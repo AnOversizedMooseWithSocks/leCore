@@ -45,6 +45,35 @@ def _rgb(vals, points, n):
     return v                                                         # already (M,3)
 
 
+class ViewSocket:
+    """Marks a channel socket that needs the SURFACE GEOMETRY, not just the hit point: a callable
+    f(points, normals, view_dirs) -> values.
+
+    WHY THIS EXISTS. Every other socket is f(points) -> values, which is enough for a solid texture
+    (a Worley cell, an fBm) because those depend only on WHERE you are. View-dependent effects do
+    not: iridescence, Fresnel edge tint and sheen all depend on the angle between the eye and the
+    surface, so a point alone cannot resolve them. The shipped `holographic_thinfilm.iridescent_socket`
+    has always been a 3-argument socket for exactly this reason -- and nothing in the render path
+    could call it, so its physics was reachable only from its own unit test. This is the missing door.
+
+    EXPLICIT MARKER, NOT ARITY INTROSPECTION. Guessing from a callable's signature breaks on partials,
+    ufuncs, and anything taking *args, and it fails silently when it guesses wrong. Wrapping is one
+    visible word at the call site and cannot misfire.
+
+    Materials without a ViewSocket are entirely unaffected -- `resolve` still accepts points alone and
+    returns byte-identical values, which the selftest asserts.
+    """
+
+    __slots__ = ("fn",)
+
+    def __init__(self, fn):
+        self.fn = fn
+
+    def __call__(self, points, normals, view_dirs):
+        """Resolve the socket at the hit geometry."""
+        return self.fn(points, normals, view_dirs)
+
+
 class SurfaceMaterial:
     """A render material whose EVERY channel is a socket. Channels: color, roughness, reflect, emission, opacity --
     each a constant, a Param, a callable field f(points)->values, or a map array. Resolved per hit by render_surface,
@@ -88,18 +117,62 @@ class SurfaceMaterial:
         return cls(color=tuple(rgb), roughness=float(m.roughness), reflect=float(m.metallic),
                    emission=emis, opacity=float(m.base_color[3]))
 
-    def resolve(self, points):
+    def resolve(self, points, normals=None, view_dirs=None):
         """All channels at `points` (M,3) -> dict of arrays: color (M,3); roughness/reflect/emission/opacity (M,).
-        This is THE per-hit resolution step demo backends used to hand-roll."""
+        This is THE per-hit resolution step demo backends used to hand-roll.
+
+        `normals` and `view_dirs` are OPTIONAL and default to None, so every existing caller keeps
+        working unchanged and returns byte-identical values. They are only consulted by channels
+        wrapped in `ViewSocket` -- view-dependent effects like iridescence, which a hit point alone
+        cannot resolve. A ViewSocket with no geometry supplied RAISES rather than silently falling
+        back to some view-independent approximation: a material that quietly renders as the wrong
+        thing is worse than one that refuses.
+        """
         n = len(points)
-        sc = lambda ch: np.asarray(resolve_param(ch, points=points, n=n), float).reshape(-1)[:n] \
-            if np.ndim(resolve_param(ch, points=points, n=n)) else np.full(n, float(resolve_param(ch, points=points, n=n)))
-        def scalar(ch):
-            v = np.asarray(resolve_param(ch, points=points, n=n), float)
-            return np.full(n, float(v)) if v.ndim == 0 else v.reshape(n)
-        return {"color": _rgb(self.color, points, n), "roughness": scalar(self.roughness),
+
+        def viewed(c):
+            """Resolve a ViewSocket to a plain array, or return None if this channel is not one.
+
+            The result must NOT then be fed to resolve_param: that function reads an (M,3) array as a
+            per-point LOOKUP MAP and collapses it to (M,), which silently turned an iridescent red
+            into flat white the first time this was wired. An already-resolved channel is final.
+            """
+            if not isinstance(c, ViewSocket):
+                return None
+            if normals is None or view_dirs is None:
+                raise ValueError(
+                    "this material has a view-dependent channel (ViewSocket) but resolve() was "
+                    "called without `normals`/`view_dirs`. Iridescence and sheen depend on the "
+                    "eye-to-surface angle, so they cannot be resolved from the hit point alone -- "
+                    "pass the shading geometry, or use a view-independent channel.")
+            return np.asarray(c(points, normals, view_dirs), float)
+
+        def rgb(c):
+            v = viewed(c)
+            if v is None:
+                return _rgb(c, points, n)
+            if v.ndim == 2:
+                return v
+            if v.ndim == 1 and v.size == n * 3:
+                return v.reshape(n, 3)
+            if v.ndim == 1 and v.size == 3:
+                return np.broadcast_to(v, (n, 3)).astype(float)
+            return np.repeat(np.atleast_1d(v).reshape(-1)[:n][:, None], 3, axis=1)
+
+        def scalar(c):
+            v = viewed(c)
+            if v is None:
+                v = np.asarray(resolve_param(c, points=points, n=n), float)
+            return np.full(n, float(v)) if v.ndim == 0 else np.asarray(v, float).reshape(-1)[:n]
+        return {"color": rgb(self.color), "roughness": scalar(self.roughness),
                 "reflect": scalar(self.reflect), "emission": scalar(self.emission),
                 "opacity": scalar(self.opacity)}
+
+    def is_view_dependent(self):
+        """True if any channel needs shading geometry -- so a caller can tell BEFORE rendering whether
+        it must supply normals and view directions."""
+        return any(isinstance(c, ViewSocket) for c in
+                   (self.color, self.roughness, self.reflect, self.emission, self.opacity))
 
 
 def render_surface(sdf, camera, width, height, materials, light_dir=(0.45, 0.75, 0.35),
@@ -143,8 +216,10 @@ def render_surface(sdf, camera, width, height, materials, light_dir=(0.45, 0.75,
         for mid in np.unique(ids):
             sel = ids == mid
             mat = materials[int(mid)] if not isinstance(materials, SurfaceMaterial) else materials
-            ch = mat.resolve(Ph[sel])                                # <- the per-hit socket resolution
             n_sel = N[sel]; d_sel = Dh[sel]
+            # Hand the shading geometry to the socket resolver: view-dependent channels (ViewSocket)
+            # need it, and every other channel ignores it, so this is free for existing materials.
+            ch = mat.resolve(Ph[sel], n_sel, d_sel)                  # <- the per-hit socket resolution
             lam = np.clip(n_sel @ L, 0, 1)[:, None]
             H = L - d_sel; H = H / (np.linalg.norm(H, axis=1, keepdims=True) + 1e-9)
             shin = 4.0 + (1.0 - ch["roughness"]) * 60.0             # roughness -> highlight width

@@ -49,6 +49,7 @@ ARITY = {
     "sphere": (1, 0), "box": (3, 0), "torus": (2, 0), "cylinder": (2, 0), "plane": (1, 0),
     "capsule": (2, 0), "cone": (2, 0), "ellipsoid": (3, 0), "octahedron": (1, 0),
     "union": (0, 2), "intersect": (0, 2), "subtract": (0, 2), "smooth_union": (1, 2),
+    "fillet_union": (1, 2),
     "translate": (3, 1), "scale": (1, 1), "rotate": (4, 1), "repeat": (3, 1),
     "round": (1, 1), "onion": (1, 1), "displace": (2, 1), "twist": (1, 1),
     "mirror": (2, 1), "bend": (2, 1),
@@ -134,6 +135,7 @@ class SDF:
     def intersect(self, other):       return SDF("intersect", (), [self, other])
     def subtract(self, other):        return SDF("subtract", (), [self, other])
     def smooth_union(self, other, k=0.3): return SDF("smooth_union", (k,), [self, other])
+    def fillet_union(self, other, r=0.1): return SDF("fillet_union", (r,), [self, other])
     def translate(self, t):           return SDF("translate", tuple(t), [self])
     def scale(self, s):               return SDF("scale", (s,), [self])
     def rotate(self, axis, angle):    return SDF("rotate", (axis[0], axis[1], axis[2], angle), [self])
@@ -192,7 +194,7 @@ class SDF:
                 "capsule": 8, "cone": 16, "octahedron": 12, "ellipsoid": 14}
         WARP = {"translate": 3, "scale": 2, "rotate": 12, "repeat": 6, "round": 1, "onion": 2,
                 "displace": 10, "twist": 10, "mirror": 2, "bend": 12, "elongate": 6}
-        COMBINE = {"union": 1, "intersect": 1, "subtract": 2, "smooth_union": 6}
+        COMBINE = {"union": 1, "intersect": 1, "subtract": 2, "smooth_union": 6, "fillet_union": 8}
 
         iterative = [False]
 
@@ -392,8 +394,78 @@ def _rot_matrix(axis, angle):
                      [t*x*z - s*y, t*y*z + s*x, t*z*z + c]])
 
 
+#: The binary COMBINATOR kinds. Folding a list of N parts with any of these builds a LEFT-LEANING
+#: chain of depth N, and a naive recursive eval then needs N stack frames -- which is why skinning a
+#: 300-edge skeleton used to die with RecursionError at Python's default limit of 1000. The chain is
+#: unrolled iteratively below, so depth is bounded by the C stack of the SHALLOW right children
+#: instead of by the number of parts.
+_BINARY_COMBINATORS = ("union", "intersect", "subtract", "smooth_union", "fillet_union")
+
+
+def _combine(k, kk, a, b):
+    """Apply one binary combinator to two already-evaluated distance arrays.
+
+    ONE HOME for the four combinator formulas, so the iterative chain walk and the recursive dispatch
+    below can never drift apart -- two copies of `smooth_union`'s polynomial that happened to match
+    would be a silent-divergence bug of exactly the kind this engine keeps finding.
+    """
+    if k == "union":
+        return np.minimum(a, b)
+    if k == "intersect":
+        return np.maximum(a, b)
+    if k == "subtract":
+        return np.maximum(a, -b)
+    if k == "fillet_union":
+        # EXACT constant-radius rolling-ball fillet (iq's opUnionRound), promoted from
+        # holographic_fillet into the DSL so it can be COMPOSED inside a tree. The difference that
+        # matters here is not the arc shape but the BOUND: ua/ub are clamped at 0, so once both
+        # surfaces are further than r away the result is exactly min(a, b) -- the sharp union. A
+        # smooth_union has no such cutoff and keeps depositing material at a distance, which is the
+        # measured cause of webbing returning at large blend (backlog F-3).
+        ua = np.maximum(kk - a, 0.0)
+        ub = np.maximum(kk - b, 0.0)
+        return np.maximum(kk, np.minimum(a, b)) - np.sqrt(ua * ua + ub * ub)
+    h = np.clip(0.5 + 0.5 * (b - a) / kk, 0.0, 1.0)          # smooth_union (iq's polynomial smin)
+    return b * (1 - h) + a * h - kk * h * (1 - h)
+
+
+def _eval_chain(node, P):
+    """Evaluate a left-leaning chain of binary combinators ITERATIVELY, bit-identically.
+
+    WHY THIS IS BIT-IDENTICAL AND NOT AN APPROXIMATION. A fold builds ((a op b) op c) op d. The
+    recursive evaluator computes a, then a op b, then (a op b) op c, then that op d -- left to right.
+    This walks down the left spine collecting (kind, k, right_child), evaluates the base, then
+    replays the ops in the SAME left-to-right order with the SAME formulas (see _combine). Identical
+    operations on identical inputs in identical order, so identical floats. That matters more than it
+    might seem: `smooth_union` is NOT associative (measured: rebalancing the tree moves the surface by
+    ~3e-3, thousands of ULP), so any restructuring of the chain WOULD change every existing skinned
+    mesh. Unrolling the evaluation changes nothing.
+
+    Right children recurse normally -- they are shallow in a fold (a translated, rotated primitive),
+    so the C stack is bounded by part complexity, not by part COUNT.
+    """
+    ops = []
+    cur = node
+    while cur.kind in _BINARY_COMBINATORS:
+        ops.append((cur.kind, cur.params[0] if cur.params else 0.0, cur.children[1]))
+        cur = cur.children[0]
+    acc = _eval(cur, P)                                       # the base of the spine (shallow)
+    for k, kk, right in reversed(ops):                        # replay outward: left-to-right order
+        acc = _combine(k, kk, acc, right.eval(P))
+    return acc
+
+
 def _eval(node, P):
     k, p, ch = node.kind, node.params, node.children
+    # A deep left spine is unrolled iteratively. Guarded by a depth probe so the ordinary shallow case
+    # (two or three nested unions) takes the plain recursive path and pays nothing for this.
+    if k in _BINARY_COMBINATORS:
+        d, cur = 0, node
+        while cur.kind in _BINARY_COMBINATORS and d < 64:
+            d += 1
+            cur = cur.children[0]
+        if d >= 64:
+            return _eval_chain(node, P)
     if k == "sphere":
         return np.linalg.norm(P, axis=1) - p[0]
     if k == "box":
@@ -518,16 +590,10 @@ def _eval(node, P):
         r = np.linalg.norm(z, axis=1)
         r = np.maximum(r, 1e-9)
         return 0.5 * np.log(r) * r / np.abs(dr)                  # analytic distance estimate for z^n+c fractals
-    if k == "union":
-        return np.minimum(ch[0].eval(P), ch[1].eval(P))
-    if k == "intersect":
-        return np.maximum(ch[0].eval(P), ch[1].eval(P))
-    if k == "subtract":
-        return np.maximum(ch[0].eval(P), -ch[1].eval(P))
-    if k == "smooth_union":
-        a, b = ch[0].eval(P), ch[1].eval(P); kk = p[0]
-        h = np.clip(0.5 + 0.5 * (b - a) / kk, 0.0, 1.0)
-        return b * (1 - h) + a * h - kk * h * (1 - h)
+    if k in _BINARY_COMBINATORS:
+        # Shallow case: recurse as before, but through the one _combine home so the formulas cannot
+        # drift from the iterative path's copy.
+        return _combine(k, p[0] if p else 0.0, ch[0].eval(P), ch[1].eval(P))
     if k == "translate":
         return ch[0].eval(P - np.array(p))
     if k == "scale":
@@ -680,6 +746,7 @@ DSL_HELP = {
     "intersect": "only where both overlap. 2 children, no params",
     "subtract": "the first shape minus the second. 2 children, no params",
     "smooth_union": "union with a soft blend. params: blend radius k. 2 children",
+    "fillet_union": "union with an EXACT radius-r fillet that is LOCAL -- beyond r it is the sharp union, so it cannot blend at a distance. params: fillet radius r. 2 children",
     "translate": "move a shape. params: dx, dy, dz. 1 child",
     "rotate": "spin a shape about an axis through the origin. params: axis x, y, z, radians. 1 child",
     "scale": "resize about the origin. params: factor. 1 child",
@@ -752,6 +819,7 @@ _GLSL_PRIM = {
     "octahedron": "float sdOcta(vec3 p, float s){ p=abs(p); float m=p.x+p.y+p.z-s; vec3 q; if(3.0*p.x<m)q=p.xyz; else if(3.0*p.y<m)q=p.yzx; else if(3.0*p.z<m)q=p.zxy; else return m*0.57735027; float k=clamp(0.5*(q.z-q.y+s),0.0,s); return length(vec3(q.x,q.y-s+k,q.z-k)); }",
     "ellipsoid": "float sdEllipsoid(vec3 p, vec3 r){ float k1=length(p/r); float k2=length(p/(r*r)); return k1*(k1-1.0)/(k2+1e-12); }",
     "smin":     "float opSmin(float a, float b, float k){ float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0); return mix(b,a,h)-k*h*(1.0-h); }",
+    "uround":   "float opUnionRound(float a, float b, float r){ float ua=max(r-a,0.0), ub=max(r-b,0.0); return max(r,min(a,b))-sqrt(ua*ua+ub*ub); }",
 }
 
 
@@ -839,13 +907,16 @@ def _emit_body(node, pvar, ctr, helpers):
         helpers[f"bulb{iters}"] = _mandelbulb_glsl(float(p[0]), iters, float(p[2]))
         return stmts, f"sdBulb{iters}({pvar})"
 
-    if k in ("union", "intersect", "subtract", "smooth_union"):
+    if k in ("union", "intersect", "subtract", "smooth_union", "fillet_union"):
         sa, ea = _emit_body(ch[0], pvar, ctr, helpers)
         sb, eb = _emit_body(ch[1], pvar, ctr, helpers)
         stmts += sa + sb
         if k == "union":         return stmts, f"min({ea},{eb})"
         if k == "intersect":     return stmts, f"max({ea},{eb})"
         if k == "subtract":      return stmts, f"max({ea},-({eb}))"
+        if k == "fillet_union":
+            helpers["uround"] = _GLSL_PRIM["uround"]
+            return stmts, f"opUnionRound({ea},{eb},{p[0]:.6g})"
         helpers["smin"] = _GLSL_PRIM["smin"]; return stmts, f"opSmin({ea},{eb},{p[0]:.6g})"
 
     # transforms / modifiers introduce a new point var or wrap the child's distance

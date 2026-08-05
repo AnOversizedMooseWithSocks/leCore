@@ -713,6 +713,58 @@ def _selftest_mesh_orient():
           "non-manifold reported as non-manifold, not non-orientable)" % r2["flipped"])
 
 
+def shrinkwrap_field(mesh, field, factor=1.0, iters=8, level=0.0, eps=None, max_step=None):
+    """SHRINKWRAP ONTO A FIELD: pull each vertex of `mesh` onto the `field`'s isosurface.
+
+    The generalisation of `shrinkwrap` from a MESH target to an implicit one, and the enabling half of
+    scaffold-based polygonisation (backlog M-5): build a coarse quad cage around the skeleton
+    (`skin_skeleton`, B-Mesh) and project it onto whatever field the creature compiler produced,
+    instead of marching a global grid. The consequences the backlog wants follow from the cage, not
+    from this function -- density follows the SKELETON so a thin limb cannot be undersampled by a
+    grid sized for a torso, quads follow the limb direction, and vertex->segment ownership survives.
+
+    METHOD (Quilez's raymarching practice, which is what an SDF gives you for free): a signed
+    distance field's value IS the distance to the surface and its gradient IS the direction, so the
+    closest point is reached by stepping `-f(P) * grad f / |grad f|` and repeating. No search
+    structure, no triangle soup. `iters` Newton steps; the step is CLAMPED to `max_step` because the
+    field's Lipschitz bound is only ~1 for a true distance field and a smooth-union tree can exceed
+    it locally -- an unclamped step there overshoots to the far side of a limb.
+
+    Returns (new_mesh, residual) exactly like `shrinkwrap`, so the two are interchangeable.
+
+    KEPT NEGATIVE, inherited and real: this is closest-POINT, not a ray-cast along the vertex normal.
+    A cage vertex sitting nearer a NEIGHBOURING limb than its own will be pulled onto the neighbour --
+    the same failure the mesh version documents, and the reason `factor` < 1 with repeats exists.
+    """
+    from holographic.mesh_and_geometry.holographic_mesh import Mesh
+    V = np.asarray(mesh.vertices, float).copy()
+    if eps is None:
+        span = float(np.linalg.norm(V.max(0) - V.min(0))) or 1.0
+        eps = 1e-4 * span
+    if max_step is None:
+        span = float(np.linalg.norm(V.max(0) - V.min(0))) or 1.0
+        max_step = 0.05 * span
+
+    def _f(P):
+        return np.asarray(field(np.atleast_2d(P)), float).ravel() - float(level)
+
+    residual = np.abs(_f(V))
+    for _ in range(int(iters)):
+        d = _f(V)
+        # Central differences: cheaper than an analytic gradient and correct for ANY callable field,
+        # which is what makes this work on the composition tree, a hidden-layer field or a cut one.
+        g = np.empty_like(V)
+        for k in range(3):
+            off = np.zeros(3); off[k] = eps
+            g[:, k] = (_f(V + off) - _f(V - off)) / (2.0 * eps)
+        n = np.linalg.norm(g, axis=1, keepdims=True)
+        step = -d[:, None] * g / np.maximum(n, 1e-12) ** 2 * float(factor)
+        mag = np.linalg.norm(step, axis=1, keepdims=True)
+        step = np.where(mag > max_step, step * (max_step / np.maximum(mag, 1e-12)), step)
+        V = V + step
+    return Mesh(V, [tuple(int(i) for i in f) for f in mesh.faces]), residual
+
+
 def shrinkwrap(mesh, target_mesh, factor=1.0, cell_scale=1.0):
     """SHRINKWRAP: move each vertex of `mesh` toward its CLOSEST POINT on `target_mesh` (Blender's shrinkwrap /
     retopo-snap operator). `factor` in [0,1] is how far to move -- 1.0 lands exactly on the target surface, 0.5 goes

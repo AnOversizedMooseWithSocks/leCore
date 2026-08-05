@@ -78,6 +78,34 @@ def _read(path):
         return None
 
 
+def _tree_state(root, exclude):
+    """Content-state of everything the generators READ: every .py and docs/*.md by
+    (path, size, mtime_ns), excluding the generators' OWN outputs -- including them
+    would self-invalidate every run (regeneration touches their mtimes). Honest by
+    the module's own pinned contract: generators are deterministic functions of the
+    tree, so an unchanged tree means unchanged outputs."""
+    import hashlib
+    h = hashlib.sha256()
+    ex = {str(root / o) for o in exclude}
+    pats = ["*.py", "holographic/**/*.py", "tools/*.py", "tests/*.py", "docs/*.md"]
+    seen = set()
+    for pat in pats:
+        for f in sorted(root.glob(pat)):
+            fp = str(f)
+            if fp in ex or fp in seen or "__pycache__" in fp:
+                continue
+            seen.add(fp)
+            st = f.stat()
+            h.update(("%s|%d|%d" % (f.relative_to(root), st.st_size,
+                                    st.st_mtime_ns)).encode())
+    return h.hexdigest()[:20]
+
+
+def _bake_path():
+    import tempfile
+    return Path(tempfile.gettempdir()) / "lecore_regen_bake.json"
+
+
 def run(check=False, root=None):
     """Run every generator from the repo root. Returns (missing, failed, changed) as lists of names/paths.
 
@@ -90,17 +118,45 @@ def run(check=False, root=None):
     missing, failed, changed = [], [], []
 
     env = dict(os.environ, PYTHONHASHSEED="0")           # the constitution applies to the generators too
+    # PER-GENERATOR BAKE (measured: --check 8.4s per run, several runs per session).
+    # Key = tree state + the generator's own bytes; value = sha of its outputs. On a
+    # hit where the outputs on disk still match the recorded sha, the subprocess is
+    # skipped -- the pinned determinism contract is what licenses this. Any tree
+    # edit, generator edit, or hand-touched output invalidates naturally.
+    import hashlib as _hl
+    import json as _js
+    tstate = _tree_state(root, outputs())
+    try:
+        bake = _js.load(open(_bake_path()))
+    except Exception:
+        bake = {}
+    bake_dirty = False
     for gen, _outs in GENERATORS:
         argv = gen.split()                               # a generator entry may carry args (see GENERATORS)
         if not (root / argv[0]).exists():
             missing.append(gen)                          # NEVER silently skip -- see the module docstring
             continue
+        gsrc = _read(root / argv[0]) or b""
+        bkey = "%s|%s|%s" % (gen, tstate, _hl.sha256(gsrc).hexdigest()[:12])
+        cur = _hl.sha256(b"\x00".join((_read(root / o) or b"") for o in _outs)).hexdigest()[:16]
+        if bake.get(bkey) == cur:
+            continue                                     # baked: tree, generator, outputs all unchanged
         proc = subprocess.run([sys.executable] + argv, cwd=str(root), env=env,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if proc.returncode == 0:
+            bake[bkey] = _hl.sha256(b"\x00".join((_read(root / o) or b"")
+                                                 for o in _outs)).hexdigest()[:16]
+            bake_dirty = True
         if proc.returncode != 0:
             failed.append(gen)
             sys.stderr.write("FAILED: %s\n%s\n" % (gen, proc.stdout.decode("utf-8", "replace")[-2000:]))
 
+    if bake_dirty:
+        try:
+            import json as _js2
+            _js2.dump(bake, open(_bake_path(), "w"))
+        except Exception:
+            pass
     if check:
         for o in outputs():
             if before.get(o) != _read(root / o):

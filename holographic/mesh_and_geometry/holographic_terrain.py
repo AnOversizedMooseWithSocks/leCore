@@ -175,6 +175,29 @@ def erode(height, droplets=2000, steps=30, inertia=0.05, capacity=1.0, depositio
     (stable and still carving); 4.0 grew peaks even on the module's own fBm terrain, which is why the default
     changed. Lower capacity = gentler carving, higher = more aggressive; above ~2.0 risks the old feedback.
 
+    STABILITY LIMIT, MEASURED -- THE DEFAULT IS SAFE, HEAVY USE IS NOT. `cap` scales with the local
+    drop and the drop is a consequence of prior erosion, so the loop has positive gain. Lowering the
+    default capacity to 1.0 moved the threshold; it did not remove the loop. On a 128x128 grid, one
+    fBm terrain, same seed, varying ONLY the droplet count:
+
+        2,000 droplets (default)   range   0.03 ..    1.00      clean
+       20,000                             -1.44 ..    7.05      already outside the input range
+       30,000                             -2.36 ..    5.94
+       40,000                            -20.21 ..   48.26
+       50,000                          -1.6e+07 .. 3.8e+07      runaway
+       60,000                     mean height -4.9e+08
+
+    So: STAY NEAR THE DEFAULT DROPLET COUNT for a grid this size, and check the output range if you
+    raise it. Erosion at the default is well behaved and genuinely channelised -- the top 5% of cells
+    carry 42% of all material moved, which diffusion does not do -- it is only the high-droplet
+    regime that diverges.
+
+    KEPT NEGATIVE: clamping the drop that feeds `cap` does NOT fix this. Tried and measured: it made
+    30,000 droplets worse (-2.4..5.9 became -18.7..52.7), because a smaller cap trips the
+    `sediment > cap` branch and trades the erosion runaway for a DEPOSITION runaway. The loop has two
+    signs and clamping one end feeds the other. A real fix needs a per-droplet budget or a global
+    mass constraint, not a clamp.
+
     Returns the eroded copy. Conservation note: sediment leaving the grid edge with a dying droplet is lost --
     total material is NOT exactly conserved, matching real drainage out of the tile.
     """
@@ -229,6 +252,12 @@ def erode(height, droplets=2000, steps=30, inertia=0.05, capacity=1.0, depositio
                 break                                        # droplet leaves the tile; its sediment leaves too
             h1, _, _ = grad(nx, ny)
             dh = h1 - h0
+            # UNBOUNDED BY DESIGN, AND IT RUNS AWAY -- SEE THE DOCSTRING'S STABILITY SECTION. `cap`
+            # scales with the local drop, and the drop is a consequence of previous erosion, so a
+            # deeper cut raises capacity which cuts deeper. Do not "fix" this by clamping -dh here:
+            # that was tried and it made 30k droplets WORSE (range -2.4..5.9 became -18.7..52.7),
+            # because a smaller cap trips the `sediment > cap` branch and trades an erosion runaway
+            # for a DEPOSITION runaway. The loop has two signs and clamping one end feeds the other.
             cap = max(-dh, min_slope) * speed * water * capacity
             if sediment > cap or dh > 0:
                 # deposit: over capacity, or moving uphill (fill the pit it just climbed out of)

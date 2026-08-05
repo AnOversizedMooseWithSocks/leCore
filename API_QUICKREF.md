@@ -63,6 +63,7 @@
     - `intersect(self, other)` -- 
     - `subtract(self, other)` -- 
     - `smooth_union(self, other, k=0.3)` -- 
+    - `fillet_union(self, other, r=0.1)` -- 
     - `translate(self, t)` -- 
     - `scale(self, s)` -- 
     - `rotate(self, axis, angle)` -- 

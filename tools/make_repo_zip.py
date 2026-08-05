@@ -168,6 +168,35 @@ def main(argv=None):
     verb = "would include" if args.dry_run else "wrote %s --" % out
     print("%s %d files, %.1f MB uncompressed" % (verb, n, total / 1e6))
     if not args.dry_run:
+
+        # ARTIFACT FINGERPRINTS (release drift detector): h + demand ranks of each
+        # generated doc's bytes, diffed against the previous ship. Informational and
+        # non-gating -- a moved fingerprint on an intentional change is expected; one on
+        # a "no-op" ship is the alarm this exists for. Stored in tempdir, keyed by doc.
+        try:
+            import json as _js, tempfile as _tf, numpy as _np
+            import sys as _sys
+            _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            if _root not in _sys.path:                     # the tool runs from tools/
+                _sys.path.insert(0, _root)
+            from holographic.agents_and_reasoning.holographic_modeltrain import fingerprint as _fp
+            _fpp = os.path.join(_tf.gettempdir(), "lecore_artifact_fps.json")
+            try:
+                _prev = _js.load(open(_fpp))
+            except Exception:
+                _prev = {}
+            _cur = {}
+            for _doc in ("REFERENCE.md", "CAPABILITIES.md", "capabilities.json",
+                         "docs/NOTES_concepts.md"):
+                if os.path.exists(_doc):
+                    _b = _np.frombuffer(open(_doc, "rb").read(), dtype=_np.uint8)
+                    _f = _fp(_b[:200000].astype(_np.int64) % 16, k=16)
+                    _cur[_doc] = {"h": round(float(_f["h"] or 0), 3), "ranks": _f["ranks"]}
+                    if _doc in _prev and _prev[_doc] != _cur[_doc]:
+                        print("  fingerprint moved: %s %s -> %s" % (_doc, _prev[_doc], _cur[_doc]))
+            _js.dump(_cur, open(_fpp, "w"))
+        except Exception as _e:
+            print("  (fingerprints skipped: %s)" % str(_e)[:60])
         print("  archive: %.1f MB" % (out.stat().st_size / 1e6))
     return 0
 

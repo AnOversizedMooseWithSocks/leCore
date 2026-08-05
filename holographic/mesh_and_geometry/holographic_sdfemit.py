@@ -71,7 +71,14 @@ from holographic.mesh_and_geometry.holographic_sdf import SDF
 #: (the 4-dialect WGSL/C emitter) only because their branch-heavy forms (cone's caps, octahedron's face select)
 #: are not yet ported to the dialect table -- a filed follow-up, not a mathematical limit. capsule is a clamp
 #: away and is the first to add when the table grows a general clamp(lo,hi).
-UNEMITTABLE = ("menger", "twist", "displace", "bend", "ellipsoid", "capsule", "cone", "octahedron", "elongate")
+#: `fold_fractal` and `mandelbulb` were NOT on this list and had no dialect rule either -- so the
+#: old set-arithmetic coverage() reported them as EMITTED and the whole table as complete, while
+#: sdf_dialect raised on both. They are iterative domain folds, the same reason `menger` is refused
+#: here, and they DO emit through the GLSL Shadertoy path (holographic_sdf has _mandelbulb_glsl).
+#: Declared rather than quietly fixed, because an undeclared gap is what the honest coverage probe
+#: exists to make impossible.
+UNEMITTABLE = ("menger", "twist", "displace", "bend", "ellipsoid", "capsule", "cone", "octahedron", "elongate",
+               "fold_fractal", "mandelbulb")
 
 DIALECTS = {
     "wgsl": {"scalar": "f32", "vec3": "vec3<f32>", "infer_types": True, "suffix": "f",
@@ -132,14 +139,44 @@ for _d, _s, _sq, _fa, _suf, _fl in (("c_f64", "double", "sqrt", "fabs", "", "flo
     }
 
 
-def coverage():
-    """Which of `holographic_sdf.ARITY`'s node kinds this emitter handles, and which it refuses.
-    `emitted + refused == every kind` -- a gap here is a shader that silently omits geometry."""
-    from holographic.mesh_and_geometry.holographic_sdf import ARITY
-    refused = set(UNEMITTABLE)
-    emitted = set(ARITY) - refused
-    return {"emitted": sorted(emitted), "refused": sorted(refused), "total": len(ARITY),
-            "complete": bool(emitted | refused == set(ARITY))}
+def coverage(dialect="wgsl"):
+    """Which of `holographic_sdf.ARITY`'s node kinds this emitter ACTUALLY emits, BY EMITTING THEM.
+
+    A gap here is a shader that silently omits geometry, which is why this report exists at all.
+
+    IT USED TO LIE, and the way it lied is worth keeping on record: it computed
+    `emitted = set(ARITY) - set(UNEMITTABLE)` by pure set arithmetic and never emitted anything. So
+    the moment a new node kind was added to ARITY, this reported it as emitted and `complete: True`
+    -- while `sdf_dialect` raised `no dialect rule for node 'fillet_union'` on the very same kind.
+    A TOOL THAT CANNOT DETECT THE FAILURE IT WAS WRITTEN TO DETECT is worse than no tool, because it
+    is trusted. It now BUILDS a probe node of every kind and tries to emit it, so a kind is reported
+    as emitted only if it really emitted.
+
+    Returns {emitted, refused, broken, total, complete}. `broken` is the new field and the load-bearing
+    one: a kind that is NOT on the declared UNEMITTABLE list yet still fails to emit. It must be empty.
+    """
+    from holographic.mesh_and_geometry.holographic_sdf import ARITY, sphere
+    emitted, refused, broken = [], [], []
+    for kind, (nparams, nchildren) in sorted(ARITY.items()):
+        # A generic probe: mid-range scalars and sphere children. Params differ in meaning per kind,
+        # but emission is structural -- it depends on the KIND, not on the values.
+        params = tuple([0.5] * nparams)
+        if kind == "rotate":
+            params = (0.0, 1.0, 0.0, 0.5)                 # a unit axis, or the node is degenerate
+        if kind in ("menger", "mandelbulb", "fold_fractal"):
+            params = tuple([2.0] * nparams)               # iteration counts must be >= 1
+        node = SDF(kind, params, tuple(sphere(0.4) for _ in range(nchildren)))
+        try:
+            sdf_dialect(node, dialect=dialect)
+            emitted.append(kind)
+        except SdfEmitError:
+            (refused if kind in UNEMITTABLE else broken).append(kind)
+        except Exception:
+            # Any OTHER exception is also a failure to emit; a probe that dies for a different reason
+            # is still a kind this emitter cannot be trusted with.
+            (refused if kind in UNEMITTABLE else broken).append(kind)
+    return {"emitted": sorted(emitted), "refused": sorted(refused), "broken": sorted(broken),
+            "total": len(ARITY), "complete": not broken}
 
 
 class SdfEmitError(ValueError):
@@ -215,7 +252,7 @@ def _emit(node, pvar, d, ctr):
     if k == "plane":
         return [], "(%s - %s)" % (d["swz"](pvar, "y"), _lit(p[0], d))
 
-    if k in ("union", "intersect", "subtract", "smooth_union"):
+    if k in ("union", "intersect", "subtract", "smooth_union", "fillet_union"):
         sa, ea = _emit(ch[0], pvar, d, ctr)
         sb, eb = _emit(ch[1], pvar, d, ctr)
         va, vb = nv("a"), nv("b")
@@ -227,6 +264,16 @@ def _emit(node, pvar, d, ctr):
         if k == "subtract":
             return stmts, _minmax(d, "max", va, "(-%s)" % vb)
         kk = _lit(p[0], d)
+        if k == "fillet_union":
+            # iq's opUnionRound: ua=max(r-a,0), ub=max(r-b,0); max(r,min(a,b)) - sqrt(ua^2+ub^2).
+            # Written with the dialect's own min/max/sqrt helpers rather than a literal string, so a
+            # dialect whose scalar is f32 gets sqrtf and one whose scalar is f32 in WGSL gets sqrt.
+            ua, ub = nv("ua"), nv("ub")
+            stmts.append(_decl(d, d["scalar"], ua, _minmax(d, "max", "(%s - %s)" % (kk, va), _lit(0.0, d))))
+            stmts.append(_decl(d, d["scalar"], ub, _minmax(d, "max", "(%s - %s)" % (kk, vb), _lit(0.0, d))))
+            sq = "sqrtf" if d["scalar"] == "float" else "sqrt"
+            return stmts, "(%s - %s(%s * %s + %s * %s))" % (
+                _minmax(d, "max", kk, _minmax(d, "min", va, vb)), sq, ua, ua, ub, ub)
         h = nv("h")
         stmts.append(_decl(d, d["scalar"], h,
                            d["clamp"]("%s + %s * (%s - %s) / %s" % (_lit(0.5, d), _lit(0.5, d), vb, va, kk))))
@@ -465,11 +512,25 @@ def _selftest():
             raise AssertionError("%s must be refused" % name)
 
     # 5a. EVERY node kind is either emitted or refused. A gap is a shader that silently omits geometry.
-    # 27 node kinds: 18 emitted + 9 refused (the two most-recent additions both EMIT, so the refused set is unchanged
-    # but the total rose 25 -> 27). Keep this in sync with the realtime-suite mirror in test_holographic_realtime.
+    # 28 node kinds: 17 EMIT (probed by actually emitting) + 11 declared-refused. The count rose 27 -> 28
+    # with fillet_union, and the refused set grew by fold_fractal + mandelbulb -- which were never
+    # emittable but were also never declared, so the OLD set-arithmetic coverage() called them emitted.
+    # Keep this in sync with the realtime-suite mirror in test_holographic_realtime.
     cov = coverage()
-    assert cov["complete"] is True and cov["total"] == 27
-    assert set(cov["refused"]) == set(UNEMITTABLE)
+    assert cov["complete"] is True and cov["total"] == 28, cov
+    assert set(cov["refused"]) == set(UNEMITTABLE), cov["refused"]
+
+    # THE LOAD-BEARING ASSERT: no kind may fail to emit without being DECLARED unemittable. This is
+    # the check the old coverage() could not make, because it never emitted anything -- it computed
+    # ARITY minus a hand-written list, so a new node kind was "covered" the moment it was registered.
+    # Every dialect is probed: a rule can be added to one table and forgotten in another.
+    for _d in ("wgsl", "glsl", "c_f32", "c_f64"):
+        _c = coverage(dialect=_d)
+        assert _c["broken"] == [], "%s cannot emit undeclared kinds %r" % (_d, _c["broken"])
+
+    # And the newest combinator really emits AND agrees numerically -- emitting is not correctness.
+    _fu = S.sphere(0.5).fillet_union(S.sphere(0.5).translate((0.6, 0, 0)), 0.2)
+    assert validate_c(_fu, P[:20], "c_f64")["max_abs_diff"] < 1e-14, "fillet_union C must match _eval"
 
     # 5b. the ones that ARE emittable: onion and rounded, checked against the Python _eval
     for node in (S.sphere(1.0).onion(0.1), S.box(0.5, 0.5, 0.5).rounded(0.1)):

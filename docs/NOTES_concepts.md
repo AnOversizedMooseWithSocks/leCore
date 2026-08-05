@@ -47973,3 +47973,5367 @@ tomllib, socketserver, colorsys, wave) or a repo-local tool. So the outlier was 
 LESSON: "it passes locally" is worth exactly nothing when local has packages CI does not. The dependency
 constraint is part of the contract a test must respect, not just something the core respects -- and the
 cheapest check is to read requirements.txt before reaching for a convenient parser.
+
+## ORGANICS: crystals, grass, plants, growth scrubbing, creature idle (backlog Tiers 0-5, first pass)
+
+DELTA: 580 modules (was 576), 6142 tests collected (was 6114 -- +28 integration), audits still 0/0/0,
+docs regenerated and drift-gate clean. Four new modules, one new UnifiedMind part (p14, 26 faculties),
+five catalog entries.
+
+WHAT THE AUDIT FOUND, AND WHY MOST OF THIS WAS NOT NEW CODE
+Rule 0 with 30 stranger phrasings across the five requested domains returned working, tested,
+SHIPPED code for most of it -- behind names nobody would type. `grow_plant`, `turtle_to_segments`,
+`segments_to_scene`, `greeble_panel`, `procedural_object`, `object_to_mesh`, `greeble_mesh` and
+`scatter_on_terrain` all existed with NO faculty at all, so `find_capability("procedural tree")`
+returned *Texture graph* and *fit_shape*. An entire L-system plant/tree generator was dark. The
+correct response was PROMOTION, not invention: only four modules were actually built, and two of
+those (growth, creatureidle) are readouts of data the engine already stored.
+
+THE ONE GENUINE BLANK SLATE was crystal lattices. Premise correction on the record: there are 7
+crystal SYSTEMS but 14 BRAVAIS LATTICES (systems x P/I/F/C centring). Built the 14; the 7 are a
+grouping. An illegal system+centring pair RAISES rather than quietly emitting a lattice that does not
+exist in nature. Numeric contract, not a smoke test: FCC 0.7405 / BCC 0.6802 / SC 0.5236 packing
+fractions, FCC coordination exactly 12, HCP c/a = sqrt(8/3) to 1e-12, reciprocal identity to 1e-10 on
+a fully triclinic cell.
+
+THE KEYSTONE WAS A MISSING RETURN TYPE, NOT A MISSING ALGORITHM. The shipped ScatterLayer returned
+points, normals and HYPERVECTORS -- nothing in the tree turned placements into geometry. That single
+gap is why "apply grass meshes and scatter them across a surface area" did not work despite every
+ingredient being present. `realize_scatter` fixed it and now serves FOUR callers (grass, plant
+permutations, rocks, crystal unit cells) exactly as the generalize-on-contact check predicted before
+it was written -- pinned by tests so the reuse claim cannot rot.
+
+### KEPT NEGATIVES (loud)
+
+* MERGE COST IS LINEAR IN INSTANCES. A million-blade lawn merged is a million x source vertices and
+  will not fit in memory. Not a bug -- the honest cost of merging. Dense fields must use
+  mode="instanced" (verified: 300 placements, 1 definition) plus the still-unbuilt bake/LOD path (S-4).
+* `count` IS PART OF THE DETERMINISM KEY. Found by my own selftest failing: the first 200 points of a
+  4000-sample are NOT a 200-sample at the same seed, because rng.choice(size=n) draws a different
+  stream length. The TEST was wrong, not the code -- but callers wanting a stable prefix must fix
+  count, not slice. Written into the module.
+* MONOTONIC GROWTH IS A PROPERTY OF THE RULE, NOT OF STAGING. Measured L-system iterations (5 subset
+  of 25) rather than assuming. A rule that rescales or reorients as it grows legitimately breaks
+  containment, so `growth_report` MEASURES and REPORTS `monotone` instead of asserting a universal
+  that is false. monotone=False is information, not automatically a bug.
+* AND THE REPORT'S OWN INSTRUMENT IS PINNED: the selftest builds a deliberately RETRACTING grower and
+  asserts the report catches it. A verifier that cannot fail is decoration -- the same lesson as the
+  yaml.dump line-wrap that produced a false green inside a test written to prevent false greens.
+* IDLE HEADROOM IS EXACTLY 0.0, MEASURED. The sine trough lands precisely on the hinge `lo`, so the
+  limb fully straightens once per cycle (which is what makes the bend direction readable). The bound
+  is TOUCHED, not merely respected -- so the `>=` assertion is load-bearing and must never be
+  loosened to a strict `>`.
+* THE IDLE IS A LIMITS DEMO, NOT LOCOMOTION. No gait, no ground contact, no balance, forward
+  kinematics only, no self-collision, spine does not animate. The real arc (Hecker et al. SIGGRAPH
+  2008, morphology-independent motion retargeting) is NOT started and stays a declared negative --
+  the line between the cheap readout and the research arc must stay sharp.
+* BRAVAIS SCOPE: translation lattices only. No space groups (230 of them), no point-symmetry
+  operators. `neighbor_pairs` is O(N^2) BY DESIGN -- exact and honest at display sizes; a cell-hash
+  pass is the documented upgrade IF measurement ever shows it pays. Do not pre-optimize.
+* t IS GROWTH PROGRESS, NOT PHYSICAL TIME. No claim that equal steps in t are equal steps in seconds
+  or accretion rate. Do not label a scrub axis "time" in a UI.
+
+### THE DESIGN INSIGHT WORTH KEEPING
+
+The idle animation needed NO animation authoring: `Creature` already stored a cone limit per mount
+and a one-way auto-plane hinge per interior joint, so the idle is a READOUT of constraint data that
+already existed. Because the stored limit is what GENERATES the motion, an impossible bend cannot be
+displayed -- a knee hyperextending on screen means the stored limit is wrong, which is exactly the
+bug the preview exists to expose. Audited `pose_limb`/solve_ik_limited first and correctly did NOT
+reuse it: IK reaches a TARGET and lands where the solve puts things; you cannot ask it to "flex this
+joint to 40% of its range". Different question, so forward kinematics -- but driven from the SAME
+limits dict, so the two can never disagree about a joint's range.
+
+Same shape for growth scrubbing: the PLAYBACK half was fully shipped (timeline, transport,
+frame_cache, render_animation). The gap was entirely generator-side -- every grower computed
+intermediates and threw them away. So G-1 adds a staging contract and no playback machinery at all.
+
+### WIRING / DISCOVERABILITY
+
+Aliases were written by TESTING stranger phrasings against the live index first. Nine measurably
+failed before registration ("cubic lattice", "salt crystal structure", "put grass on my terrain mesh",
+"cover a surface in plants", "make a bush", "vegetation generator", "watch it grow step by step",
+"make the creature move a little", "branching plant generator"). Gate now 19/19, pinned by
+parametrized tests so a future merge that re-shadows them fails CI rather than going quietly dark --
+the D1 regression pattern already on record, where ~57 arriving capabilities pushed 25 method-names
+out of the top-15 for their own name without anything about them changing.
+
+Full HTTP round-trip proven, not assumed: all 10 organics faculties appear in GET /tools (1593 total)
+and POST /invoke returns real results. Note for future sessions: the /invoke payload key is `name`,
+NOT `method` -- I got this wrong first try and the service correctly refused.
+
+MESH SHAPE CONTRACT, learned the hard way and now pinned by a test: the engine hands meshes around as
+BOTH a `Mesh` object (metaball_mesh, mesh_from_sdf) and a bare `(V, F)` tuple (sweep_tube). Any new
+faculty taking a mesh must accept both or it silently breaks half its callers.
+
+### STILL OPEN (this was a first pass over the backlog, not its completion)
+
+T-1 space colonization (must first read dielectric_breakdown/grow_ice -- they may already generalize,
+which would make it an extension, not a new module); T-3 variant() spec perturbation (the scatter
+POOL path works, the spec-level variation does not exist yet); T-4 phyllotaxis foliage; R-1 metaball
+auto-density skin + per-ball thickness; R-2 spine editing ops; R-3 rigblock parts; R-4 symmetry
+groups; R-7 metaball-provenance skin weights; R-9 paint mode; C-2/C-3 are proven by test but have no
+convenience composer; S-3 ribbon profile in the groom layer; S-4 bake/LOD (perf, needs a baseline
+before any number is pinned).
+
+## ORGANICS, SECOND PASS: space-colonization trees (T-1/T-2/T-4), Spore-style skin + spine (R-1/R-2)
+
+DELTA: 582 modules (was 580), 6162 tests collected (was 6142 -- +20), p14 now 38 faculties (was 26),
+7 catalog entries total for the arc. Audits 0/0/0, docs drift-clean, 1605 tools over HTTP.
+
+### T-1'S AUDIT PAID OFF BY SAYING NO, THEN SAYING YES FOR A REASON
+
+The backlog forbade writing T-1 before reading dielectric_breakdown/grow_ice, because both do
+"attractor-driven branching growth". Read them. They do NOT generalize, for three concrete reasons
+now recorded in the module so the question is not reopened:
+  1. SUBSTRATE  DBM grows on a 2-D boolean GRID (_candidates is hardcoded ys/xs 4-adjacency); a tree
+     grows in continuous 3-D.
+  2. DRIVER     DBM picks by phi^eta from a relaxed LAPLACE field -- a global PDE solve per step.
+     Space colonization moves toward the MEAN DIRECTION of the attractors that chose a node. No solve.
+  3. TERMINATION DBM runs until stopped; space colonization ENDS when attractors are consumed, which
+     is what gives a crown its finite shape.
+"Branching" was a costume, not a mechanism.
+
+### BUT THE SAME READ FOUND A MISSED REUSE IN MY OWN PRIOR WORK
+
+DielectricBreakdown already records `.order` -- the step index at which each cell joined -- and its
+own comment says "for animating / age". My dendrite staging from the previous pass CHECKPOINTED the
+sim, re-running it per stage. Replaced with thresholding the order field: one run instead of n, and
+it upgraded the dendrite from discrete-checkpoints-only to a genuine CONTINUOUS grow_at. The lesson
+is uncomfortable and worth keeping: I audited the engine before building, then failed to audit the
+thing I was about to wrap. Read the object you are delegating to, not just the function you call.
+
+### KEPT NEGATIVES (loud)
+
+* skin_skeleton HAS A HARD CEILING, MEASURED: it nests one SDF node per edge and evaluates
+  recursively, so it raises RecursionError between 200 and 300 edges (199 OK, 299 not, at Python's
+  default limit of 1000). Trees are routinely 150-3000 edges. The backlog's T-2 claim -- "plant limbs
+  reuse the shipped B-Mesh skinner" -- is therefore TRUE ONLY AT THE SMALL END. Both paths now ship
+  and both are pinned: skin_skeleton for the blended surface under ~200 edges, tree_mesh (per-branch
+  sweep_tube, O(edges), no recursion) above it. TRADE-OFF STATED, not hidden: tree_mesh gives
+  interpenetrating tubes with visible joins, not one blended watertight surface.
+* THE ORIGINAL TREE DEFAULTS NEVER TERMINATED. step 0.08 / influence 0.55 / kill 0.14 gave 2943 nodes,
+  186/200 attractors consumed, capped at max_iters -- a tree that never finished growing, which LOOKS
+  like a working tree. Measured sweep found (0.30, 0.25, 0.12) -> 165 nodes, 200/200 consumed,
+  terminating naturally at iteration 160. The rule is roughly kill >= 2*step; the three parameters
+  move together. The selftest now asserts terminated == "attractors_consumed", which is the assertion
+  that would have caught this immediately. `terminated` is RETURNED rather than swallowed so a capped
+  run announces itself.
+* DA VINCI TAPER, CAUGHT BY ITS OWN ASSERT: the first version seeded EVERY node with tip_radius^n and
+  then summed its children, double-counting tip^n at each fork (0.12024 vs 0.120204). Only tips seed
+  the accumulator; an interior node's radius is defined ENTIRELY by what it carries. The exponent is
+  exposed because n=2 is an OBSERVED allometry, not a law (real species run ~2-3).
+* SPHERICAL metaballs only, and for Spore's own stated reason: ellipsoids widen the shape space but
+  are orientation-dependent and markedly slower to evaluate. Adopted with the reasoning, not copied.
+* The shipped metaball_mesh takes ONE radius for ALL centres, so it cannot express a fat torso with
+  thin wrists -- which is the entire point of R-1. Hence a per-ball field (metaball_field) marched
+  through meshbridge. Recorded so nobody "simplifies" it back onto metaball_mesh.
+* Implicit surfaces have NO local control: the metaball union merges limbs that pass close together
+  whether or not they are meant to connect. Inherent, not a bug.
+* move_node deliberately does NOT offer per-node free positioning. The spine is GENERATED from
+  (length, segments, axis, curve); an arbitrary node offset would make the spec stop describing the
+  curve it produces. Stated in the docstring rather than silently unsupported.
+* Phyllotaxis here is the VISUAL signature (fixed divergence angle along a branch). Real phyllotaxis
+  is set at the meristem and interacts with internode elongation.
+
+### THE MEASUREMENT THAT REPLACED A GUESS
+
+The metaball spacing rule ("space balls at d = r * spacing so the union stays smooth") is the "neat
+bit of math" Hecker describes but does not give. Rather than trust a derivation, the selftest SAMPLES
+the field: it finds the surface's radial distance at 40 points along a straight chain and asserts the
+ripple between balls stays under 6%. Measured 1.38% at spacing 1.0. If someone loosens the spacing,
+the test says so in the units that matter (visible surface dents), not in units of faith.
+
+### A SELFTEST THAT DID NOT COVER ITS OWN FRONT DOOR
+
+creature_metaball_mesh had a wrong import (mesh_from_sdf is a UnifiedMind wrapper, not a
+holographic_meshtools function; the real extractor is meshbridge.sample_field + marching_tetrahedra,
+and the marcher takes AXES, not bounds). Every assertion in the selftest sailed past it because the
+selftest never called the module's end-to-end door -- the INTEGRATION test caught it. Both are now
+fixed and the selftest calls the mesh path. Rule: a selftest that never invokes the module's main
+entry point is not a regression trap for it.
+
+### STILL OPEN
+
+R-3 rigblock parts with deformation handles; R-4 symmetry groups (radial-N); R-7 skin weights from
+metaball provenance (the `bone_of` array now exists and is returned specifically to make this small);
+R-9 paint mode; T-3 spec-level variant() (the scatter POOL path works, spec perturbation does not
+exist); S-3 ribbon profile inside the groom layer; S-4 bake/LOD -- perf, and nothing there gets a
+number without a baseline, variance across seeds, and its negatives.
+
+## THE "CEILING" WAS A LEFT FOLD -- a wall I wrote into a docstring instead of walking the levers
+
+DELTA: 6166 tests (was 6162), p14 39 faculties, audits 0/0/0, docs clean. No new modules.
+
+### WHAT I GOT WRONG
+
+Last pass I measured skin_skeleton raising RecursionError between 200 and 300 edges (199 OK, 299 not),
+and recorded it as a MEASURED CEILING with a workaround path beside it. The measurement was correct.
+The CONCLUSION was not. A RecursionError is a statement about the EVALUATOR, not about the problem
+size, and the constitution's rule is explicit: when blocked, walk the five levers before declaring
+anything impossible. I skipped straight to a workaround and then documented the wall as a property of
+the world. Moose caught it.
+
+The actual cause, found in eight lines of the shipped source:
+
+    field = parts[0]
+    for p in parts[1:]:
+        field = field.smooth_union(p, k)      # a LEFT FOLD -> a chain of depth N
+
+Depth N, and `_eval` recursed once per level. Nothing to do with skeletons, meshes, or geometry.
+
+### THE FIX, AND WHY THE OBVIOUS ONE WAS WRONG
+
+The obvious fix is lever 2 -- partition into a commutative monoid, i.e. a BALANCED reduction, depth
+log2(N). MEASURED FIRST, and it is ruled out: `smooth_union` is NOT associative. Rebalancing the same
+three spheres moves the field by 3.3e-3 -- thousands of ULP, not a rounding difference. A balanced
+tree would therefore have silently changed EVERY previously emitted skinned mesh, which the
+additive/backward-compatible constraint forbids outright. (Plain `union` IS associative -- it is min,
+a true monoid -- so the trap is specific to the smooth variants.) That measurement is now a TEST, so
+a future session cannot "optimize" the fold into a balanced tree and quietly flip old output.
+
+What actually works: leave the CHAIN alone and unroll its EVALUATION. `_eval_chain` walks the left
+spine iteratively, collecting (kind, k, right_child), evaluates the base, then replays the ops
+left-to-right -- identical operations, identical order, identical floats. Right children recurse
+normally because they are shallow (a translated primitive), so the C stack is bounded by part
+COMPLEXITY instead of part COUNT.
+
+MEASURED, against an independently written reference at depths 10 / 63 / 64 / 65 / 500 / 2000 (either
+side of the 64-deep switch point): BIT-IDENTICAL, maxdiff exactly 0.0 at every depth. And the ceiling
+is gone: 5999 edges skin where 299 crashed.
+
+Also folded the four combinator formulas into one `_combine` home, because the iterative and
+recursive paths would otherwise hold two copies of the smooth-min polynomial -- the exact
+silent-divergence shape this engine keeps finding.
+
+### INSTANCING, WITH A BASELINE
+
+Second correction from Moose: I merged tree branches when they are the same shape up to a similarity
+transform. `tree_instanced` places ONE unit-tube Definition per branch through a (radius, radius,
+length) scale + rotation + translation. Measured at 420 branches: merged stores 5040 vertices,
+instanced stores 12 -- 420x less geometry, and it is O(1) in branch count (checked at two sizes, so
+the claim is about scaling and not about one lucky number).
+
+KEPT NEGATIVE, stated rather than buried: an instanced branch is a similarity transform of a unit
+tube, so its two ends render at their MEAN radius. Within-branch taper is the price of the memory
+win; tree_mesh keeps it. Three paths now exist because they genuinely trade off differently --
+blended surface (skin_skeleton), exact per-branch taper (tree_mesh), O(1) geometry (tree_instanced).
+
+### THE TRANSFERABLE LESSON
+
+"Measured X, therefore X is a limit" is not measurement -- it is measurement plus an unexamined
+premise. The number was right and the conclusion was wrong, which is worse than a wrong number
+because it looks like rigour. Before writing "ceiling" or "hard limit" in a docstring: name the
+mechanism, then walk the levers against THAT mechanism. Here the mechanism was one line of folding
+in a file I had already read.
+
+## ORGANICS, THIRD PASS: the HOLOGRAPHIC half -- and the regression that proved the point
+
+DELTA: 583 modules, 6181 tests (was 6166), p14 50 faculties (was 39), 10 catalog entries for the arc,
+1617 tools over HTTP. Audits 0/0/0. Backlog items R-3, R-4, R-7, T-3, S-3 closed.
+
+### THE CRITIQUE WAS CORRECT AND THE EVIDENCE WAS A REGRESSION I SHIPPED
+
+Moose: "remember to do things holographically." The first two passes solved organics with plain NumPy
+in an engine whose entire premise is that structure lives in vectors. The proof was not aesthetic --
+it was a measurable capability LOSS. The shipped `holographic_scatterlayer` binds each placement to a
+region code and bundles them, so "is anything scattered near here?" is an unbind, with no scene graph
+and no spatial index. When I generalised scattering to mesh surfaces I returned points, normals and
+transforms and DROPPED that. The newer, more general path was strictly LESS capable than the one it
+replaced, and nothing in my audits caught it because every audit asks "is it wired and findable", not
+"did the generalisation preserve what the specific case could do". Restored as
+`scatter_layer_vector` / `region_occupancy`, default-off.
+
+LESSON WORTH GENERALISING: when replacing a specific implementation with a general one, diff the
+CAPABILITIES, not just the tests. A superset in scope can be a subset in power.
+
+### WHERE THE HOLOGRAPHIC FORM ACTUALLY EARNS ITS PLACE (not decoration)
+
+  R-3 PARTS: a rigblock library is a CODEBOOK; attaching parts to sockets is bundle_bind(roles,
+  parts) -> ONE vector. That buys three things a dict cannot: query by unbind+cleanup, COMPARISON
+  (cosine between two creatures = how alike their layouts are), and composability with everything
+  else in the engine that eats a hypervector. Parts are derived_atom(seed, name), so the same name is
+  the same vector in every process with nothing stored.
+  R-4 SYMMETRY: a symmetry GROUP is a set of transforms; radial-5 is now the same code path as
+  bilateral-2 rather than a second implementation. Mirrors carry det -1 so transform_mesh repairs the
+  winding -- the bug every hand-rolled mirror ships with.
+  R-7 WEIGHTS: skinning is already framed here as a soft mixture of experts over bones, so a vertex's
+  weights ARE its neighbourhood's shares against the bone codebook. `creature_metaballs` returned
+  `bone_of` two passes ago specifically so this needed no re-derivation -- and it didn't.
+  T-3 VARIANTS: determinism instead of storage, applied to art assets. Twenty ferns is a loop over
+  seeds, pure in (spec, seed), never stored.
+
+### KEPT NEGATIVES, MEASURED
+
+* BUNDLE CAPACITY IS REAL AND IS REPORTED. 24 parts at dim=1024 recall at 100% with min margin 0.028;
+  mean cosine falls 0.441 -> 0.193 as the bundle loads, exactly the sqrt(n/dim) shape. `assembly_report`
+  MEASURES this rather than assuming it, and the selftest asserts BOTH directions -- clean recall at a
+  sane load AND genuine failure at 60 parts in dim=64. A capacity report that can never fail measures
+  nothing.
+* OCCUPANCY IS A STATISTICAL READ, NOT A PER-CELL ORACLE. Measured (80 blades, dim 2048, 60 empty
+  probes): occupied mean 0.165, empty mean -0.0008 +- 0.031 -> 5.4 sigma, rising to 8.3 at dim 4096.
+  But the MINIMUM occupied reading was -0.005: a cell holding a single blade sits at the noise floor
+  and is indistinguishable from empty. Good for "is this region populated", useless for counting.
+* MY FIRST TEST OF THAT WAS THE WRONG INSTRUMENT. It compared ONE occupied point against ONE empty
+  point and demanded an 8x ratio; it failed at 6.8x. The encoding was fine -- a single empty probe is
+  a draw from a zero-mean distribution and its sign is luck. Replaced with a measured floor over 60
+  probes. Same failure mode as the yaml line-wrap and the count-dependent RNG stream: the instrument
+  was wrong, not the thing measured. That is now three times this session's arc.
+* SKIN WEIGHTS ARE DISTANCE-BASED, NOT GEODESIC. Touching limbs bleed weight into each other -- the
+  same limitation linear blend skinning always has, and the documented reason Spore's fat torsos
+  sheared.
+* THE PART RECORD IS A LAYOUT, NOT GEOMETRY. Recalling "left_shoulder -> horn" says which part is
+  socketed where; it does not say where the vertices are.
+
+### A BACKLOG ITEM THAT WAS FILED WRONG
+
+S-3 was written as "add profile='ribbon' to build_strand_body". Reading the module showed that
+function builds a PBD SoftBody -- physics, not geometry -- and that the groom layer has NO meshing
+path at all. The gap was a missing STAGE, not a missing parameter. `strand_ribbons` closes it, and the
+payoff is bigger than the note implied: grass now inherits the whole shipped groom pipeline (root on a
+surface, simulate with PBD, blow with curl-noise wind, then ribbon) instead of being a static card.
+Written into the docstring, because a backlog note is a hypothesis and the code is the evidence.
+
+### BACKLOG STATUS
+
+CLOSED: O-1/O-2/O-3, C-1/C-2/C-3, S-1/S-2/S-3, T-1/T-2/T-3/T-4, G-1, R-1/R-2/R-3/R-4/R-7/R-10.
+DECLARED NEGATIVES (deliberately not built): R-6 self-collision, R-8 gait/morphology-independent
+retargeting (the Hecker SIGGRAPH 2008 arc).
+REMAINING: R-9 procedural paint mode (cheap now that skin + UVs exist), S-4 bake/LOD -- and S-4 gets
+no number without a baseline, variance across seeds, and its negatives kept loud.
+
+## ORGANICS COMPLETE: paint mode (R-9) and scatter bake/LOD (S-4) -- the last two items
+
+DELTA: 584 modules, 6191 tests (was 6181), p14 54 faculties, 12 catalog entries for the arc, 1621
+tools over HTTP. Audits 0/0/0, docs drift-clean, 77 organics integration tests.
+
+### RULE 0 DID MOST OF THE WORK AGAIN
+
+Both items were mostly shipped. `pattern_field` (checker/stripes/dots/noise), `cosine_palette`, the
+texture graph and UV faculties covered paint; `mesh_lod_chain`, `mesh_select_lod`,
+`mesh_cluster_decimate` and the `measure` variance harness covered LOD. One new module, and it is
+composition plus honest measurement rather than algorithms.
+
+### WHERE THE HOLOGRAPHIC READ PAID, AND WHERE IT WOULD HAVE BEEN DECORATION
+
+Paint by world position is what every noise texture already does, and it is WRONG for a creature: it
+swims when the creature moves and it ignores anatomy. `bone_tint` reads the skin-weight bundle from
+R-7 and mixes the palette by each bone's share, so the paint is bound to the RIG -- markings travel
+with a pose, and a limb is its own colour region for free because its vertices are weighted to its
+bones. Asserted, not eyeballed: a vertex fully weighted to one bone takes exactly that bone's hue and
+a 50/50 vertex is the exact midpoint. World-space noise cannot do either.
+
+AND THE RESTRAINT, stated because it is the same judgement call: the pattern fields themselves stayed
+plain procedural functions. A checkerboard is not a structure that needs recall, so binding it into
+hypervectors would buy nothing and would be decoration. "Do it holographically" means use the
+representation where it pays, not everywhere.
+
+### S-4's NUMBERS, WITH THEIR BASELINE, VARIANCE AND EXCLUSIONS
+
+The backlog's own instruction was "no scatter perf number without a baseline, variance, and the kept
+negatives". 3000 blades, 5 seeds, through the shipped `measure` harness:
+    baseline (full-resolution merge of every instance): mean 0.0879s, std 0.0280, CI [0.073, 0.114]
+    the same scatter at distance 60 through the bake  : mean 0.0058s, std 0.0003, CI [0.0055, 0.006]
+    -> 15.2x, CONFIDENCE INTERVALS DISJOINT, which is what makes it a result and not a lucky run.
+Triangles fall 2400 -> 88 (3.7%) on the 400-blade case; that is an EXACT count, so it carries no error
+bar -- putting a CI on a deterministic integer would be theatre.
+
+WHAT THE TIMING EXCLUDES, measured rather than waved away: the bake itself (mean 0.0024s, std 0.0040)
+is not in the 15.2x, because a bake is built once and queried per frame. A query costs 0.0027s, so the
+bake amortizes after ~1 query. That check was the point -- if it had taken a hundred queries to
+amortize, the comparison would have been dishonest and the number would have had to be reported
+differently. The exclusion is only legitimate BECAUSE it was measured.
+
+### THE BUG I ALMOST SHIPPED, AND WHAT CAUGHT IT
+
+The LOD chain wrapped decimation in a bare `try/except: use the source`. That would have let a
+decimation failure look like a working LOD chain -- the thinning alone still produces a "saving", so
+the report would have shown real numbers while every level quietly drew the full-resolution blade.
+Caught by asking the obvious question of my own output (did the levels actually get smaller?) rather
+than trusting the ratio. Now `level_note` records what happened per level and `decimated_levels`
+counts the ones that really shrank; the selftest asserts no FALLBACK and at least one genuine
+decimation. On a 6-triangle blade the chain comes out [6, 4, 4] -- the coarsest levels CANNOT shrink
+further, which is a legitimate outcome that must be VISIBLE rather than inferred.
+
+A bare except that substitutes a silent fallback is the same failure family as the yaml line-wrap and
+the single-probe occupancy test: the instrument reports success while measuring nothing.
+
+### KEPT NEGATIVES (loud)
+
+* LOD THINNING REMOVES BLADES. It is a quality trade, not a free win, and `keep_fraction` is returned
+  so the loss is visible. The thinning is NESTED (hash-ranked, so the far set is a strict subset of
+  the near set) -- which is the property that makes it usable in motion; naive per-frame random
+  thinning makes blades flicker in and out as the camera moves, and the test asserts nesting for
+  exactly that reason.
+* NO BILLBOARDS/IMPOSTORS. A card facing the camera needs the camera; this module is camera-free by
+  design and the LOD choice here is geometric (population + mesh level). Impostor baking is a
+  rendering-side job and is NOT claimed.
+* PAINT IS PER-VERTEX. Detail finer than the mesh's vertex spacing needs a texture bake through the
+  UV faculties, which already ship.
+
+### THE ORGANICS BACKLOG IS CLOSED
+
+BUILT: O-1/O-2/O-3 (promotion), C-1/C-2/C-3 (crystals), S-1/S-2/S-3/S-4 (scatter, ribbons, bake+LOD),
+T-1/T-2/T-3/T-4 (trees, taper, variants, phyllotaxis), G-1 (growth scrubbing), R-1/R-2/R-3/R-4/R-7/
+R-9/R-10 (skin, spine edits, parts, symmetry, weights, paint, idle).
+DECLARED NEGATIVES, deliberately not built and recorded so nobody reinvents them: R-6 self-collision,
+R-8 gait / morphology-independent retargeting (the Hecker SIGGRAPH 2008 arc, a research programme of
+its own and explicitly out of scope for a preview-quality idle).
+
+## ORGANIC CREATURE MATERIALS: layered anatomy, and two bugs the quality render exposed
+
+DELTA: 585 modules, 6210 tests (was 6191, +19), p14 59 faculties, 14 catalog entries for the arc.
+Audits 0/0/0, docs drift-clean.
+
+### RULE 0 FOUND ALMOST EVERYTHING; THIS MODULE IS RECIPES
+
+Reused: `voronoi` (Worley f1/f2/f2f1 -- scale cells, chitin plates), `wave` (worm annuli), `musgrave`
+(mammal pores), `layered_material`/`Layer` (stacking with the base<diffuse<specular<coat order
+ENFORCED at compose time), `surface_material` (Param sockets accept callable fields), `Material` (an
+HRR record with .record()/.blend()), and the shipped organic catalog's `bone`/`leather`. Built: the
+six taxon recipes, body-aligned structure fields, and the anatomical stack.
+
+### THE STRUCTURAL IDEA, AND THE ENFORCEMENT
+
+A skin is a stack of TISSUES: [bone] -> [organ] -> dermis -> epidermis -> coat. The important part is
+that it is enforced rather than described. INSECTS DECLARE endoskeleton=False and
+`anatomy_stack('insect', with_bone=True)` RAISES -- an arthropod's rigid structure IS its epidermis
+(the chitin exoskeleton), so silently stacking a skeleton would model an animal that does not exist.
+A comment saying "insects have no bones" is a comment; a taxon that refuses the layer is a model.
+Worms are likewise invertebrate, and the rendered stacks came out right without special-casing:
+reptile carried skeleton:bone, insect and worm did not.
+
+BODY-ALIGNED, NOT WORLD-ALIGNED: every structure field is sampled in a body frame anchored to the
+spine and stretched along it, so scale rows elongate down the animal and travel with it. Measured:
+rotating the body axis decorrelates the pattern (r < 0.9), and stretch makes variation ALONG the axis
+slower than across it (0.037 vs 0.111). Same lesson as the rig-bound paint (R-9): anatomy-space beats
+world-space for anything attached to an animal.
+
+### TWO REAL BUGS, BOTH FOUND BY THE RENDER FAILING HONESTLY
+
+1. metaball_field IS A DENSITY, NOT A DISTANCE FIELD. Marching cubes only reads the SIGN, so the
+   density served it fine for the whole previous arc. A sphere tracer needs a Lipschitz bound, and
+   measured on a real creature the density's |grad| ranged 0.0 to 26.1 where an SDF is ~1.0 -- so the
+   first quality render came back as PURE BACKGROUND. Added `metaball_distance`: the log-sum-exp
+   smooth union of spheres, associative (so it reduces over all balls in ONE vectorised op rather
+   than a fold), stabilised by subtracting the running minimum, Lipschitz-1 by construction.
+   Measured |grad| 0.90. Note the connection: a ~190-ball union is only viable because of the
+   left-fold recursion fix from the previous session.
+2. THERE WAS NO DOOR TO THE FIELD. It existed only inside the mesher, so no renderer could reach it.
+   `CreatureField` now satisfies BOTH consumer contracts from one object -- callable for
+   mesh_from_sdf, plus .eval/.ids/.bounds for render_surface/path_trace -- rather than making callers
+   remember which door to use.
+
+### AND A MEASUREMENT BUG IN MY OWN DEMO, WHICH IS THE MORE INSTRUCTIVE ONE
+
+The beauty script masked the subject as "pixels that differ from the background colour". With a
+`sky`, non-hit pixels are sky*0.5 + background*0.5 -- a GRADIENT, not the flat background -- so the
+test marked EVERY pixel as subject. Consequences: the silhouette crop silently became a no-op (all
+three images stayed 420x420 when they should have cropped), and the reported subject mean/std folded
+in the sky. The fix is exact rather than approximate: the sky is a pure function of ray direction, so
+the expected miss-colour is computable per pixel. Coverage then read 45-56% and the crop worked
+(419x220, 386x415, 396x85).
+THE PATTERN, now four times in this arc: the instrument was wrong, not the thing measured. yaml
+line-wrap, count-dependent RNG stream, single-probe occupancy, and now a background-colour mask.
+Every one of them REPORTED SUCCESS while measuring nothing.
+
+### CONTROLS BEFORE RESULTS
+
+Before claiming the structure reaches the pixels, ran it as a control: structure_strength 0.0 / 1.0 /
+1.8 gave high-frequency image energy 0.00582 / 0.00700 / 0.00863 -- monotone, so the pattern is
+genuinely in the render and not an artifact of shading. With relief displacement the families
+separate strongly and sensibly: worm annuli 0.161, reptile scales 0.022, insect plates 0.007.
+
+### KEPT NEGATIVES (loud)
+
+* THE INTERIOR IS NOT AN X-RAY. Bone and organ tint only what re-emerges through translucent skin;
+  on an opaque mammal they contribute essentially nothing. `interior_visible` reports this rather
+  than implying a cutaway.
+* RELIEF COSTS SPEED, AND THE COST IS THE POINT. Adding a high-frequency displacement to a distance
+  field breaks its Lipschitz bound, so the result is divided by a measured Lipschitz estimate and the
+  tracer marches more slowly. Large amplitudes make it overshoot and punch holes -- keep it to a few
+  thousandths of body size. Verified |grad| <= 1.05 at amp 0.004 and 0.010.
+* SOLID 3-D TEXTURE, NO UV UNWRAP -- which is what makes it wrap a curved body seamlessly, but also
+  means a scale is a slice through a volumetric cell, so scale thickness is not constant on a
+  strongly concave surface.
+* NOT AN ENERGY-CONSERVING LAYERED BRDF. `layered_material`'s own docstring is explicit that it fixes
+  the STACKING, not the radiometry; stacking coats here inherits exactly that limit.
+* IRIDESCENCE IS A TINT, not a spectral thin-film solve.
+* NO FUR GEOMETRY. `mammal` is skin plus a sebum coat; actual hair is the groom layer plus
+  strand_ribbons, and a shader does not replace it.
+* A CHITINOUS BEETLE IS GENUINELY NEAR-BLACK. The first insect render looked "too dark" and the
+  material was correct -- a glossy dark shell gets its character from what it REFLECTS, so the fix
+  was a studio sky (subject mean 0.102 -> 0.236), not brighter pigment. Worth remembering before
+  "fixing" a material that is behaving accurately.
+
+## A FALSE KEPT NEGATIVE, AND THE AUDIT GAP THAT LET IT SHIP
+
+DELTA: 585 modules, 6210 tests + 8 new integration tests, 1 new audit tool. Audits 0/0/0.
+
+### THE DEFECT (worse than a missing feature)
+
+The creature-material module set `iridescence` for fish and insect, RETURNED it in its dict, and read
+it from NO channel. Dead data. Alongside it I filed a kept negative reading "iridescence is a tint,
+not a spectral thin-film solve" -- which described the limitations of code THAT DID NOT EXIST. A
+missing feature is a gap; a negative describing a non-existent implementation is a FALSE STATEMENT IN
+THE DOCUMENTATION, and it is worse because it reads as diligence. Anyone trusting that note would
+have concluded iridescence worked and was merely approximate.
+
+### AND IT WAS A RULE 0 FAILURE ON TOP
+
+`holographic_thinfilm` ships real interference physics -- `interference_reflectance`,
+`spectrum_to_rgb`, `thin_film_tint`, and `iridescent_socket` -- and its module docstring literally
+names "beetle shell" as the use case. I wrote a weaker thing beside it without looking. The probe I
+ran at the start of that session asked for "iridescence" and the catalog DID return the thin-film
+capability; I read the hit and did not follow it. Rule 0 is not just running the probe.
+
+### THE DEEPER FINDING: THE SHIPPED SOCKET HAD NO CONSUMER
+
+`iridescent_socket` is a 3-argument socket f(points, normals, view_dirs), because iridescence is
+view-dependent. `SurfaceMaterial.resolve` passed ONLY points, so nothing in the render path could
+ever call it. It had a passing unit test and no door -- iridescence had never worked end to end in
+this engine. The unit test proved the physics, not the integration, which is exactly the gap
+integration tests exist for.
+
+FIX: `holographic_surface.ViewSocket`, an explicit marker (not arity introspection -- that breaks on
+partials and ufuncs and fails silently when it guesses wrong). `resolve(points, normals=None,
+view_dirs=None)` is additive; a ViewSocket with no geometry RAISES rather than silently degrading to
+a view-independent approximation. BACKWARD COMPATIBILITY VERIFIED, not assumed: existing materials
+resolve to identical bytes, and the reference render mean is 0.50964675 before and after, asserted to
+1e-8 in a test.
+
+SUB-BUG found while wiring it: `resolve_param` reads an (M,3) array as a per-point LOOKUP MAP and
+collapses it to (M,), which silently turned an iridescent red into flat white. An already-resolved
+channel must not be re-resolved.
+
+### THE INSTRUMENT WAS WRONG. AGAIN. (fifth time this arc)
+
+First measurement of the new iridescence reported a hue shift of 0.002 -- apparently negligible. The
+effect is ~50x that. The test averaged over 400 random normals, and averaging over a scattered normal
+distribution washes out an ANGULAR response. Swept properly at a fixed normal: R-B goes +0.132 ->
+-0.094 -> +0.104, a genuine gold-to-teal reversal. Running list: yaml line-wrap, count-dependent RNG
+stream, single-probe occupancy, background-colour mask, and now normal-averaged angular response.
+EVERY ONE reported success or a null result while measuring the wrong thing. A weak number is a claim
+about the instrument until the instrument has been checked.
+
+A second instrument error inside the same fix: I first asserted the FINAL colour must cross from warm
+to cool. `fish` failed -- correctly, because its base pigment is blue and dominates the sign. That
+assertion was measuring base colour, not the film. The physics claim now sits on `thin_film_tint`
+directly, where it belongs, and the socket test asserts only what the socket owns (hue range > 0.10).
+
+### NEW TOOL: tools/delegation_drift.py
+
+The faculty/module signature seam has now drifted three times in this arc (scatter_mesh gained
+holographic/dim/cell_size; creature_material gained iridescence/film_nm/n_film; creature_skin_field
+gained distance/smooth_k) and NO audit caught any of them -- the module has a docstring
+(reachability), the catalog example still runs (skill_lint), nothing is unwired (wiring_report). The
+failure is in the SEAM and nothing was looking at seams. The engine's "See holographic_x.y" docstring
+convention is machine-readable, so now it is read.
+
+CALIBRATED, NOT GUESSED: raw comparison gives 238 findings, most of them faculties that legitimately
+transform their arguments rather than forwarding them (building a class, computing a delegate's
+inputs). Filtering by NAME OVERLAP -- a faculty already forwarding most parameters IS a 1:1 forwarder,
+so a small gap is real drift -- cuts it to 42 at >= 0.80. It catches all three of my own known bugs,
+which is how the threshold was chosen.
+
+SHIPPED NON-GATING ON PURPOSE. 40 pre-existing findings remain across the engine, and a tool that
+fails the build on day one gets disabled rather than obeyed. `--gate` is there for when the backlog is
+cleared. My own p14 faculties are now clean; the remaining 40 are an honest, named backlog, not a
+claim that I fixed the engine.
+
+### KEPT NEGATIVES (loud)
+
+* delegation_drift checks NAMES, not semantics: a faculty forwarding `seed` to a delegate's `rng_seed`
+  reads as drift, and one forwarding to the WRONG delegate parameter reads as clean. A seam-shaped
+  net, not a proof.
+* Iridescent film THICKNESS rides the structure field so the sheen breaks up per scale/plate. That is
+  a deliberate look, not a measurement of any real animal's cuticle.
+* ViewSocket fixes STACKING of view-dependence into the socket protocol; it does not make the shading
+  model energy-conserving, which remains layered_material's own stated limit.
+
+### UNRELATED PRE-EXISTING DEFECT, FOUND AND NOT CHASED
+
+`tests/test_bump_version.py` (9 tests) errors with FileNotFoundError on `VERSION` -- and the file is
+absent from the ORIGINAL uploaded archive too, so it predates this work. Reported rather than
+silently fixed, since packaging is not this session's scope.
+
+### STILL OPEN
+
+Mammal FUR GEOMETRY -- the standing kept negative that a shader does not replace hair. The pieces all
+exist (groom_hair roots strands on a surface, simulate_hair runs PBD, hair_wind blows them,
+strand_ribbons meshes them) so it is a composition, not a build. Deliberately NOT started here rather
+than rushed at the end of a session.
+
+## THE CREATURE EDITOR -- and a placement bug that every one of my tests slept through
+
+DELTA: 587 modules, 6233 tests (was 6210), p14 66 faculties, 16 catalog entries for the arc.
+Audits 0/0/0. Two new modules: holographic_creaturesocket, holographic_creatureeditor.
+
+### THE BUG (the important part of this session)
+
+`transform_mesh` and `InstancedScene` use the COLUMN-vector convention -- basis vectors in the
+columns, translation in M[:3, 3]. Every placement matrix I had written used ROWS. transform_mesh
+therefore applied a TRANSPOSED rotation and IGNORED THE TRANSLATION ENTIRELY.
+
+Consequence: every scattered grass blade, every instanced tree branch and every phyllotaxis leaf was
+placed AT THE ORIGIN. The lawn was one clump. The renders shown in earlier sessions were
+geometrically wrong.
+
+WHY MY TESTS PASSED, which is the part worth keeping:
+  * vertex COUNTS pass -- duplicated geometry is still duplicated, wherever it sits
+  * "nothing below z=0" passes -- a blade at the origin is not below the ground
+  * matrix-content checks pass -- the MATRIX was fine; the CONVENTION was wrong
+  * the holographic occupancy layer passed -- it was binding the same (wrong) positions the geometry
+    used, so generator and verifier agreed with each other while both were wrong
+Every assertion I had was about COUNT or about the matrix. None was about WHERE THE GEOMETRY WENT.
+The missing assertion is SPATIAL EXTENT: placed geometry must SPAN the surface it was scattered on.
+Extent is the one property that cannot be satisfied by everything piling up at a point. It is now in
+the selftests for scatter, trees and leaves:
+    before  x -0.105 .. 0.105   (all at origin)
+    after   x -0.061 .. 5.844   (spans the 6x6 lawn)
+
+Fixed in five producers (placement_frames, tree_instanced, phyllotaxis_frames, socket frames, and the
+LOD identity keys) plus every consumer reading positions in the old convention -- including the
+scatter layer's cell binding, which had been hashing the wrong cell for every blade.
+
+LESSON, generalised: when two components you wrote agree with each other, that is not evidence. The
+occupancy verifier and the scatter generator shared a bug and confirmed each other. A check is only
+independent if it comes from OUTSIDE the pair -- here, physical extent.
+
+### THE FEATURE THAT FOUND IT: SOCKETS IN ANATOMY SPACE
+
+`attach_part` used to return {"shoulder": "horn"} -- a layout record with no location. That is what
+made the part system bookkeeping rather than Spore. A socket is now (t, theta): fraction along the
+spine, angle around the body in a ROTATION-MINIMIZING frame (Frenet flips at inflections and is
+undefined on straight runs, so a Frenet theta would twist parts around a curved body). World position
+is DERIVED by marching the creature's own distance field outward.
+
+That is the whole trick, and it is the third appearance of the same principle in this arc, after
+rig-bound paint and body-aligned scales: ANYTHING ATTACHED TO AN ANIMAL BELONGS IN ANATOMY SPACE.
+Store a world position and the first spine edit leaves the horn floating beside the head. Asserted
+directly: after a belly-thickening edit a socket re-resolves onto the NEW skin, depth 0.194 -> 0.320,
+still exactly on the surface to 1e-6.
+
+`socket_at_point` is the inverse (click -> anatomy coordinates) and `pick_socket` marches the FIELD
+rather than a tessellated proxy, so parts land on the surface the user actually sees. The round trip
+resolve(socket_at(p)) == p is asserted, because if picking and placing disagreed a part would jump
+the moment the user released the mouse.
+
+A SECOND DESIGN FLAW found by a test: a part at theta = 0 sits ON the mirror plane, so bilateral
+symmetry duplicated it onto ITSELF -- two coincident horns, z-fighting and costing double. Real
+editors place a midline part once; `_dedupe` now does too, comparing theta modulo 2*pi.
+
+### THE EDITOR SESSION
+
+`CreatureEditor` is the object an app drives. Reuses the shipped `EditHistory`, whose
+.apply/.invert command protocol turned out to be fully general -- so undo/redo is its machinery, not
+a second implementation. Commands are SNAPSHOTS rather than hand-written inverses: inverting "extend
+the spine by 2" sounds easy and is not (it must restore the resampled radius profile and the
+renormalised limb fractions), and a snapshot cannot get that wrong on a document this small.
+
+DOCUMENT KEPT CANONICALLY JSON-SHAPED AT ALL TIMES. The first save/load round trip failed because
+computed edits leak np.float64 and tuples, which come back as float and list. The fix was NOT to
+loosen the assertion to "equivalent" but to normalise on every commit, so the round trip is an
+IDENTITY and can be asserted as one -- byte-identical re-save, verified.
+
+Verified end to end by driving it exactly as an app would: 7-node spine, 2 limb pairs, bilateral
+horns, a 5-spike dorsal ridge on the midline, a click-placed pair via ray pick; validate ok; budget
+66/120 with radial symmetry counted properly; undo/redo mid-session; save/load identical at 2648
+bytes; build -> 20148 skin verts, 9 parts placed, 0 missed. Rendered: 21136 distinct colours with
+9521 warm part-coloured pixels, i.e. the horns and spikes are demonstrably ON the body.
+
+### KEPT NEGATIVES (loud)
+
+* VALIDATION IS STRUCTURAL, NOT AESTHETIC. It catches an empty spine, a limb anchored off the body,
+  a part the library lacks, a socket whose ray misses the skin. It has NO opinion on whether the
+  creature can stand, balance or walk -- that needs the gait arc, which is not built.
+* THE COMPLEXITY BUDGET IS A COUNT, NOT A COST MODEL. Spine nodes, limb segments and parts against a
+  cap, so an app can show "66 of 120". It does not predict render time or memory.
+* PARTS ARE PLACED, NOT BLENDED: a horn sits on the skin as separate geometry with a visible seam.
+  Fusing into the metaball field is a different and much slower operation.
+* NO PART-PART COLLISION. Two parts on nearby sockets interpenetrate, exactly as Spore's did.
+* SOCKETS ARE SPINE-RELATIVE, so a socket on a limb tip uses the nearest spine station and is
+  approximate. Per-limb socket frames are a real extension, not pretended at here.
+* A CONCAVE BODY CAN MAKE THE OUTWARD RAY MISS or exit through a different lobe; resolution reports
+  `hit` and `build` returns `missed` so an app can flag it rather than bury a part in the torso.
+
+### WHAT AN APP STILL NEEDS
+
+Authored part GEOMETRY (mouths, eyes, feet, hands -- the library takes meshes, there just are not
+any yet; the selftests use a generated cone), and GAIT: the Hecker et al. SIGGRAPH 2008
+morphology-independent animation arc, still a declared negative and still the honest last item.
+
+## THE PART LIBRARY: parametric rigblocks, and why parts are functions rather than assets
+
+DELTA: 588 modules, 6253 tests (was 6233), p14 70 faculties, 18 catalog entries for the arc.
+Audits 0/0/0. New module: holographic_creaturepartlib (11 parts).
+
+### RULE 0 FOUND A GENUINE BLANK
+
+'a mouth or jaw', 'foot with toes', 'claw or talon', 'wing membrane', 'antenna' and 'superellipse'
+all returned NOTHING. The socket system could place parts and there were no parts to place -- the
+selftests were placing a generated cone. A creature creator whose only part is a cone is not one.
+
+### PROCEDURAL, NOT AUTHORED -- and the reason is the HANDLE
+
+Spore's rigblocks were hand-modelled meshes carrying a few authored deformation handles, and the
+handles are the important half: a part is not a fixed mesh, it is a small FAMILY of shapes its author
+sanctioned. Generating the family from parameters gets the same result and buys three things:
+    no asset pipeline -- leCore has no modeller and no binary assets; a part that is a FUNCTION ships
+    determinism      -- same parameters, same bytes, nothing stored (the storage lever, applied to art)
+    real handles     -- and this is the decisive one: `digits=3` versus `digits=5` is a genuinely
+                        DIFFERENT foot, not one mesh scaled. Measured: 1232 -> 2000 faces. No amount
+                        of deforming an authored mesh produces another toe. A parametric part can
+                        express that; a rigblock in the original sense cannot.
+Handle ranges are DECLARED in PART_HANDLES and registered with the PartLibrary, so clamp() enforces
+them -- asking for a horn ten times its authored maximum gets the maximum. That is what makes it a
+library rather than a pile of meshes.
+
+### ONE NEW PIECE OF GEOMETRY CODE, AND IT WAS A REAL GAP
+
+Every part is built on `sweep_profile`: a swept ring whose RADIUS VARIES along the path, in a
+rotation-minimizing frame. The shipped `sweep_tube` takes ONE profile for the whole tube and so
+cannot taper -- which is the one thing every organic appendage does. Horn, claw, toe, antenna, ear
+and fin ray are all this function with a different path and radius curve; nothing else needed
+writing. It is wired and cataloged in its own right, because "tapered tube" was a measured miss.
+
+### A DISTINCTION THE SELFTEST FORCED ME TO MAKE HONEST
+
+The first assertion said every part must stand on +Z above its socket. The mouth failed -- correctly.
+A mouth is an APERTURE: a hole in the skin that straddles the surface, not a protrusion standing on
+it. Pushing it above the surface so the rule held would have looked exactly as wrong as it sounds.
+So `PART_ORIGIN` now declares which parts are "centred" and which "standing", and the selftest holds
+each kind to its OWN contract instead of one loose rule that fits neither. Declaring the distinction
+was the fix; loosening the assertion would have been the bug.
+
+### VERIFIED END TO END
+
+Parametric parts -> library -> editor -> sockets -> geometry, on a real creature: 7-node spine, two
+limb pairs, bilateral eyes on stalks, a mouth, bilateral horns, bilateral antennae, a four-fin dorsal
+run, bilateral flank spikes. Validate ok, 0 warnings; budget 96/200 with symmetry counted; 13 parts
+placed, 0 missed; skin 21140 verts + parts 2340 verts. Every placement sits on the skin to 1e-6 and
+all 13 are in distinct positions. Document round-trips exactly with real parts in it.
+
+### KEPT NEGATIVES (loud)
+
+* PARTS ARE SHAPES, NOT ANATOMY. A mouth is a modelled opening, not a jaw that articulates; an eye
+  does not look at anything. Rigging parts to the creature's skeleton is a separate arc.
+* WATERTIGHT BUT NOT MANIFOLD AT SUB-PIECE SEAMS: a foot's toes meet its pad by OVERLAP, not by a
+  boolean. Fine for rendering, not fine as CAD input -- run the shipped mesh repair first.
+* NO UVs AND NO PER-PART MATERIALS. Parts take the colour the caller gives them; the material layer
+  works on the body, not on sockets.
+* EVERYTHING IS AUTHORED +Z UP with the origin at the attachment point, because that is what the
+  socket frame expects. A part authored in another orientation attaches sideways.
+* Placed part geometry can dip a few hundredths below the skin where a flat base meets a curved
+  flank (measured -0.036, most of it the mouth aperture). That is the honest cost of placing rather
+  than blending, and it is what hides the seam.
+
+### WHAT REMAINS FOR A GAME ON TOP
+
+GAIT. Everything needed to CREATE a creature is now present and discoverable: body, skin, parts,
+sockets, symmetry, paint, materials, editor session with undo/save/validate/budget, and picking.
+What is not present is making it walk -- the Hecker et al. SIGGRAPH 2008 morphology-independent
+animation arc, still a declared negative. `creature_idle` shows where joints bend and is explicitly
+NOT locomotion; the line between them stays sharp.
+
+## GAIT -- the last item, and three bugs that all faked a PERFECT score
+
+DELTA: 589 modules, 6271 tests (was 6253), p14 76 faculties, 20 catalog entries for the arc.
+Audits 0/0/0. New module: holographic_gait.
+
+### THE DESIGN: MEASURE THE ONE THING THAT IS OBJECTIVE
+
+Every other piece of this arc had a shape to check against. Locomotion does not -- a walk either
+"looks right" or it does not, which is the kind of claim that invites a demo instead of a
+measurement. So the module is built around FOOT SLIP: while a foot is planted its WORLD position must
+be constant. That is the moonwalk artifact, it is what looks wrong when it breaks, and it is a NUMBER.
+
+And the construction makes it small by design rather than by tuning. Body speed is NOT a free
+parameter:
+        speed = stride / (duty * period)
+During stance the foot is planted and the body must advance exactly one stride. Accept speed as an
+independent input -- as the naive version does -- and the feet slide by whatever the mismatch
+happens to be. Deriving it means the measurement CONFIRMS the construction instead of discovering a
+fudge factor.
+
+MORPHOLOGY-INDEPENDENT, which is the useful half of Hecker's SIGGRAPH 2008 idea reduced to what can
+be built honestly here: `analyze_rig` finds legs by asking which limbs REACH THE GROUND, takes stride
+from their measured reach, and `gait_pattern` generates phases for any leg count. Nothing is authored
+per creature. A hexapod walks from the same code (slip 6.74%), and the analyzer correctly reads the
+shipped vertical-spine `quadruped_spec` as 2 LEGS AND 2 ARMS -- which is the right reading of that
+body and proof the classification is measured, not named.
+
+### THREE BUGS, ONE SHAPE, AND A PERFECT SCORE THAT MEANT NOTHING
+
+The slip metric read 0.00%. It was measuring nothing.
+
+  1. `solve_ik_limited` returns (joints, residual) -- a TUPLE. I indexed it as a list, so `solved[-1]`
+     was a float RESIDUAL and the reach check compared a scalar to a point. Identical in kind to
+     `nearest` returning (index, score) earlier in this arc: A RETURN SHAPE ASSUMED INSTEAD OF CHECKED.
+  2. A bare `try/except: return None` swallowed the resulting ValueError and reported it as "every leg
+     is out of reach". This is the SAME bare-except trap I criticised in the LOD chain two sessions
+     ago and then wrote myself. A configuration failure and a kinematic failure must not share an
+     error path.
+  3. `root_ref` defaulted to +Y, so a mount's 70-degree cone forbade a leg from pointing DOWN. A
+     constraint frame belongs to the BODY, not to a global default -- the same anatomy-space lesson
+     as sockets and rig-bound paint, in a third costume.
+
+The IK had been exact the entire time: measured err 0.0000 once called correctly. What made this
+findable was asking whether a perfect score was even POSSIBLE -- a foot that never moves cannot slip.
+The controls are now assertions: `unreachable` must be empty, feet must travel more than half a
+stride, feet must LIFT. Without them the slip figure is an artifact.
+
+SIXTH INSTRUMENT FAILURE OF THIS ARC. Running list: yaml line-wrap, count-dependent RNG stream,
+single-probe occupancy, background-colour subject mask, normal-averaged angular response, and now a
+foot that never moved. EVERY ONE reported success or a clean null while measuring the wrong thing.
+The generalisation is stable enough to state as a rule: A PERFECT SCORE IS A HYPOTHESIS ABOUT THE
+INSTRUMENT, NOT A RESULT. Ask what a broken measurement would look like BEFORE believing a good one.
+
+### THE HONEST NUMBER
+
+Slip is 6.75% of stride, not zero. The derived speed removes the systematic component; what remains
+is IK residual within the joint limits plus frame discretisation. The threshold sits at 9% in the
+selftest -- just above where it lands -- so a regression surfaces rather than being absorbed by a
+generous bar. Measured trot contacts reproduce the classic DIAGONAL pattern (front-left with
+hind-right, then the opposite half-cycle) straight off the rig, and consecutive rendered frames differ
+by 0.068 mean, so the strip is animation rather than a repeated still.
+
+### MY OWN AUDIT FLAGGED ME, AND THE EXEMPTION IS ON THE RECORD
+
+delegation_drift flagged gait_pose/gait_frames/gait_report for a missing `mind` parameter. Correct
+detection, wrong conclusion: the faculty IS the mind and passes `self`; exposing the parameter would
+let a caller hand a FOREIGN mind to a method reached through this one. That is exactly what BUDGET is
+for -- three named entries with reasons, so the exemption is a decision on the record rather than a
+hole. Back to the pre-existing 40.
+
+### KEPT NEGATIVES (loud)
+
+* NO PHYSICS AND NO BALANCE. The body is carried along a prescribed path at the derived speed. There
+  is no centre of mass, no support polygon, no ground reaction -- a creature with both legs on one
+  side will happily "walk" while being obviously unbalanced. This is KINEMATIC locomotion.
+* NO TERRAIN: the ground is a plane at a measured height; feet do not adapt to slopes or steps.
+* NO SECONDARY MOTION -- no spine undulation, no tail swing, no soft-tissue lag. Hecker's system had
+  passive dynamics on top; this does not.
+* GAIT PATTERNS ARE THE CLASSIC DIAGRAMS, not a solved optimum. Walk/trot/pace/bound/gallop are what
+  tetrapods use; other leg counts get an evenly spread metachronal wave, asserted from biology rather
+  than derived.
+* AN UNREACHABLE LEG IS REPORTED, never silently stretched. A creature whose legs cannot touch the
+  ground does not secretly get longer legs.
+
+### THE CREATURE ARC IS COMPLETE
+
+Body, spine editing, thickness profiles, metaball skin, symmetry groups, parametric parts, sockets in
+anatomy space, picking, skin weights, paint, taxon materials, idle, an editor session with
+undo/save/validate/budget -- and now locomotion. An app can create a creature and make it walk.
+What is NOT built, and is named rather than implied: balance, terrain adaptation, secondary motion,
+and gait as an optimisation rather than a diagram.
+
+## THE THREE VISUAL DEFECTS -- and a received wisdom I repeated without testing
+
+DELTA: 589 modules, 6279 tests (was 6271), p14 79 faculties, 23 catalog entries for the arc.
+Audits 0/0/0. Moose looked at a render beside a Spore screenshot and said the limbs were lumpy, the
+parts were white and not attached, and it was not close. All three were real defects, not taste.
+
+### 1. LUMPY LIMBS -- undersampling, and a selftest that could never have caught it
+
+Measured ripple on a real limb: 225%, against the 6% my straight-chain selftest allows. But
+gap/radius was 0.76, well inside the smooth range, so the metaball SPACING was innocent. The actual
+cause: at resolution 104 on a body 2.7 units tall, a limb of radius 0.030 is 2.3 MARCHING CELLS
+ACROSS. Marching cubes cannot represent a tube that thin -- it beads into whatever the lattice
+catches.
+
+WHY THE SELFTEST MISSED IT, which is the transferable part: it measured a straight, constant-radius
+chain IN ISOLATION, at its own comfortable scale. Lumpiness only appears when a THIN feature is
+marched inside the bounding box of a MUCH LARGER body, because the cell size is set by the whole
+body and the limb gets no say. A QUALITY METRIC THAT IS NOT SCALE-RELATIVE IS NOT A QUALITY METRIC.
+`skin_quality` now reports cells-across and the resolution that fixes it, and the mesher WARNS rather
+than silently emitting lumps. Ripple 225% -> 17.6%.
+
+### 2. PARTS WHITE AND FLOATING -- a kept negative that was the wrong call
+
+I had written "parts are placed, not blended; the seam is the honest price" and filed it as a kept
+negative. It was wrong. Spore parts look attached because they are metaballs in the SAME implicit
+surface as the body -- not a shading trick, the same field. `fused_field` melts fusable parts into
+the skin: measured, a point 0.12 above the plain surface now reads INSIDE the fused field, and the
+result is one continuous mesh with a smooth fillet at the join.
+A kept negative is a decision, and decisions can be wrong. Recording one is not the same as
+justifying it, and "honest price" was doing the work of an argument I never made.
+FUSION IS OPT-IN PER PART, with the loss stated: it approximates a part by its AXIS, so horns,
+claws, spikes, antennae and eyes survive faithfully (they ARE tapered tubes) while fins (membranes),
+hands (branching) and mouths (apertures) become blobs and stay as placed geometry.
+
+### 3. EVERYTHING IS A TUBE -- and the received wisdom I never tested
+
+Metaballs are spheres, so every cross section of a creature is a CIRCLE, and no profile edit changes
+that: a fat belly is still a round belly. That is what separates "tapered tube" from "body".
+
+I had carried Spore's own stated reason for spheres-only -- ellipsoids are orientation-dependent and
+markedly slower -- into my docstrings as a kept negative. MEASURED, IT DOES NOT APPLY: warping SPACE
+instead of the balls gives the same effect with no cost at all (0.2306s shaped vs 0.2433s circular
+per 40k points). The claim is true of ellipsoid PRIMITIVES and false of a space warp. I inherited a
+conclusion without checking whether it applied to the thing I was building -- which is a different
+failure from not measuring: it is measuring the wrong system and adopting the answer.
+`section_warp` scales cross-body coordinates in the BODY FRAME (fourth appearance of anatomy-space
+after sockets, scales and rig-bound paint), giving width/depth/ridge/belly. Verified exact: x1.60 and
+x0.70 as asked, aspect 0.98 -> 2.24.
+
+### AND THE SEVENTH INSTRUMENT ERROR, IMMEDIATELY
+
+My first aspect measurement said the warp went BACKWARDS. It did not -- I probed along world x/y
+while the warp operates in the body's N/B axes, which for that creature were [0, 0.997, 0.072] and
+[-1, 0, 0]. The code was exact; the probe was wrong. Seventh time this arc.
+
+### A DEFECT I FOUND, REPORTED, AND THEN FIXED PROPERLY
+
+Under warp the field's gradient reached 2.11, where a distance field must stay at 1.0 -- a sphere
+tracer would punch through the surface. Cause: NEAREST-station frame assignment, which makes the
+frame jump discontinuously at the midpoint between spine nodes. MARCHING CUBES NEVER NOTICED, because
+it reads only the SIGN, which is exactly how a defect like this ships looking fine while render_surface
+and path_trace would fail on it. Fixed by softmax-BLENDING the stations (re-orthonormalising after,
+since a weighted average of orthonormal frames is not orthonormal): gradient 2.11 -> 0.99, aspect
+still exact, warp=None still bit-identical.
+
+### THE DRIFT TOOL PAID FOR ITSELF
+
+`creature_skin_field` gained `warp` in the module and not in the faculty -- the FOURTH occurrence of
+faculty/module signature drift in this arc. This time `delegation_drift` flagged it (overlap 0.86,
+missing: warp) BEFORE the integration test did. The audit I built two sessions ago caught precisely
+the failure mode it was written for.
+
+### STILL SHORT OF THE REFERENCE, NAMED
+
+Limbs have no feet planted on the ground (gait can pose them, but the editor does not auto-place a
+foot part at each leg tip), and the shading is smooth-organic rather than Spore's flat cartoon look
+with outlines. Neither is a bug; both are unbuilt.
+
+## FEET AND CEL SHADING -- the two gaps I named last session, closed
+
+DELTA: 589 modules, 6290 tests (was 6279), p14 82 faculties, 25 catalog entries for the arc.
+Audits 0/0/0. Both items were named as "unbuilt, not broken" last session; both are now built.
+
+### LIMB SOCKETS -- closing a kept negative rather than living with it
+
+The socket system was SPINE-relative: a socket on a limb used the nearest SPINE station, and the
+module said so explicitly as a kept negative ("sockets on a limb tip are approximate. Per-limb socket
+frames are a real extension, not pretended at here"). That negative was the reason feet could not go
+where feet go, so it was worth closing rather than carrying.
+
+`limb_station` / `resolve_limb_socket` give a limb its own frame. The load-bearing flag is
+`along_axis`: a foot goes on the END of a leg, so the ray casts down the limb's own axis and the
+placement frame is built from the AXIS rather than the surface normal -- using the normal would tilt
+the foot exactly where the surface curves most. That one flag is the difference between a foot and a
+knee spur.
+
+`auto_feet` finds legs the way the GAIT finds them -- which limbs reach the ground -- so it needs no
+authoring, works on any body plan, and correctly puts nothing on an arm. Measured: feet land 2.4e-15
+from the surface at the leg tips.
+
+### CEL SHADING -- and why it is geometric rather than an image filter
+
+An edge filter over the rendered image finds CONTRAST, not geometry: it traces the boundary between
+two colours on a flat belly exactly as happily as the true silhouette, and it does not know which
+side of the edge is the object. The silhouette is a geometric fact (the surface turning away from the
+eye, N.V -> 0), so `toon_shade` computes it from the geometry and bakes it into the vertex colours
+the rasteriser already accepts. No new render path, and it composes with vertex paint, taxon
+materials and skin weights.
+
+Measured: bands=N gives EXACTLY N luminance levels (1,2,3,5,12 checked), and in the final render 86%
+of subject pixels fall in 4 luminance bins -- the flat banding is real, not an impression.
+
+### THE INSTRUMENT, AGAIN -- but caught in one step this time
+
+My first banding measurement reported 116/242/242 distinct levels for bands=1/3/8, which looks like
+the quantiser doing nothing. It was doing exactly what it should: the RIM term is continuous and adds
+levels regardless of the band count, so measuring both together confounds them. Isolating with rim=0
+gave exactly 1/2/3/5/12. Eighth instrument confound of this arc -- and the first one I suspected and
+isolated in a single step rather than after a wrong conclusion, because the shape is now familiar:
+A MEASUREMENT THAT MIXES TWO EFFECTS MEASURES NEITHER.
+
+### KEPT NEGATIVES (loud)
+
+* CEL SHADING DARKENS THE SILHOUETTE ONLY. It does not stroke interior creases, part boundaries, or
+  where a limb crosses the body -- those need an image-space pass with depth and object ids, which is
+  a different feature and is NOT claimed.
+* OUTLINE WIDTH IS CURVATURE-DEPENDENT: the rim band is wide where the surface turns gently and
+  narrow where it turns sharply, because it is an angle threshold rather than a screen-space width.
+  A constant-width outline needs a shell pass or image space.
+* PER-VERTEX, so bands step at the mesh's own resolution; on a coarse mesh the band edges look
+  faceted. Another reason the quality guard exists.
+* FEET ARE NOT FUSED. A foot has branching digits, so reducing it to a ball chain would make it a
+  blob -- it stays placed geometry with a seam, which is the same honest trade the fin makes.
+
+## SUP-1 / SD-1 -- superposed memory with a law, and the demand meter that prices it
+
+Shipped: `holographic_superposed` (caching_and_storage) and `holographic_statedemand`
+(sampling_and_signal); six faculties (superposed_memory, memory_capacity_law,
+allocate_memory_dim, state_demand, entropy_rate, compressibility_check); 3 catalog
+entries; audits 0/0/0; discoverability 5/5 on stranger phrasings.
+
+THE IDENTIFICATION (the result the modules package): a superposition memory IS
+random-spreading CDMA / sparse support recovery. Matched-filter law predicts one-shot
+n* (48 predicted, 48 measured at D=1024,V=1024,a=0.90); V-scaling constant n*x^2/D held
+0.6+/-0.08 across V=64..4096; Donoho-Tanner line predicted the iterative decoder's wall
+at 74, measured ~70. Utilization vs Fano-on-state-bits: f64 0.5%, int8 ~4.5% (int8
+DECISION-FREE, identical n* at every D), sign-binary ~25% -- vs ~0.04% for the best
+trained architecture on the same task/bound (Zhou 2605.05066 Exp 5). The <0.1% ceiling
+is an ENCODER artifact: seed-derived random codes + explicit decoding recover it.
+
+KEPT NEGATIVES (loud):
+* Undamped PIC past its phase transition is WORSE than one-shot (0.333 vs 0.591 at n=84,
+  D=1024) -- error amplification, textbook CDMA. recall(decoder='pic') is therefore
+  LOAD-GATED and refuses above pic_transition(); the selftest asserts the gate fires.
+* The binary-quantization negative is REFINED, not contradicted: it applies to fine
+  readback; argmax recall survives sign at ~70% capacity (0.031D vs 0.044D).
+* Plug-in block entropy biases silently LOW outside the dense regime (white noise read
+  0.47 of its true 3.0 bits at k=8,L=6,T=20k); entropy_rate_report refuses those L.
+* TT ranks of an iid stream read 4/16/54 from sampling noise at fixed tolerance;
+  tt_state_demand thresholds every unfolding at the SAME stream shuffled (rank against
+  your own null). iid -> 1, period-p -> p, walk increments -> 1, verified.
+* Compressibility is HORIZON-RELATIVE: short windows of a long phase-randomisation are
+  95-98% pure tone and honestly pass; window==randomisation-length rejects 8/8. Every
+  gate verdict carries `horizon`; a pass certifies that window only.
+* A spectrum-only score against phase-randomised surrogates gives observed==null_mean to
+  machine precision (caught by the module's own selftest, first draft) -- the null must
+  destroy what the score keys on; fit_deterministic's full-family fit is phase-sensitive.
+
+Open next: damped-PIC basin sweep vs the transition; wire recall('pic') through the
+shipped FHRR resonator (this PIC is its known-keys specialisation); bin+PIC combined
+(predicted ~39% of the Fano bound at 1-bit state); Verdu-Shamai exact spectral-efficiency
+curves to replace the DT asymptote; Frady-Kleyko-Sommer 2018 check before the nesting
+law (k log2(c+1) + log2 L <= log2 D - log2 beta) is claimed novel anywhere.
+
+## HRNN-1 -- the Holographic RNN shipped
+
+`holographic_hrnn` (agents_and_reasoning): the composed sequence engine the research arc
+converged on. One faculty (mind.holographic_rnn), one catalog entry; audits 0/0/0;
+discoverability 3/3 ("holographic rnn", "sequence model that abstains", "should I fit a
+generator or a memory").
+
+THE ARCHITECTURE, one clause per measurement: process_stream walks the abstention ladder
+-- calibrated compressibility gate (pass = a generator exists AT THIS HORIZON; identified
+via injected fit_deterministic, mind-wired forecast NRMSE 0.0065; standalone off-grid
+harmonic LS fallback NRMSE 0.047) | structured: price demand (TT ranks) and route to
+associative()/classifier() | incompressible: refuse WITH an allocator quote. classifier()
+carries BOTH trajectory invariances (arrival-time traps + Levy areas; selftest enforces
+each is necessary: order task 1.000, chirality task 1.000). associative(n_pairs=N)
+allocates dimension from the capacity law BEFORE storing (selftest: dim 2048 for 40
+pairs, recall 1.000 via gated PIC). Every verdict carries {regime, mechanism, h,
+horizon, why} -- no answer without provenance.
+
+KEPT NEGATIVES / lessons this build re-taught:
+* FFT-bin frequency snapping breaks EXTRAPOLATION even when the in-window fit is
+  excellent (NRMSE 1.313 on the bin vs 0.047 refined off-grid; period 150 does not
+  divide T=1000). The generator rung's claim is extension, so the frequency is solved
+  over an 81-point off-grid sweep, never snapped. Same family as the wall-clock/
+  determinism lesson: the quantity you certify must be the quantity you solved for.
+* The mind-injected predict() serves indices AT/PAST the record only and raises on
+  interior queries -- the generator rung extends, it never interpolates history.
+* No gradient, no learned weight anywhere in HRNN-1; the only solve is the ridge
+  readout and the harmonic LS. The recurrent state is read as a PATH (traps +
+  signature), never as a final state (the documented 0.33-vs-0.97 weakness).
+
+What HRNN-1 is NOT (scope, stated): not an escape from the Impossibility Triangle (the
+trajectory readout is E^C and says so); not a language model; the generator rung
+certifies its horizon only. The claim is narrower and measured: the corner is chosen
+per stream by measurement, the state is priced before it is spent, and every mechanism
+refuses outside its validity region.
+
+## HRNN-1 field trials -- market data + books, and the guard the API demanded
+
+WIRING PROVEN over HTTP: GET /tools introspects all five new faculties; POST /invoke
+{name, args} round-trips memory_capacity_law (22 @ dim1024/V256), entropy_rate (h~0 on
+period-4), compressibility_check. The first invoke attempt used n_null=8 and silently
+produced an un-passable verdict (min p = 1/9 > alpha) -- the THIRD occurrence of the
+resolution-floor mistake, this time through the API. compressibility_gate now REFUSES
+the configuration ('refused-config', names the minimum n_null) instead of running it.
+
+MARKET (data/sol_market.npz, SOL/BTC/ETH):
+* log-RETURNS: refused 'incompressible' at h=1.90-1.98 on every asset and timeframe --
+  the honest verdict, delivered with an allocator quote.
+* PRICES: 'structured' (h=0.24-0.33, demand ranks [4,...]) on 1d; funding 'structured'
+  ranks [3,...]. KEPT NEGATIVE, live on real data: SOL 1h px PASSED the gate as
+  'generator' (r2=0.951 in-window) -- the documented walk-weakness of the phase-rand
+  surrogate (calibrated false-fit 0.250 on walks) firing on a smooth trending price.
+  THE HORIZON FIELD IS VINDICATED EMPIRICALLY: held-out extension NRMSE 16.47 vs 2.88
+  for last-value-naive (5.7x WORSE than naive). In-window certification is real and
+  extension past the horizon is garbage, exactly as the field claims. Standing fix
+  remains the surrogate BATTERY (differenced surrogate for trend structure).
+
+BOOKS (NLTK gutenberg + UDHR; the engine's documented benchmark):
+* UDHR language ID, 8 languages, 120-char chunks: dual trajectory readout 0.812 vs
+  final-state 0.170 vs bag 0.898. The path-based readout closes 4.8x of the documented
+  final-state failure (0.33-0.36 on the old 2-3 way task; 0.170 at 8-way here) -- and
+  the bag still wins, because language ID is a bag task. KEPT: on bag-dominated tasks
+  the bag baseline is mandatory; the dual readout's value is order-sensitive tasks.
+* Author ID (austen/shakespeare/milton/melville), 120 chars: bag 0.470, dual 0.400,
+  chance 0.25 -- 120 characters underdetermines authorship; small honest result.
+* Demand meter on prose: h = 3.33 (Emma) / 3.12 (KJV) bits/char at k=27, L<=3 (dense-
+  regime capped), consistent with classical low-order English entropy estimates; TT
+  ranks 19-22 of max 27 -- prose demands near-full short-block rank. The meter prices
+  real text sensibly.
+
+## HRNN on our own corpus (NOTES + the repository): measured answers
+
+DEMAND METER on our text (k=27, dense-regime L<=3): NOTES_concepts h=3.39 b/char (ranks
+[19,20]), THEORY 3.36, REFERENCE 3.31, unified core .py 3.38, catalog .py 3.51 -- at the
+a-z+space char level our jargon-dense prose is as irreducible as Austen (3.33). CAVEAT
+kept loud: the strip discards symbols/indentation, exactly where code's real structure
+lives; a byte-level or token-level meter would read code lower.
+
+REPO AS FACTS: all 594 modules -> 12 families stored as ONE 36,288-dim vector (283 KB
+f64; allocator-priced, zero search), full-repo recall 1.0000 via gated PIC. The engine
+holds its own layout as a superposed memory at spec.
+
+TWO DEFECTS FOUND BY FEEDING IT OUR OWN BYTES, both fixed:
+* Constant-feature poison: features with ~0 train std divided by the 1e-9 guard became
+  noise amplifiers (6 of 95 byte-count features; accuracy dragged to chance). Fix:
+  zero-variance features are floored to unit scale (harmlessly constant).
+* Missing invariance level: the dual readout carried arrival (traps) + chirality (Levy)
+  but NO bag; on bag-dominated real text it measurably paid (UDHR 0.812 vs bag 0.898;
+  repo file-type 0.500 vs bare centroid 0.622). The readout now carries all THREE
+  levels (embedded bag + traps + Levy). KEPT: at small n the EMBEDDED bag (mean input)
+  remains sample-inefficient vs raw counts (UDHR 0.830 vs 0.898) -- representation
+  matters; raw-count features stay the mandatory baseline on bag tasks. Repo file-type
+  at 160 chars is genuinely blurred (~0.6 ceiling-ish): our .py is docstring-dense
+  prose and our .md is code-dense -- the house style defeats window-level type ID.
+
+## SEN-1 -- the stream sentinel: first functionality BUILT ON the HRNN
+
+`holographic_sentinel` (sampling_and_signal): watch(x) = windowed ladder + change events
+carrying both windows' provenance; record(x)/replay() = the priced recorder (generator
+params ~30 floats | quantile symbols | raw; noise NEVER fake-compressed; replay is
+in-window only -- no API for extrapolation past a horizon, which is the honest
+interface). Faculty mind.stream_sentinel; catalog 156; audits 0/0/0; discoverability
+4/4 ("drift monitor", "compress telemetry honestly", ...). Selftest pins: 3-regime
+stream boundaries found within one window, ZERO false alarms on a stationary tone,
+tone ratio 33x at NRMSE 0.019, noise ratio 1.00x, replay NRMSE 0.018.
+
+FOUND AND FIXED BY BUILDING ON TOP -- the surrogate DEGENERACY: a harmonic stack's
+phase surrogate is ANOTHER harmonic stack, so when the fitter's hypothesis class is
+closed under the surrogate, observed can never beat null (p=1.0 measured on a clean
+3.01-cycle tone; earlier passes rode on spectral LEAKAGE, i.e. accident). Deeper truth:
+a phase-randomised deterministic signal is itself deterministic per-realisation -- the
+surrogate's generator claim is TRUE, so 'beat the surrogate' was the wrong criterion
+for pure harmonic processes. The falsifiable criterion is PREDICTIVE COMPRESSION:
+prefix-fit / suffix-test (fit 70%, certify extension NRMSE on the held-out 30%).
+Tones certify, noise and walks do not, and the certificate is exactly the property
+replay needs. The ladder's calibrated stage stays (it catches what extension cannot:
+spectrum-matched imposters at window ~ coherence); the sentinel's certification path
+covers the degenerate windows. Declared heuristic kept loud: h_jump=0.5 is uncalibrated;
+stationarity-null calibration is named future work.
+
+## The trained-model lifecycle, measured (save/load shipped)
+
+"TRAINED" HAS A MEASURABLE DEFINITION per rung. Associative: exactly one presentation
+per fact (storage IS training; capacity in closed form). Readout: the learning curve
+knees where the ridge design matrix goes overdetermined -- UDHR 8-lang held at
+~0.62-0.64 for n_train < F (~170 features), jumped to 0.911 at 32/class (256 rows) and
+0.956 at 64/class. Trained = n_train > feature dim AND held-out plateau. Generator:
+enough samples to certify at the horizon (n_null >= ceil(1/alpha)-1 surrogates; dense
+regime T >= 15*k^L).
+
+EXPORT/IMPORT shipped on both model classes (save()/load(), npz, no pickle):
+* SuperposedMemory: file = state at the DECLARED precision + five scalars; codebooks
+  regenerate from the seed (vocab*dim floats of dictionary cost nothing on disk).
+  Whole-repo model (594 facts): f64 272.9 KB recall 1.0000 | int8 32.2 KB recall 1.0000
+  (decision-free through the full export path) | bin 5.8 KB recall 0.9983. The entire
+  repository layout in under six kilobytes at 99.8%.
+* TrajectoryReadout: traps+proj+W+scaling+classes, 11.5 KB; reimported predictions
+  BIT-IDENTICAL. (The round-trip demo's 0.000 accuracy was an unshuffled train/test
+  split -- disjoint classes -- not a model defect; shuffled runs sit 0.83-0.96.)
+
+QUERY + EXECUTE: a loaded memory answers queries (module -> family) and its recalled
+value drives mind.invoke by name -- the trained model as a router over the catalog.
+Object handles over /invoke exist for serving live models across HTTP calls.
+
+LIMITATIONS, demonstrated not asserted: 4x overload -> graceful 0.667 recall with the
+PIC gate fired and its reason attached; horizon certification (SOL 1h: in-window r2
+0.951, out-of-horizon 5.7x worse than naive); bag-dominated tasks want raw-count
+features; no comprehension -- meaning lives at DECLARE rungs 6-7, this stack is the
+measured substrate beneath it.
+
+## Above/below sweep on the HRNN: caching + validated generator rung shipped
+
+DOWN: process_stream computed block entropy twice per call (inside the gate, again for
+routing). Fixed structurally with a content-hash memo (sha256 of bytes, never hash())
+on the pure meters entropy_rate_report / tt_state_demand -- bake-once for streams,
+bounded at 256 entries. Measured: repeat routing of a 60k stream 3x faster; the win
+grows with k^L.
+
+UP: the generator rung now VALIDATES BY EXTENSION before certifying -- fit the head,
+extend onto the held-out tail inside the window, only then refit-and-certify; the
+verdict carries validated_nrmse. MEASURED: SOL 1h px, the standing market false-fit
+(gate passed, r2 0.951), is now DOWNGRADED to 'structured' with the guard named in why;
+the pure sine still certifies at validated_nrmse 0.045. An in-window score cannot
+certify a generator; extension can.
+
+DENOISE (the right manifold this time): spectral median-floor denoise applied ONLY
+before fitting, never to verdicts -- the old kept negative (denoiser on recall output:
+cosine 0.13 -> -0.06, wrong manifold) stands untouched; 'a few strong tones' IS the
+median floor's manifold. Retry fires on any gate refusal, with the burden of proof
+raised: the denoised fit must extend onto the RAW held-out tail and the tail must carry
+>=10% tone content (so white noise cannot sneak through -- verified). MEASURED: sine at
+sigma=1.5 and 2.5 recovered as generator(identify(denoised)) with validation 0.20/0.27;
+white -> incompressible, walk -> structured, SOL 1h -> structured, all correctly refused.
+
+OPEN DEFECT, loud: the denoised-retry is NON-MONOTONE in noise -- sigma 0.3/0.6/1.0
+land structured/incompressible while 1.5/2.5 certify. Negative controls are clean, so
+the shipped behaviour is conservative (misses recoverable generators, never fabricates
+one), but the gap points at the injected fit_deterministic wrapper's behaviour on
+denoised heads vs raw tails. Reproduce: sweep sigma in 0.1 steps with the STANDALONE
+fit_harmonics fitter to isolate injected-vs-internal; suspect family selection or the
+extend path. Until resolved, mid-noise tones route to 'structured', which is honest.
+
+## Sweep 2: horizon profile shipped; dilation refuted; defect narrowed
+
+route_profile(x) shipped on HolographicRNN + catalog entry (discoverable via 'did the
+regime change', 'drift detection'): the routing ladder on tail-anchored geometric
+windows, verdict per horizon. Scale disagreement localises drift -- measured on a
+sine->noise splice, h climbs 0.87 -> 1.34 -> 1.98 as the window narrows onto the noise.
+The memo cache makes the repeated sub-window metering cheap.
+
+DEFECT NARROWED, FIX REFUTED, REVERTED: the mid-sigma recovery gap (0.6-1.0) is NOT the
+injected fitter (standalone fit_harmonics shows the identical gap). The sidelobe-unit
+hypothesis was tested via +/-3-bin keep-mask dilation and made things strictly WORSE
+(dilated neighbours carry noise phases that beat at period T across the head/tail
+split; sigma 1.2-2.5 stopped recovering). Reverted to the bare threshold -- recovers
+sigma <= 0.4 and >= 1.2, clean negative controls (white/walk/SOL refused) -- with the
+refutation kept IN THE DENOISER'S CODE so no future session re-tries it unmeasured.
+Next diagnosis step on record: log retained-bin sets and head-fit r2 per sigma. A
+conservative gap is acceptable; a chimera is not.
+
+## Little HRNNs as accelerators: TriageCascade shipped (holographic_triage)
+
+The codebook idea applied to computation: a tiny ridge over cheap features (memoised
+entropy rate, top-bin power, derivative skew, lag-1 autocorr) fronts an expensive
+predicate. THE CONTRACT IS THE DESIGN: the fast path may only REJECT; every accept runs
+the full machinery -- a cheap surrogate that can say yes is a false-certification
+machine, one that can only say no fails into the price you were already paying.
+Calibration: threshold below the lowest training positive minus safety*spread (zero
+train false-rejects BY CONSTRUCTION); held-out false-rejects measured. Trained heads
+save()/load() (functions are code, rebound at load). Faculty mind.triage_cascade
+(defaults front the compressibility gate); catalog entry; discoverability 3/3; audits
+0/0/0.
+
+MEASURED, both sides loud:
+* Selftest oracle (skew-vs-surrogates): 75% of held-out streams fast-rejected, 0 false
+  rejects, decisions == oracle, export round-trip identical.
+* REAL oracle (mind.compressibility_check) on 22 held-out streams incl. 6 market rows:
+  contract PERFECT (0 false rejects, 22/22 agreement) but the default safety=1.0 is too
+  conservative to pay -- 9% fast-rejected, 1.0x wall clock. The little model is honest
+  before it is fast.
+
+OPEN TUNING ITEM (timed out mid-sweep): the safety knob trades fast-fraction against
+false-reject risk; sweep safety in {0.5, 0.25, 0.1} against the real oracle (train
+labels can be computed ONCE and reused -- add a fit_from_labels(inputs, labels) path so
+the sweep does not re-run the oracle per setting; that API gap is why the sweep timed
+out). Also try quantile-of-positives calibration and richer features (spectral flatness,
+h at two k's). Target: >=50% fast at 0 false rejects on the market-mixed held-out set.
+
+## MT-1: train_model front door + structure fingerprints (holographic_modeltrain)
+
+Three faculties (train_model, structure_fingerprint, structure_drift), two catalog
+entries (160 total), discoverability 5/5, audits 0/0/0.
+
+train_model routes and TELLS THE TRUTH: sequences+labels -> TrajectoryReadout, with
+the measured learning-curve knee enforced at the API (an underdetermined ridge is
+returned but trained=False, carrying the row count that flips the verdict -- selftest:
+8 rows vs 58 features flagged, flips at 59); (keys,values) -> SuperposedMemory with
+dimension allocated BEFORE storing; bare stream -> the HRNN ladder (generator with
+predict() or an honest verdict). Every result {kind, trained, why}; every model saves.
+
+structure_fingerprint {h, E, ranks, demand_bits, horizon} + structure_drift compare in
+MEASURED units. Demo on our own artifact: capabilities.json fingerprints stable against
+itself, vs noise: 'entropy rate moved 2.49 -> 2.99; state demand moved: max rank 8 ->
+1'. The release-regression detector: structure moves before unit tests break.
+
+Robustness fix from the demo's own first call: out-of-range symbols (alphabet 64 vs
+k=8) died three frames deep in an SVD reshape; both meters now refuse with a sentence
+naming the mismatch (_check_alphabet).
+
+UTILIZATION MAP dissolved here (no backlog): cascade fronts for _validated_fit and
+synthesize_procedure's BFS; fingerprint logging in CI per generated doc/zip artifact;
+telemetry/CI-timing streams through process_stream (flaky-test triage IS 'generator or
+noise'); classifier on solver residual traces (diverging vs converging = chirality-like
+early warning); mesh-curve readouts in leStudio.
+
+## Non-monotone denoise defect RESOLVED; cascade API gap closed
+
+MECHANISM (isolated per the recorded recipe -- injected vs standalone were identical,
+so not the wrapper): the fixed 6x-median denoise threshold kept the tone's LEAKAGE
+SIDELOBES at low noise (top-frac 0.85-0.90: a beating multi-bin sum the harmonic fitter
+cannot extend) while high noise's raised threshold isolated one clean bin. Fix 1: a
+FACTOR LADDER (6/12/24/48), first validating strength wins. That opened the predicted
+trap -- a single-bin denoised signal IS the model class and self-validates (white
+noise's best bin: nrmse 0.000) -- and the corr^2 raw-tail guard then failed honest
+tones from PHASE DRIFT alone (0.31 -> 0.053 measured). Fix 2, load-bearing: explained
+variance via lstsq of the raw tail on [fc, grad(fc)] -- the pair spans every phase of a
+tone, and two free params explain ~1% of noise by chance; threshold 0.06 sits ~5x above
+the noise floor.
+
+MEASURED AFTER: sigma sweep MONOTONE -- 0.3/0.6/1.0/1.5 all generator(denoised) with
+nrmse 0.127/0.145/0.169/0.201; refusal begins sigma=2.5 (SNR ~0.14): a detection limit,
+not an inversion. The old sigma=2.5 pass was partly the self-validation artifact and is
+honestly forfeited. Negative controls all refuse: white x2, walk, SOL 1h (structured),
+SOL returns (incompressible). Users inherit free: train_model certifies the sigma=1.0
+tone; market/books routing unchanged.
+
+TriageCascade.fit_from_labels(inputs, labels) shipped -- oracle labels computed once,
+safety sweeps free (the API gap that timed out the tuning run). Sweep itself still open.
+
+## NEST-1: the nested memory library (holographic_nested) -- the head-turner
+
+THE ALGEBRA IS THE FEATURE: bind's associativity flattens sum_i bind(name_i, sum_j
+bind(k,v)) into composite-key pairs, so a LIBRARY of whole knowledge bases lives in ONE
+vector and (base, key) -> value costs a SINGLE unbind -- no base is ever reconstructed
+to be read. Capacity is the flat law at the PRODUCT load (the Nesting Depth Law's
+warning operationalised: the allocator prices depth before the first fact). Bases build
+in place (add) or shelve from existing trained SuperposedMemories (codebook match
+asserted). Load-gated PIC; save/load; exports at the declared precision.
+
+Faculty mind.nested_memory (95 members, none shadowed); catalog 161; discoverability
+3/3 ('many databases in one vector', 'memory of memories', 'shelve a trained memory');
+selftest: 7 bases x 30 facts, one-unbind min acc 1.000, shelve 1.000, round-trip
+identical, gate fires at library load.
+
+THE DEMO (users can retell this one): the repository (594 module->family facts), the
+market session's measured verdicts (8), and a books base (200 language facts) -- 802
+facts across 3 domains in ONE 49,024-dim int8 vector, 43.6 KB on disk; one-unbind
+accuracy repo 0.9916, market 1.00, books 1.0000. 'Which family is holographic_nested?'
+-> caching_and_storage. 'What regime is sol_1d ret?' -> incompressible.
+
+KEPT NEGATIVE from the demo's first run: PIC at library scale is a MEMORY bomb --
+hundreds of queries x D~1e5 builds multi-hundred-MB intermediates (process killed).
+The allocator provisions for one-shot spec, so batched matched-filter queries are the
+default at scale; a streaming/blocked PIC is the open item if library-scale iterative
+decode is ever needed. Build-on surface for users: train_model -> pair memories ->
+shelve -> one library file per project/app, queried cross-domain in one call.
+
+## HRNN working-session report + fixes (one resolved, one narrowed)
+
+THE TEST: composite workflow -- route 7 streams (tones, SOL px/ret, funding, NOTES
+bytes, white), fingerprint each, first-vs-second-half temporal drift, train+report,
+emit JSON (4 KB, /tmp/hrnn_report.json pattern). All verdicts serialisable; the report
+FOUND something real: funding's second half drifted structurally (changed=True, in
+measured units) while every other stream was temporally stable. The drift detector's
+first field catch.
+
+FIXED THIS SESSION:
+* Ladder rung 'top-1 bin' added: when the true frequency straddles two bins (measured
+  at T=2000: leakage split 0.64/0.44), every threshold keeps both (unfittable beat) or
+  kills both; top-1 always reaches the clean-tone regime, and the raw-tail explained-
+  variance guard is what makes it safe against noise's own best bin. T=1000 sigma=1.0
+  improved: nrmse 0.169 -> 0.084. Negatives all still refuse (white/walk/SOL1h).
+* Incompressible-verdict why now formats h to 2dp (was a 16-digit float in user output).
+
+NARROWED, STILL OPEN: length-dependence of the denoised-retry -- sigma=1.0 certifies at
+T=1000 (nrmse 0.084) but refuses at T=2000/4000 even with the top-1 rung. Reproduce:
+process_stream(sin(2*pi*t/210)+1.0*noise) at T=2000. Suspects, in order: (1) the retry
+path may not run or may raise silently at longer T (add a probe print in the ladder);
+(2) the injected extend_generator wrapper at len=1600; (3) explained-variance
+decorrelation over a 400-sample tail at bin-vs-true frequency offset. Rule out (1)
+first with the STANDALONE fitter at T=2000 -- one command, next session's first move.
+
+## Length-dependence defect RESOLVED (and the regression it uncovered, also resolved)
+
+The recorded discriminator ran first and was decisive: at T=2000, top-1 rung, SAME
+bytes -- standalone fit_harmonics PASS nrmse 0.000, injected fit_deterministic wrapper
+None. Suspect (2) confirmed, (1)/(3) ruled out. FIX: the denoised-recovery path is
+pinned to the standalone harmonic fitter -- the denoised signal is BY CONSTRUCTION in
+its model class (a few tones); the injected broad-family fitter earns its breadth on
+the raw gate-passed path and measurably loses on this manifold. Tones now certify at
+T=1000/2000/4000, nrmse 0.000.
+
+THE FIX UNCOVERED A REGRESSION, immediately: walk -> generator. The injected fitter's
+failure had been ACCIDENTALLY protecting walks; fit_harmonics happily fits a walk's
+dominant near-DC bin (1-2 cycles), which honestly explains much of a 1/f^2 tail.
+GUARD (principled, classic): minimum observed cycles -- a fundamental completing < 4
+cycles in-window is indistinguishable from trend and cannot be certified at this
+horizon (the claim belongs to a longer one). Walk/walk2 -> structured at T=2000/4000;
+tones (4.76+ cycles) unaffected; white refuses; SOL 1h structured. All four properties
+hold simultaneously for the first time.
+
+KEPT: an accidental failure can be load-bearing -- removing a bug requires re-running
+the negatives THAT BUG was silently absorbing. The full battery (tones x lengths,
+walks x lengths, white x2, market px+ret) is now the standing regression suite for any
+touch to the recovery path.
+
+## MQAR benchmark run -- the demolition table, with its honest scope
+
+MQAR (multi-query associative recall), the SSM literature's standard benchmark
+(Zoology/Based; the task Mamba/GLA-class models train thousands of steps on and
+degrade at as pairs approach state capacity), ZERO training:
+
+  kv=16  V=512   D=896    int8 <1KB   one-shot 1.000  PIC 1.000   0.1s
+  kv=64  V=2048  D=4288   int8  4KB   one-shot 1.000  PIC 1.000   1.5s
+  kv=256 V=8192  D=20096  int8 19KB   one-shot 1.000  PIC 1.000  28.6s
+
+Dimension from the closed-form allocator, atoms regenerated from seeds (no codebook
+stored), int8 state (decision-free, measured), deterministic bit-for-bit. Standing
+measured comparison on the same task family: 25% of the Fano ceiling at 1-bit state vs
+~0.04% for the best trained architecture (Zhou Exp 5) -- ~600x utilization.
+
+SCOPE, stated before anyone else states it for us: this benchmarks the MEMORY half of
+MQAR (pairs presented as pairs); the full published task includes parsing pairs out of
+a distractor token stream, which is an induction/encoding stage our benchmark bypasses.
+The wall-clock is CPU NumPy FFTs, unoptimized, single-thread.
+
+PATH TO A PUBLIC CLAIM (Cranmer's recorded gate applies): (1) run the actual Zoology
+harness configs including distractor parsing (needs a token-to-pair encoder -- the VM's
+IFMATCH machinery is the candidate); (2) UEA-MTSCA suite for the classifier head
+against published GRU/LSTM/Mamba numbers; (3) wall-clock vs a trained baseline ON THE
+SAME HARDWARE, train time included (theirs: minutes-hours of GPU; ours: the table
+above); (4) multi-seed CIs on everything. Until then the claim is scoped: on the
+associative-recall core, zero-training holographic memory achieves what trained
+recurrent architectures train toward and do not reach.
+
+## Easy model handle shipped: train / ask / save (holographic_modeltrain.Model)
+
+m = mind.easy_model(data, labels=...) -> one handle over any kind; m.ask(query)
+dispatches by kind (key ids -> values via gated PIC; sequences -> labels; an integer
+count -> that many forecast steps past the horizon); m.save(path) +
+mind.load_easy_model(path) round-trip as one npz (kind tag embedded; generator saves
+as ~14 floats + fundamental + horizon). All train_model honesty guards inherited.
+Selftest: pair ask==reload exact; generator ask(50) extends correctly and round-trips.
+Two faculties (easy_model, load_easy_model), catalog 162, discoverability 3/3, part
+selftests 97 members/no duplicates. The whole lifecycle is now three verbs, and none
+of them will flatter you.
+
+## Domain recipes shipped (holographic_modeltrain.recipes / mind.hrnn_recipes)
+
+Six domain front doors -- forecasting, market analysis, scientific study, data
+processing, text generation, audio/images -- each a dict {what, how, honest}: a working
+call sequence over the shipped faculties plus the HONEST field stating what the
+mechanism will not do (returns are refused not predicted; open text generation routes
+to the n-gram faculties and comprehension to DECLARE; extension past the certified
+horizon is the caller's declared risk). Selftest asserts every recipe's `how`
+references a real faculty. Discoverability 5/5 on domain phrasings ('forecast the
+weather', 'analyze market data', 'predict a time series', 'generate text with hrnn',
+'what can the hrnn do for me'). Catalog 163; 98 members reach the mind.
+
+The design position, recorded: the refusals ARE the product. A user who types
+'forecast the weather' gets certify-then-extend with the horizon attached -- not a
+model that extrapolates fiction, and not a lecture; a recipe.
+
+## The shape headache, eliminated at the door (adapt() + vocabulary-preserving ask)
+
+adapt(data, labels) now fronts train_model/easy_model: dicts of {key: value} in ANY
+hashables -> string-keyed pair memory; {'x','y'} dicts unpacked; CSV text or .csv path
+parsed (header detected, trailing non-numeric column becomes labels); string labels ->
+integer codes WITH the inverse map; ragged sequence lists lifted (T,)->(T,1); tabular
+2-D rows -> per-row sequences; NaNs interpolated with the count in a note; 2-D without
+labels routes column 0 and says so. THE DECODE IS PART OF THE MODEL: ask('apple')
+answers 'fruit', a classifier trained on ['wolf','hare'] answers 'wolf' -- and the
+maps persist through save()/load() (meta_* arrays in the npz), verified round-trip
+through the mind. Selftest additions: dict-of-strings train->ask->save->load->ask;
+CSV-with-header-and-string-labels -> classifier answering in strings; NaN stream
+interpolated with note. All prior selftest contracts unchanged.
+
+Design position: users speak their vocabulary at BOTH ends; integer codes are an
+implementation detail that must never leak into an answer.
+
+## Fuzzy ask shipped -- and its first demo caught a Rule-0 failure
+
+DID-YOU-MEAN in Model.ask(): stdlib difflib resolves typos/casing/partials to the
+closest stored key, and the correction is REPORTED in why, never silent ('Frnace'
+answering as France without saying so is a lie about what was stored). Showcase:
+capitals asked as 'brazil'/'Norwya'/'vietnm'/'Mexcio' all answer correctly with the
+correction shown; abbreviation 'hrnn' vs 16-char module names is honestly refused
+(below cutoff); classifier answers in species names; 8 facts + fuzzy matching + maps
+round-trip in a 3.6 KB file. HONEST SCOPE: this is edit-distance over the stored key
+vocabulary, not natural language -- semantic queries remain find_capability's job.
+
+THE CATCH (the demo's real payment): the repo-as-model demo answered 'misc' for
+holographic_superposed -- because holographic/misc/holographic_superposed.py EXISTS: a
+week-old, DIFFERENT module (21 KB, imported by superschedule, unified p05/p07,
+machinemodel, catalog_p04, hopfield, and tests) that predates SUP-1. SUP-1's Rule-0
+audit queried capabilities but never grepped the BASENAME before naming the new module
+-- a name collision across families shipped and stayed invisible through every audit
+(imports are family-qualified, so nothing breaks; the audits check wiring, not naming).
+Lesson appended to Rule 0: audit = find_capability phrasings AND file_grep the intended
+module name. NEXT SESSION, first item: rename SUP-1's module to
+holographic_supermemory with an import shim at the old path (small verified
+increments; touches hrnn/modeltrain/unified p14/catalog text). Until then the two
+coexist safely but tax discovery -- the repo-facts model's last-wins dict answer was
+faithful to the collision, not wrong.
+
+## Real-data showcase + two corrections (terminology and tabular routing)
+
+REAL DATASETS (raw.githubusercontent.com/jbrownlee/Datasets):
+* Melbourne daily min temperatures 1981-90 (3650 days): certified
+  generator(denoised), val_nrmse 0.182; HELD-OUT 450-day forecast RMSE 2.53 C vs
+  seasonal-naive 3.72 C -- the HRNN beats the standard weather baseline on real data.
+* Monthly sunspots 1749-1983 (2820 months): the ~11-year solar cycle recovered via the
+  denoised path on raw stage-2 refusal; fingerprint h=0.95, ranks [4,4].
+* Iris: CSV straight in, species names out, guard satisfied (149 > 55 features).
+
+TABULAR ROUTING FIX (found by Iris): rows-as-(F,1) sequences fed 4-step trajectories
+to a path readout -> 0.655 held-out on a nearly separable dataset. A tabular row is
+ONE timestep of F channels, not F timesteps of one scalar: rows <= 32 wide now lift to
+(1,F), making the bag term the raw feature vector. Iris held-out 0.655 -> 0.966.
+Long 1-D inputs (> 32) keep the (T,1) time-series lift. ask() lift matched.
+
+TERMINOLOGY CORRECTION (user-driven, recorded as policy): ask() is exact/fuzzy
+edit-distance lookup over the model's stored vocabulary -- it is NOT natural-language
+prompting, and no doc/catalog text may imply ChatGPT-style querying. Catalog does
+field updated to state the scope explicitly. Semantic queries: find_capability.
+Comprehension: DECLARE rungs 6-7. Overclaiming the ask() surface is now a named
+documentation defect class.
+
+## RAG-lite + computation surrogates: both integration patterns measured
+
+DEMO A (in-tree WordNet, 400 real definitions): easy_model(facts) trained 3.7s,
+exported 178 KB, fuzzy-served with corrections reported ('amphipxy -> amphipod',
+'AMPUTATOR' -> lowercase match). The RAG-lite pattern works TODAY at the scale where
+superposition earns it: 10^2-10^4 facts, fixed-size state, graceful degradation, tiny
+artifact, allocation guaranteed before storing.
+
+SCALING LAW, stated before ambition outruns it: 144k entries -> D ~ 4.3M (int8 state
+~34 MB: FINE) but SuperposedMemory materialises vocab x D codebooks (hundreds of GB:
+NOT fine) and full-vocab cleanup at that scale costs ~5e12 flops/query (minutes, not
+on-the-fly). NAMED NEXT BUILD: BigPairMemory -- seed-derived atoms regenerated in
+chunks (the MQAR benchmark pattern, already proven at V=8192/D=20096) for storage and
+batch recall; for interactive serving at 144k, the dictionary-as-dict remains correct
+and the HRNN memory serves the CURATED working set. Integration hook after that:
+DECLARE/find_capability consulting a context model to enrich resolutions on the fly.
+
+DEMO B (computation surrogate): fine-step driven-oscillator simulation 1.04s ->
+certified generator fit once 0.09s -> ask(200 future steps) 0.0001s = 9078x, NRMSE
+0.041 vs the true simulation, exported 0.9 KB. Bake-once as a TRAINED MODEL, and only
+where the validation gate certifies it: the surrogate exists because the steady state
+IS a generator; a chaotic simulation would be refused, which is the feature. The
+surrogate pattern composes with the triage cascade (fast-reject) and the memo cache
+(bake exact) as the third member of the amortisation family: cache = exact replay,
+cascade = cheap refusal, surrogate = certified extension.
+
+## HRNN-integration audit: measured costs, then the two lists
+
+MEASURED (the evidence, not vibes): find_capability cold start 1.90s (index build,
+paid at EVERY mind boot / service start / agent session), then 50ms per query;
+skill_lint 5.3s; reachability 2.1s; regen_docs --check 8.4s; full gate 0.02s
+(memoisation already did its job -- a gate cascade default-on is hereby CUT from the
+list, the measurement says it is not worth wiring); fingerprint 7ms.
+
+LEAST EFFORT / MOST GAIN (all are shipped-pattern applications):
+1. Bake the find_capability index: content-hash the catalog bytes -> persist the built
+   index -> cold start 1.9s -> ms at every boot of every session and agent. The memo
+   pattern from statedemand, applied to the engine's most-called introspection path.
+   Plus an alias-exact fast path (dict hit -> microseconds) with the 50ms search as
+   fallback -- the cascade contract on retrieval.
+2. skill_lint example memo: content-hash (example, module bytes) -> skip unchanged ->
+   CI runs only touched examples. Same memo pattern, CI wall-clock.
+3. Fingerprint logging per generated artifact in regen_docs/zip: the drift detector as
+   a standing release regression gate. The calls already exist; this is one loop.
+
+TOP 3 BY IMPACT, EFFORT NO OBJECT:
+1. DYNAMIC MODEL SYNTHESIS (the on-the-fly point, recorded as direction): train_model
+   stops being a router over three fixed recipes and becomes a COMPILER -- measure the
+   data (ladder + demand meter), then EMIT a composed pipeline (adapters, features,
+   readout, decoder, gates) as a stored artifact, the way nodegen emits nodes and the
+   VM stores programs. Models become minted currency in arbitrary shapes; the recipes
+   become the standard library, not the boundary.
+2. THE CONTEXT LAYER: BigPairMemory (streaming seed-derived codebooks, the proven
+   MQAR pattern) over the full 144k dictionary + curated corpora, consulted by
+   DECLARE/find_capability to enrich resolutions on the fly -- the RAG integration,
+   done leCore-style with allocation guarantees and honest scaling.
+3. CERTIFIED SURROGATE LAYER over the render/simulation pipeline: the 9078x oscillator
+   result generalised -- steady states, converged radiance, settled physics served
+   from certified generators/memories instead of recomputation, refused where the
+   gate refuses. The optical correspondence note names the sibling (radiance caching);
+   ours ships with a validity certificate.
+
+## Creature/agent brains x HRNN: audited, probed live, one real instrument found
+
+AUDIT: CreatureMind (agents_and_reasoning/holographic_creature_mind) -- reactive
+act(senses)/learn(senses, action, reward)/plan layer on the one mind; agent side has
+the tool-use loop, valuehead, Planner, DECLARE.
+
+LIVE PROBE (real CreatureMind, driven): untrained creature under BOTH patrol and
+chaos percepts: action stream h=1.96/1.93, ranks [1] -- the instruments correctly
+report an unformed policy (acting at chance regardless of world structure). After
+20x4 rewarded learn() calls: policy-correct 0.25 (it did NOT learn my wall->opposite
+mapping) BUT h dropped 1.96 -> 0.97 and ranks [1] -> [3]: the creature crystallised a
+STRUCTURED WRONG HABIT.
+
+THE INSTRUMENT THIS YIELDS (the finding): two meters, one alarm. Entropy rate h of
+the action stream measures POLICY FORMATION; task reward measures POLICY CORRECTNESS;
+h dropping while reward stays flat is the confidently-wrong-habit alarm -- the RL
+sibling of the test-named-for-a-hope antipattern, and neither meter alone can see it.
+Cheap (fingerprint = 7ms, memoised), online, per creature.
+
+THE INTEGRATION MENU for creature/agent minds (ordered by readiness):
+1. Learning meter + wrong-habit alarm (above) -- calls exist, wire into creature
+   telemetry/idle reports.
+2. Behavior-regime drift: structure_drift on action/percept streams per creature per
+   epoch -- 'this creature's behavior changed' in measured units.
+3. Idle surrogate: a TRAINED creature's settled patrol/idle loop is a certifiable
+   generator -> serve idle animation from ~14 floats instead of ticking the brain
+   (the 9078x oscillator pattern; gate refuses unsettled behaviors, which is correct).
+4. Behavior-state classifier: TrajectoryReadout on (T,d) creature state paths --
+   timing + chirality invariances fit gait/orbit/patrol-direction discrimination.
+5. Planner triage: the cascade fronting expensive plan() calls, fast-reject-only.
+NOT wired this session (budget); items 1-2 are one-loop efforts on shipped calls.
+
+## behavior_meter SHIPPED -- the creature-brain instrument, wired end to end
+
+mind.behavior_meter(actions, rewards, prev=last_epoch): h_norm (entropy rate / log2
+n_actions) grades policy FORMATION (>0.85 unformed, <0.60 formed); rewards grade
+CORRECTNESS; formation advancing >0.15 while reward moves <0.05 fires the WRONG-HABIT
+ALARM. Thresholds set from the live probe's own numbers. Actions may be any hashables.
+The alarm requires two epochs BY DESIGN (pass prev) -- a single epoch cannot
+distinguish a formed-correct policy from a formed-wrong one without a reward baseline,
+and the meter says so instead of guessing.
+
+VERIFIED ON THE REAL CREATURE through the faculty: epoch0 unformed (h_norm 0.98,
+reward 0.19) -> teaching regimen -> epoch1 FORMED-WRONG (h_norm 0.48, reward 0.23,
+alarm=True with the diagnosis in why). The instrument catches, on the actual
+CreatureMind, the exact failure the probe discovered: structure without correctness.
+
+Close-out: selftest with 4 numeric cases (unformed / alarm fires / reward-moved-too
+stays quiet / hashable actions); faculty on unified p14 (99 members, none shadowed);
+catalog 164 with runnable example; discoverability 3/3 ('is my creature actually
+learning', 'wrong habit alarm', 'reinforcement learning sanity check'); audits 0/0/0;
+docs regenerated; zip rebuilt. Remaining menu items (behavior drift per epoch, idle
+surrogate, gait classifier, planner triage) stay in the integration menu above.
+
+## The four integrations SHIPPED (index bake, SYN-1, CTX-1 substrate, SUR-1)
+
+1. find_capability BAKED: per-cap haystacks precomputed once (they are pure functions
+   of registration strings; recomputing them per call was the 50ms) + cross-session
+   query memo persisted keyed by a hash of catalog CONTENT (a catalog edit retires
+   stale entries silently). Measured: warm 50ms -> 1.0ms (50x), memo repeats ~0ms.
+   HONEST REMAINDER: the ~2s cold module-import chain is untouched (out of this
+   scope; it is import cost, not index cost).
+2. SYN-1 synthesize_model: measure -> EMIT the pipeline as a JSON recipe (each stage
+   choice recorded WITH its justifying measurement: tabular vs path features, decoder
+   from load vs PIC transition, SuperposedMemory vs BigPairMemory from codebook
+   size) -> compile and train. Recipes are artifacts like stored VM programs. v1
+   scope stated: measurement-driven rules over shipped stages, not open codegen;
+   nodegen tie is the recorded next step.
+3. CTX-1 substrate big_pair_memory: BigPairMemory ships streaming seed-derived
+   codebooks (chunked regen, the MQAR pattern) -- state is ONE vector, codebooks cost
+   nothing between calls. Verified: D=10944, V=4096, 150 pairs, streamed recall
+   1.000; selftest at V=4096 in-module. Serving scope honest: batch recall at big V;
+   interactive full-vocab cleanup at 144k remains minutes -- curated working sets
+   interactive, long tail batch. DECLARE/find_capability consultation hook = next.
+4. SUR-1 make_surrogate: the amortisation family under ONE contract -- certified
+   extension (ladder-certified generators; oscillator 9078x) | exact hash-replay |
+   real computation, memoised. NEVER fabrication; .provenance names the contract in
+   force. Selftest asserts all three paths and that an uncertifiable fn refuses
+   certification.
+Close-out: 102 members reach the mind, catalog 166, discoverability 4/4, audits
+0/0/0, docs regenerated, zip rebuilt.
+
+## The full-circle demo: the meter steers training, the surrogate serves the brain
+
+ACT 1 -- THE METER CHOOSES THE REGIMEN (live, fresh creatures each):
+  R1 supervised r=+1 (the old failure):  h 0.98->0.48, reward 0.19->0.23, ALARM -> WRONG HABIT
+  R2 on-policy +/-1:                     h 0.98->0.42, reward 0.19->0.91, no alarm -> HEALTHY
+  R3 on-policy + supervised correction:  h 0.98->0.32, reward 0.19->0.94, no alarm -> HEALTHY (best)
+The instrument that caught the failed regimen two sessions ago now RANKS regimens; R3
+adopted. The creature actually knows the policy.
+
+ACT 2 -- THE ROUNDED-SINUSOID CATCH (a certification-scope bug found by the demo):
+make_surrogate certified the trained patrol at NRMSE ~0.2 (a smoothed staircase) and
+served it 3x faster -- at policy-agreement 0.500. CERTIFIED-FOR-CONTINUOUS IS NOT
+CERTIFIED-FOR-ARGMAX: rounding a smooth fit back to symbols misses half the steps
+while the NRMSE gate smiles. FIX (symbolic contract): integer-valued streams take the
+exact-cycle path -- smallest period whose majority cycle explains >= alpha of samples
+certifies and serves EXACT symbols; no qualifying cycle -> no certification, never a
+rounded sinusoid. Pinned in selftest.
+
+ACT 3 -- AFTER THE FIX: 'exact-cycle certified: period 4 ... explains >= 0.90 of 400
+samples'; 1000 future patrol steps served at policy-agreement 1.000, 0.0044 ms/action
+vs 0.131 ms brain tick = 30x, brain untouched. The idle-surrogate menu item is now a
+measured reality: a settled behavior loop served from a handful of floats, certified
+under the contract that fits its type, refusing where it does not.
+
+KEPT: every certification carries a CLAIM TYPE. Continuous claims validate by
+extension NRMSE; symbolic claims validate by exact match. A gate that certifies the
+wrong claim type is a false certifier even when its own number is green -- the fourth
+instance of 'the quantity you certify must be the quantity you solved for'.
+
+## The four-item list COMPLETED (remainders closed, each with its measurement)
+
+1. INDEX BAKE, finished: the profiler found the cold start exactly -- 581 ast.parse+
+   compile calls (2.1s of 2.7s) re-extracting one docstring line per module every
+   first find_capability. Docstring bake keyed by (path, size, mtime_ns) in tempdir:
+   first find_capability 1.90s -> 0.14s on warm boots (14x; one rebuild per fresh
+   checkout). Stacked with the haystack bake + query memo: warm queries 1ms, repeats
+   free. The engine's introspection is now effectively instant after first touch.
+2. SYN-1, finished: replay_recipe(recipe, data) retrains from a stored recipe with
+   its recorded seed/alpha and ASSERTS the re-measured stage choices reproduce -- a
+   recipe is a CONTRACT; drift raises with the diff. Pinned in selftest.
+3. CTX-1, finished: find_capability_enriched -- retrieval-augmented routing. Unknown
+   words looked up in the in-tree 144k dictionary; definition tokens join the search
+   WITH suffix families (measured necessity: definitions say 'prediction', aliases
+   say 'predict' -- zero overlap until stemmed; and the first stem list had an
+   off-by-one, 'tion' stripping to 'predic'). Measured: 'prognosticate the morrow'
+   -> forecasting capabilities (raw: fallbacks); exotic-query rescue 1-2 of 4 with
+   ZERO regressions (additive by construction: tokens only added). Expansions
+   reported in the result, never silent. The dict tier stays a dict (O(1), exact --
+   determinism-instead-of-storage says that IS the right tier); BigPairMemory serves
+   the fixed-budget curated tier.
+4. SUR-1 was completed last session by the symbolic exact-cycle contract.
+Close-out: 104 members reach the mind; catalog 167; discoverability 3/3 on the new
+phrasings; audits 0/0/0; docs regenerated; zip rebuilt.
+
+## Above/below audit: one big catch, fixed to construction-time correctness
+
+THE CATCH (below): route_or_abstain still cost 3.53s AFTER the find_capability bake --
+the null router's 64 scrambled queries go through find_scored, a SECOND scoring path
+the bake never touched, plus a full-catalog vocab re-tokenisation per cache miss, and
+the null floor was memoised per-process but never persisted. Invisible to every
+find_capability benchmark: the audit exists because instruments only measure the path
+they measure.
+
+FIXES, with the failure ladder they climbed: (1) shared _ensure_fc_baked across both
+paths -> the module selftest immediately caught the staleness window (a capability
+registered AFTER baking has no token sets -- its own 'MyThing' late registration
+crashed the scorer); (2) final form: token sets are pure functions of constructor
+arguments, so they are BAKED AT BIRTH in Capability.__init__ -- no window, no flag,
+no ordering; (3) catalog vocab cached per catalog state; (4) null floors persisted as
+(mu, sd) via the fc memo file -- the router already treats a floor without its null
+array as 'p unavailable, never fabricated', so warm boots stay honest about p.
+
+MEASURED AFTER: route_or_abstain first call 3.53s -> ~0.00-0.20s warm-boot, repeats
+0.001s. The abstaining router -- the engine's guard against confident nonsense -- is
+now free to run on EVERY routing decision instead of being rationed.
+
+REST OF THE SWEEP, honestly: fit_deterministic's 30 call-sites are gate-memoised at
+the meters; regen_docs 8.4s and skill_lint 5.3s are per-release costs (content-hash
+per-generator baking remains cheap fruit, unpicked, recorded); stream-emitters
+(ask_traced, edit_history, value_head, analog_forecaster) are the ABOVE candidates
+for fingerprint/meter taps -- listed, not wired. No other sub-second hot path found.
+
+## advise_scale SHIPPED -- the walls consulted before they are hit
+
+The verbatim complaint: 'the auto scaling stuff is not very auto' -- the laws existed
+(allocate, pic_transition, k*~0.13D, F=4 wall, and the real mind.auto_scale knob-
+doubling loop) but lived scattered, so each wall was met head-first and the remedy
+re-derived. mind.advise_scale(n_pairs/vocab/dim/bundle_k/factors/depth, fix=True)
+applies every closed-form law in ONE checkpoint: per-law margins, the BINDING
+constraint, a concrete prescription (exact dim; decoder switch at the PIC transition;
+PARTITION for bundle overload with the sparse-decoder 8.7x note; factor-group tiling
+past F=4), and fix=True returns the corrected spec. Depth has NO closed form on
+record, and the advisor says so and routes to mind.auto_scale by name -- honest
+routing beats a fabricated law.
+
+HARDENING: train_model's pair door now attaches its scale report to every result --
+walls announce themselves at the site where models are built, not in a NOTES
+archaeology session. Rule-0 audit first surfaced the existing auto_scale (reused by
+reference, not duplicated). Selftest: binding constraint named + exact fix dim for
+over-capacity; PARTITION named for bundle 200 @ D=512; factor-group count for F=7;
+clean pass for a spec with margin. Discoverability 4/4 on wall phrasings ('hit a
+capacity wall', 'how big should dim be', 'bundle overloaded', 'which constraint is
+binding'). 105 members reach the mind; catalog 168; audits 0/0/0.
+
+NEXT (recorded): tap advise_scale into encode_tree/bundle call sites the same way
+the pair door got it; wire the inception-depth harness as a packaged eval_fn for
+auto_scale so the depth answer becomes one call too.
+
+## Depth harness shipped -- and the measurement killed the planned faculty (good)
+
+depth_probe(depth, dim): encode n trees differing ONLY at the deepest leaf; worst
+pairwise cosine = how much of that level survives (1.0 = gone). MEASURED BEFORE
+WIRING: d1 0.70, d3 0.97, d5 0.997, d7+ 1.000 -- IDENTICAL at dim 256 and 1024. The
+depth wall is DIM-INDEPENDENT: geometric per-level attenuation + normalisation crush
+the deepest contribution, and no dimension budget recovers it. CONSEQUENCE: the
+planned auto_scale_depth (double dim until depth carries) was killed pre-ship -- it
+would have burned its budget to diagnose what one probe number says. advise_scale's
+depth law replaced 'no closed form on record' with the measured wall (~d5-7) and the
+CORRECT lever: elevate levels onto carriers/INDEX or anchor coarse/fine per level
+(the boring-axis lesson, now enforced at the advisor). mind.depth_probe wired;
+advisor selftest pins 'dim is NOT the lever' for depth 9; aliases extended ('nesting
+depth wall', 'tree too deep'). 106 members reach the mind.
+
+KEPT: measurement over narrative, applied to our own plan -- the fastest way to ship
+the wrong autoscaler is to skip the feasibility probe that costs one tool call.
+
+## compute_plan SHIPPED -- the amortisation tiers join the dispatch menu
+
+Rule-0 audit first, and it mattered: gpu_crossover (M1 harness, THE hardware-blocked
+number) and zig_dispatch_policy (measured 2-5x regime) already exist and are reused
+by reference, not duplicated. THE GAP was the menu itself: dispatch stopped at raw
+backends {numpy | zig | gpu} while the engine's strongest tricks -- exact-replay
+memo, certified surrogates, superposed batch -- were not backends at all. Where the
+GPU wins raw throughput, the winning move is often to SHRINK the work, not race it.
+
+mind.compute_plan(n, calls_expected, repeat_fraction, stream) routes in tier order:
+memo (repeats: recomputing a known answer is the only true waste) -> surrogate (a
+sample output stream that certifies via the ladder; 9078x measured; symbolic streams
+under the exact-cycle contract) -> zig (the real policy's verdict, honoured) -> gpu
+(the real crossover row, honoured ONLY when trustworthy+measured; an unmeasured
+device is NAMED blocked in the why, never guessed) -> cpu-numpy. Selftest pins all
+five tiers including the never-guess clause. Verified through the mind: repeat->memo,
+periodic->surrogate, novel-big->cpu-numpy with 'hardware-blocked, on record' in why.
+
+When the M1 crossover measurement finally runs, its row plugs into use_gpu_row and
+the router is complete without another line of code -- the blocked item now has a
+socket waiting for it. Discoverability 4/4 ('should this run on the gpu', 'avoid
+recomputing', 'which backend should I use', 'shrink the work'). 107 members;
+catalog 169; audits 0/0/0.
+
+## convergence_guard SHIPPED -- the CLT stop gains the assumption check it lacked
+
+Rule-0 found adaptive_sample_budget already principled (CLT interval, Milanfar/
+Cranmer seat) -- and principled estimators fail at their ASSUMPTIONS: the interval is
+right for i.i.d. increments and a lie for a pixel still drifting (caustic discovery)
+or correlated. MEASURED TRAP, pinned in catalog: two streams with near-identical CLT
+half-widths (~0.008, both 'converged'), one with true error 0.083 -- 10x its claimed
+interval. convergence_guard tests the assumption, not the estimate: split-half drift
+z + max-|acf| vs the i.i.d. bound.
+
+DESIGN LESSON PAID FOR EN ROUTE: the first build used the entropy-rate meter for the
+order test; the meter HONESTLY REFUSED on a dense regime and the guard defaulted to
+'trustworthy' -- a guard that answers trustworthy when its own test refused is the
+OPPOSITE of a guard. Replaced with the acf test, which is TOTAL (cannot refuse);
+lesson: a guard's test must be total or its refusal path must fail SAFE (iid_ok=None,
+never True). Selftest pins white->True, drift->DRIFT, periodic->ORDER.
+
+Scope: the same guard IS the sim settle detector (fluids/softbody/smoke steady state
+= iid residuals) -- one instrument, two pipelines. Wiring into the actual pathtrace
+loop and a live sim module remains recorded next work. 108 members; catalog 170;
+audits 0/0/0.
+
+## Graphics/sim optimization pass: measured sweep -> settle-gated runner SHIPPED
+
+SWEEP (measure first): fluid_step 64x64 = 1.6ms/step -- cheap per step, expensive per
+SHOT (hundreds of frames, most after the dynamics are over). sdf_render marches to
+mesh via the existing bridge. The pass's finding: the per-op kernels are fine; the
+waste is FRAMES SIMULATED PAST EQUILIBRIUM.
+
+run_until_settled(step, state, steps): generic settle-gated runner -- residual stream
+watched by convergence_guard; i.i.d. residuals = settled = remaining frames served
+from the state. MEASURED LIVE on the real fluid solver: 600-frame decaying shot
+settled at step 96, 504 frames served, 4.7x wall-clock, final-frame max error vs the
+fully-simulated ground truth 0.00e+00 (exactly zero -- diffusion truly reached its
+fixed point). THE NEGATIVE PINNED: a driven flow keeps ORDER in its residuals, the
+guard refuses every check, all 200 frames honestly simulated -- no false handoff.
+Selftest pins both regimes. Works for any step(state)->state: fluids, smoke, softbody
+relaxation, heat, cloth, particles; settled-but-OSCILLATORY regimes are the recorded
+next composition (guard detects pure order in residuals -> hand to make_surrogate's
+exact-cycle/harmonic contract instead of a frozen state).
+
+The render-side sibling (convergence_guard inside the pathtrace accumulate loop) and
+the sim-side composition above are the two recorded next wirings. One guard now
+serves three pipelines: adaptive sampling, sim settle, and (via behavior_meter's
+h-machinery) creature learning. 109 members; catalog 171; audits 0/0/0.
+
+## The 50k-NPC exercise -> BehaviorPool SHIPPED (LOD for minds)
+
+THE DESIGN (recorded as the standing answer to 'game server on one box'): naive
+budget 50k NPCs x 60Hz = 3M brain ticks/s, impossible; the leCore stack makes settled
+behavior cost its information content: (1) BEHAVIOR LOD -- settled loops served as
+exact cycles (30x measured on the creature), brains tick only near players or
+perturbation; (2) identity = SEED not state (regenerate the wolf, store deltas);
+(3) world facts superposed (594 modules in one vector; MQAR 19KB precedents);
+(4) player-empty zones frozen under run_until_settled's guard; (5) h/drift
+fingerprints per region/economy stream as exploit + degeneration alarms; (6)
+compute_plan fronting pathing (memo/surrogate tiers); (7) snapshots as npz. Humans
+get honest full simulation; the other 50k minds are amortised.
+
+THE SHIPPED PRIMITIVE: BehaviorPool -- add(name, tick_fn, state); step_all(inputs);
+report(). Demotion: recent output window certifies as an exact majority cycle (the
+symbolic surrogate contract) -> served at near-zero cost. Promotion: ANY input to the
+agent clears the cycle instantly (contact = live). Never-demote: driven/chaotic/
+learning agents never certify and tick live -- the honesty inherited whole. MEASURED:
+2,020 agents (2,000 patrol + 20 chaotic bosses) x 300 ticks -> 1,996 demoted, 502,766
+brain ticks avoided (5.9x fewer than naive), all 20 bosses correctly live, periodic
+perturbations promoting correctly. Selftest pins demotion >= 28/30, driven never
+demoted, promotion-on-contact.
+
+NEXT recorded: cohort superposition (one vector per NPC archetype, deltas only) and
+the pool's report feeding behavior_meter per region. 110 members; catalog 172;
+audits 0/0/0.
+
+## Burial-and-wiring audit: proven, open, and one real gap named
+
+PROVEN: standing audits 0/0/0; tests/ orphan scan clean (all non-test defs are
+fixtures -- nothing buried in test files); HTTP /tools introspects 1,677 tools with
+ALL 16 recently shipped faculties present (verified from captured payload);
+/health live; value-returning /invoke proven in prior sessions.
+
+THE REAL GAP (open, designed, not yet fixed): OBJECT-RETURNING faculties over HTTP
+(behavior_pool, easy_model, load_easy_model, big_pair_memory, make_surrogate,
+triage_cascade, holographic_rnn) are in-process only -- an HTTP agent cannot hold
+the returned object. REMEDY: session handle registry -- object invokes return
+{'handle': id}; follow-ups call {'handle','method','args'}; TTL expiry. Catalog
+entries to note 'in-process; HTTP handles pending' (docs task).
+
+CONTAINER LESSON (cost real calls): background services die between bash tool
+calls; repeated full-service boots invite silent OOM kills -- probe in-shell,
+boot the service at most once per session. A mid-close-out kill also CORRUPTED the
+delivery zip via cp-after-failed-build; rule: verify zip SIZE before cp, never
+chain build+copy in one command under memory pressure.
+
+## Panel year-with-the-HRNN review filed (docs/PANEL_REVIEW_hrnn_year.md)
+
+Eleven panelists' published programs extrapolated onto the shipped HRNN (framing
+rule enforced in the doc: real methods, no fabricated opinions). Consolidated
+change list, ranked: (1) resonator decoder into recall(), 25->50% utilization;
+(2) benchmark pack as repo infra (Zoology+distractors, UEA, CI harness -- Cranmer's
+gate); (3) settled-but-oscillatory handoff; (4) streaming/online meter variants;
+(5) carrier-elevated deep encoder gated by depth_probe; (6) sparse bundle decoder
+vs k*; (7) pathtrace guard + certified radiance cache; (8) cohort superposition +
+open recipe search; (9) triage sweep + local_pool; (10) M1 crossover + WGSL
+kernels; (11) HTTP handle registry (prerequisite for all remote agent use).
+Consensus line: instruments are publishable-grade; the gap to new science is
+decoders at the ceiling, benchmarks for the strictest member, and streaming+scale.
+Items 3/9/10/11 were already pended -- the panel independently re-derived them,
+which is the review functioning as an audit.
+
+## CONSOLIDATED STANDING LIST (post-panel; supersedes scattered pendings)
+
+NOW: (1) HTTP handle registry for object-returning faculties + catalog notes;
+(2) supermemory rename + shim (name collision); (3) settled-but-oscillatory handoff
+(guard ORDER -> cycle surrogate); (4) triage safety sweep (>=50% fast at 0 FR);
+(5) CI fruit: skill_lint example memo, fingerprint-per-artifact, regen per-gen bake.
+NEAR (panel-ranked): (6) resonator decoder into recall(), 25->50% utilization,
+basin sweep, bin+PIC ~39%; (7) benchmark pack as repo infra (Zoology+distractors
+via IFMATCH encoder, UEA-MTSCA, CI harness, wall-clocks) -- Cranmer's gate;
+(8) streaming O(1) meters (entropy_rate/guard/process_stream); (9) carrier deep
+encoder gated by depth_probe + sparse bundle decoder vs k*; (10) pathtrace guard +
+certified radiance cache; cohort superposition + region meters for BehaviorPool,
+then gait classifier, planner triage; (11) DECLARE context hook + open recipe
+search/nodegen tie; (12) advise_scale taps at encode_tree/bundle sites.
+RESEARCH-GATED: (13) Verdu-Shamai curves; Frady-Kleyko-Sommer 2018 check BEFORE
+nesting-law novelty claims; DECLARE dry_run/validate_kernel/ITERATE-REPEAT.
+HARDWARE-BLOCKED: (14) M1 crossover (socket: compute_plan.use_gpu_row) then WGSL
+acf+cycle kernels; local_pool break-even; dense index (nomic); import-chain cold
+start; README counts (pytest absent -- never faked).
+STRATEGIC: (15) mesh-first vs native-first fork (ARCH-1 recipe validator remains
+fork-independent next); Abstraction Ladder awaiting approval; comfy-lecore Phase 1.
+
+## Backlog item 1 CLOSED: object faculties over HTTP -- mostly existed, two seam bugs fixed
+
+RULE 0 PAID AGAIN: the 'handle registry' the burial audit designed already existed
+(holographic_objectref: refs resolved inbound, minted outbound, J-3D-24; summary
+gains 'ref' unconditionally). The audit's gap was real but SMALLER than designed:
+(a) no way to CALL a method on a held object; (b) two seam bugs found by the
+verification itself.
+
+SHIPPED: /invoke {name:'call', args:{handle, method, args}} -- public methods only,
+mints handles for non-JSON results, caller errors never 500. FIXES: (1) envelope
+unwrap (accept the minted {type, ref, repr} dict verbatim -- symmetry rule);
+(2) THE RESOLVED-OBJECT BUG: refs.resolve runs on args BEFORE the call branch, so
+the ref-string inside the envelope was ALREADY swapped for the live object -- the
+branch then asked the registry to look an object up by itself ('unknown object
+handle <Model repr>'). A string after unwrap is an unresolved handle; anything else
+IS the object. Verified end-to-end IN-PROCESS through the exact HTTP dispatch path:
+easy_model mint -> ask('apple')=fruit -> save (file on disk) -> load_easy_model ->
+ask('oak')=tree; guards: private method refused, dead handle refused, no-near-key
+query refused. HONEST SCOPE: callable-valued args (BehaviorPool.add's tick_fn)
+cannot cross JSON -- named-behavior registration is the recorded follow-up; live
+socket smoke remains blocked by this container's process reaping (in-process
+dispatch is the same code path).
+
+## Backlog item 2 CLOSED: supermemory rename + shim (the name collision, resolved)
+
+caching_and_storage/holographic_superposed.py -> holographic_supermemory.py; the old
+path is now a compatibility shim (star re-export + _selftest delegate) whose
+docstring carries the Rule-0 lesson that caused it. Four importers updated (unified
+p14, nested, modeltrain, hrnn); BOTH paths' selftests green; all importer selftests
+green; end-to-end through the mind green (advise_scale, big_pair_memory). The misc/
+module (the week-old, different 'computing in superposition') keeps its name and its
+six importers untouched -- additive, backward-compatible only, as the law requires.
+The catalog now seeds holographic_supermemory as its own entry; the old basename
+resolves to the shim whose docstring redirects. fc query memo retired by content
+hash as designed.
+
+## Backlog item 3 CLOSED: settled-but-oscillatory handoff (+ guard hardening it forced)
+
+run_until_settled(cycle_handoff=True, cycle_tol=1e-6): when the guard refuses with
+ORDER, the STATE is scanned over candidate periods (residual lag is a hint only) and
+a repeating state within tol * scale is certified and served by CYCLE REPLAY. Claim
+type: state cycle at numeric tolerance (certify the quantity you serve). Default OFF
+(additive); faculty param threaded.
+
+THE BUILD FOUND TWO GUARD DEFECTS (second 'guard-that-cannot-fire' instance):
+(1) constant nonzero residual (a rotating state) has zero variance after mean
+removal -- drift AND acf both vacuously pass, so pure deterministic motion read as
+equilibrium noise; now zero-variance-around-nonzero-mean = ORDER by definition, CLT
+declared meaningless. (2) a constant residual carries NO period, so the cycle search
+scans the state itself, smallest period wins. Selftest pins: rolling-sine limit
+cycle -> served >300/500 with replay exact to 1e-9; noisy-driven negative still
+refuses under handoff; original decaying + driven contracts unchanged. LIVE through
+the mind: ring flow default -> 'never settled, honestly simulated'; handoff ->
+oscillatory steady state, cycle replay, final-frame error 0 vs true rotation.
+
+## Backlog item 3 CLOSED: settled-but-oscillatory handoff (found half-built, finished honestly)
+
+RULE 0 ON MY OWN WORK: the oscillatory branch already existed in run_until_settled --
+default-off, superior to the rewrite I was about to ship (acf-lag hint, scale-relative
+tol, claim-type comment). Turning it on surfaced THREE real defects, each fixed with
+its instrumented evidence:
+1. CHAOS FALSELY SETTLED (severe): a chaotic stationary process has i.i.d.-looking
+   residuals of LARGE magnitude; the equilibrium test needed TWO properties -- i.i.d.
+   AND median residual <= settle_tol * run-peak scale. Chaos now never hands off,
+   flag or no flag; pinned.
+2. Scan horizon: the best state period can exceed the residual acf's lag range
+   (driven oscillator: two non-commensurate fundamentals land near-grid at p=63, dev
+   5.5%, vs p=31 at 13%) -- the state scan now gets 2*max_lag.
+3. Scale was the INSTANTANEOUS last frame (phase-dependent 0.10-0.87, a breathing
+   tolerance) -- now the window peak.
+MEASURED, live forced fluid (period-24 driving, 480 frames): limit cycle certified at
+step 128 with the TRUE period 24; 352 frames served by loop replay; 3.1x wall-clock.
+HORIZON DOCTRINE ENFORCED IN THE CONTRACT: per-period tol 2e-2 over 15 served periods
+gave final error 0.13 -- inside the k*tol accumulation bound and far above the
+per-period number, so the why now reports worst-case k*tol for the caller's own k.
+Selftest pins: default-off preserved; driven+flag certifies; chaos+flag never.
+Faculty passes cycle_handoff/cycle_tol/settle_tol; catalog entry updated to the
+two-property equilibrium and the oscillatory tier. KEPT: turning on a default-off
+branch is a re-verification event -- its negatives were pinned against the OFF state.
+
+## Backlog item 4 CLOSED: triage safety sweep (measurement replaces timidity)
+
+sweep_safety(inputs, labels): one ridge fit on a train split (labels precomputed --
+the fit_from_labels rationale), every safety setting scored on HELD-OUT data; the
+choice is the largest fast-reject rate at ZERO held-out false rejects -- one FR
+disqualifies a setting regardless of speed. Class default stays 1.0 (defaults never
+flip silently); the recommendation ships as data.
+
+SELFTEST LESSON: the first assert demanded chosen<1.0 -- asserting a CONCLUSION.
+On a cleanly separable battery 1.0 already winning is CORRECT. Rewritten to assert
+the contract (0 FR, >= 1.0's speed) plus a hard faint-positive battery where the
+margin genuinely costs and a faster 0-FR setting must exist.
+
+REAL BATTERY (tones at 0.5 sigma, white, walks, SOL/BTC returns; oracle = the full
+ladder, measured 713ms/stream vs 0.4ms features = 1609x):
+  safety 1.00 -> 0% fast | 0.50 -> 10% | 0.25 -> 30% FR 0 | 0.10/0.05/0.02 -> 70%
+  but 1 FALSE REJECT each -- the cliff, visible and disqualifying.
+RECOMMENDATION ON RECORD: safety 0.25 (30% of oracle calls skipped, perfect held-out
+contract). Caveat stated: 27-stream battery, ~11 held out -- rerun the sweep at
+production scale before hardcoding anything. Also learned: the stage-1 gate is
+STRICTER than the ladder (0.5-sigma tones stage1-reject but ladder-certify) -- the
+cascade's oracle must be the check it actually fronts.
+
+## Backlog item 5 CLOSED: CI fruit picked (regen bake, lint memo, artifact fingerprints)
+
+(a) regen_docs per-generator bake: key = tree-state (every .py + docs/*.md by
+size+mtime_ns, EXCLUDING the generators' own outputs -- including them would
+self-invalidate every run) + generator bytes; value = output sha; subprocess skipped
+on hit. Licensed by the module's own pinned determinism contract. MEASURED: --check
+8.4s -> 0.1s baked (cold 5.5s builds the bake).
+(b) skill_lint tree memo: only a fully GREEN run is ever cached (a stale failure can
+never hide); tree unchanged since last green -> cached summary, exit 0. MEASURED:
+0.9s -> 0.0s (the old 5.3s was mostly the catalog cold start the earlier bakes
+already killed -- wins stack).
+(c) make_repo_zip artifact fingerprints: h + demand ranks of each generated doc's
+bytes, diffed vs the previous ship -- informational, non-gating; a moved fingerprint
+on a 'no-op' ship is the alarm. First baseline written this ship.
+Session audit loop (lint+reach+regen) now ~2s total where it was ~16s.
+
+## Backlog item 6 (first half) CLOSED: bin+PIC measured and wired -- 25% -> 37.5%
+
+THE MEASUREMENT (D=1024, V=256, alpha=0.9, 3 seeds, max-load sweep):
+  BIN one-shot  n=32  -> 25.0% of the 1-bit Fano ceiling (standing champion,
+                          replicated EXACTLY)
+  BIN + PIC     n=48  -> 37.5%  (prediction on record was ~39%: confirmed)
+Damped PIC on the SAME sign-quantised state earns 1.5x more information per stored
+bit. Float rows are reported as LOAD only, never utilization -- 64 bits/dim is a
+different ceiling (the claim-type rule applied to information claims).
+
+WIRED: SuperposedMemory.recall(..., state_bits=1) -- additive kwarg, default None
+(float, unchanged); selftest pins bin+PIC > bin+one-shot at n=44 with PIC >= 0.9.
+Verified through the mind at an independent seed (0.73 -> 0.86 at n=44).
+
+HONEST SCOPE OF THE 50% CHASE: the FHRR resonator was audited FIRST and is the
+WRONG tool here by its own kept negative -- it factorizes bound products
+(Frady/Kent lattice regime); cleanup of superposed pairs is not that problem. The
+remaining measured path to ~50%: sparse-inference decoding (the panel's Olshausen
+item -- sparse decoders hold ~8.7x the linear readout on bundles; whether that
+transfers to pair recall at 1-bit state is the NEXT experiment), and the damped-PIC
+basin sweep (damping/sweeps grid) remains unswept at 1-bit. Both recorded.
+
+## Item 6 second half CLOSED: the 50% chase ends at a measured wall (37.5%), with
+## two kept negatives and a channel hypothesis
+
+EXPERIMENT 1 -- ordered SIC (the CDMA ladder's next rung): max n@0.9 = 48 -> 37.5%,
+EXACT parity with damped PIC at O(n^2) cost. KEPT NEGATIVE: at equal-power random
+codes under 1-bit state, cancellation ORDER buys nothing -- Verdu's SIC advantage
+needs power disparity to exploit; symmetric loads have none. SIC is NOT wired
+(parity at higher cost is a loss).
+
+EXPERIMENT 2 -- sparse ternary codebooks (the Olshausen probe), nz in
+{1024,256,64,32,16}: every density -> 37.5% (dense ternary slightly WORSE, 34.4%).
+KEPT NEGATIVE: circular convolution DENSIFIES the bound product regardless of atom
+sparsity, so the state statistics converge to the same Gaussian and the sign()
+channel dominates identically. The 8.7x sparse-decoder result lives in the
+DIRECT-BUNDLE regime (no binding); it does not transfer to convolutive pair recall.
+
+CONVERGENT CONCLUSION: three independent families (parallel cancellation, ordered
+cancellation, sparse codes) land on 37.5 +/- 0% -- the ceiling is a property of the
+CHANNEL (sign of a Gaussian MAC), not of any decoder we field. HYPOTHESIS with
+falsifier: the 1-bit-quantized Gaussian MAC capacity (Verdu-Shamai coarse-
+quantization line, ALREADY on the research-gated list) should predict this number;
+computing it either confirms 37.5% as near-capacity for this code family or names
+the remaining gap. Until that check, the shipped claim stays: 25.0% -> 37.5% (1.5x)
+via state_bits=1 + PIC, wired, selftested, and at the wall three experiments agree on.
+
+## Backlog item 7 CLOSED: the benchmark pack ships (tools/bench_pack.py) -- and its
+## first run delivers one headline and one catch
+
+THE PACK (Cranmer's gate as infrastructure): (1) MQAR WITH DISTRACTORS -- the full
+Zoology-shaped task: interleaved (key,value) pairs among Poisson distractor runs
+from a disjoint token range, one-pass scanner encoder (adjacency rule, using the
+same vocab-range knowledge every published baseline's tokenisation embeds);
+(2) UEA .ts loader (stdlib+numpy parser; real archives fetched from sktime's
+GitHub tree -- allowed-domain constraint respected); (3) CI harness: multi-seed
+mean/sd/bootstrap-95% rows -- claims without intervals do not leave the file.
+Non-gating by design: it is the instrument that turns measured results into
+claimable ones.
+
+HEADLINE (closes the recorded scope gap on the MQAR claim): MQAR+distractors
+kv=64/V=512 -> 1.000 [1.000,1.000] x5 seeds; kv=128/V=1024 -> 1.000 x3. The
+'memory half only' caveat is RETIRED: distractor parsing included, perfect recall,
+zero training, with intervals.
+
+THE PACK'S FIRST CATCH IS OUR OWN CLASSIFIER: UEA BasicMotions test acc 0.592
++/- 0.066 [0.500, 0.650] -- literature commonly reports near-ceiling (~0.95+) on
+this archive. Real multivariate motion data exposes the trajectory readout's
+weakness on smooth low-d signals; named improvement target, and the panel's
+carrier-elevated encoder (standing item 9) is the first suspect to test against
+this exact row. This is precisely what the pack is FOR: our weakest number now has
+a benchmark, a CI, and a hypothesis attached, in the repo, rerunnable by anyone.
+
+## Backlog item 8 CLOSED: StreamMeter -- the instruments run where the data is born
+
+StreamMeter(window, max_lag): push(x) per sample or block, verdict() = the
+convergence guard on the live ring, entropy() = the live rate report. DESIGN CHOICE
+STATED: window stats recompute from the ring at verdict() time (O(W), microseconds
+at W<=few-thousand) rather than incrementally -- because that makes verdict()
+BIT-IDENTICAL to the batch guard on the same bytes, which the selftest pins as the
+property licensing trust in the stream path. A cleverer running version can come
+later WITH that identity test as its gate. Warmup answers iid_ok=None honestly.
+
+MEASURED: push 0.29 us/sample (3.4 MHz -- ~77x real-time for 44.1k audio), verdict
+0.38 ms. LIVE demo through the mind: white window True -> drift injected ->
+False with 'mean is DRIFTING z=15.6' caught online. Discoverability 3/3 ('online
+convergence check', 'monitor a live stream', 'audio block meter'). 111 members;
+catalog 173. Puckette's demand (audio-block-rate online instruments) and the game
+server's real-time requirement both satisfied by the same object; over HTTP it
+travels as a handle (item 1's registry already carries it).
+
+## Backlog item 9 (first half) CLOSED: the carrier-elevated deep encoder
+
+BUILT AND MEASURED against the pre-registered gate (depth_probe, dim 512):
+  holistic separability: flat dead at d5 (1.000); carrier separable through d7,
+  then POLYNOMIAL decay (0.948 at d7 -> 0.982 at d24, never snapping to 1.0) --
+  with equal level weights, shared-levels/total forces this decay by construction,
+  stated rather than goalpost-moved.
+  THE TRUE PAYOFF -- depth-addressability: unbind level-d carrier, strip position
+  tag, clean up -> deep-leaf recovery 0.94-1.00 at depths 7/12/16/24/32, where the
+  flat encoding carries ZERO bits about the leaf. The advisor's prescribed lever,
+  now real: 'depth must survive' has an encoder.
+TRADE-OFF KEPT LOUD: carriers buy addressability at the price of holistic nesting
+algebra -- flat for shallow composition, carriers for surviving depth; both
+costumes kept, catalog says when to use which. Selftest pins d7 separable + d16
+leaf readout >= 7/8. Faculty wired (112 members), catalog 174, discoverability 3/3.
+SECOND HALF REMAINING (recorded): sparse bundle decoder vs k* ~ 0.13*D on DIRECT
+bundles (the regime where the 8.7x claim lives -- the convolutive-recall transfer
+was already refuted at item 6); and the BasicMotions 0.592 row still awaits its
+feature fix -- the carrier encoder addresses TREES, not smooth trajectories, so
+that suspect list moves to readout features (recorded honestly).
+
+## Backlog item 9 FULLY CLOSED: sparse bundle decoder measured and wired
+
+DIRECT-BUNDLE regime (where the sparse claim lives), D=512, V=1024, set-recovery
+>= 0.9, 3 seeds: linear top-k holds k=32; OMP greedy subtraction holds k=128 --
+4.0x THE LINEAR CEILING at equal accuracy. KEPT NEGATIVES: (1) least-squares refit
+after OMP adds nothing (k=128 either way); (2) the gain does not transfer to
+convolutive pair recall (binding densifies; the 37.5% sign-channel wall binds there
+-- item 6's refutation stands). PROTOCOL HONESTY: the older '~8.7x' figure used a
+different protocol; under set-recovery with Gaussian atoms the multiplier is 4.0x.
+Both numbers stand WITH their protocols; neither is quoted bare -- the claim-type
+rule applied to capacity multipliers.
+
+WIRED: bundle_decode(m, codebook, k, method='omp'|'linear') + mind faculty (113
+members); selftest pins OMP >= 0.9 recovery where linear fails at the same k;
+catalog aliases extended ('unmix a bundle with sparse decoding'). Item 9 complete:
+carrier encoder (depth survives) + sparse decoder (4x direct-bundle capacity), each
+with its measured domain of validity and its refusals on record.
+
+## leStudio backlog KNOCKED OUT (P1-P5, all measured against their repros)
+
+P1 DTYPE (their #1): _bilinear_periodic weights now computed in the field's own
+dtype; projection casts (cached) wavenumbers per dtype; diffuse kernel likewise.
+MEASURED on their grid (144x192): advect 2.62 -> 1.25 ms/call, float32 in ->
+float32 out through advect/project/diffuse/fluid_step. Their whole render/blur/
+cache pipeline stops silently doubling.
+P2 MULTI-CHANNEL: advect accepts (H,W,C), one backtrace across channels; selftest
+pins channel-exact match. HONEST ATTRIBUTION: post-P1 the shared backtrace is a
+wash (3.01 vs 3.27 ms) -- their 2x arrives via P1 (7.23 -> 3.01 combined = 2.4x on
+RGB dye); the API convenience ships anyway.
+P3 WALLS, in the SOLVER: fluid_step(boundary='wall') -- Neumann projection via
+even/odd mirror extension (vx odd-in-x, vy odd-in-y) so zero normal flow is
+enforced INSIDE the pressure solve; clamped backtrace; free-slip walls; density
+never deleted. Their acceptance: local jet into the wall 90 steps -> leak 0.00
+(wrap leaks 19.95 through the seam), mass 103.3% (vs 5%/0% kept by the old
+options). Also SURFACED: plain semi-Lagrangian is ~3-7% non-conservative under
+hard driving in BOTH modes (wrap gained 7.3%) -- pre-existing, now on record.
+PHYSICS BONUS pinned in the discriminator: a uniform force in a sealed box
+correctly produces NO net flow (the Neumann projection removes it) while the
+torus drifts -- the wall solve is doing real physics, not containment cosmetics.
+P4 ROI: advect(roi=(y0,y1,x0,x1)) -- sound because the backtrace is local
+(needs the field within |v|dt+1); projection stays global; coarse-global +
+fine-local hybrid documented as the standard answer.
+P5 ALLOCATIONS: cached coordinate grids keyed by (H,W,dtype); out= on advect.
+P3a DOCUMENTATION: catalog entry covers solid= (obstacles) vs boundary='wall'
+(sealed canvas), the costs, and the roi guidance; discoverability on their exact
+complaint phrasings ('canvas edges are walls', 'ink wraps around the edge').
+Rule-0 check: nothing they asked for existed except solid= -- which they found
+themselves and which measurably does NOT conserve; now it has a sibling that does.
+
+## Backlog item 10 (BehaviorPool half) CLOSED: cohorts + region meters
+
+COHORT SUPERPOSITION (compact_cohorts): demoted agents with rotation-equivalent
+cycles share ONE canonical tuple; each agent keeps (archetype ref, phase), with the
+phase absorbing the rotation so served output is BIT-IDENTICAL across compaction
+(pinned in selftest -- the first cut counted rotations as distinct archetypes and
+stalled at 2.9x; canonicalisation was the fix). MEASURED at town scale: 10,000
+agents (periods 7/11/13, random phases) -> 3 archetypes, 103,330 -> 10,031 ints,
+10.3x compaction; 10,000/10,000 demoted, 760k brain ticks avoided over 140 ticks.
+Identity = archetype + delta, as the 50k-NPC design specified.
+
+REGION METERS (region_meter): per-zone behavior_meter over members' recent outputs
+(served agents keep feeding hist, one-line change) -- 'is this zone's AI
+degenerating' as a number with the wrong-habit alarm; contract note: the alarm
+catches CRYSTALLISING-wrong (formation delta), chronic low reward reads directly
+from reward_mean. Both ride the object handle over HTTP. Catalog aliases extended.
+REMAINING half of item 10 (recorded): pathtrace-loop guard wiring + certified
+radiance cache -- needs the render loop's internals, next session's spelunk.
+
+## Backlog item 12 CLOSED: advise_scale taps at the encode sites
+
+The measured laws now fire WHERE the spec is visible, as stdlib warnings plus a
+mind.last_advice() note -- never a changed return type, never a refusal, default
+behaviour byte-identical (warnings are suppressible and testable; the standard
+side channel for exactly this). TAPS: (1) tree_structure at depth>4 -- the flat
+encoder's dim-INDEPENDENT wall (d5-7), advice names encode_tree_carrier and its
+measured leaf recovery; (2) superpose_batch(gated=False) past k* ~ 0.13*D --
+gated=True spills correctly on its own, so the tap fires ONLY on the manual
+override, advising gated or bundle_decode(method='omp'). Selftest pins: shallow
+tree silent, deep tree taps naming 'carrier', ungated overload taps naming the
+law; live-verified through the mind. FOUND EN ROUTE: superpose_batch keys are
+(n, dim) VECTORS (asarray(float) on names crashes downstream) -- contract now
+exercised by the selftest.
+
+## ARCH-1 VERIFIED CLOSED (built by a parallel arc; independently exercised)
+
+Rule 0 on 'the next strategic item' found validate_recipe already native and
+discoverable on the exact phrasings ('validate a recipe', 'check recipe well
+formed'). Contract confirmed live: DAG-only references, no dangling/forward/out-of
+-range refs, outputs point at produced results, set-ops non-empty; (ok, problems).
+Positive direction exercised through the mind (tree_structure recipe -> True, []);
+negative directions pinned by the module's own selftest (run green). ARCH-1 is
+real: discoverable, callable, wired, selftested. The comfy-lecore drift gate has
+its validator waiting.
+
+--- SESSION CLOSE (context limit) ---
+This arc closed standing items 1-9, 10 (BehaviorPool half), 12, ARCH-1 (verified),
+plus the full leStudio P1-P5 backlog. Remaining NEAR: item 10 render half
+(pathtrace guard + radiance cache -- needs render-loop spelunk), item 11 (DECLARE
+context hook + open recipe search/nodegen tie). Fresh-context recommended for
+both. Every close-out above carries its measurement, pins, and negatives inline.
+
+## Item 10 render half (guard wiring) CLOSED: CI-driven adaptive path tracing
+
+mind.path_trace_adaptive(sdf, camera, tol): sample in blocks, stop each pixel when
+its CLT 95% half-width falls under tol*scale -- the statedemand stopping rule per
+pixel. SCOPE STATED: MC samples are iid BY CONSTRUCTION, so the interval is valid
+without the drift/acf tests (the guard's honest scope note, not an omission).
+Built ON path_trace's own `active` mask -- the shipped tracer, not a fork.
+
+MEASURED (lit sphere, 48x48, tol=0.03): 84% of a flat 128-spp render's samples
+avoided; error 7x UNDER the contracted tolerance (MAE 0.0043 vs tol 0.03); spp
+16-112 spatially adaptive (sky stops at min, sphere edges run long). Flat-128
+achieves MAE 0.0019 -- better than anyone asked for, at 6x the cost: the adaptive
+render spends until the promise is met and stops.
+
+TWO STRAWMEN CAUGHT IN DEVELOPMENT, now selftest guards: an UNLIT scene and a
+sphere BEHIND the camera each converge instantly and fake a perfect win (spp all
+at min, MAE 0.0000) -- the selftest asserts the scene is lit/in-frame, saving>0.5,
+spp varies spatially, and the tolerance contract holds vs a 384-spp reference.
+NAME COLLISION caught by the p14 MRO guard at wiring time: render_adaptive already
+lives on p09 (mesh/relight renderer) -- shipped as path_trace_adaptive; one name,
+one part. REMAINING (recorded): the certified radiance cache (surrogate-backed
+incoming-radiance memo with a certification gate) -- a fresh-session item.
+
+## RESEARCH-GATED ITEM CLOSED: the Verdu-Shamai check -- the wall IS the channel
+
+Computed the sum-capacity of the channel a 1-bit superposed state actually is
+(per dim: y = sign(x_u + z), x_u ~ N(0,1/n) vs interference N(0,(n-1)/n)):
+   n=8: 0.479 | n=48: 0.4623 | n=512: 0.4595 -> limit (2/pi)/(2 ln2) = 0.4592,
+the Verdu-Shamai coarse-quantisation shape, numerically reproduced in-repo
+(channel_capacity_1bit, selftest-pinned to the limit and to the ratio below).
+
+VERDICT ON THE 37.5% WALL: measured operational utilization / capacity at n=48
+= 0.375 / 0.4623 = 81%. The three-family convergence (PIC, SIC, sparse codes)
+was converging on NEAR-CAPACITY uncoded performance; the missing 19% is coding
+gain that symbol-by-symbol storage at alpha=0.9 necessarily forgoes. The
+decoders are exonerated; the falsifier CONFIRMED the channel hypothesis. Past
+~0.46 the only lever is changing the channel (state_bits > 1) -- and the same
+function generalises to compute that ceiling before anyone chases it.
+
+## BACKLOG CONSOLIDATION + TIER 0 -- the two determinism/rig bugs, and the instruments
+
+DELTA: 590 engine modules (was 589), 1 new module (`holographic_creaturereport`), 3 new faculties on
+p14, 1 catalog entry. Audits: reachability 0 undocumented / 0 new import-only, catalog_gaps 0,
+skill_lint 0 (one does-length regression raised and fixed to 58/58 budgeted). ONE backlog document
+now exists: `BACKLOG_creature_v3.md`; `BACKLOG_organics.md` deleted.
+
+### THE SWEEP: most of the backlog was already built under other names
+
+Three `find_capability` passes plus source verification turned ~11 of the backlog's "build" items
+into EXTRACTIONS. The load-bearing finds:
+
+* **F-1 "composition tree, not a flat sum" ALREADY EXISTS** as `holographic_sdf` -- per-node
+  `smooth_union(k)`, hard `union`, parser, WGSL emitter, and it already carries the kept negative the
+  rebuild needs (smooth_union is NOT associative; tree shape is part of the contract). Building a
+  second field tree beside it would have been the two-siblings tax. Recorded as D-9.
+* **T-1 "bone fields from the rig" ALREADY EXISTS** as `Humanoid.skin()` -- capsule bones + joint
+  spheres + muscle bellies, in the DSL, for one species. The work is EXTRACTION to any rig.
+* **P-2 "handle-driven additive deformation" is `blend_shapes`.** The Rigblock contract (named
+  handles composing additively over a unit interval) is morph targets with weights. No new deformer.
+* **M-5's scaffold projection is `shrinkwrap` + B-Mesh**, needing only its target generalized from a
+  mesh to a field.
+* **R-1/R-3 was SMALLER than the backlog thought.** `Creature.bones` was ALREADY per-segment
+  (parent, child) and already agrees with `Humanoid.bones`. Only the SKIN's provenance labels were
+  per-chain. The "unify the rig type" tier shrank to a label fix plus an invariant.
+
+### B-1 -- AND THE BACKLOG'S OWN NUMBER WAS WRONG
+
+Fixed: `creature_metaballs` tagged every ball in a limb with the chain name (`L0`), so provenance was
+coarser than the rig and every ball from hip to toe bound to one bone -- a bone that necessarily
+bends mid-shaft. Now `"<chain>#<segment>"`, matching the spine's already-correct `spine%d`.
+
+MEASURED on `quadruped_spec`: 16 rig segments, and NOW 16 distinct non-head tags (4 spine + 12 limb).
+The old labelling gave 8. **The backlog recorded "9 tags vs 17 segments"** -- that figure came from a
+different spec and does not reproduce here. Kept loud rather than quietly matched: a number in a plan
+is not a measurement, and I nearly wrote an assert for 17 that would have failed on the shipped spec.
+The invariant is now pinned with the real count and a per-segment tag existence check, and it is a
+REGRESSION TRAP, not a smoke test: every previous selftest passed under the broken labelling because
+none of them counted.
+
+### B-2 -- a determinism violation that every selftest was structurally unable to see
+
+`structure_field`'s `field()` normalised `(x-lo)/(hi-lo)` over THE QUERY BATCH, so the texture value
+at a point depended on which other points shared the call. Measured before: the same point returned
+0.5000 / 0.2900 / 0.1575 at three batch sizes -- renderer chunking (4096) changed the texture between
+preview and final.
+
+Fixed by making the range a property of the PRIMITIVE: a fixed seeded 17^3 probe over the body-frame
+domain at construction, frozen into the closure, values outside it CLIPPED rather than re-stretched
+(a stable answer beats a prettier batch-relative one). MEASURED AFTER: max difference **0.00e+00** --
+exactly zero, not merely under the 1e-12 gate -- across all six taxa at batch sizes 1 / 64 / 4096.
+
+WHY EVERY SELFTEST MISSED IT, which is the transferable part: they all compared values WITHIN one
+batch. A batch-relative bug is invisible to any test that never varies the batch. The general rule,
+which belongs in ISA.md as a conformance probe: **NO OBSERVABLE MAY DEPEND ON BATCH COMPOSITION.**
+This is the bind_batch lesson one level up -- there a microarchitecture change moved a decision;
+here the batch itself was leaking into a value.
+
+### TIER 0 -- the instruments, and their baseline
+
+`holographic_creaturereport`: `webbing_report` (M-2), `silhouette_report` (M-3), `part_colour_ids`
+(M-1). Wired as `mind.creature_webbing_report` / `creature_silhouette_report` / `creature_part_ids`.
+
+BASELINE ON THE SHIPPED QUADRUPED, which is the number the Tier 2 rebuild is judged against:
+**webbing_pairs = 50 of 99 non-adjacent pairs (47 further pairs shielded), silhouette holes = 0.**
+Zero enclosed negative space is the blob diagnosis stated numerically -- the backlog predicted
+non-zero webbing everywhere and it is confirmed.
+
+THE INSTRUMENT IS TESTED BEFORE ITS SUBJECT. Two guards, because a metric that returns a plausible
+constant is this arc's most expensive recurring failure:
+1. Ground truth it did not produce -- a ring must count 1 enclosed hole and 1 component, a disc 0/1.
+2. RESPONSE to the thing it claims to measure -- widening the blend must not web LESS. Measured
+   k=0.01 -> 10 webbed, k=0.30 -> 52. A metric that did not move with the blend would be decoration.
+
+### TWO RETURN-SHAPE TRAPS IN ONE SESSION
+
+`connected_components` returns **a list of sorted index lists**, not a per-node label array -- and it
+lives in `holographic_island`, not the `graphtools` module the catalog description made me expect. I
+had written the labels-array unpacking. It would not have raised; it would have produced a confident
+wrong hole count. Caught only because I greped the live definition instead of trusting the catalog
+prose. Second trap the same session: `mind.creature(spec)` returns `(Creature, sdf)`, not a Creature,
+which broke the catalog example -- caught by actually running the example rather than eyeballing it.
+"Check return shapes" is on the standing list because it keeps happening; it happened twice today.
+
+### KEPT NEGATIVES (loud)
+
+* `webbing_pairs` measures the STRAIGHT-LINE corridor between two segment midpoints. It cannot
+  distinguish webbing from a legitimately intervening third part, so corridors blocked by a third
+  bone's flesh are reported as `shielded` and EXCLUDED (47 of them here). **Watch the trend under a
+  rebuild, not the absolute value.** An absolute reading of this number is a misuse of it.
+* `silhouette_report` is an orthographic grid projection, NOT a render -- deliberately, because a
+  render brings a camera, shading and a background colour, three places this arc has already lost a
+  measurement (the background-colour mask confound). It therefore says nothing about how the creature
+  reads under an actual camera and lighting.
+* The B-2 fix CLIPS outside its calibrated probe range. A query far outside the body-frame domain
+  gets 0 or 1 rather than a re-stretched value. That is the intended trade (determinism over
+  prettiness) and it is a real behavioural difference from the old field for extreme queries.
+* `delegation_drift` reports 41 pre-existing drifted signatures across the engine. My three new
+  faculties are NOT among them (checked by name). That backlog is untouched, not cleared.
+
+
+## R-2 / R-3 / R-5 -- ONE RIG TYPE, and a holographic query that measurement demoted
+
+DELTA: 591 engine modules (was 590), 1 new module (`holographic_rig`), 3 new faculties (88 on p14),
+1 catalog entry (153 on p06). Audits: reachability 0 undocumented / 0 new import-only, catalog_gaps 0,
+skill_lint 0, delegation_drift 0 for all six faculties added this session. Compile-all clean.
+HTTP round-trip proven end to end.
+
+### THE BACKLOG WAS WRONG ABOUT THE SIZE OF THIS TIER, IN OUR FAVOUR
+
+R-3 said "unify the rig type: give the creature `bones` and they are the same structure." They
+ALREADY WERE. `Creature.bones` and `Humanoid.bones` were both explicit per-segment (parent, child)
+lists alongside `joints` and `chains`. The real work was not a representation change but a shared
+VIEW plus the invariant that keeps them agreeing -- additive by construction, since neither class was
+touched and neither one's bytes moved. MEASURED: creature 16 segments, humanoid 16 segments, both
+pass `rig_invariant`, and `rig_of` opens both with no branch. That is D-1 made real rather than
+aspirational.
+
+### ONE TAG RULE, AND THE DRIFT IT IMMEDIATELY CAUGHT
+
+Segments are now named `"<chain>#<index>"` EVERYWHERE. The spine used to spell itself `spine0` while
+limbs (post-B-1) spelled themselves `L0#0` -- the same idea in two spellings, which a shared type
+cannot join across without a translation table.
+
+Unifying it exposed the exact failure the reports exist to catch: `holographic_creaturereport` had
+its own private skeleton walk with its own naming, so the moment the canonical spelling changed it
+kept emitting `spine0` while the skin emitted `spine#0`. **I found this by READING the HTTP response
+body, not by checking its status code** -- every selftest was green and the call returned ok:true
+with `"worst": [["spine0", "L0#1", 1.0]]` in it. A report that cannot be joined back to the balls
+that caused the defect is a report you cannot act on. Fixed by DELEGATING to the shared Rig, and
+pinned with set equality across report tags == rig tags == skin `bone_of` tags. Behaviour-preserving:
+50/99 webbed and blend response 10 -> 52 both unchanged after the refactor.
+
+### R-5 ROLE TAGS -- THE MEASUREMENT CHANGED THE API
+
+Roles (`foot`, `tip`, `torso`) are inferred from geometry with no authoring: 4 feet on the quadruped,
+2 on the biped, same code, no branch. The intended holographic part was `bind(segment, role)`
+superposed into ONE vector so "which segments are feet" is an unbind instead of a scan.
+
+IT DOES NOT HOLD UP, AND THE MEASUREMENT SAID SO BEFORE THE API SHIPPED. Recall by unbind, dim=512,
+4 roles: **0.94 at 16 segments, 0.66 at 32, 0.19 at 64, 0.04 at 128.** Exact on the shipped 16-segment
+rigs and unusable past ~32.
+
+TWO RESCUES TESTED AND BOTH REFUTED, recorded so nobody re-tries them:
+* A load-aware LARGEST-GAP cut instead of an absolute threshold: 0.94 / 0.72 / 0.17 / 0.17. Almost
+  no change.
+* MORE DIMENSIONS: at 64 segments recall went 0.19 (512) -> 0.05 (2048) -> 0.00 (8192). It got WORSE,
+  which is the informative part -- the higher dimensions were removing the noise that had been
+  accidentally lifting some items over an absolute threshold. So there are TWO separate problems: an
+  absolute cosine cut is the wrong instrument for a bundle whose per-item score falls as ~1/sqrt(load),
+  AND the bundle is loaded past capacity. A threshold tweak fixes neither.
+
+So `find_by_role` is the EXACT dict and is THE AUTHORITY; `find_by_role_holographic` is the VSA path
+with its measured table in the docstring and its cliff PINNED BY A TEST that fails if the table goes
+stale. Shipping the holographic path as the default would have meant a gait that silently does not
+find a leg and reports a clean result for a creature limping on three. The temptation to make the
+headline feature holographic is exactly what "believe measurement over narrative" is for.
+
+### THE SERVICE CONTRACT, LEARNED BY PROBING
+
+`/invoke` takes `{name, args}`, not `{tool, args}`, and live objects cross calls as `"ref:Type:N"`
+handle strings from `holographic_objectref` (NOT `{"$ref": ...}`, which 500s). Verified the whole
+agent path: build a spec -> build a creature -> get a handle -> `rig_invariant`, `rig_roles`,
+`creature_webbing_report`, `creature_silhouette_report` all return correct results over HTTP. Also
+learned that a background service does not survive the shell that started it, so start-and-query must
+happen in one session.
+
+### KEPT NEGATIVES (loud)
+
+* `find_by_role_holographic` IS NOT AUTHORITATIVE and must never be promoted to default without
+  re-measuring the table. Its cliff is pinned by a test on a 64-segment rig.
+* `auto_roles` infers `foot` from HEIGHT (lowest 35% of vertical extent), the same way the gait picks
+  legs. A creature posed lying down, or one whose arms hang below its feet, will be tagged wrong.
+  It is a geometric heuristic, not anatomy.
+* A bone in no chain is tagged `free#<i>` rather than dropped -- but nothing yet CONSUMES free
+  segments meaningfully; they exist so a fitted rig (D-6/L-1) cannot silently lose segments.
+* `Rig` is a VIEW, not a live binding: it snapshots joints at construction, so posing the creature
+  afterwards does not move the Rig. Re-open it after a pose. This will bite when gait consumes roles.
+
+
+## TIER 2 (F-1/F-2/F-4) -- METABALL GROUPS, and THREE instrument errors in the gate itself
+
+DELTA: 592 engine modules, 1 new (`holographic_creaturetree`), 2 new faculties (90 on p14), 1 catalog
+entry (154 on p06). Audits 0/0/0, delegation_drift 0 for all eight faculties added this arc. Docs 595
+modules. Compile-all clean, all five touched module selftests green, meshing verified.
+
+### THE HEADLINE
+
+    webbing_pairs        76 / 99   ->   0 / 99
+    negative space        0.130    ->   0.427   (1 - solidity of the silhouette)
+    meshes through the existing marcher: 27,580 verts (no new render path)
+
+Parent-child segments blend at their shared joint; everything else HARD-unions. Webbing between
+unrelated limbs is not reduced, it is UNEXPRESSIBLE -- there is no operator in the tree that could
+produce it. That is Hecker's metaball groups, and it compiles into the SDF DSL that already existed
+rather than into a second field type.
+
+### BUT THE GATE WAS WRONG THREE TIMES FIRST, AND THAT IS THE REAL LESSON
+
+The rebuild was gated on `webbing_pairs`. The number was garbage in three successive ways, and each
+failure had a different shape:
+
+1. **"Any material in the corridor."** Counted a limb's OWN flesh as webbing between it and anything
+   on the far side of it. Read 50/99 on a field whose defect is real but whose magnitude was invented.
+2. **"...unless a third bone's axis is within 0.15 x the midpoint span."** A magic fraction with no
+   physical meaning. It missed by a HAIR in the case that decided the verdict -- samples sitting
+   0.051 from a leg of radius 0.05, cut at 0.046 -- so a correct field was reported as defective.
+   I then replaced the fraction with provenance OWNERSHIP, which was more principled and STILL wrong:
+   webbing then went DOWN as the blend went UP (k=0.30 -> 4, k=0.01 -> 12), because the shield was
+   absorbing the very material being measured. A METRIC THAT MOVES THE WRONG WAY UNDER THE ONE KNOB IT
+   SHOULD TRACK IS REFUTED, NOT TUNED.
+3. **The definition that survived:** webbing is material NO BONE'S OWN PRIMITIVE ACCOUNTS FOR. A point
+   inside the surface but outside every bone's volume exists ONLY because two fields blended. Under a
+   hard union no such material can exist, which is why this can reach exactly zero instead of merely
+   getting small -- and no third-party shield concept is needed at all, because a limb's own flesh is
+   accounted for by that limb. Response restored and monotone: k=0.01 -> 0, k=0.30 -> 78.
+
+The tolerance is DERIVED, not picked (D-7): a ball chain only approximates a capsule, so a pure hard
+union already shows a noise floor, MEASURED at max 0.0098 = 0.65% of reference length (p99 0.35%).
+The default is 1.5% of the rig's reference length, ~2x the measured floor.
+
+### THE SECOND GATE WAS ALSO THE WRONG INSTRUMENT (M-3)
+
+`silhouette_report` counted ENCLOSED holes, per the backlog. Measured: a standing quadruped scores
+**0 holes on all three axes under EVERY field** -- the blob and the fix alike. That is not a defect in
+the creature, it is correct: a quadruped's leg gaps are OPEN AT THE GROUND, so they are never
+enclosed. A gate that reads 0 for both the broken and the fixed version gates nothing, and it would
+have passed silently while I congratulated myself on the webbing number.
+
+Replaced with SOLIDITY -- silhouette area over convex-hull area, the standard shape descriptor --
+reported as `negative_space` = 1 - solidity. Blob 0.130 -> tree 0.427. `holes` is KEPT, because it is
+the right measure for a body with a genuine enclosed opening (a hand on a hip, a ring tail): two
+measures for two shapes, rather than one measure pretending to cover both. The new measure is
+validated on ground truth it did not produce -- a disc must score ~1.0 solidity, a thin plus sign
+below 0.45.
+
+### A CLAIM OF MINE, REFUTED BY MY OWN TEST, KEPT
+
+I asserted "a fat joint blend cannot web unrelated limbs, because no operator joins them." Measured:
+**58**. Grouping makes sibling blending unexpressible but does NOT bound how FAR a parent-child fillet
+reaches -- a big smooth_union at a hip deposits material out into the gap between the legs, and that
+is webbing regardless of which operator made it. This is exactly the gap Bernhardt 2010 (bounded
+blend ranges) and Gourmel 2013 (gradient blending, "unwanted blending at a distance") address, i.e.
+backlog F-3 -- so F-3 IS NOT POLISH AFTER F-2, it is the other half of the fix. Pinned as a range
+(zero at the working blend, >10 at a fat one) so the finding cannot be quietly forgotten.
+
+### PROMOTION, AND WHAT IT COSTS A TEST
+
+`bone_capsule` was extracted from `holographic_humanoid._bone_sdf` -- private to the humanoid while
+being the one primitive every rig needs. Verified bit-identical (max error **0.0e+00** over 64 sampled
+points) at the moment of promotion, then the humanoid was rewired to delegate. NOTE THE COST: once
+one calls the other, the equality test compares a function with itself and passes vacuously, so it was
+replaced by an absolute NUMERIC CONTRACT (a radius-0.2 capsule along +Y: a point 0.5 to the side is
+exactly 0.3 outside, on-axis exactly -0.2 inside, to 1e-12). A promotion silently converts an equality
+test into a tautology; the contract has to be restated in absolute terms.
+
+### THE DRIFT TOOL CAUGHT ME WITHIN ONE SESSION
+
+Adding `tolerance` to `webbing_report` and not to its faculty produced faculty/module drift
+IMMEDIATELY, and `delegation_drift` flagged it (overlap 0.86, missing: tolerance) before anything
+else did. Fifth occurrence of that failure mode in this codebase, first one committed and caught
+inside a single session.
+
+Separately, `creature_tree_grouped` had a duplicate-keyword bug on the `head`/`radii` path -- a path
+ONLY the faculty exercises, never the selftest, so every selftest was green while the faculty raised
+TypeError on its first real call. Now pinned with a test that makes the exact call shape the faculty
+makes. "It works in-process" and "the faculty can call it" really are different claims.
+
+### KEPT NEGATIVES (loud)
+
+* GROUPING DOES NOT BOUND FILLET REACH (58 at blend 0.30). F-3 is required, not optional.
+* `webbing_pairs` is only meaningful against the SAME rig and tolerance; the tolerance is
+  reference-length-relative, so numbers from differently-sized creatures are not comparable.
+* `holes` reads 0 for a standing quadruped under every field. Do not gate on it for legged bodies.
+* The tree DROPS the shipped field's extras: no `section_warp` non-circular cross-sections, no
+  `bone_of` provenance on the tree itself, no fused parts. `creature_field` remains the default and
+  the featureful path; the tree is the readable one. Merging them is unbuilt, not broken.
+* Solidity is measured on ONE orthographic axis at a time. A creature readable from the side and a
+  blob from the front will score well on one axis; the report does not aggregate.
+
+
+## F-3 -- THE ANSWER THE BACKLOG NAMED WAS THE WRONG ONE, AND MEASUREMENT SAID SO TWICE
+
+DELTA: no new modules (592). ONE new DSL node kind (`fillet_union` in `holographic_sdf`), the
+creature joint blend made relative, 0 new faculties (signatures extended). Audits 0/0/0,
+delegation_drift 0 on all eight faculties of this arc, compile-all clean, 7 module selftests green.
+Docs 595 modules. Shader emission verified.
+
+### RULE 0 PAID FOR ITSELF AGAIN -- F-3's OPERATOR ALREADY EXISTED
+
+`find_capability("limit how far a fillet reaches")` returned `holographic_fillet`, and FOLLOWING THE
+HIT (not just running the probe) found `fillet_union` -- iq's exact rounded boolean, already shipped,
+whose docstring already states the property F-3 wanted: "away from the crease it is the sharp union,
+so the fillet is local". The backlog said to implement Gourmel-style gradient blending. The bounded
+operator was already in the tree next door.
+
+It could not be COMPOSED, though: it returned a bare callable, so it could not nest inside DSL nodes
+(`AttributeError: 'function' object has no attribute 'kind'`). Promoted it into the DSL as the node
+kind `fillet_union` -- ARITY, `_combine`, `_BINARY_COMBINATORS`, the DSL doc table, and the GLSL
+emitter (`opUnionRound`), all additive. VERIFIED: the node equals the standalone function to
+**0.00e+00**, and locality is exact -- beyond r it is bit-identically `min(a,b)` (0.00e+00 over 1761
+sampled points) where `smooth_union` still differs by up to **0.0497**. Shader emission confirmed
+end to end.
+
+### AND THEN IT DID NOT FIX THE PROBLEM. TWICE REFUTED.
+
+PREDICTION 1 (last session's, recorded loud): grouping does not bound fillet reach, so F-3's bounded
+operator will fix the fat-blend regression. MEASURED at an absolute blend of 0.30:
+
+    smooth_union   58 webbed
+    fillet_union   60 webbed      <- the "fix" was slightly WORSE
+
+WHY, and it is obvious in hindsight: **the operator's locality bound IS r.** A bounded blend whose
+bound exceeds the gap it must not cross is not bounded in any way that helps -- the gap between two
+legs is smaller than 0.30, so both surfaces are inside the bound and the fillet fills it exactly as
+the soft blend did. Gourmel-style gradient blending inherits the same geometry, so IT IS NOT BUILT,
+and this is why rather than "we ran out of time".
+
+PREDICTION 2 (mine, and it held): the problem is not the operator, it is that the blend is an
+ABSOLUTE length. This is the `cell_scale` bug in a new costume -- a quantity meaningful only relative
+to the body, expressed as a constant (backlog D-7). Blend expressed as a multiple of the THINNER of
+the two segments' radii at each joint:
+
+    blend_rel   0.25   0.50   1.00   2.00   4.00
+    webbing        0      0      2     34   (clamped)
+    neg space  0.456  0.443  0.413  0.365
+
+Zero webbing to 1.0x the limb radius, and the silhouette opens FURTHER than the hand-tuned absolute
+default managed (negative space 0.427 -> 0.443..0.456). Relative is now the default; `blend=` forces
+an absolute one. Above 1.0x a fillet is fatter than the bone it joins -- that is a blob, not a blend --
+so it is CLAMPED with that stated reason.
+
+### THE CLAMP THAT WAS NOT A CLAMP
+
+First version clamped inside the chain compiler, while the HEAD join read the raw value -- so
+`blend_rel=4.0` still scored 29 webbed pairs with a "clamp" in place. A LIMIT ENFORCED IN ONE OF TWO
+PLACES IS NOT A LIMIT. Moved to one `_clamp_rel` home and pinned with an equality trap (4.0 must
+produce exactly what 1.0 produces), which is the only form of this test that catches a second
+un-clamped path appearing later.
+
+### WHAT THIS SAYS ABOUT THE BACKLOG'S RESEARCH ENTRIES
+
+The Gourmel 2013 / Bernhardt 2010 rows were read as "the fix for melting", and they are real
+research, but the failure mode they solve (blending at a distance from an UNBOUNDED operator) was not
+the failure mode present here once metaball groups landed. The remaining defect was a BADLY SCALED
+parameter, and no operator sophistication substitutes for getting the units right. A cited paper is
+not a diagnosis.
+
+### KEPT NEGATIVES (loud)
+
+* GRADIENT-BASED BLENDING (Gourmel 2013) IS NOT BUILT, and not for lack of time: the bounded-operator
+  experiment showed the remaining webbing came from blend RADIUS exceeding the gap, which a
+  gradient test does not change. Revisit only if a case appears where two SURFACES blend wrongly at a
+  radius smaller than the gap between them.
+* `op="fillet"` earns its place at the DSL level (exact radius + proven locality, both measured) but
+  NOT as the creature default: at the working blend the two operators tie (0 webbing both), and at a
+  fat absolute blend the fillet is marginally worse. Default stays `smooth`.
+* `blend_rel` scales to the THINNER segment. At a joint between a very thick torso and a very thin
+  limb, the torso side gets a fillet far smaller than its own radius -- correct for not swallowing
+  the limb, but it means a shoulder crease stays sharper than an artist might want.
+* The relative rule is per-JOINT, not per-body: it fixes scale-dependence but says nothing about
+  whether the chosen fraction is aesthetically right. That is proportion work (Tier 8), not units.
+
+
+## WIRING AUDIT -- what a "wire it up" pass found after everything already passed
+
+No new capability. This was a pass over the wiring of the eight faculties and one DSL node kind
+added this arc, and it found THREE real defects that every green selftest had missed. All are the
+same shape: a claim that nothing executed.
+
+### 1. A NODE KIND WIRED INTO ONE EMITTER OF TWO
+
+`fillet_union` was added to `holographic_sdf` (ARITY, `_combine`, `_BINARY_COMBINATORS`, DSL doc,
+GLSL emitter) -- and there is a SECOND emitter, `holographic_sdfemit`, the 4-dialect WGSL/GLSL/C
+table, which enumerates combinator kinds independently and raised `no dialect rule for node
+'fillet_union'`. Vendor-neutral WGSL is a hard project constraint, so this was a real hole, not
+cosmetic. Ported the rule (iq's opUnionRound, written through the dialect's own min/max/sqrt helpers
+so f32/f64 both come out right) and VERIFIED BY EXECUTION with the shipped `sdf_emitters_agree`,
+which compiles both emitters and runs them: **agree, worst 1.15e-07**.
+
+### 2. THE COVERAGE TOOL COULD NOT DETECT THE FAILURE IT EXISTS TO DETECT
+
+`sdfemit.coverage()` reported `fillet_union` as EMITTED and the table as `complete: True` while
+`sdf_dialect` raised on that exact kind. Cause: it computed `emitted = set(ARITY) - set(UNEMITTABLE)`
+by pure set arithmetic and NEVER EMITTED ANYTHING. Its own docstring said "a gap here is a shader that
+silently omits geometry" -- and a new node kind became "covered" the instant it was registered in
+ARITY.
+
+Rewritten to BUILD a probe node of every kind and actually emit it, per dialect, with a new `broken`
+field (a kind that fails to emit and is NOT declared unemittable) that must be empty.
+
+**It immediately found two PRE-EXISTING undeclared gaps: `fold_fractal` and `mandelbulb`** -- no
+dialect rule, not on the refused list, so they had been reported as emitted for as long as the tool
+existed. They are iterative domain folds (the same reason `menger` is refused) and they DO emit
+through the Shadertoy path. Declared, with the reason, rather than quietly patched.
+
+A TOOL THAT CANNOT FAIL IS NOT A CHECK -- it is a decoration that carries the authority of a check.
+This is the ninth instrument error of the arc and the first found in a tool rather than a measurement.
+
+### 3. AN EMIT CLAIM I WROTE FROM THE GENERIC CONTRACT, NOT FROM TRYING IT
+
+Both the module docstring and the faculty said the creature tree "emits WGSL/Shadertoy". Shadertoy is
+true (5311 chars on the shipped quadruped). **WGSL is FALSE**: every bone is a `capsule`, and the
+dialect table declares capsule unemittable. I inherited the claim from the generic SDF contract
+without executing it -- the same failure as adopting a conclusion measured on a different system.
+Corrected in both places, and now pinned in BOTH DIRECTIONS: the selftest asserts the Shadertoy
+emission succeeds AND that the WGSL emission still raises, so if capsule is ever added to the dialect
+table the test fails and forces the docstring's negative to be updated rather than silently rotting.
+
+### WHAT WAS ALREADY CORRECT (verified, not assumed)
+
+* All 8 faculties present with docstrings and signatures matching their modules; `delegation_drift`
+  clean on every one.
+* All 3 catalog examples EXECUTED verbatim, not merely resolved (skill_lint checks resolution;
+  running them is a different claim).
+* Full HTTP round-trip for all 8 over `/invoke`, including passing an SDF handle (`ref:SDF:2`) as the
+  `field` argument of another call -- the agent-composition path, not just single calls.
+* `capabilities.json` regenerated and contains all three new entries (575 capabilities).
+* Test suites: realtime + sdf + all creature suites + targeted humanoid/rig/pose from integration
+  (the `bone_capsule` promotion blast radius) -- **50 + 28 + 12 + 26 passed**.
+
+The mirrored coverage assertion in `test_holographic_realtime.py` FAILED on the node-count change, as
+its own comment said it must ("both must move together"). That is a pin doing its job, and it is the
+reason the count is stated in two places on purpose.
+
+### KEPT NEGATIVES (loud)
+
+* THE CREATURE TREE CANNOT REACH WGSL. Capsule is unemittable in the dialect table. Adding it is a
+  clamp away (the table's own note says so) and is NOT done here.
+* `coverage()`'s probe uses generic mid-range params per kind. Emission is structural (it depends on
+  the kind, not the values), but a kind whose emitter branches on a PARAMETER VALUE could still slip
+  through -- none does today.
+* `fold_fractal`/`mandelbulb` are now declared unemittable in the dialect table. That is a statement
+  about that table only; they still emit through the Shadertoy path.
+
+
+## TIER 3 + TIER 4 -- VOLUMETRIC TISSUE, AND THE INTERIOR THAT FINALLY EXISTS
+
+DELTA: 593 engine modules, 1 new (`holographic_creaturetissue`), 6 new faculties (96 on p14), 1
+catalog entry (155 on p06), 1 backward-compatible rename. Audits 0/0/0, delegation_drift clean on all
+14 faculties of this arc. Compile-all clean. Suites: organics + creature + gauntlet 187 passed,
+realtime + sdf + app_creature 52 passed. Docs 596 modules.
+
+### THE INVERSION IS REAL NOW (D-3)
+
+`tissue_fields` returns one nested SDF per tissue -- bone, muscle, fat, skin -- each compiled by the
+SAME `creature_tree`, so a layer is not a different KIND of object from the skin, it is the same body
+at a different radius. That is what makes Tier 4 free: hiding a layer is choosing which field to
+render, and a cut is `max(f, plane)`. No per-tissue submeshes, no compositing.
+
+MEASURED on the shipped quadruped: nesting 0/396 violations, interior volume splits bone 15.8% /
+muscle 36.3% / fat 25.3% / skin 22.7%, no zero-volume layer. Hiding shrinks the solid monotonically
+(occupancy 0.137 skin -> 0.102 muscle -> 0.021 skeleton), and the payoff verifier MESHES: the
+skeleton alone marches to 14,688 verts with the skin hidden. The old `anatomy_stack` would have
+produced nothing here, because no bone existed in space.
+
+The control inversion is pinned rather than described: raising the FAT slider grows the skin radius
+0.108 -> 0.128 while the bone radius does not move by 1e-12. That is the whole point of inside-out --
+"thick thighs, fat belly" is a muscle-and-fat statement, and now it is one in the code too.
+
+### WHY NESTED RADII AND NOT AN `onion`/`round` OFFSET
+
+A uniform offset grows every bone by the same absolute amount -- precisely the bug the last two
+sessions were spent undoing (a per-feature quantity expressed as one global number). Each layer gets
+a per-segment radius dict instead, so muscle on a thigh and muscle on a finger are separate
+quantities, and the joint-blend-relative-to-limb rule keeps working at every layer.
+
+### A NUMBER I INVENTED, CAUGHT BY MY OWN MEASUREMENT
+
+The first draft of the module docstring said "hiding the skin exposes a skeleton whose bone volume is
+6.6% of the body's". I wrote that BEFORE the measurement existed. It is 15.8%. A number in a
+docstring is a claim like any other; this one lived long enough to be worth recording, because the
+failure is not arithmetic -- it is writing the prose and the measurement in the wrong order.
+
+### THE TIE THAT KEPT FIVE BONES
+
+`tissue_weights` (T-5) capped influences with a threshold cut, `W >= kth`, and the selftest caught
+FIVE nonzero weights where four were asked for. Cause: on a bilaterally symmetric creature two
+mirrored limbs are EXACTLY equidistant from a spine point, so the k-th value appears twice -- and
+every creature is bilaterally symmetric, so this was not an edge case, it was the common case.
+Replaced with a STABLE argsort, which resolves ties to the lowest index per the ISA's determinism
+rule 1, and the assert changed from `<= 4` to `== 4` because "at most" is exactly the wording that
+lets a tie through. Also pinned reproducibility across calls, since a tie resolved differently moves
+a weight.
+
+T-5 itself replaces the metaball-provenance approximation: provenance answers "which ball produced
+this lump", a question about the SKINNING PROCESS. Distance to the bone AXIS is a statement about the
+ANATOMY and does not care how the surface was built -- which is the reported cause of the fat-torso
+shear, the same weakness Hecker reports in Spore for the same reason.
+
+### B-4 CLOSED, ADDITIVELY
+
+`anatomy_stack` is renamed `integument_stack`, with `anatomy_stack` kept as a working alias (removing
+a shipped name is not additive; verified identical output). The kept negative demanded this rename
+"once real anatomy exists" -- it now does, and leaving two things called anatomy is exactly how a
+future session convinces itself the interior already exists. The alias docstring says plainly that
+its "bone" is a tint, not a bone, and points at `tissue_fields`.
+
+### KEPT NEGATIVES (loud)
+
+* THIS IS NOT ANATOMY, it is a plausible layered body. For an invented creature there is no ground
+  truth to be correct against, and nothing here matches any real species.
+* ORGANS (T-3) ARE NOT BUILT. The body cavity is undifferentiated muscle. Organs are the one place
+  metaballs are genuinely the RIGHT representation (a liver IS a smooth blob that neighbours press
+  against), so that is the shape the work should take -- but it is unbuilt, not broken.
+* TISSUE FRACTIONS ARE A SAMPLING ESTIMATE over a uniform box, not an integral. They move by ~1% between
+  seeds and sample counts (16.1% vs 15.8% at 1500 vs 4000 samples). Do not read them to a decimal.
+* `visible_field` HIDES WHOLE LAYERS ONLY. There is no per-region or per-bone visibility, so "show me
+  this leg's muscles" is not expressible.
+* The cut plane is a HALF-SPACE. Curved or box cuts would compose the same way but are not wired.
+* `tissue_weights` uses distance to the bone AXIS, so a point inside a fat belly binds to whichever
+  spine segment is nearest in space even if anatomically it belongs elsewhere; it is a better
+  approximation than provenance, not a solve.
+
+
+## T-3 ORGANS -- the one place metaballs were the right answer all along
+
+DELTA: 593 modules (no new module -- organs live with the tissue they sit inside), 2 new faculties
+(98 on p14), 1 promoted primitive, catalog entry extended. Audits 0/0/0, drift clean on all 16
+faculties of this arc. Compile-all clean, 5 selftests green, organics + creature suites 177 passed.
+Docs 596 modules. HTTP verified including the organ path.
+
+### THE INVERSION OF THIS WHOLE ARC
+
+Four sessions have been spent getting AWAY from summed metaballs, because summing them melts limbs
+together. Organs are the opposite case and the argument flips exactly: a liver genuinely IS a smooth
+blob, and neighbouring organs genuinely DO press against one another and flatten where they touch.
+The representation that ruins a limb is the correct one for viscera. So `organ_field` uses the
+shipped `metaball_distance` and NOT the composition tree -- the same primitive, chosen for the case
+it actually fits.
+
+### PROMOTED: ANATOMY SPACE, ON ITS SIXTH APPEARANCE
+
+`_station` was private inside `holographic_creaturesocket` while being the primitive that makes any
+placement RIDE body edits -- and it had already been used by sockets, scales, rig-bound paint and
+limb sockets. Organs are the sixth. Promoted to `spine_station` with `_station` kept as a delegating
+alias (one implementation, no churn at the call sites), and wired as a faculty.
+
+THE PAYOFF IS PINNED, because it is the entire reason organs are not placed in world coordinates:
+bend the spine (curve 0 -> 0.5) and ALL 17 occupied organ samples move with it, and the bent body
+still reports 0 organs outside skin and 0 in bone. World-coordinate placement would pass every other
+test in the file and fail exactly this one.
+
+### D-7, A THIRD TIME, IN CODE I WROTE THIS SESSION
+
+I passed `blend=0.35` to `metaball_distance` as the organ smooth-union k, against organ radii of
+~0.04 -- a blend TEN TIMES the size of the things it blends. iq's smin subtracts up to k/4, so the
+field read negative almost everywhere: MEASURED organ occupancy 0.93 of the entire bounding box. The
+creature was one giant organ. Fixed by making the blend a FRACTION OF THE SMALLEST ORGAN RADIUS
+(0.0022 occupancy after). This is the same absolute-vs-relative bug as `cell_scale` and as the joint
+blend, now committed by the person who wrote the last two fixes for it. The lesson is not "remember
+the rule" -- it is that any spatial constant typed as a literal deserves the question "relative to
+what" before it is typed.
+
+### ORGANS IN BONE: FIXED STRUCTURALLY, NOT BY NUDGING
+
+Fitting each organ to the MUSCLE envelope still left 12 of 8000 sampled points inside both organ and
+bone -- the spine runs right through where viscera go. Moving the organs until the number went away
+would have left it waiting to reappear on the next body plan. Instead the bone field is SUBTRACTED
+from the organ field, so an organ is whatever room is left after the skeleton and the overlap is
+unexpressible. 0/0 now, and asserted -- a check that passes only because the construction is right is
+precisely the check that catches the construction going wrong.
+
+### A SAMPLE COUNT THAT WAS TOO SMALL TO MEAN ANYTHING
+
+The label-reachability test sampled 6000 uniform points, which lands on organs about FOUR times
+(organs are ~0.1% of the bounding box). "Organs exist" would have been a coin flip dressed as a test.
+Raised to 40000, measured 35 hits, and the organ volume fraction is now reported from an 8000-sample
+run rather than the 4000-sample one where it rounded to 0.000. A fraction that reads 0.000 is not a
+measurement of a small thing, it is a measurement of nothing.
+
+### KEPT NEGATIVES (loud)
+
+* THE LAYOUT IS PLAUSIBLE, NOT CORRECT. Six blobs at hand-chosen anatomy-space coordinates. A real
+  quadruped's viscera are not this, and no claim is made otherwise.
+* ORGANS NEED A SPINE. Anatomy space is spine-relative, so a rig without `spine_nodes` (a fitted rig,
+  a humanoid) silently gets no organs rather than raising -- `tissue_fields` catches the ValueError so
+  a body still builds. That is a real gap for the humanoid, not a design decision.
+* ORGANS ARE SHRUNK TO FIT, so a small creature gets proportionally smaller organs and a very thin
+  one gets nearly nothing. There is no minimum viable organ size and no warning when clamping bites.
+* THEY DO NOT DEFORM UNDER POSE. The field is rebuilt from the rest spine; posing a limb does not
+  move viscera (correct), but bending the spine requires REBUILDING the fields, not transforming them.
+* NO ORGAN-SPECIFIC MATERIALS. `tissue_at` returns 'organ' for all six, so a liver and a lung shade
+  identically. Per-organ ids are a small extension and are not built.
+
+
+## THE CENTAUR -- and the two-legged quadruped it exposed
+
+DELTA: no new modules (593). 2 new faculties (99 on p14), 1 catalog entry (156), 1 additive spec
+extension, THREE bugs fixed in shipped code. Audits 0/0/0, drift clean. Compile-all clean. Suites:
+organics 176, creature+gauntlet+app+realtime 47 passed. Docs 596 modules.
+
+### D-1 IS NOW DEMONSTRATED, NOT ASSERTED
+
+`centaur_spec()` builds a horse with a humanoid torso and arms mounted ON that torso, and NOTHING in
+the engine knows what a centaur is. The only structural addition was chain-on-chain mounting --
+`{"on": "torso", "u": 0.85}` -- plus optional chain names for readability. Measured on the SAME code
+as a quadruped: 26 segments, webbing 0, negative space 0.585, anatomy nesting 0 violations, organs
+legal, and it WALKS on its four horse legs at 7.0% slip with its arms correctly not treated as legs.
+
+ADDITIVITY IS PINNED AS BYTES, not as an intention: the quadruped's joints/bones/chains digest
+(924506180675d65047773c1f6958a44d) is asserted in the selftest, so the extension cannot quietly move
+the default body.
+
+### AND THEN THE HYBRID FOUND A BUG THAT HAD BEEN SHIPPING FOR THE WHOLE ARC
+
+Testing gait on the centaur showed `legs: 2`. So did the quadruped. **Every gait figure this engine
+has ever produced was computed on half the animal.**
+
+`analyze_rig` tested AXIS 2 for "reaches the ground". On the shipped `quadruped_spec`, z is the
+SPINE'S LENGTH axis and y is vertical: all four feet sit at y = -0.376 while their z values are 0.300
+and 0.900. The z-test selected the two FRONT legs and called them the animal.
+
+THE PART THAT MATTERS IS WHAT A PREVIOUS SESSION DID WITH THAT NUMBER. It hit `n_legs == 2` on a
+quadruped, and instead of investigating, wrote an assert `== 2` with a comment explaining that the
+quadruped was "correctly a biped with two arms" -- and propagated the same sentence into two
+integration tests. A surprising measurement was met with PROSE RECONCILING US TO IT. That is the
+"test named for a hope" antipattern in its purest form: the test was green, the docstring was
+confident, and the claim was false. Both tests are now corrected with the history in them.
+
+It also silently disagreed with `holographic_rig.auto_roles`, which infers feet from the Y extent and
+found all four. TWO COMPONENTS DISAGREEING ABOUT WHICH WAY IS DOWN, each correct-looking alone. The
+tests now assert the two AGREE rather than asserting either count, since agreement is the real claim.
+
+### THE SECOND WRONG AXIS, HIDING BEHIND THE FIRST
+
+With four legs found, slip jumped to 38% against a <9% gate. Cause: `forward` defaulted to (0,1,0),
+which is VERTICAL on that creature -- the gait was walking it straight up into the air while the
+planted feet slid the whole way. Measured from the body's long axis instead: 6.75%.
+
+THE TWO WRONG AXES HAD BEEN CANCELLING. Walking "up" while only measuring the two front legs produced
+a plausible 6-7% that passed every gate for the whole arc. A metric can be wrong in two ways that
+compose into a right-looking number, which is why the fix for the first bug had to make the second
+one visible before either could be trusted.
+
+### A THIRD DRIFT THE TOOL COULD NOT SEE
+
+Removing the module's `forward=(0,1,0)` default did not change the faculty's behaviour, because the
+FACULTY carried its own copy of the same default and passed it explicitly. `delegation_drift`
+compares parameter NAMES and both had `forward`, so a duplicated DEFAULT VALUE is invisible to it.
+Fixed by making the faculty pass None through. Worth knowing as a limit of that tool: it catches a
+missing parameter, not a diverged default.
+
+### KEPT NEGATIVES (loud)
+
+* `down` and `forward` are INFERRED FROM THE REST POSE. A creature authored lying down, or one whose
+  limb tips genuinely point up, will be read wrong. It is a measurement of the body, not knowledge of
+  gravity, and there is no way to override it per-creature yet.
+* THE CENTAUR HAS NO ARM BEHAVIOUR. Arms are chains that exist, are skinned, get tissue and are
+  correctly excluded from the gait -- nothing swings them. `tip` roles exist for exactly this and are
+  unconsumed.
+* CHAIN-ON-CHAIN IS ORDER-DEPENDENT: the host chain must appear earlier in the `limbs` list. It
+  raises by name rather than silently mounting on the spine, but there is no topological sort.
+* THE CENTAUR'S ORGANS ARE THE HORSE'S. Anatomy space is spine-relative, so viscera are placed along
+  the horse spine and the humanoid torso is hollow. Correct-ish for a centaur by accident, wrong in
+  general for any hybrid with two body cavities.
+* Slip 7.0% is UNDER the 9% gate but is not zero, and the remaining slip is unexplained -- it is the
+  IK's residual, not a measured quantity with a cause attached.
+
+
+## TIER 7 (B-3 / X-1 / X-2 / X-3) -- the units bug, fixed AND generalised
+
+DELTA: 593 modules, 0 new modules (the fix belongs where the constants live), 2 new faculties (99 on
+p14), 1 catalog entry (157 on p06). Audits 0/0/0, drift clean on all 18 faculties of this arc.
+Compile-all clean, 5 selftests green, suites 187 passed. Docs 596 modules. HTTP verified.
+Tier 7 is now CLOSED: X-1 (batch determinism) shipped earlier this arc, X-2 and X-3 here.
+
+### B-3 REPRODUCED BEFORE IT WAS FIXED
+
+`cell_scale` was a raw WORLD frequency, so the pattern was pinned to world units and the body floated
+relative to it. MEASURED on the shipped quadruped at 1x and 3x body size (cells counted as sign
+crossings along the body axis):
+
+    insect    17 -> 49 plates
+    reptile    7 -> 23 scales
+    mammal    94 -> 298 pore cells
+
+The same animal wearing finer skin because it grew. With `body_length` supplied, all three hold
+(17 -> 17, 7 -> 7, 94 -> 114 with the mammal residual explained below). Reproducing the defect first
+matters: it is what makes the fix's numbers mean something, and the selftest ASSERTS THE OLD PATH
+STILL SHOWS THE DEFECT, so the gate cannot quietly become vacuous if the default ever changes.
+
+### THE INSTRUMENT WAS AT ITS RESOLUTION LIMIT (tenth of the arc)
+
+The first version of the gate failed on the mammal: 104 cells at 1x, 110 at 3x, which looks like the
+fix not working. It was the SAMPLER. Counting sign crossings on a fixed 800-point line undersamples
+the finest taxon -- the SAME field returns 104 crossings at 800 samples and 110 at 4000. Scaling
+samples WITH the body and checking convergence: the 3x/1x ratio reads 1.213 at 600 samples/unit,
+1.018 at 2400 and 1.018 at 9600. Converged at 2400, which is now the density, with the numbers in a
+comment so the choice is not a magic constant either. A COUNT MEASURED BELOW ITS NYQUIST REPORTS THE
+SAMPLER'S ALIASING AS A PROPERTY OF THE THING MEASURED.
+
+### A DERIVED TABLE, BECAUSE I MISTYPED THE HAND-DERIVED ONE
+
+I first wrote `CELLS_ACROSS` as six typed constants, computing them as `cell_scale / 1.509`. Wrong
+direction: a frequency in cells-per-unit times a length gives a count, so it is MULTIPLY. Every entry
+was off by the same 2.28x, and the consistency of the error is exactly what made it look plausible.
+The table is now DERIVED from TAXA (`cell_scale * CALIBRATION_LENGTH`), so the relationship cannot be
+mistyped and a taxon added later cannot be forgotten. `CALIBRATION_LENGTH` is also now NAMED -- the
+old constants were meaningful only relative to the default quadruped's size and nothing said so,
+which is the whole content of D-7.
+
+### X-3: THE RULE, AS A PROBE, DEMONSTRATED ON THE DEFECT IT GENERALISES
+
+This absolute-vs-relative bug has now been found FOUR SEPARATE TIMES in this codebase:
+
+    cell_scale      a raw world texture frequency  -- a 3x creature grew ~2x finer skin
+    marching res    cells-across set by the whole body, so a thin limb got no say (beading)
+    joint blend     an absolute blend radius, so a fat blend crossed the gap between two legs
+    organ blend     an absolute metaball k ten times the organ radius -- one giant organ
+
+Two of those were committed BY ME in the last two sessions, after writing the fix for the first one.
+A fifth rediscovery is not a matter of remembering harder, so `scale_invariance_probe` is the check:
+build the thing at two body scales, measure the quantity, report whether it moved. Its selftest runs
+it on BOTH paths and requires it to FAIL on the absolute one (relative error 1.235) and PASS on the
+relative one (0.0) -- a probe that only ever returns ok is the "tool that cannot fail" failure this
+arc already found in `coverage()`.
+
+### KEPT NEGATIVES (loud)
+
+* THE PROBE CANNOT KNOW WHICH QUANTITIES SHOULD SCALE. A limb length must scale with the body; a
+  scale-count must not. It answers "does this change with size" and the caller says which answer is
+  right. It is a probe, not a gate.
+* BODY-RELATIVE SIZING IS OPT-IN. Omit `creature=`/`body_length=` and the old absolute frequency is
+  used unchanged -- additive rule. That means the DEFAULT is still the broken-under-resize behaviour,
+  deliberately, because flipping it would restyle every existing creature.
+* `CELLS_ACROSS` IS CALIBRATED TO ONE BODY. The counts reproduce the hand-tuned look at the default
+  quadruped's size. They are not measurements of real animals -- a real reptile scale is ~5 mm
+  regardless of species, which this does not model.
+* THE CELL COUNT IS MEASURED ALONG ONE AXIS through the body. A pattern that is anisotropic in a way
+  the `stretch` factor does not capture would not be caught by this gate.
+
+
+## TIER 9 -- THE LOOP CLOSED, AND THE THREE SPECS THAT PROVE IT
+
+DELTA: 593 modules, 0 new modules, 3 new faculties (102 on p14), 1 catalog entry (158 on p06), 1
+generalised metric. Audits 0/0/0, drift clean on all 21 faculties of this arc. Compile-all clean,
+4 selftests green, suites 187 passed, HTTP verified. Docs 596 modules.
+
+### THE RESULT
+
+    body        segments   webbed/tested   negative space   nesting   organs
+    quadruped      16          0 / 99           0.411          0        yes
+    centaur        26          0 / 293          0.538          0        yes
+    fitted          4          0 / 6            0.000          0        NO
+
+All three walk the SAME calls: `rig_invariant` -> `creature_tree` -> `tissue_fields` ->
+`anatomy_report` -> `webbing_report` / `silhouette_report`. No branch anywhere on which kind of body
+it is. The centaur has more segments than the quadruped it is built from (asserted -- otherwise the
+hybrid spec could silently degrade to an ordinary body and the D-1 claim would prove nothing), and
+the fitted rig came from a POINT CLOUD.
+
+### L-1: A FITTED CAPSULE IS A BONE SEGMENT
+
+`fit_primitives` already emitted capsules as `(centre, half_height, radius, (axis, angle))` -- morally
+bone segments -- and nothing converted them, so the fit path and the creature path were two unrelated
+worlds that happened to have similar shapes. That is precisely the silent orphaning D-6 warns about,
+and no audit catches it because the signatures still match. `rig_from_primitives` converts them, and
+the fitted rig then skins (6,742 verts) and grows tissue through machinery that has never heard of a
+point cloud. HALF OF L-1 WAS ALREADY CLOSED AND UNNOTICED: `fit_pose` returns a `Humanoid`, which
+`rig_of` has accepted since the Rig landed.
+
+SPHERES ARE SKIPPED, not faked into zero-length bones. A blob is not a segment, and a degenerate bone
+would fail `rig_invariant` -- correctly. Chains are one per capsule: a point-cloud fit has no
+parent/child knowledge, and inventing a hierarchy would be a guess dressed as structure.
+
+### THE METRIC DEGRADED SILENTLY, AND I ALMOST SHIPPED THE NUMBER
+
+First run of the regression reported the QUADRUPED at 53 webbed pairs -- the same body that scores 0
+through the creature path. Cause: `webbing_report` accounted for material via metaball provenance,
+and a bare `Rig` is not a `Creature`, so `creature_metaballs` raised and the metric fell back to raw
+occupancy. It did not error, it did not warn; it produced a plausible number under a DIFFERENT
+definition. A METRIC THAT DEGRADES SILENTLY PRODUCES A NUMBER, AND A NUMBER GETS BELIEVED.
+
+Fixed by generalising the accounting to the RIG itself (each segment's capsule, using
+`creature_tree`'s own radius rule via the newly public `segment_radii` -- one home for the taper rule
+rather than a second copy in the report). `accounted` now REPORTS which definition was used
+('metaballs' / 'rig' / False) instead of being a bool that reads False in two different situations.
+
+And the two definitions are now CROSS-CHECKED on one body: the quadruped measured through metaball
+provenance and through the rig must agree, and they do (0 == 0). If they had disagreed, every webbing
+number in this arc would have been suspect.
+
+### SOLIDITY ABOVE 1.0
+
+The fitted rig reported negative_space = -0.013, i.e. a shape filling MORE than its own convex hull.
+Discretisation: `area` counts PIXELS while the hull is a polygon through pixel CENTRES, so the hull
+misses a half-pixel border. Only visible on a nearly convex shape, which the fitted two-capsule rig
+is. Clamped at 1.0 with the reason stated, rather than corrected with a perimeter term, because the
+quantity that matters is CONCAVITY and the error only appears where there is none.
+
+### KEPT NEGATIVES (loud)
+
+* A FITTED RIG HAS NO SPINE, so it gets no organs and no anatomy-space placement. REPORTED as
+  `organs: False` rather than hidden or faked. This is a real gap in the loop: `observe` recovers
+  segments but not a BACKBONE, so the inverse pipeline is not yet complete (backlog L-3, inferring
+  tissue from a fitted skin, is also unbuilt).
+* THE FITTED CHAINS ARE UNPARENTED. Every capsule is its own chain, so joint-relative blending has
+  nothing to blend to and the fitted skin is a hard union of capsules. Correct given what a point
+  cloud tells you, but it means a fitted body does not articulate.
+* `webbing_pairs` FOR THE FITTED RIG IS 6/6 PAIRS TESTED -- a tiny sample. Zero webbing on six pairs
+  is much weaker evidence than zero on 293, and the report does not weight them differently.
+* THE REGRESSION DOES NOT GAIT. The backlog asks that all three "build, skin, and gait through the
+  same code"; this covers build and skin. Gait on a fitted rig would need the foot role, which needs
+  a ground-relative body, which needs the spine that a fit does not recover.
+
+
+## L-2 / L-3 -- THE OBSERVE HALF GETS A BACKBONE, and a 2.7 GB wall came down
+
+DELTA: 593 modules, 0 new modules, 2 new faculties (104 on p14), 1 catalog entry (159 on p06), 1
+scaling fix to a shipped capability, 1 generalisation of anatomy space. Audits 0/0/0, drift clean on
+all 23 faculties of this arc, compile-all clean, 6 selftests green, suites 177 passed. Docs 596.
+
+### RULE 0, AGAIN, AND IT SAVED THE WHOLE ITEM
+
+The backlog's L-3 ("infer tissue from a fitted skin") and the spine gap both needed a medial axis.
+`find_capability("find the backbone of a shape")` returned `mesh_skeleton` and `skeleton_curve` --
+already shipped, already returning an ordered centerline WITH the medial radius at each node, i.e.
+both a spine and a thickness measurement. Nothing needed inventing.
+
+### A 2.7 GB WALL IN AN EXISTING CAPABILITY
+
+`skeleton_curve` could not be run on a creature: MEASURED, a 3,686-vertex mesh at res=24 peaked at
+2.7 GB and a 10,776-vertex one at res=32 was KILLED. Cause: `interior_distance_field` computes the
+winding number for the whole res^3 grid against every face in ONE dense allocation.
+
+Fixed with lever 5 (tile the domain): the point set is chunked to a fixed budget, so the transient is
+(chunk x faces) instead of (res^3 x faces). MEASURED AFTER: 728 MB at the size that was killed, and
+the previously impossible case now runs. VERIFIED BIT-IDENTICAL across 9 chunks -- which is exactly
+the batch-independence rule one level up: the winding number of a point cannot depend on which other
+points share the call, so chunking is free correctness-wise and the test asserts it rather than
+assuming.
+
+### AN "INFERENCE" THAT WAS AN ARITHMETIC IDENTITY
+
+My first `infer_tissue_fractions` computed the soft-tissue modifier as
+`0.6 * (r * (1 - bone - skin)) / (r * 0.35) - 1`. **`r` CANCELS.** Every segment of every creature
+returned exactly -0.16 muscle and -0.02 fat -- a constant wearing the costume of a measurement, and
+it would have passed any test that only checked "it returns a body_params dict".
+
+Caught by printing the values rather than the shape. The fix is conceptual, not algebraic: a
+per-segment number must be relative to the OTHER segments, because a proportion is the only thing a
+single silhouette can actually tell you. Now the thick middle reads +0.94 and the thin ends -0.22,
+and the selftest requires the values to VARY and the thickest measured segment to infer the most soft
+tissue -- the two assertions that a cancelling formula cannot satisfy.
+
+### THE GAP I RECORDED LAST SESSION, CLOSED
+
+Last session's kept negative: "a fitted rig has no spine, so it gets no organs and no anatomy-space
+placement." It turned out to be the missing BACKBONE, not the missing Creature TYPE. `spine_frames`
+now reads either `spine_nodes` or a `spine` chain, so one anatomy space serves authored and recovered
+bodies alike instead of a second implementation growing beside it for the observe half. A rig
+recovered from a mesh now grows all five layers -- bone, muscle, fat, skin AND organs -- with 0
+nesting violations, 0 organs in bone, 0 outside skin. Pinned end to end:
+generate -> mesh -> recover spine -> infer tissue -> grow body.
+
+### PRE-EXISTING FAILURE, REPORTED NOT HIDDEN
+
+`tests/test_cad_backlog.py::test_every_mesh_reducing_faculty_is_silhouette_guarded` fails:
+`scatter_lod` is a mesh-reducing faculty with no silhouette guard. VERIFIED PRE-EXISTING -- it fails
+identically in the previously delivered build, and `scatter_lod` (splat LOD) is untouched by any
+creature work. Left alone deliberately: it is a real gap, in a different area, and fixing it inside
+an unrelated arc is how a change set becomes unreviewable. 113 other tests in that file pass.
+
+### KEPT NEGATIVES (loud)
+
+* `rig_from_mesh` IS SINGLE-BRANCH, inherited from `skeleton_curve`: it collapses the medial ridge
+  along one PCA axis, so it recovers the TORSO of a limbed creature and the limbs are simply ABSENT
+  (not merely approximate). Recovering limbs needs branch segmentation of the ridge, unbuilt. The
+  function is named for the part it actually does.
+* THE MUSCLE/FAT SPLIT IS NOT OBSERVABLE from a surface. A fat animal and a muscular one with the
+  same silhouette are indistinguishable; the split is a fixed 60/40 and only the TOTAL is evidence.
+* THE CHUNK BUDGET (4M point-face pairs) IS A FIXED CONSTANT, not measured against available RAM. It
+  is well inside a 4 GB box but it is a guess about the machine, which is the same class of bug as an
+  absolute length -- it just has not bitten yet.
+* RECOVERED SEGMENT COUNT IS RESOLUTION-DEPENDENT: 6 segments at res=24, and the medial curve's node
+  count follows `nbins` and the grid. A recovered rig is not a canonical object.
+
+
+## TIER 5 (M-5/M-6) -- SCAFFOLD MESHING, and the panel's call to promote rather than build
+
+DELTA: 593 modules, 0 new modules, 2 new faculties (106 on p14), 1 catalog entry (160 on p06).
+Audits 0/0/0, drift clean on all 25 faculties of this arc, compile-all clean, selftests green,
+suites 181 passed. Docs 596.
+
+### THE PANEL'S CALL, AND WHY IT WAS A PROMOTION
+
+Convened on the three open judgment calls, real published methods only:
+
+* **Quilez's raymarching practice + Fuentes Suarez & Hubert 2018 (scaffolding, then projection)** --
+  an SDF's value IS the distance and its gradient IS the direction, so closest-point-on-an-implicit
+  is Newton iteration with no search structure. Combined with scaffold-then-project, the prescription
+  is: do NOT write a mesher; generalise `shrinkwrap`'s target from a mesh to a field and let the
+  existing B-Mesh cage be the scaffold.
+* **Togelius, Yannakakis, Stanley & Browne 2011, Search-Based PCG** -- for content quality you define
+  an evaluation function and SEARCH, rather than hand-coding rules. Applied to Tier 8, that says
+  A-1/A-2 should be scored by the M-3 negative-space metric already built, not by a rule table. Not
+  implemented yet; recorded as the design, so the next session does not hand-code proportions.
+* **Milanfar's baseline discipline** -- F-5 (anisotropic convolution) stays provisional until it
+  beats the sphere chain in the original space; `section_warp` already covers part of its motive.
+
+### WHAT WAS ACTUALLY MISSING: WIRING, NOT ALGORITHM
+
+`skin_skeleton` (B-Mesh cage from verts/edges/radii), `shrinkwrap` (closest-point snapping) and
+`creature_tree` (the field) were all shipped. The ONLY gap was that `shrinkwrap` took a MESH target.
+`shrinkwrap_field` generalises it -- Newton steps down the gradient, central differences so it works
+on ANY callable field (the composition tree, a hidden-layer field, a cut one), with the step CLAMPED
+because a smooth-union tree exceeds the Lipschitz bound locally and an unclamped step overshoots to
+the far side of a limb. Verified: a coarse cage on a sphere, residual 0.4000 -> 1.11e-16.
+
+### THE FLATTERING NUMBER, AND THE HONEST ONE
+
+First measurement: scaffold residual-to-surface 1.3e-16 vs marching 8.8e-3. THIS FLATTERS THE
+SCAFFOLD TRIVIALLY -- marching-cubes vertices are grid-edge INTERPOLATIONS, so of course they sit off
+the isosurface, while Newton-projected ones sit on it. Reporting that as the win would have been
+comparing a method to a baseline that was never trying to do the thing measured.
+
+The honest claim of M-5 is about THIN LIMBS: a global grid is sized for the whole body, so a thin limb
+gets a couple of cells across it and beads. MEASURED as radial ripple around the thinnest segment's
+axis -- the SAME instrument `holographic_creatureskin` already uses for its ball-spacing rule, not a
+new one invented for this comparison:
+
+    marching (res 40)   25.4% ripple   10,754 verts
+    scaffold            1.6%  ripple    7,570 verts
+
+16x better on the actual defect, with 30% fewer vertices. Both numbers are pinned, and the selftest
+ALSO asserts the scaffold verts land on the field to 1e-9 -- because a smooth limb that is smoothly
+in the wrong place would pass a ripple test alone.
+
+### KEPT NEGATIVES (loud)
+
+* CLOSEST-POINT, NOT RAY-CAST. A cage vertex sitting nearer a NEIGHBOURING limb than its own is
+  pulled onto the neighbour. Inherited from the mesh shrinkwrap, which documents the same thing, and
+  the reason `factor` < 1 with repeats exists.
+* THE CAGE IS STILL MARCHED. `skin_skeleton` builds the B-Mesh cage by marching cubes internally, so
+  the scaffold inherits a grid at CAGE resolution -- it is coarse and its errors are then projected
+  away, but this is not the ILP quad scaffold of Fuentes Suarez & Hubert. M-6's "keep marching as
+  fallback" is therefore not just a fallback: marching is still in the pipeline.
+* NO QUAD GUARANTEE. The backlog wants quads following limb direction so deformation is clean; this
+  produces the cage's triangles. Vertex->segment ownership is available (`tissue_weights`) but is not
+  wired into the scaffold output.
+* THE RIPPLE COMPARISON IS AT ONE RESOLUTION (res 40). Marching at a much higher resolution would
+  close the gap at a vertex-count cost that was NOT measured -- the claim is "better at equal-ish
+  vertex budget", not "marching cannot do this".
+
+### ADDENDUM -- A SEAM THE CLEAN-EXTRACT CHECK CAUGHT AND NO SELFTEST DID
+
+`scaffold_mesh()` with no `field=` built the SOFT tree, while `mind.creature_tree` defaults to the
+GROUPED one. So the default-path mesh sat **6.2e-03 off** the surface a caller would then measure it
+against -- silently, because both are valid fields and neither call errors. My selftest missed it
+because it always passed `field=` explicitly, i.e. it tested the path I was thinking about rather
+than the path a caller takes.
+
+Found only by the clean-extract front-door check, whose whole purpose is to call things the way a
+user would. Fixed to `creature_tree_grouped` and pinned by a test that uses the DEFAULT and projects
+onto the faculty's field (1.3e-16 after). Fourth faculty/module seam of this arc, and the first where
+both sides were individually correct -- a default that differs between a module and its faculty is a
+seam even when neither side is wrong.
+
+
+## TIER 8 (A-1/A-2/A-4) -- READABILITY AS A SEARCH, and the degenerate optimum found first
+
+DELTA: 594 modules, 1 new (`holographic_creatureproportion`), 4 new faculties (110 on p14), 1
+catalog entry (161 on p06). Audits 0/0/0, drift clean on all 29 faculties of this arc, compile-all
+clean, suites 177 passed. Docs 597 modules.
+
+### THE PANEL'S CALL
+
+Togelius, Yannakakis, Stanley & Browne 2011, "Search-Based Procedural Content Generation": for
+content QUALITY you define an evaluation function and search it, rather than hand-coding rules. We
+already owned the evaluation function -- `silhouette_report`'s negative space, the M-3 gate the field
+rebuild was judged on -- so A-1/A-2 became "search the spec against the metric we already trust", and
+no second opinion about what reads well entered the codebase.
+
+### THE DEGENERATE OPTIMUM, MEASURED BEFORE THE SCORE WAS WRITTEN
+
+Sampled negative space across limb radius 0.03 -> 0.12 BEFORE designing anything:
+
+    limb radius   0.030  0.050  0.070  0.090  0.120
+    negative sp.  0.470  0.420  0.413  0.370  0.332
+
+MONOTONE DECREASING, no interior optimum. A search maximising it drives limbs to zero thickness and
+calls a spider-legged wisp the most readable creature possible. THAT IS WHAT A SINGLE-OBJECTIVE
+SEARCH DOES TO ANY METRIC, and it is why the first thing built here was a second measurement rather
+than a search loop.
+
+The second term is A-1's actual claim made measurable -- ONE DOMINANT MASS: the share of body volume
+owned by the spine, by nearest-bone-axis ownership (the same rule `tissue_weights` uses, so it cannot
+disagree with the skinning about which part a point belongs to). Measured 0.817 / 0.743 / 0.516 at
+limb radius 0.03 / 0.05 / 0.09 -- monotone the OTHER way. The pair has an interior optimum.
+
+Pinned by the inversion that proves the score is not single-objective in disguise: a moderate body
+scores HIGHER overall (0.398) than a spindly one (0.333) even though the spindly one has more
+negative space. If the terms ever moved together, one would be redundant.
+
+Webbing is a FEASIBILITY GATE, not a penalty term. A webbed creature is not a worse creature, it is a
+broken one, and mixing a correctness failure into a quality score lets the search buy its way out of
+it with prettier proportions. Pinned: the old global-sum field is infeasible (76 pairs) regardless of
+how it scores.
+
+### WHY THE SHIPPED GRADIENT OPTIMIZER WAS REFUSED
+
+The engine ships `optimize` (Adam + finite differences) and it is the obvious reach. Refused, and the
+reason is in the docstring: this objective is a GRID-SAMPLED VOLUME measure, so it changes in steps as
+sample points cross the surface and a finite-difference gradient reads mostly quantisation noise. A
+deterministic sweep over a declared candidate set is honest about what it did and reproducible. Not a
+claim that gradient search could not work on a smoother objective -- a claim about THIS objective.
+
+### A-3 IS NOT DONE, AND THE SEARCH SAID SO
+
+`spine_curve` was included as a search knob for A-3 (line of action). THE SEARCH CHOSE 0.0 -- it
+REMOVED the curve. The score is indifferent to spine curvature and marginally prefers straight,
+because a straighter body has slightly more silhouette negative space. So A-3 is NOT implemented: the
+knob exists, the metric does not measure what A-3 is about. Recorded rather than papered over by
+pinning the curve to a non-zero default and calling it a line of action.
+
+### KEPT NEGATIVES (loud)
+
+* THIS DOES NOT REACH ART DIRECTION. A two-term score cannot tell an appealing creature from a merely
+  well-proportioned one. It refuses the obviously unreadable and says why with a number; that is all.
+* A-3 (LINE OF ACTION) IS UNBUILT -- see above. It needs a metric that rewards a single clear curve,
+  which silhouette area does not.
+* `dominance_target` DEFAULTS TO 0.70, A CHOSEN NUMBER. It is a taste parameter with a plausible
+  value, not a measurement, and the search's answer moves with it.
+* THE SEARCH IS A COORDINATE SWEEP over DECLARED candidates -- it cannot find a value between the
+  ones offered, and it takes the knobs one at a time so it cannot see interactions between them.
+* `ground_creature` REPORTS SUPPORT, IT DOES NOT POSE. It returns the offset and a contact count; it
+  does not adjust leg angles to achieve support if the body would topple.
+
+
+## DOGFOODING -- what actually using the engine to make creatures found
+
+DELTA: 594 modules, 2 new faculties (112 on p14), 1 catalog entry (162 on p06). Audits 0/0/0, drift
+clean, compile-all clean, suites 176 passed. Docs 597.
+
+Every numeric gate was green before this session: webbing 0 across three body plans, negative space
+0.44, nesting clean, limb ripple 1.6%. Then I built four creatures and LOOKED at them. Three real
+gaps, none of which any metric could see.
+
+### GAP 1 -- THE ENTRY POINT DID NOT EXIST
+
+`find_capability("make a creature")` returned the parts library, the body-shape module and the editor
+session -- everything EXCEPT how to make a creature. `"design a monster from scratch"` returned
+`design_network` and a cross-field designer. The pipeline was SIX calls in an order only somebody who
+had just written them would know (spec -> Creature -> rig -> tree -> scaffold -> sockets -> parts).
+
+This is Rule 0's own failure mode, committed across an entire arc, on the single most obvious query a
+user would type. Fixed with `build_creature(spec)` and aliases taken from what I actually typed. All
+five failing phrasings now hit first.
+
+### GAP 2 -- THE PIPELINE PRODUCED PARTLESS BALLOONS
+
+The renders showed clean un-webbed limbs (the architecture fix is VISIBLE, which six earlier sessions
+never achieved) -- and uniform tapered tubes, hemispherical stubs where feet should be, a sphere for a
+head. No eyes, no mouth, no feet. `creature_tree` never touched the 11-part library (eye, mouth, foot,
+hand, claw, horn, spike, fin, antenna, ear, digit, all with authored handle ranges) that has shipped
+the whole time. EVERY READABILITY NUMBER WAS GREEN WHILE THE CREATURE HAD NO FACE, because negative
+space and webbing cannot see a missing foot.
+
+Fixed with `auto_sockets`, which drives placement from the rig's ROLE tags rather than part names --
+so the quadruped, the centaur and a biped all get feet on whatever their feet are, with no per-plan
+table. 7 placements, 0 missed.
+
+### GAP 3 -- AND ATTACHING PARTS DID NOT FIX IT (measured, unfixed)
+
+Rendering with parts and differencing against without: **0.58% of pixels changed**. The parts are
+placed correctly (97.5% of their vertices outside the body, sensible points, a foot 7.5x the limb
+radius) -- they just land ON TOP of geometry that already fills that space, because the limb's own
+capsule already caps the leg with a hemisphere. A foot bump next to a rounded stub does not read as a
+foot.
+
+That is backlog D-5/P-3 exactly: "a foot reads as a foot because it is a MODELLED foot placed at a
+limb tip". The fix is that the limb must END AT THE ANKLE and the foot supply the end -- a change to
+how limbs TERMINATE, not to how parts are placed. Recorded as a kept negative in the faculty, the
+module and the catalog rather than left as an unexplained visual disappointment.
+
+### THE INSTRUMENT LESSON, AGAIN, FROM THE OTHER SIDE
+
+Six sessions produced "measurably better numbers and outputs that still looked wrong", and the whole
+Tier 0 answer was to build better metrics. The metrics worked -- webbing and negative space really did
+track the melting defect and really did gate the rebuild. AND THEY WERE STILL BLIND TO A CREATURE WITH
+NO FACE. A metric measures what it measures; the set of things no metric in the suite can see is not
+knowable from inside the suite. Looking at the output is not a weaker check than measuring it, it is
+an INDEPENDENT one -- which is the same argument as "independent checks come from outside the pair".
+
+### SMALLER FRICTION, WORTH RECORDING
+
+* `save_render(path, rgb01)` takes the PATH FIRST, unlike every sibling that takes data first.
+* `m.camera(fov_deg=...)` not `fov=` -- a natural guess raises TypeError.
+* `PartLibrary()` builds a VALID EMPTY library that places nothing and raises nothing. The pre-loaded
+  one is `holographic_creaturepartlib.library()`. An empty library that silently places zero parts is
+  the same failure shape as a metric that silently degrades -- and it cost two probes here.
+* There is no `save_png`; image writing is `save_render` / `save_image`.
+
+### KEPT NEGATIVES (loud)
+
+* PARTS DO NOT READ YET (0.58% pixel change). Wired so the gap is measurable, not absent.
+* `auto_sockets` PLACES EYES AND MOUTH SPINE-RELATIVE at t=0.97/0.995. On a creature whose head is not
+  at the spine end (a hammerhead, a body with a neck bent back) they will land in the wrong place.
+* THE PART SET IS FIXED: feet, eyes, mouth. Horns, claws, fins, ears, antennae and digits are in the
+  library and are NOT placed by anything.
+* PARTS ARE NOT UNIONED INTO THE BODY. `build_creature` returns body mesh and part geometry
+  separately; the seam is unhandled, which is the D-5 question the backlog says to answer with a good
+  socket join rather than fusion -- unbuilt either way.
+
+
+## RETOPO + LOD IN THE CREATURE PIPELINE, and a refuted fix for the foot problem
+
+DELTA: 594 modules, 0 new modules, faculty signatures extended (112 on p14), catalog example now
+exercises quads. Audits 0/0/0, drift clean, compile-all clean, suites 176 passed. Docs 597.
+
+### THE FOOT FIX I REASONED MY WAY INTO, AND MEASUREMENT REFUTED
+
+Last session's finding: parts changed only 0.58% of rendered pixels because the limb's own capsule
+already caps the space a foot would occupy. The backlog's prescription reads plainly -- a foot reads
+as a foot because it IS the end of the leg -- so I added `tip_inset`: pull the last segment back and
+let the part supply the end.
+
+MEASURED: 0.58% -> **0.18%**. WORSE. Cause, found by probing rather than reasoning: at inset 2.0 the
+socket MISSES ENTIRELY -- zero placements, no error. `resolve_limb_socket` casts against the
+CREATURE's limb parameterisation (u=1.0 is the tip of the AUTHORED limb), not against the tree's
+inset geometry, so shortening the limb leaves no material where the cast points.
+
+The real defect is therefore not "the limb is too long" but that LIMB TERMINATION AND SOCKET
+RESOLUTION ARE PARAMETERISED INDEPENDENTLY, and moving one silently breaks the other. Fixing it means
+teaching the socket resolver about the inset -- a change in the socket module. `tip_inset` stays as a
+default-OFF knob with the measurement attached so the next attempt starts from the finding rather
+than from the idea.
+
+### RETOPO AND LOD, WHICH WERE ALREADY BUILT
+
+`quad_remesh` (field-guided tris-to-quads) and the silhouette-guarded LOD chain both shipped; the
+creature pipeline never called either. `build_creature(quads=True, lods=(...))` now does.
+
+MEASURED on the shipped quadruped: 9,524 tris -> 5,383 faces at 77% quads, **43% fewer faces**, and
+the vertices DO NOT MOVE -- on-surface error stays 1.32e-16, rendered body pixel count 6,143 -> 6,153
+(0.16%). That is the check that matters for a retopo: it must be a TOPOLOGY change, not a shape
+change, and the render confirms it rather than the face count implying it. This closes the "NO QUAD
+GUARANTEE" kept negative recorded against M-5 -- quads following the limb are what clean deformation
+needs.
+
+The LOD chain is taken through `silhouette_guard_chain`, not raw decimation, so a level that saves
+faces by eating a limb is REFUSED rather than shipped, and each surviving level carries its own
+measured max/mean error.
+
+### A SHADOWED ATTRIBUTE THAT RETURNED THE WRONG TYPE INSTEAD OF RAISING
+
+`LODLevel.index` is the TUPLE'S BUILT-IN METHOD, not a field. Reading it returns a bound method and
+formats as "<built-in method index of LODLevel object...>" -- it does not raise, it does not warn, it
+just yields a callable where an integer was expected. Caught only because the report was PRINTED with
+%d and blew up on the format. Now taken from `enumerate` and pinned with an isinstance assert. A
+shadowed attribute that silently yields the wrong TYPE is worse than a missing one.
+
+Also cost two probes this session: `quad_remesh` lives in `holographic_crossfield` (it is
+field-GUIDED, so it lives with the cross field), not in the polygon module its name suggests.
+
+### KEPT NEGATIVES (loud)
+
+* `tip_inset` IS REFUTED AS SHIPPED (0.58% -> 0.18%) and defaults to 0.0. It cannot help until the
+  socket resolver knows about it.
+* PARTS STILL DO NOT READ. The foot problem is unfixed; this session narrowed the CAUSE (independent
+  parameterisation) without fixing it.
+* 77% QUADS, NOT 100%. The remainder are triangles, mostly where the cage's marched topology leaves
+  odd valence. Fine for rendering, imperfect for subdivision.
+* THE LOD CHAIN IS SLOW on a full-resolution body -- the QEM chain on a 7.5k-vert mesh exceeded a
+  25-minute budget here, so the selftest runs it at cage_res=20. That is a real performance limit,
+  not a tuning choice.
+
+
+## THE DENOMINATOR -- a finding, a fix built on it, and both retracted
+
+DELTA: 594 modules, no new faculties. Audits 0/0/0, drift clean, compile-all clean, suites 176 passed.
+Docs 597. The code delta is small; the correction is the content.
+
+### WHAT I REPORTED LAST SESSION, AND WHY IT WAS WRONG
+
+Reported: "parts do not read -- the full part set changes only 0.58% of rendered pixels", and built
+`tip_inset` to fix it (then measured that inset made it WORSE and recorded that as a second finding).
+
+BOTH CLAIMS WERE ARTEFACTS OF ONE MISTAKE: 0.58% was a fraction OF THE WHOLE IMAGE, which is 95%
+background. Re-measured against the SUBJECT:
+
+    body silhouette   6,162 px -> 6,856 px with parts   (+11% of the body)
+    feet extend       0.095 below the body's lowest point = 2.6x a limb radius
+
+THE PARTS DO READ. The denominator was the defect. `tip_inset` was solving a problem that did not
+exist, which is exactly why shortening the limb never improved the number -- a fix that does not move
+its target is evidence about the TARGET, not only about the fix, and I read it as the latter.
+
+A PERCENTAGE NEEDS THE THING IT IS A PERCENTAGE OF STATED. This is every absolute-vs-relative bug of
+this arc (cell_scale, joint blend, organ blend, webbing tolerance) wearing a statistical costume: a
+quantity meaningful only relative to the body, expressed against something else. Fifth instance, first
+one in a MEASUREMENT rather than in a parameter.
+
+### THE ONE REAL BUG THE WRONG THEORY UNCOVERED
+
+Chasing it was not worthless. `resolve_limb_socket` marches OUTWARD from the limb station, which
+assumes the station is inside the body -- true only while the field and the station come from the
+same limb. They are parameterised INDEPENDENTLY (station from the creature's authored limb, field
+from whatever tree was compiled), so any tree that moves a limb tip puts the station outside, the ray
+never crosses inside->outside, and the function returned hit=False: ZERO PLACEMENTS, NO ERROR.
+
+Fixed by searching BACKWARD when the cast starts outside. Bit-identical when the station is inside
+(pinned), so no existing placement moves; and pinned for the outside case, because a silent miss is
+invisible to any test that only exercises the normal path. 7/7 placements at every inset now.
+
+### KEPT NEGATIVES (loud)
+
+* `tip_inset` REMAINS DEFAULT-OFF and is now known to be unnecessary, not merely unhelpful. It is
+  kept only because the socket fix makes it SAFE, and a future part type may want it.
+* THE 11% FIGURE IS ONE CAMERA, ONE POSE. Parts contribution will differ from other angles; nothing
+  aggregates over views.
+* THE REMAINING PART GAP IS COVERAGE, NOT VISIBILITY: horns, claws, fins, ears, antennae and digits
+  are in the library and nothing places them. That is the honest Tier 6 remainder.
+* I HAVE NOW MISREAD MY OWN MEASUREMENT TWICE IN THIS ARC in the same direction -- once believing a
+  metric that had silently degraded (webbing on a bare Rig), once believing a ratio with the wrong
+  denominator. Both times the number was plausible and the conclusion confident.
+
+
+## PART COVERAGE BY ROLE, and the denominator rule made structural
+
+DELTA: 594 modules, 2 new faculties (113 on p14), 1 catalog entry (163 on p06). Audits 0/0/0, drift
+clean, compile-all clean, suites 176 passed. Docs 597.
+
+### ONE RULE SET, THREE BODY PLANS, MEASURED
+
+`auto_sockets` now places by ROLE across the whole library surface: a ground-touching tip gets a
+FOOT, a LATERAL non-ground tip gets a HAND, the head gets eyes and a mouth (optionally ears, horns,
+and a dorsal spike ridge -- the last being the one part that is genuinely a swept tube and therefore
+the one D-5 still allows to fuse). Measured, with NO per-body-plan table anywhere:
+
+    quadruped   4 feet, 0 hands
+    centaur     4 feet, 2 hands
+    humanoid    2 feet, 2 hands
+
+That is D-1 stated in parts rather than in prose, and the counts are asserted EXACTLY -- "some parts
+were placed" is the shape of a test that passes while a hand sits on a neck.
+
+### WHICH IT DID
+
+The centaur's upright torso chain ends in a `tip` by every rule that makes an arm a tip, so it got a
+HAND ON ITS NECK. The fix had to be geometric, not a name check: branching on the chain being called
+"torso" is exactly the per-body-plan table D-1 forbids. LIMBS ARE LATERAL, BODY AXES ARE MEDIAL --
+measured, the centaur's neck tip sits at x=0.000 while its arms sit at x=0.471 of a 0.5 half-width,
+so a tip on the sagittal plane is a neck, a tail or a spine, never a manipulator. Uses the same
+bilateral-about-x assumption the mirror system already makes.
+
+### THE DENOMINATOR RULE, NOW A FUNCTION
+
+Last session's retraction produced a rule I said should be a habit. Habits are not enforceable, so it
+is now `ratio(n, d, of=...)` / `mind.measured_ratio`, which will not produce a percentage without
+naming what it is a percentage OF. Pinned with the exact case that burned me: the same part
+contribution reads 0.58% of the IMAGE and 11% of the BODY, both arithmetically correct, only one
+answering "do the parts read".
+
+This is the measurement twin of D-7. D-7 made every distance declare its reference length after the
+same bug appeared four times in parameters; this makes every ratio declare its denominator after it
+appeared once in a measurement and cost a session of work built on a false finding.
+
+### KEPT NEGATIVES (loud)
+
+* EARS, HORNS AND SPIKES ARE OFF BY DEFAULT. They place correctly (13 parts on a quadruped, 0 missed)
+  but they are a STYLE choice, not an anatomy one, and turning them on by default would put horns on
+  every creature anyone builds.
+* THE MEDIAL TEST ASSUMES BILATERAL SYMMETRY ABOUT X. A radially symmetric body (a starfish, an
+  anemone) has no sagittal plane and every tip would read as lateral. Correct for the bodies the
+  mirror system already supports; wrong beyond them.
+* CLAWS, FINS, ANTENNAE AND DIGITS remain unplaced. They are in the library; nothing sockets them,
+  because I have no geometric rule that says where a fin belongs that would not be a guess.
+* I COULD NOT VISUALLY VERIFY the centaur render this session -- the image viewer returned nothing
+  twice. The 8.0%-of-body-silhouette figure is the evidence for that build, not a look at it, and
+  after this arc's history that distinction is worth stating rather than glossing.
+
+
+## BILATERAL SYMMETRY WAS WORLD-RELATIVE -- the same bug, a fifth costume
+
+DELTA: 594 modules, 0 new faculties, 1 promoted helper (`sagittal_normal`). Audits 0/0/0, compile-all
+clean, 5 selftests green, suites 177 passed. Docs 597. The DEFAULT quadruped and centaur are
+BYTE-IDENTICAL to the previous build (sha 5ccbddd9a9959152 / 3e4d2afa428c9249 on their joint arrays,
+compared against the shipped zip).
+
+### FOUND BY PROBING MY OWN ASSUMPTION
+
+Last session I recorded a kept negative: "the medial test assumes bilateral symmetry about x". Rather
+than leave it as prose, I built the same quadruped with its spine along +X and MEASURED. It came out
+with TWO LEGS instead of four.
+
+The cause was not my test -- it was underneath it. `_mirror` reflected across the world x=0 plane,
+which is the sagittal plane ONLY when the spine runs along z. With the spine along +x the mirror
+plane CONTAINS the spine, every limb mirrors onto itself, the `abs(d[0]) > 1e-6` degeneracy guard
+correctly drops the twin as a duplicate, and `L0m`/`L1m` never exist. No error, no warning, half a
+creature.
+
+Fixed by deriving the plane from the body: `sagittal_normal(axis) = normalize(cross(up, spine_axis))`,
+stored on the Creature so anything asking "which way is sideways" asks the BODY. The degeneracy guard
+now asks the right question too (does the limb lie IN the sagittal plane), which for the default axis
+reduces to the old test exactly -- hence byte identity.
+
+MEASURED across three spine orientations (+Z, +X, and a diagonal): 16 segments and 4 mirrored chains
+in every case, where +X previously gave 8 segments and 2 chains.
+
+### THE PATTERN, NOW FIVE DEEP
+
+    cell_scale        an absolute world FREQUENCY where a body-relative one belonged
+    joint blend       an absolute LENGTH
+    organ blend       an absolute LENGTH
+    part contribution a ratio against the wrong DENOMINATOR
+    mirror plane      an absolute world DIRECTION
+
+Every one is the same mistake: a quantity meaningful only relative to the body, written against the
+world. D-7 fixed it for distances, `ratio(of=...)` for denominators, and this for directions. The
+useful generalisation is not "remember D-7" but: ANY QUANTITY THAT WOULD CHANGE IF THE BODY WERE
+MOVED, ROTATED OR RESIZED MUST NAME WHAT IT IS RELATIVE TO. That is now three enforcement mechanisms
+for one idea, which is the right number when a mistake has recurred five times.
+
+### KEPT NEGATIVES (loud)
+
+* LIMB `dir` IS STILL WORLD-AUTHORED. Rotating a spec's spine axis does NOT rotate its limbs, so the
+  centaur built along +X gets 2 feet rather than 4 -- its legs no longer reach the ground. The mirror
+  is fixed; the limb DIRECTION has the identical bug one level up. NOT fixed here because making
+  `dir` body-relative would silently re-point every limb in every existing spec, which is not
+  additive. It needs an opt-in `dir_space: "body"` key, unbuilt.
+* `sagittal_normal` FALLS BACK TO +X when the spine is parallel to up. A vertical body has no unique
+  sideways from spine and up alone; the fallback keeps the historical default rather than inventing
+  an answer, so a purely vertical creature is still world-locked.
+* RADIAL SYMMETRY IS STILL UNSUPPORTED. A starfish has no sagittal plane at all, and every tip would
+  read as lateral. The engine's own module docstring already scoped this out; nothing here changes it.
+
+
+## `dir_space: "body"` -- the limb-direction half of the same fix
+
+DELTA: 594 modules, 0 new faculties, 1 new SPEC KEY. Audits 0/0/0, compile-all clean, suites 177
+passed. Docs 597. Default quadruped still sha 5ccbddd9a9959152 -- byte-identical.
+
+### THE BUG, ONE LEVEL UP FROM THE MIRROR
+
+Fixing the sagittal plane made SYMMETRY body-relative. Limb `dir` had the identical defect above it:
+a world vector, so rotating a spec's spine axis did not rotate its limbs and the legs pointed where
+the ground no longer was. MEASURED on the quadruped along +X:
+
+    world-space dirs   2 feet reach the ground, 10 segments  (limbs mirrored onto themselves)
+    body-space dirs    4 feet,                  16 segments
+
+### WHY IT COULD BE ADDITIVE, WHICH IS THE WHOLE DESIGN
+
+`dir_space: "body"` reads the vector in the body frame -- x sideways (the sagittal normal), y up,
+z along the spine. FOR THE DEFAULT SPINE AXIS (0,0,1) THAT BASIS IS THE IDENTITY, so body space and
+world space are the same vector at the default orientation and only diverge once the body is turned.
+That is why a new key was possible where changing `dir`'s meaning was not: no existing spec moves,
+verified by asserting `_feet((0,0,1), "world") == _feet((0,0,1), "body") == (4, 16)` and by the
+unchanged joint hash.
+
+The gate also asserts that WORLD space STILL SHOWS THE DEFECT at +X. A migration knob whose old path
+has quietly been fixed is a knob measuring nothing.
+
+### KEPT NEGATIVES (loud)
+
+* OPT-IN MEANS THE DEFAULT IS STILL WRONG UNDER ROTATION. Every shipped spec (quadruped, centaur,
+  hexapod) uses world dirs and will still lose limbs if its axis is changed. Migrating them would be
+  a behaviour flip for anyone who has saved one; the honest state is that the FIX exists and the
+  DEFAULT does not use it.
+* THE BODY FRAME USES A FIXED WORLD UP (0,1,0). A creature whose spine is vertical has no unique
+  sideways from spine and up alone, so `sagittal_normal` falls back to +x and body space degenerates
+  toward world space exactly where it would be most useful.
+* `at`, `theta` AND SOCKET ANGLES ARE UNAUDITED for the same bug. I fixed the two places I measured;
+  I have not checked whether every other directional quantity in the spec is world-locked, and on
+  this arc's record the prior should be that at least one more is.
+
+
+## THE ROTATION PROBE -- and the finding that the rule was TOO SIMPLE
+
+DELTA: 594 modules, 1 new faculty (114 on p14), catalog entry extended. Audits 0/0/0, compile-all
+clean, suites 177 passed. Docs 597.
+
+### THE SWEEP I SAID TO DO
+
+Rather than wait for a sixth absolute-vs-relative bug to surface through a broken render, I built
+`rotation_invariance_probe` -- the directional twin of `scale_invariance_probe` -- and swept the spec
+surface with it. Results on the quadruped across four spine axes:
+
+                            dir_space=world        dir_space=body
+    segment count           16, 10, 16, 16         16, 16, 16, 16
+    foot count               4,  2,  4,  4          4,  4,  4,  4
+    chain count              4,  2,  4,  4          4,  4,  4,  4
+    spine arch magnitude    invariant              invariant
+
+So the opt-in key does what it claims, and the world default's defect is confirmed at exactly one of
+four orientations -- which is precisely how it hid for the whole arc.
+
+### THEN THE PROBE FOUND A VARIATION THAT WAS CORRECT
+
+Adding a VERTICAL spine (0,1,0), the body-space quadruped reports 2 feet, not 4. My first instinct
+was a seventh bug. The geometry says otherwise: with the spine vertical the creature is REARING --
+its front tips sit at y=0.524 while the back pair sits at y=-0.076, so only two limbs are anywhere
+near the ground. `auto_roles` defines a foot by height against the GROUND, and THE GROUND DOES NOT
+ROTATE WITH THE BODY. Two feet is right.
+
+### WHICH MEANS THE ARC'S RULE WAS TOO SIMPLE
+
+I had been converging on "make everything body-relative". That is wrong, and a naive sweep acting on
+every variation this probe reports would have BROKEN foot detection, which was correct all along. The
+accurate rule:
+
+    EVERY QUANTITY MUST BE RELATIVE TO THE RIGHT FRAME
+      BODY frame:   shape -- symmetry plane, limb direction, blend radii, texture scale, thickness
+      WORLD frame:  gravity -- what counts as a foot, which way is down, standing, support
+
+All five bugs fixed this arc were SHAPE quantities written in world terms. None of them were gravity
+quantities, and the one gravity quantity in the sweep was already right. The probes cannot tell the
+two apart -- they answer "does this change", and the caller must say which answer is correct. That
+limitation is now stated in the docstring as the point rather than as a caveat, and BOTH directions
+are pinned: world dirs must still show the defect, body dirs must be invariant, and the reared foot
+count must still vary.
+
+### KEPT NEGATIVES (loud)
+
+* THE SWEEP WAS NOT EXHAUSTIVE. I probed segment/chain/foot counts and arch magnitude. `at`, socket
+  `theta`, part orientation and gait phase are still unaudited; the probe now exists to check them,
+  and I have not run it on them.
+* A PROBE IS NOT A GATE. Nothing runs `rotation_invariance_probe` in CI over the spec surface. It is
+  a tool a session must choose to point at something, which is exactly how the scale probe's four
+  instances accumulated in the first place.
+* THE VERTICAL-SPINE CASE IS UNDER-SERVED EITHER WAY: `sagittal_normal` falls back to +x when the
+  spine is parallel to up, so a vertical body's "sideways" is world-locked even in body space.
+
+
+## DOGFOODING ROUND 2 -- four creatures, and the head that isn't one
+
+DELTA: 594 modules, 1 new faculty (115 on p14). Audits 0/0/0, compile-all clean, suites pass.
+
+### THE PIPELINE HELD UP ON BODIES IT HAD NEVER SEEN
+
+Built four creatures, three of them invented for this session, all opting into `dir_space: "body"`:
+
+    hexapod    23 segs   6 feet                       score 0.378   stands
+    serpent     8 segs   no limbs (correctly none)    score 0.206   stands
+    raptor     16 segs   2 feet + 2 HANDS             score 0.394   stands
+    quadruped  16 segs   4 feet                       score 0.365   stands
+
+The raptor is the result worth noting: I gave it one pair of ground-reaching limbs and one pair of
+raised ones, and the role rule worked out feet and hands with no per-plan input. Six feet on the
+hexapod, none on the serpent. That is D-1 doing its job on bodies written after the rule was.
+
+### THE VIEWER FAILED, SO I LOOKED THROUGH ASCII
+
+`view` returned nothing for the PNGs (valid files -- 420x320, 14 KB). Rather than trust numbers again,
+I used the engine's own `ascii_sdf`, which I CAN read. Both creatures came back legible: a horizontal
+torso mass with four legs and clear gaps between the pairs; the raptor with its raised limbs distinct.
+The un-webbed architecture is visibly holding.
+
+I also mislabelled my own first view -- the spine runs along z, so an eye offset in -z is a FRONT
+view, not a side one. Caught by the shape being symmetric when a profile should not be.
+
+### WHAT LOOKING FOUND THAT NO SCORE COULD
+
+The quadruped's profile reads as A TUBE THAT GETS FATTER AT ONE END. Measured half-thickness along
+its spine: 0.104, 0.114, 0.113, 0.114, 0.163. The head IS 1.43x the body -- and the profile is
+MONOTONE. There is no neck, so nothing SEPARATES the head mass from the torso mass, and a silhouette
+without a pinch does not read as headed however big the head is.
+
+That is backlog A-1's big-shape/medium-shape hierarchy, and neither `negative_space` nor `dominance`
+can see it: both are aggregate volume measures, and a neck is a LOCAL MINIMUM. Added
+`head_definition` (profile, head_ratio, neck_ratio, has_neck) to measure it.
+
+THE ASSERTION IS PINNED TO THE CURRENT, BAD STATE: `assert not hd["has_neck"]`, with a message saying
+that if a neck ever exists this test is the thing that should change. A gap recorded as a failing
+expectation gets fixed; a gap recorded as prose gets forgotten.
+
+### KEPT NEGATIVES (loud)
+
+* `head_definition` MEASURES, IT DOES NOT FIX. Giving the quadruped a neck is a spec change --
+  `spine_profile` already exists to express one -- and changing the shipped spec would move every
+  saved creature, so it is not done here.
+* THE PROFILE IS PROBED ALONG WORLD +Y from each spine node. For a body whose up is not world up
+  (the vertical-spine case again) it measures the wrong direction.
+* API FRICTION FOUND THIS ROUND: `ascii_sdf` wants `camera=(origin, forward)` while `m.camera()`
+  returns a `Camera` object -- two camera conventions in one engine, and the mismatch is a TypeError
+  rather than a conversion.
+
+
+## TWO COPIES OF ONE RULE, and the cross-section that proves the anatomy
+
+DELTA: 594 modules, 0 new faculties. Audits 0/0/0, compile-all clean, suites 177 passed. Docs 597.
+
+### THE NECK THAT COULD NOT BE AUTHORED
+
+Last round's finding was that the quadruped has no neck, and I noted `spine_profile` already exists
+to express one. Tried it. IT DID NOTHING -- the thickness profile came back byte-equal with and
+without a profile applied, no error.
+
+Cause: TWO COPIES OF THE RADIUS RULE. A private `radius()` closure inside `creature_tree`, and the
+public `segment_radii` helper -- which I had made public LAST SESSION specifically so the rule would
+have one home, and then left the closure in place. Teaching `segment_radii` to honour a per-node
+profile changed nothing, because the tree never called it.
+
+Fixed by DELETING the copy rather than fixing it twice. Measured after:
+
+    shipped   profile 0.105 0.114 0.113 0.114 0.162   has_neck False
+    necked    profile 0.120 0.146 0.147 0.122 0.161   has_neck True
+
+The necked body pinches 0.147 -> 0.122 before the head, which is what makes a silhouette read as
+headed. The shipped creature is unchanged (scaffold hash and webbing/negative-space identical), so
+the fix is additive.
+
+TWO LESSONS, and the second is the uncomfortable one. First: a feature that silently stops working
+when the default pipeline changes is worse than one that was never there -- `spine_profile` had
+"worked" for the old skin and quietly become a no-op. Second: I CREATED this drift myself, one
+session after writing the comment "one home for the radius rule, because two copies of one rule
+drift". Making a helper public does not remove the duplicate; deleting the duplicate does.
+
+### ALSO FIXED: head_definition probed along world +y
+
+Recorded last round as a kept negative, fixed here: the thickness probe now runs perpendicular to the
+SPINE (from the creature's own body frame), not along world up. Verified identical results for spine
+axes +Z and +X, and unchanged at the default.
+
+### THE CROSS-SECTION, WHICH IS THE TIER 4 PAYOFF
+
+Cut the necked creature with a sagittal plane and shaded the cut face by `tissue_at`. Read as ASCII
+because the PNG viewer keeps returning nothing:
+
+    outer rim  .  skin
+    then       o  fat
+    then       M  muscle
+    core       #  bone
+    inside     @  organs
+
+Concentric, in the right order, with viscera embedded in the muscle -- the nesting invariant
+`anatomy_report` asserts numerically (0 violations over 4000 samples) is now VISIBLY correct too.
+Tissue mix on the cut face: 2,782 bone / 2,376 muscle / 1,470 fat / 67 organ vertices.
+
+That is D-4 delivering what it promised: no per-tissue geometry was built. The cut is `max(f, plane)`
+and the colour is a material lookup, so "see inside" cost one field composition and one query.
+
+### KEPT NEGATIVES (loud)
+
+* A MIDLINE SAGITTAL CUT MISSES THE LIMBS entirely (they sit at x = +/-0.3), so the section shows
+  torso only. Correct, but a user wanting to see a leg's interior needs an off-midline or transverse
+  cut, and nothing suggests that.
+* THE BONE MASS READS LARGE in section -- bone is 45% of segment radius plus joint spheres, so a
+  midline cut through the spine is dominated by it. Plausible, not anatomical.
+* THE PNG VIEWER RETURNED NOTHING for these renders (valid files). Every visual claim this round is
+  from ASCII, which I can read; the rendered PNG is delivered but unverified by me.
+
+### ADDENDUM -- the necked creature WEBS, and the two goals are coupled
+
+The clean-extract check reported webbing 14/99 on the necked body where the shipped one scores 0.
+Measured across three profiles:
+
+    shipped        webbing  0/99   neck False   head 1.43
+    necked         webbing 14/99   neck True    head 1.18
+    necked-thin    webbing  0/99   neck False   head 1.62
+
+The webbing does not come from the NECK, it comes from the THICKER TORSO the same profile introduces
+(0.114 -> 0.147). The joint blend is relative to segment radius by design (that was the D-7 fix), so
+fattening the torso proportionally fattens every joint fillet, and the fillets start reaching into
+the corridors between limbs.
+
+So the two readability goals are COUPLED and I had been treating them as independent: a profile that
+gives the head separation by thickening the torso buys it with webbing, and one that avoids webbing
+(necked-thin) loses the pinch. Neither of the two shipped profiles achieves both. The readability
+SEARCH is the right tool for this -- it already scores negative space with webbing as a hard
+feasibility gate, and `spine_profile` is exactly the kind of knob it sweeps -- but it is not wired to
+sweep profiles, and I am not claiming a solution I have not measured.
+
+RECORDED, NOT PAPERED OVER: the necked creature in this session's cross-section is INFEASIBLE by the
+engine's own gate. The section is still a valid demonstration of the tissue stack; it is not a
+demonstration of a good creature.
+
+### ADDENDUM 2 -- the cross-section was rendered from the wrong side
+
+The user looked at the delivered PNG and said "the cross section view is on the other side I am
+guessing?". They were right, and the check is one line: the kept material spans x = -0.441 .. 0.000,
+so the cut face sits at x~0 pointing +x -- and my camera was at x = -2.04. I rendered the intact BACK
+of the creature and called it a cross-section.
+
+WHY IT LOOKED PLAUSIBLE, which is the part worth keeping: a body cut in half looks EXACTLY like an
+uncut body from the far side. There is no visual cue that anything is wrong, and every number I had
+checked (tissue mix on the mesh vertices, layer counts, nesting) was about the MESH, not about what
+the camera could see. A correct measurement of the wrong thing again -- the same shape of error as
+the denominator, arriving through a different door.
+
+Re-rendered from +x: the cut face now reads 25.5% muscle-red / 27.9% bone-white / 37.4% fat-yellow of
+the creature's pixels, where before the face contributed none. Transverse section confirms concentric
+rings in the right order:
+
+    .ooMMMMM######MMMMMoo.        . skin   o fat   M muscle   # bone   @ organ
+    .oooMMM@@@@@@@MMMMooo.
+
+FIXED AT THE SOURCE, not in my call site: `visible_field(cut=...)` now returns a field carrying
+`cut_face_normal`, `cut_point` and `camera_hint(dist)`. Material is kept on the NEGATIVE side, so the
+face points along +normal; that is a property of the cut, and the cut should carry it rather than
+every caller re-deriving a sign. Pinned in the selftest.
+
+KEPT NEGATIVE: nothing VERIFIES that a rendered cross-section actually shows a cut face. The colour
+census I ran by hand (muscle/bone/fat fractions of rendered pixels) is the check that would catch
+this, and it is not wired into anything.
+
+
+## ANATOMY, REBALANCED -- bone was 17.5% of the section, centred, and had no ribs
+
+The user looked at the cross-section and said the material gives little room for organs, muscle or
+fat but a lot to bone; that bone should not be so large, should not necessarily be centred, and that
+real bodies have things like rib cages. All three were right and all three were measurable.
+
+### 1. TOO MUCH BONE
+
+Measured at a mid-torso segment: bone 17.5% of section AREA, with muscle 37.8% -- a bone core wider
+than the muscle around it. Cause: bone was 45% of the skin radius, and area goes as radius squared,
+so "45% of the radius" is a much bigger share of the picture than it sounds.
+
+    before   bone 17.5%   muscle 37.8%   fat 31.1%   skin 13.5%
+    after    bone  8.0%   muscle 52.3%   fat 28.3%   skin 11.4%
+
+### 2. CENTRED
+
+A spine is DORSAL. Centring it leaves the body cavity as a RING around the bone; putting it dorsally
+leaves a real ventral space beneath it, which is the anatomical reason viscera have room. The offset
+is expressed as a fraction of the gap between the bone and muscle radii, so bone CANNOT leave the
+muscle envelope however large the fraction -- the nesting invariant holds by construction rather than
+by check (still 0 violations).
+
+### 3. NO RIBS
+
+The largest bone structure in a chest section is the rib wall, and it sits near the OUTSIDE of the
+cavity. `bone_field` now builds ribs as chains of thin capsules sweeping an arc from each vertebra
+down and around, mirrored by sweeping +/- the sagittal direction. MEASURED: 42% of bone volume is
+lateral (rib) rather than midline (vertebra).
+
+Bone is now BUILT rather than DERIVED. "The body at a smaller radius" cannot express a dorsal spine
+or a rib cage; it can only express a rod.
+
+### THE FLOOR HAD BECOME THE SPEC
+
+Found while rebalancing: the minimum-offset floor (0.5% of reference length, there so no layer has
+zero volume) was 0.0075 while the requested SKIN thickness was 0.004 -- so skin was floor-driven, not
+spec-driven, and read as a third of body volume. A MINIMUM THAT OVERRIDES THE THING IT PROTECTS is a
+bug wearing a safety belt. Lowered to 0.15%, which still prevents degenerate layers.
+
+### PINNED
+
+Area shares (bone < 11%, muscle > 40%), the spine being dorsal of the segment axis, and ribs being a
+real share of bone volume. Each is the thing a viewer would object to, asserted as a number.
+
+### KEPT NEGATIVES (loud)
+
+* THE DEFAULTS MOVED. `bone_frac` 0.45 -> 0.24, `fat` 0.20 -> 0.14, `skin` 0.06 -> 0.05, and bone is
+  now a different SHAPE. Every previously generated body changes. This is not additive; it is a
+  correction to a wrong default, and the old proportions remain reachable through the parameters.
+* RIBS ARE GEOMETRY, NOT ANATOMY. Equal arcs at every vertebra, no sternum, no floating ribs, no
+  costal cartilage, and they do not stop where a real rib cage stops -- a quadruped gets ribs along
+  its whole spine including the tail.
+* `tissue_thickness` STILL READS THE SCALAR `spine_radius`, not the per-node profile that
+  `creature_tree` now honours. So a necked creature's SKIN pinches while its muscle and fat layers do
+  not follow. Same class of bug as the one fixed last session, one layer over, and NOT fixed here.
+
+
+## FEET AND HIPS -- what a viewer objected to, and what the fixes cost
+
+The user looked at the render and said the feet look bad and the leg-to-torso junction looks bad, but
+the cross-section is better. Three fixes, two of which broke assertions that were encoding the OLD
+anatomy -- which is how you can tell they changed something real.
+
+### FEET: ORIENTED BY THE LEG, NOT BY THE GROUND
+
+The foot inherited its limb's frame (`along_axis`), so the sole faced wherever the shin pointed --
+splayed sideways like flippers. Backlog P-3 says it outright: "ground-orient at PLACEMENT, not only
+during gait". Added `ground_frame` and an `orient: "ground"` socket key; verified every sole normal is
+now exactly (0, 1, 0).
+
+THIS IS THE FRAME RULE AGAIN, from the world side: shape is body-relative, GRAVITY IS WORLD-RELATIVE,
+and a sole is a gravity quantity. Same rule that says a reared creature correctly has fewer feet on
+the ground.
+
+### THE ASSERTION THAT FAILED BECAUSE THE FIX WORKED
+
+`assert _below > _r` -- "feet must extend past the leg" -- failed at 0.0282 below vs a 0.0367 limb
+radius, on a foot that had just got better. A foot hanging off the shin like a spur IS deep; a foot
+lying FLAT is shallow and long. The old assertion measured depth because depth was all the old foot
+had. Replaced with the quantity that actually says "this reads as a foot": the horizontal footprint,
+plus a direct check that every sole faces the ground.
+
+### HIPS: A STICK EMERGING FROM A MASS
+
+Measured on the fat body: torso skin 0.155, limb root 0.055 -- a 2.8x mismatch, so the joint blend
+had to span the difference as a cone. That cone is the collar. Real limbs are not sticks: a thigh is
+thick at the hip and tapers to the ankle, so the blend spans almost nothing. Added `mount_flare`,
+expressed as a FRACTION OF THE LOCAL BODY RADIUS (D-7) so it holds lean or fat, and only ever growing
+a root that is too thin.
+
+HONEST RESULT: the improvement is REAL BUT MODEST in silhouette, and it is not free -- webbing went
+24 -> 25 on the fat body. Crucially the 24 was ALREADY THERE at flare 0.0, so the flare costs one
+pair and the fat body is what webs. The fat/webbing coupling recorded earlier is still the dominant
+effect and is still unsolved.
+
+### THE FLOOR THAT ATE THE SLIDER (again, one layer over)
+
+Making fat fill to the authored radius silently killed the fat slider wherever the authored radius
+already exceeded the tissue stack: `fat: 4.0` returned exactly the lean body. Fixed by splitting the
+ring into a BASELINE and the slider's EXTRA, with the extra riding on top of the floor. Second time
+this arc a floor has swallowed the thing it was protecting -- first the min-offset over skin
+thickness, now the authored radius over fat.
+
+Also retuned the default stack to sum to EXACTLY 1.0 x R (bone .24 + muscle .50 + fat .21 + skin
+.05), so a default creature needs no fill at all and `fill_fat` only acts when the author asks for
+something thicker. Before, the stack summed to 0.85 and every body was silently 15% padded, which is
+why muscle read 37.8% of section area instead of 49%.
+
+    final section: bone 5.8%  muscle 49.0%  fat 35.5%  skin 9.7%   (organs 1.4% of volume, was 0.3%)
+
+### KEPT NEGATIVES (loud)
+
+* THE HIP IS BETTER, NOT GOOD. A flared root is still a capsule meeting a capsule; there is no
+  deltoid, no shoulder blade, no skin fold. The collar is smaller, not absent.
+* GROUND-ORIENTED FEET ASSUME THE CREATURE IS STANDING. A foot on a raised limb, a swimming pose or a
+  creature lying down gets a sole facing the sky. `orient` is per-socket so it CAN be turned off, and
+  nothing decides that automatically.
+* THE DEFAULTS MOVED AGAIN (muscle .42 -> .50, fat .14 -> .21). Every previously generated body
+  changes. Same justification as last time -- a wrong default corrected -- and the old values remain
+  reachable, but this is the second such change in two sessions and anyone with saved creatures pays for
+  both.
+
+
+## MESH QUALITY -- "unacceptably low quality", quantified and fixed
+
+The user called the render triangulated and sloppy. That is a measurable quantity: the MEAN DIHEDRAL
+ANGLE between adjacent faces. Measured on the shipped scaffold: 11.1 deg mean, 36.5 deg at p95. It
+was not an impression, it was 11 degrees.
+
+### THREE CAUSES, ONE OF THEM EMBARRASSING
+
+1. `render_mesh` DEFAULTS TO `smooth=False`. Flat shading draws every facet, so even a good mesh
+   looks polygonal. Every render I have shown in this arc used the default. Smooth shading is
+   implemented and one keyword away; verified it changes 5.85% of pixels (max 0.61), so it was
+   working all along and simply never switched on.
+2. THE CAGE IS MARCHED, so it arrives faceted no matter how exactly its vertices sit on the field --
+   the scaffold projects vertices ONTO the surface but does not add any.
+3. NO SUBDIVISION STEP existed in the creature pipeline at all.
+
+### THE FIX, AND WHY SUBDIVIDE ALONE WOULD NOT HAVE WORKED
+
+Subdivide AND RE-PROJECT. Subdividing alone smooths the shading normals while leaving the SILHOUETTE
+polygonal -- the new vertices sit on the old flat faces. Projecting them back onto the field puts
+them on the true surface, so each level halves the faceting AND tightens the outline:
+
+    level 0    10,808 faces   mean 11.13 deg   p95 36.5
+    level 1    43,232 faces   mean  6.00 deg   p95 16.7
+    level 2   172,928 faces   mean  3.04 deg   p95  7.4
+
+On-surface error stays 1e-16 at every level -- the added vertices are EXACT, not interpolated.
+`build_creature` now defaults to `subdiv=1`.
+
+### THE DEFAULT THAT HUNG AN UNRELATED TEST
+
+Defaulting `subdiv=1` quadrupled the input to the selftest case that exercises quads and the QEM LOD
+chain -- already on record as the slow step -- and put the module selftest over its time budget.
+Pinned that one case to `subdiv=0` with the reason, since it tests topology, not surface quality.
+A QUALITY DEFAULT THAT MAKES AN UNRELATED TEST HANG is a real cost of the change, not an accident of
+the harness; the selftest now runs in 63s.
+
+### KEPT NEGATIVES (loud)
+
+* SMOOTH SHADING IS STILL OFF BY DEFAULT in `render_mesh`, and I did not flip it -- its docstring
+  says "default-off, byte-identical absent", so flipping it would move every existing render. That
+  means the OBVIOUS call still produces the faceted look, and the fix is a keyword the caller must
+  know. That is a discoverability gap I am recording rather than closing.
+* SUBDIVISION IS UNIFORM. Every face is split regardless of curvature, so a flat flank costs as much
+  as a knuckle. Adaptive subdivision driven by the dihedral angle would give the same smoothness for
+  a fraction of the faces; unbuilt.
+* THE PARTS ARE NOT SUBDIVIDED. Feet, eyes and mouth come from the library at their authored
+  resolution and are welded on as-is, so at subdiv=2 the body is smooth and the FEET are still
+  faceted -- which is exactly where the user's eye went first.
+* 172,928 FACES AT LEVEL 2 is a lot for a creature this size, and nothing decimates it afterwards.
+  The LOD chain exists but is not wired into the quality path.
+
+
+## PART GEOMETRY AND JUNCTION TOPOLOGY -- "smashed geometry with no definition"
+
+The user objected to the feet specifically and to the limb/body junctions being "messy geometry not
+topologically optimised for animation". Both were measurable, and the foot one was blunt.
+
+### THE FOOT WAS A PLATE
+
+MEASURED: the foot part's bounding box was 0.211 x 0.171 x 0.040 -- a 4.3:1 length-to-height plate.
+The builder swept the pad along +Z for 0.028 and laid every toe FLAT in the same plane, so the part
+was a disc with spokes: no heel, no arch, no ankle, nothing for the eye to name. "Smashed geometry
+with no definition" was a literal description.
+
+Rebuilt around the three things backlog P-3 actually lists:
+
+    SOLE PLANE      the pad sweeps HEEL-TO-TOE along +Y with a varying radius (wide heel, narrow
+                    arch, wide ball) -- a footprint rather than a disc
+    TOE SILHOUETTE  toes leave the BALL, thicker (0.026 vs 0.020 base) and less fanned, so the gaps
+                    between them survive at render scale
+    ANKLE JOIN      a tapering column rising in +Z where the leg lands, so the foot MEETS the limb
+                    instead of being a plate stuck across its end
+
+    before   bbox 0.211 x 0.171 x 0.040   L/H 4.3
+    after    bbox 0.173 x 0.169 x 0.117   L/H 1.4
+
+### AND THE PART SELFTEST CAUGHT MY FIRST VERSION
+
+"foot should stand on its socket, not sink below it" -- I had centred the sole ON the socket plane,
+so half the pad hung below it. A part's origin IS its socket and it grows along +Z, which
+`ground_frame` maps to world up; for a foot that means the SOLE sits at z~0 and the ankle rises. The
+assertion existed, was specific, and fired on the first wrong build.
+
+### JUNCTIONS: SMOOTHING DOES NOT FIX TOPOLOGY
+
+Tried Taubin smoothing first, on the theory that the junction mess was vertex placement. MEASURED:
+mean minimum triangle angle 31.5 -> 31.2 deg, slivers (<15 deg) 10.1% -> 10.5%. It moves vertices,
+not connectivity, so it cannot help -- and the honest reading is that I tested the wrong hypothesis
+first. RETOPO is what fixes topology:
+
+    scaffold triangles   mean corner 60.0 deg   corners < 20 deg  6.8%   83% quads after
+    after quad retopo    mean corner 85.9 deg   corners < 20 deg  2.5%
+
+A quad's ideal corner is 90, so 85.9 is close to isotropic, and slivers -- which deform badly and
+shade badly, i.e. exactly "not optimised for animation" -- drop by nearly two thirds. Vertices do not
+move, so this is topology at zero fidelity cost. NOW ON BY DEFAULT (`quads=True`).
+
+### THE FACULTY DEFAULT SEAM, FOR THE THIRD TIME
+
+Flipping `quads=True` in the module changed nothing through `mind.build_creature`, because the
+FACULTY still defaulted to False and passed it explicitly. Third instance this arc of a default that
+differs between a module and its faculty. `delegation_drift` does not catch it -- it compares
+signatures for MISSING parameters, not for disagreeing DEFAULTS. That is a real gap in the tool.
+
+### KEPT NEGATIVES (loud)
+
+* PARTS ARE SUBDIVIDED BY THE CALLER, NOT THE PIPELINE. `build_creature` subdivides the BODY; the
+  render above subdivides the parts by hand. A foot at authored resolution next to a subdiv-2 body is
+  visibly coarser, and nothing in the pipeline evens that out.
+* 252,585 FACES for one small creature, and no decimation afterwards. The LOD chain exists and is
+  still not wired into the quality path.
+* THE JUNCTION IS BETTER, NOT AUTHORED. Retopo regularises the triangles where a limb meets the body;
+  it does not give that junction the EDGE LOOPS an animator would want around a shoulder. Real
+  animation topology means loops following the deformation, which quad_remesh does not aim at.
+* ONLY THE FOOT WAS REBUILT. hand() delegates to foot() so it inherits the fix, but eye, mouth, horn,
+  claw, fin, antenna, ear and spike are untouched and may have the same plate problem.
+
+
+## PARTS FUSED INTO THE FIELD -- the feet were never one surface
+
+The user rejected the rebuilt feet too, and the close-up shows why: a ball with cones sticking
+through it, each shell's silhouette crossing the others. BETTER SHAPED PARTS DID NOT HELP BECAUSE THE
+SHAPE WAS NEVER THE WHOLE PROBLEM.
+
+### THE ACTUAL DEFECT
+
+`place_parts` welds each part in as a SEPARATE MESH overlapping the limb. The part library's own
+docstring says it: "watertight but NOT manifold-checked at the seams where sub-pieces meet". So a
+foot was a pad mesh, an ankle mesh and N toe meshes, all intersecting each other AND intersecting the
+leg, with no surface ever computed between them. Up close that is not a foot, it is a pile of shells
+in roughly the right place -- and no amount of reshaping the individual pieces fixes it.
+
+### THE FIX: ONE FIELD, ONE SURFACE
+
+`foot_sdf` builds the foot as an SDF -- flattened ellipsoid sole, ankle capsule, toe capsules, all
+SMOOTH-UNIONED -- and `part_field` places it in world space by transforming the QUERY through the
+socket frame. `build_creature` then unions those fields into the body's own field and meshes ONCE.
+The scaffold, the subdivision and the quad retopo all act on a foot that is genuinely the end of the
+leg. That is D-5's "good socket join", which the backlog insists is the answer to a visible seam --
+not fusing everything into a global blob, and not leaving the seam alone.
+
+    154,629 faces, 88% quads, ONE continuous surface, 2 separate parts left (eye, mouth)
+
+### AND THE CAGE HAD TO LEARN ABOUT THEM
+
+The scaffold cage is built from the RIG, so geometry unioned into the field that the rig does not
+know about has NO cage vertices near it -- and shrinkwrap can only move vertices it already has.
+MEASURED: on-surface error went from 1e-16 to 0.0030 the moment feet were fused, because the toes had
+nothing to project. Added `extra_bones` so a caller that adds geometry to the field adds its skeleton
+too; that recovers most of it (0.0030 -> 0.0022) but NOT all.
+
+### THE ASSERTION ENCODED THE OLD ARCHITECTURE, AGAIN
+
+"a quadruped must place feet" failed -- correctly -- because feet are no longer PLACED, they are IN
+the surface. Third time this arc a test has failed because the thing it tested got better. Rewritten
+to pin BOTH contracts: fused, the mesh must extend below the rig; unfused, the placement path must
+still work and still ground-orient its soles.
+
+### KEPT NEGATIVES (loud)
+
+* THE FUSED SURFACE IS NOT EXACT: 0.0022 on-surface vs 1e-16 for the body alone, because the
+  `extra_bones` stub is a straight capsule while the foot has toes fanning off it. The toes are the
+  part the cage still under-covers, which is precisely where the eye goes.
+* EYE AND MOUTH ARE STILL SEPARATE MESHES. Only the foot has an SDF form, so the head still has
+  shells sitting on it -- the same defect, unfixed, in a less prominent place.
+* TOPOLOGY IS ISOTROPIC, NOT ANIMATION-AUTHORED. 88% quads with near-90-degree corners is good
+  topology in the isotropic sense; it still is not the edge-loop layout an animator wants around an
+  ankle or a shoulder, and quad_remesh does not aim at that. The user asked for animation-suitable
+  topology and this is one honest step short of it.
+* `foot_size` IS A MANUAL KNOB. Nothing scales the foot to the limb it lands on, so a thin limb with
+  the default foot still looks over-shod.
+
+
+## THE THREE THINGS, IN ORDER -- unfuse, author, over-scale
+
+The user rejected the fused feet and put a Spore screenshot next to ours. Both were fair. Three
+changes, done in the order they were agreed.
+
+### 1. STOP FUSING (D-5, as written)
+
+`fuse_parts` now defaults to FALSE. Last session I smooth-unioned the feet into the body field while
+QUOTING D-5 in the comment, which is the same decision the backlog records as a historical mistake:
+"I shipped parts-as-geometry with a seam, was told they looked glued on, and 'fixed' it by fusing
+everything into the field... the fix is a good socket join, not fusion."
+
+The measurement that made it clear the fusion was not even solving the stated problem: toe gaps
+SURVIVE in the field at every blend value tested (0.000 / 0.006 / 0.012 / 0.020 -> 3 separations
+each). The blend was never what erased the toes. Fusion stays reachable for the one case D-5 allows
+-- horns, spikes and claws, which genuinely are swept tubes.
+
+### 2. AUTHOR THE PARTS
+
+    DIGITS GOT KNUCKLES. A smooth taper is a CONE, and a row of cones is a pile of spikes -- there is
+    nothing in a cone for the eye to name. `digit` now rides a cosine bulge on the taper, so the toe
+    swells at each joint and narrows between: MEASURED, 4 radius oscillations along its length where
+    before there were 0. Claws lengthened (0.55 -> 0.62) and narrowed.
+
+    THE SOLE GOT AN ARCH. Heel wide, arch PINCHED, ball wide again -- the double bulge is most of
+    what makes a footprint readable. Sampled at 9 control radii instead of 5, because at 5 the arch
+    was averaged away between control points.
+
+### 3. OVER-SCALE, AND SCALE TO THE LIMB
+
+Backlog A-1 says "over-scaled features" and I had under-applied it: toes were 1.3% of body length,
+which is nothing at any camera distance. `part_scale` defaults to 2.4 and is MULTIPLIED BY THE LIMB
+RATIO (`segment_radii(tag) / 0.037`), so a part is bold on any body plan instead of being tuned for
+one creature. Measured foot-region footprint: 84% of body length at scale 1.0, 107% at 2.4.
+
+### TWO DIAGNOSES I GOT WRONG FIRST, WORTH KEEPING
+
+* BLAMED THE BLEND. Measured: toe gaps survive at every blend value. Wrong.
+* BLAMED THE MESHER. Measured: the scaffold captures the foot region BETTER than marching (0.0007 vs
+  0.0056 on-surface). Wrong. The toes were in the geometry the whole time and were simply too small.
+
+Both were plausible, both were tested, both were refuted before anything was built on them -- which
+is the only reason the third diagnosis (proportion) got a chance.
+
+### KEPT NEGATIVES (loud)
+
+* THIS STILL DOES NOT REACH SPORE, and the reason is the one the backlog already stated: Spore's
+  parts are hand-modelled art with an art director enforcing proportion. Procedural parts are a
+  weaker substitute and the remaining gap is mostly art direction, not algorithm.
+* ONLY foot/hand/digit WERE AUTHORED. eye, mouth, horn, claw, fin, antenna, ear and spike still have
+  the original construction and may have the same cone-and-lozenge problem.
+* THE SEAM IS BACK, BY CHOICE. Discrete parts overlap the limb without a computed union, so there is
+  a visible intersection at the ankle. D-5 calls that the honest price and says the answer is a good
+  socket JOIN -- which is still unbuilt; nothing trims the limb to meet the part.
+* `part_scale = 2.4` IS A TASTE CONSTANT chosen to make feet read at this body size. It is not
+  derived from anything.
+
+
+## CONVOLUTION SURFACES -- the literature says I was using the wrong operator
+
+The user observed that feet and hands are not my strong suit and suggested searching the literature.
+That was the right call: the answer is a known, specific technique and I had not been using it.
+
+### THE SOURCES
+
+* Bloomenthal & Shoemake 1991, "Convolution Surfaces" (SIGGRAPH '91)
+* Bloomenthal, "Hand Crafted" -- a human hand as 85 convolution primitives: a palm of 15 CONTIGUOUS
+  triangles, fingers of 48, plus line segments for tendons and veins
+* Fuentes Suarez, Hubert & Zanni 2019, "Anisotropic convolution surfaces" (Computers & Graphics 82)
+* (also surfaced, not used yet: Hubert-Brierre, Cani & Galin 2026, "Extreme continuous level of
+  detail for skeleton-based implicit surfaces", Computers & Graphics 138)
+
+### THE OPERATOR WAS WRONG
+
+Bloomenthal states the property directly: "because of the superposition property of convolution, the
+sum of individual convolution surfaces does not produce unwanted bulging... When the primitives are
+contiguous, the resulting implicit surface contains no bulge."
+
+I had been building every extremity by SMOOTH-UNIONING capsules, where THE BLEND IS THE BULGE. That
+is the collar at the hip, the lump at the ankle and the melted toes -- one operator choice, showing
+up in every place I have been patching individually for several sessions.
+
+MEASURED on a right-angle joint, distance from the corner to the surface along the bisector:
+
+    smooth-union of two capsules   0.1065
+    contiguous convolution         0.0788      26% less, and no parameter to tune
+
+### AND THE SHAPE CONTROL WAS MISSING
+
+Fuentes Suarez et al.: convolution surfaces "have been limited to close-to-circular normal sections",
+extended to ELLIPSOIDAL sections given by a rotation and three radii, which "creates smooth shapes
+that previously required tweaking the skeleton or supplementing it with 2D pieces". That is exactly
+what I was doing -- faking a flat sole with a scaled ellipsoid and extra blobs. MEASURED: an
+anisotropic section comes out 0.0602 wide by 0.0151 tall, a real 4:1 sole, from ONE segment.
+
+### I REPRODUCED BLOOMENTHAL'S OPEN PROBLEM, THEN FIXED IT
+
+He flags what convolution does NOT solve: "the prevention of unwanted blending between individual
+convolution surfaces; for example, when two fingers approach each other, they should not blend."
+Contiguity fixes JOINTS, not PROXIMITY, because convolution sums everything.
+
+MEASURED on a 3-toe fan, counting solid runs across the toes: summing all segments together gives
+1 run -- every toe webbed into a single blob, his defect reproduced exactly. Evaluating each toe as
+its own GROUP and hard-unioning gives 3. That is the same metaball-groups rule the creature body
+already uses, applied at digit scale, and it answers a problem left open in the source paper.
+
+### KEPT NEGATIVES (loud)
+
+* THE PARTS PIPELINE DOES NOT USE THIS YET. `holographic_creatureconv` is built, wired and measured;
+  `foot()` in the part library still builds its mesh the old way. Swapping it is the next step and
+  is NOT done here -- the module is the capability, not the migration.
+* THE CONVOLUTION IS NUMERICALLY INTEGRATED (24 samples per segment), not a closed form. The
+  literature has closed forms per kernel and per primitive; a quadrature is honest and pure NumPy but
+  it is O(samples) per segment per query and will be slow at mesh resolution.
+* ANISOTROPY IS A DIAGONAL WARP of the query in the segment frame, which is the cheap form of
+  Fuentes Suarez et al.'s formalism -- theirs interpolates rotation and three radii along G1 circular
+  splines and is scale-invariant. Mine is per-segment and constant along it.
+* THE FIELD IS NOT A DISTANCE FIELD. A convolution field is a density; `iso` selects a level set. It
+  will not satisfy the Lipschitz assumptions the sphere tracer and the scaffold projector rely on, so
+  feeding it to those paths needs a bound or a conversion first.
+
+### MIGRATION -- the part library now builds its foot this way
+
+`holographic_creatureconv` was the capability; this is the migration I said was not done.
+
+`skeleton_mesh` marches a grouped convolution field into a mesh -- necessary because the parts
+pipeline consumes MESHES and a convolution field is a DENSITY, not a distance field, so it cannot be
+handed to the sphere tracer or the scaffold projector. Polygonising is where only the SIGN matters,
+which is exactly what marching needs.
+
+`partlib.foot()` now defaults to it. MEASURED against the merged-shell foot it replaces:
+
+    old (pad + N toe meshes merged)     866 verts   mean dihedral 21.9 deg   p95 60.5   100% manifold
+    convolution surface               4,206 verts   mean dihedral 15.7 deg   p95 55.4   100% manifold
+
+Smoother, and with a real sole profile (bbox length/height 2.27 rather than a plate). The old
+construction stays reachable as `foot(convolution=False)` -- a shipped shape should stay reachable --
+and `_foot_merged` keeps it honest about what it is.
+
+VERIFIED BY LOOKING, not only by the numbers. A top-down slice of the field prints three separate toe
+lobes with clear gaps, merging into a ball and tapering to a heel -- a readable footprint, which is
+what every previous foot failed to be:
+
+              ####        ######        ####
+              ########## ######## ##########
+                  ######################
+               ############################
+            ##################################
+
+Pinned in the selftest: the convolution foot must be smoother than the merged one, and must be
+longer than it is tall.
+
+KEPT NEGATIVE: only the FOOT migrated. `hand` still delegates to the old merged builder, and eye,
+mouth, horn, claw, fin, antenna, ear and spike are untouched. The convolution path costs ~5x the
+vertices of the shell version at res=56, and nothing decimates parts afterwards.
+
+### THE 42% FOOT -- a multiplier that could not notice the mesh changed under it
+
+The user's render showed feet like giant leaves. MEASURED: the placed foot was 0.637 long on a 1.509
+body -- 42% OF BODY LENGTH, where a real foot is 10-15%.
+
+TWO OF MY OWN CHANGES MULTIPLIED. I set `part_scale = 2.4` for A-1's "over-scaled features", then
+rebuilt the foot as a convolution surface which is intrinsically bigger (0.268 long vs 0.169). A
+BLIND MULTIPLIER CANNOT NOTICE THAT ITS INPUT CHANGED SIZE. Each change was defensible alone and
+their product was absurd, which is the failure mode of tuning a factor instead of stating a size.
+
+Replaced with `foot_frac`: the target foot length AS A FRACTION OF THE BODY (default 0.13), with the
+scale SOLVED from the mesh's actually-measured length. Change the mesh and the scale corrects itself.
+Verified: placed length 0.195 = 13% of body, on target. Still modulated by the limb it lands on, so a
+thick-legged creature gets a chunkier foot -- around a size the BODY sets, not one the library
+happened to be drawn at.
+
+This is D-7 for the fifth or sixth time and the first in a PART SIZE: express the quantity relative
+to what it must look right against. A multiplier is not a size.
+
+GATED, because this is exactly the class of error that keeps escaping: the selftest now asserts the
+PLACED foot length is between 7% and 22% of body length -- the thing a viewer actually judges, not
+the factor that produced it.
+
+KEPT NEGATIVE: I could not visually confirm the corrected render (the image viewer returns nothing
+for me). The body silhouette reads correctly in ASCII -- torso mass, four legs, clear gaps -- and the
+foot size is measured on target, but the composition at the new size is unverified by eye. Given this
+arc's history, that distinction matters: a number on target is not a look confirmed.
+
+### THE HIP -- the same paper answers the junction, and I had only applied it to the foot
+
+The user: feet look better, the legs attaching to the body is now the main issue. Correct, and the
+fix was already in hand -- I had applied Bloomenthal's result to the FOOT and not noticed it answers
+the hip identically. A hip is a joint like a knuckle.
+
+`smooth_union` between a limb and the torso ADDS material at the mount; that added material IS the
+collar. Contiguous convolution adds none. MEASURED at a hip, distance from the joint to the surface
+along the limb/spine bisector:
+
+    smooth_union tree   0.1375
+    convolution         0.1052      23% less, with no blend parameter to tune
+
+The slice through the junction is the clearer evidence. Under smooth_union the hip is ONE FILLED
+MASS -- the leg is subsumed into the body by a wide fillet. Under convolution the junction tapers and
+the leg visibly SEPARATES from the body:
+
+    smooth_union            convolution
+    ##################      ##############
+    ##################      ############
+    ############            ##########
+    ######                  #####    #####      <- leg and body distinct
+
+AND IT IS NOT A TRADE. Webbing stays 0/99 and negative space IMPROVES, 0.431 -> 0.553, so the
+cleaner junction also makes the creature read better. `build_creature(surface="convolution")` selects
+it; the SDF tree remains the default.
+
+WHAT THIS SAYS ABOUT THE LAST SEVERAL SESSIONS: mount_flare, tip_inset, the fusion experiment and the
+Taubin smoothing were all attempts to patch a bulge that the OPERATOR was creating. One paper, read
+once, retired the whole class. I should have searched the literature several sessions earlier -- the
+user suggested it and it immediately produced the answer to two separate complaints.
+
+KEPT NEGATIVES (loud)
+* CONVOLUTION IS NOT THE DEFAULT. It is a DENSITY, not a distance field, so the sphere tracer and the
+  scaffold projector -- both of which assume a Lipschitz bound -- cannot use it directly. The body
+  must be marched (sign-only) and retopologised, which is why `surface="sdf"` still ships as default.
+* IT IS SLOW: a numerically integrated convolution is O(samples) per segment per query, and the body
+  needed res=104 marching to resolve. The literature's closed forms would fix this and are unbuilt.
+* THE HEAD IS STILL A SPHERE smooth-unioned on, and eye/mouth are still separate shells. Only the
+  spine and limb chains are convolution groups.
+
+### THE MISSING HEAD -- a whole body part absent, and no gate noticed
+
+The user: the legs joining the torso looks better, but the head is weird now. Diagnosed in one look
+at the code: `creature_groups` built the spine chain and the limb chains AND NOTHING ELSE. The
+convolution body had NO HEAD. What the render showed near the front were the eye and mouth parts
+floating in front of a headless neck.
+
+WHY NOTHING CAUGHT IT, which is the part worth keeping: webbing cannot see a missing mass, negative
+space cannot, anatomy nesting cannot, and the readability score cannot. Every gate this arc built
+measures a RELATION between things that are present. NONE of them asks "is everything that should be
+here, here". A whole body part vanished and the entire instrument suite stayed green.
+
+Fixed by appending the head to the SPINE CHAIN rather than unioning a sphere onto it -- so the skull
+is a THICKENING of the body axis. That also matters for the reason this module exists: a
+smooth-unioned sphere would have added a bulge at the neck, which would have been the one place still
+showing the defect convolution was adopted to remove.
+
+    field at head centre  -0.1198   (negative = the head is there)
+    head ratio             1.56
+    webbing                0/99, negative space 0.546 -- unchanged, so the head costs nothing
+
+Pinned twice: the head centre must be INSIDE the surface, and `head_ratio` must exceed 1.2 so it is a
+head and not a neck that merely continues.
+
+THE TRANSFERABLE LESSON: this arc's gates are all relational. A PRESENCE gate -- every part the spec
+declares must exist in the surface -- is a different kind of check and does not exist. The head assert
+added here is one instance of it, not the general thing.
+
+ALSO CONFIRMED, from the kept negatives: `ascii_sdf` returned a blank frame on the convolution body
+because it SPHERE-TRACES, and a convolution field is a density with no Lipschitz bound. The recorded
+negative predicted exactly this failure before it happened, which is the first time this arc a
+written-down negative has pre-explained a symptom rather than being rediscovered.
+
+### THE FLOATING EYES -- my render script, not the engine
+
+The user saw shapes floating above the head and the creature facing away. Both were mine, and neither
+was a modelling bug.
+
+THE FLOAT: my render script called `build_creature` TWICE -- once with `surface="convolution"` for the
+body mesh, and once with the DEFAULT `surface="sdf"` for the parts. A part is positioned by
+RAY-CASTING the body field, so parts placed against one surface and drawn onto another sit exactly
+where the OTHER body was. Measured within a single build, all 7 parts land at depth 0.0000 -- dead on
+the surface. The engine was right; the script asked two different questions and combined the answers.
+
+THE BACK VIEW: the head sits at the +Z end of the spine and my camera was at -Z. Trivial, but it cost
+the user a round trip, and the fix is the same class as the cross-section camera being on the wrong
+side of the cut plane -- I keep placing cameras without asking the geometry where the front is.
+
+VERIFIED BY FLOOD-FILLING THE RENDER, not by eye (the viewer returns blank for me): the silhouette is
+ONE connected mass of 8,949 px plus three single-pixel antialiasing specks. Floating parts would show
+as separate islands of real size. They do not.
+
+GATED: `build_creature`'s selftest now asserts, for EVERY surface mode, that every placed part lands
+on its own body field within 1e-3. A caller can still combine two builds by hand, but the engine's own
+output is now checked to be self-consistent, which is what would have made the defect obvious.
+
+The lesson is small and annoying: the pipeline was correct and my USE of it was not, twice in one
+render. That is the same failure the dogfooding sessions kept finding -- the path a caller takes is
+not the path the author tests.
+
+
+## CRYSTAL GROWTH AND TERRAIN EROSION -- verified, one real bug in each
+
+Both modules' selftests passed before I started. Both had a defect the selftest did not ask about.
+
+### CRYSTAL: {hkl} WAS NOT A FORM
+
+In crystallography braces denote the FORM -- every symmetry-equivalent face -- so cubic {100} is SIX
+faces (a cube) and {111} is EIGHT (an octahedron). `crystal_habit` takes EXPLICIT faces and applies
+each with both signs only, which its docstring states correctly, but the consequence was never
+tested: ask for {100} expecting a cube and you get a SLAB, silently.
+
+    cubic {100}, size 0.5     volume 5.76      <- a slab, not a cube
+    pointwise |f(P) - f(R90 P)|  up to 0.97    <- not invariant under a 90-degree turn
+
+Added `form_faces(system, hkl)` and `crystal_habit(..., form=True)`, which expands the form under the
+system's point group (cubic permutes indices and signs; tetragonal/hexagonal permute only the two
+equivalent axes, which is the whole reason those systems are not cubic).
+
+    cube volume        1.0022   (exact: side 1.0)
+    octahedron volume  0.8495   (analytic (4/3)a^3 = 0.866)
+    symmetry           2.2e-16 and 4.4e-16 pointwise, from 0.97 and 1.15
+
+AN INSTRUMENT NOTE: my first symmetry test compared OCCUPANCY of two different random point sets and
+read 0.5012 vs 0.4928 -- a 1.7% gap I nearly wrote off as sampling noise. It was sampling noise, and
+it was also hiding a real asymmetry. The pointwise test f(P) vs f(R*P) is the one that can see it,
+and it is now what the selftest does.
+
+### TERRAIN: THE EROSION LOOP DIVERGES, AND I FAILED TO FIX IT
+
+Erosion is correct at the default and genuinely CHANNELISED -- the top 5% of cells carry 42% of all
+material moved, which diffusion does not do -- deterministic under seed, seed-sensitive, and it lowers
+peaks. But `cap` scales with the local drop and the drop is a consequence of prior erosion, so the
+loop has positive gain. Same terrain, same seed, varying ONLY the droplet count:
+
+     2,000 (default)   range   0.03 ..    1.00     clean
+    20,000                    -1.44 ..    7.05     already outside the input range
+    40,000                   -20.21 ..   48.26
+    50,000                -1.6e+07 .. 3.8e+07      runaway
+    60,000            mean height -4.9e+08
+
+The docstring already records this exploding once at capacity=4.0 and being "fixed" by defaulting to
+1.0. That moved the threshold; it did not remove the loop.
+
+I TRIED TO FIX IT AND MADE IT WORSE. Clamping the drop that feeds `cap` took 30,000 droplets from
+-2.4..5.9 to -18.7..52.7, because a smaller cap trips the `sediment > cap` branch and trades an
+erosion runaway for a DEPOSITION runaway. The loop has two signs and clamping one end feeds the
+other. REVERTED rather than shipped: a half-fix that moves the failure to a different regime is worse
+than a documented limit, because the limit can be avoided and the half-fix cannot be reasoned about.
+
+Documented instead as a measured STABILITY LIMIT in the docstring, with the numbers, the safe regime,
+and the refuted clamp so nobody retries it. A real fix needs a per-droplet erosion budget or a global
+mass constraint, not a clamp.
+
+KEPT NEGATIVES (loud)
+* THE EROSION LIMIT IS DOCUMENTED, NOT FIXED. Default droplet counts are safe on a 128x128 grid;
+  nothing warns if a caller raises them, and nothing scales the safe count with grid size.
+* FORM EXPANSION IS OPT-IN (`form=False` default), so the existing slab behaviour is unchanged for
+  anyone relying on it -- which also means the trap is still the default.
+* `form_faces` COVERS cubic and the two-axis systems properly; monoclinic and triclinic return the
+  face itself, which is right for triclinic and an approximation for monoclinic.
+
+### CRYSTALS WITH PHYSICAL GEM MATERIALS -- one more integration gap
+
+Rendering the new crystal FORMS with the shipped gem materials found a third defect in the same area.
+
+THE GAP: `crystal_habit` returns a plain callable, and its docstring says it "drops straight into
+mesh_from_sdf / the raymarcher" -- true for both. But the PATH TRACER calls `sdf.eval(P)`, because it
+must march rays THROUGH the interior to find the exit face for refraction, and a function has no
+`.eval`. So a habit could be meshed and sphere-traced but NOT path-traced -- meaning no crystal could
+be rendered with the refractive gem materials that exist precisely for it. Fixed with `sdf.eval = sdf`:
+the function stays a function, so nothing that already calls it changes.
+
+THE MATERIALS ARE REAL, not art-directed. `holographic_matlib` carries measured indices of
+refraction -- diamond 2.42, sapphire and ruby 1.77, emerald 1.58, quartz and amethyst 1.55 -- and the
+path tracer takes IOR as a per-point channel, so Fresnel and refraction come from the physics rather
+than from a tuned "glassiness" slider.
+
+RENDERED, four habits each in its own gem, verified by measurement rather than by eye:
+
+    diamond   octahedron {111}        IOR 2.42   10 distinct facet tones
+    amethyst  hex prism + rhomb cap   IOR 1.55   10
+    ruby      dodecahedron {110}      IOR 1.77   11
+    emerald   prism + pinacoid        IOR 1.58   12
+
+The facet-tone count is the check that matters: a flat blob would show one or two luminance plateaus.
+Ten to twelve means the half-space intersection really is producing distinct faces, each catching the
+sky at its own angle -- which is what a faceted crystal is.
+
+KEPT NEGATIVE: no DISPERSION. One IOR per material means white light does not split, so a diamond
+shows brilliance but no fire. The tracer would need per-wavelength IOR and spectral sampling; the
+`_IOR` table is scalar. Also no absorption along the path (Beer-Lambert), so a thick ruby is not
+darker than a thin one -- the colour is an albedo tint, not a path-length effect.
+
+### CRYSTAL CLUSTERS WITH DISPERSION AND CAUSTICS
+
+The user wanted formations grown on their lattices, not cut gemstones, with dispersion, refraction and
+caustics. Three things had to be built; two of them did not exist.
+
+DRUSE GEOMETRY. A cluster is one FORM placed many times, not many forms: each crystal nucleates on a
+shared substrate, grows along its own c-axis and tilts outward. So the builder transforms the QUERY
+through a per-crystal rotation and offset and takes the min. The lattice fixes the shape (quartz =
+hexagonal prism {10-10} capped by the rhombohedron {10-11}, which is why natural quartz is a pointed
+hexagonal rod); the substrate fixes the direction. A first pass had every prism lying flat -- the
+hexagonal c-axis is +z and nothing stood it up -- caught by the cluster's z-extent filling the whole
+sample box.
+
+DISPERSION DID NOT EXIST and is now real, not a tint. Rendered at three wavelengths (Fraunhofer C, d
+and F) with the index of refraction solved per wavelength from CAUCHY, whose two constants come from
+the material's own n_d and ABBE NUMBER -- the way a glass catalogue states dispersion. So the spread
+is the material's:
+
+    quartz    n_d 1.550  V 70   R 1.5476  G 1.5500  B 1.5555   spread 0.0079
+    diamond   n_d 2.420  V 55   R 2.4123  G 2.4200  B 2.4381   spread 0.0258
+    ruby      n_d 1.770  V 72   R 1.7668  G 1.7700  B 1.7775   spread 0.0107
+
+Diamond splits 3.3x harder than quartz, which is exactly why diamond has fire and quartz does not.
+MEASURED in the renders: R-B channel separation mean 0.25-0.30, p99 up to 0.61 -- the colour fringes
+are refraction splitting the sky per wavelength, since the geometry is identical between passes and
+only n changes.
+
+CAUSTICS need a RECEIVER. Refracted light has to land on something, so the scene carries an opaque
+floor; measured 6-16% of the floor band is above 1.5x its own median brightness -- concentrated light,
+which is what a caustic is.
+
+COST: three passes at 150x120, 28-32 spp, 6 bounces = 155-270 s per cluster. This is the offline
+NumPy tracer, as its own docstring says.
+
+KEPT NEGATIVES (loud)
+* THREE WAVELENGTHS IS NOT A SPECTRUM. Real dispersion is continuous; RGB sampling gives fringes at
+  the right MAGNITUDE but cannot show a full spectral smear, and it can alias into false colour where
+  the split exceeds a channel's width.
+* STILL NO ABSORPTION (Beer-Lambert). A thick crystal is not darker than a thin one -- colour is an
+  albedo tint, so a deep amethyst point and its tip read the same.
+* CAUSTICS ARE BRUTE-FORCE and noisy: the tracer has no next-event estimation and no photon mapping,
+  so a sharp caustic needs samples rather than an algorithm. What is visible is the bright pooling,
+  not crisp focused lines.
+* THE CLUSTER IS A UNION OF WHOLE CRYSTALS. Real druses interpenetrate and share faces where they
+  grew into each other, and the twinning laws (Dauphine, Brazil, Japan for quartz) are not modelled.
+
+
+## CRYSTAL GROWTH -- one physical rule, four growth modes
+
+New module `holographic_crystalgrow` (598 -> 599 modules), 6 faculties (125 on p14), 1 catalog entry
+(166), 6 suite tests. Audits 0/0/0, drift clean, compile-all clean, 176 + 6 tests pass.
+
+### RULE 0 FOUND THE SEEDING PRIMITIVE ALREADY BUILT
+
+`find_capability` on six phrasings returned only unrelated fallbacks for growth -- but probing turned
+up `emit_from_surface`, which already projects points onto ANY SDF, returns their normals, AND takes
+a `weight` that may be a constant, a map or a FIELD. That last part is the entire "grow crystals only
+where this material is" feature, sitting there unused. The module delegates to it rather than
+sampling surfaces again.
+
+### THE ONE RULE
+
+    A CRYSTAL GROWS PERPENDICULAR TO THE SUBSTRATE IT NUCLEATED ON.
+
+Competitive growth is why: seeds start in every orientation, but a crystal pointing away from the
+wall keeps reaching fresh solution while one lying flat is buried by its neighbours. The survivors
+point out.
+
+That single fact collapses what looked like four features into one call plus flags:
+
+    druse       grow_on a small blob                    -- radiates because the blob's normals do
+    surface     grow_on any SDF, gated by `where`
+    cavern      the same, on a chamber wall, vein-gated
+    geode       grow_on(inward=True) on a cavity        -- points at the middle for the same reason
+
+A geode is NOT a special shape. It is the identical algorithm on a surface whose outward direction
+happens to face inward, plus a rind. Building it any other way would have been four code paths for
+one phenomenon.
+
+### MEASURED, NOT ASSERTED LOOSELY
+
+    habit proportions scale-invariant     occupancy 0.073 at size 0.25 vs 0.071 at 1.00
+    crystals protrude past the substrate  and the host stays solid (>0.95 of its interior filled)
+    geode hollow                          0.00 filled at centre, 1.00 in the rind, distinct band between
+    field gating WORKS                    mean vein weight under crystals 0.313 -> 0.577
+    cavern lining                         0.702 under crystals vs 0.380 everywhere
+
+The gating number is the one that matters: "it ran" would pass with the weight ignored entirely, so
+the gate compares the field value UNDER the crystals against the field value at large.
+
+### AN ASSERTION ARITHMETIC ERROR, CAUGHT BY ITS OWN FAILURE
+
+"substrate=True must keep the host solid" failed at first -- not because the host was missing, but
+because I compared the host's volume against the WHOLE SAMPLE BOX, where a ball of radius 0.5 in a
+2.4-cube is only 4%. The threshold was measuring the box. Fixed to a CONDITIONAL rate (of points
+inside the host, what fraction is filled: 1.00). Same family as the denominator error earlier in this
+arc, caught in seconds this time because the assertion was specific enough to be obviously wrong.
+
+### KEPT NEGATIVES (loud)
+
+* CRYSTALS ARE UNIONED, so two that interpenetrate give the outer envelope of both, not the
+  re-entrant contact surface real intergrowth produces. Twin laws (Dauphine, Brazil, Japan) absent.
+* NO COMPETITIVE OCCLUSION. Real druses are sparser than their seeding because neighbours bury each
+  other as they grow; here every seed survives at full size, so a high `count` reads as a bush rather
+  than a crowded one thinning itself.
+* SIZE JITTER IS UNIFORM RANDOM, not a growth history. Crystal size distributions are broadly
+  log-normal (older nuclei are larger); this does not model that.
+* THE VEIN FIELD IS A DEMONSTRATOR -- summed sinusoids, deterministic and NumPy-only, not a
+  geologically motivated vein model. Any callable P->[0,1] can replace it, which is the point.
+* THE GEODE RIND IS A SPHERICAL SHELL. Real nodules are lumpy and their cavities are not concentric
+  with their outsides.
+
+### RENDERING THE GEODE WITH PHYSICAL MATERIALS
+
+PER-REGION MATERIALS, decided by GEOMETRY rather than by tagging: the scene is a field, so a point's
+distance from the nodule centre says what it is. Floor -> opaque pale receiver, rind -> rough opaque
+rock (roughness 0.85), lining -> amethyst's OWN measured constants (IOR 1.55, roughness 0.08,
+transmissive). That is what makes the crystals dielectrics rather than purple-painted surfaces.
+
+LIGHTING, and the reasoning is the useful part: the tracer has no next-event estimation, so it finds
+a light only by chance. A small fierce sun therefore produces FIREFLIES while a broad bright sky
+delivers the same energy at a fraction of the variance -- and the pale floor bounces fill upward into
+the cavity, which is what stops the crystals sitting in a black hole. Measured: only 2 samples in the
+whole image exceeded the firefly threshold (0.003% of pixels), against the speckled earlier renders.
+
+EXPOSURE WAS SWEPT, NOT GUESSED. The first tone map (white point p99, gain 0.9) gave contrast 0.431
+with 0.2% highlights -- flat, and no dielectric sparkle at all, which is the entire point of a gem.
+Sweeping the white point showed p95/gain 1.3 best: contrast 0.445 and 38.2% highlights. Pushing
+further (p85/gain 2.0) raised highlights to 68.8% but LOWERED contrast to 0.419 by blowing the
+midtones, so the sweep has a real optimum rather than "brighter is better".
+
+FRAMING WAS CHECKED WITH A MASK RENDER, not another 190 s path trace: a cheap sphere-traced hit mask
+answers "what fills the frame" in seconds. It corrected a false alarm -- "subject 90.7% of frame"
+looked like the camera was inside the geode, but the subject mask counts the FLOOR too. The real
+split is nodule 44.1% (64% of it crystal lining), floor 38.9%, sky 17.0%, which is a reasonable
+product-shot composition.
+
+COST, MEASURED, because I got this wrong three times: ~124 s at 130x105 / 20 spp / 46 crystals, and
+it scales WORSE than linearly in bounce depth. Estimating 240x195 / 40 spp / 7 bounces from that
+probe overran a 29-minute budget twice. The final is 160x130 / 20 spp / 6 bounces in 192 s.
+
+KEPT NEGATIVES (loud)
+* THIS IS PLAUSIBLE, NOT PHOTOGRAPHIC. 20 spp on an offline NumPy tracer with no next-event
+  estimation and no photon mapping cannot produce crisp caustics; what is there is bright pooling.
+* FIREFLY CLAMPING MAKES THE TAILS DIMMER, not more correct. It is a variance trade, stated rather
+  than hidden.
+* NO DISPERSION IN THIS RENDER. The 3-wavelength Cauchy path exists (built earlier this arc) but
+  triples the cost, and at this scene's per-crystal field cost that did not fit the budget.
+* A BACKGROUND RENDER DID NOT SURVIVE the shell session -- `nohup` with a heredoc still died when the
+  command returned. Long renders have to fit inside one synchronous call here, which is why the final
+  is sized to ~190 s rather than to what would look best.
+
+### THE COLOUR WAS THE LIGHT, NOT THE TONE MAP
+
+Second pass at the geode render. The first came back at 3% purple and 0% warm rock, and I spent an
+exposure sweep trying to fix it -- purple stayed ~3% AT EVERY EXPOSURE, which is the measurement that
+identified the real cause: a tone map cannot add colour that the render never had.
+
+THE LIGHT WAS THE PROBLEM. A midday sky was the only source, and with transmission=1 and NO
+Beer-Lambert absorption a thin crystal barely tints what passes through it, so the sky's blue won
+twice over -- once on the rind, once through the gem. Three corrections, all lighting rather than
+grading:
+
+    warmer key           hour 12.5 -> 9.0, so the sun is lower and warmer
+    warm bounce floor    pale grey -> sand (0.72, 0.58, 0.40), putting a complementary bounce into
+                         the cavity, which is what separates rind from crystals
+    deeper pigment       amethyst albedo pushed toward magenta, because without absorption the only
+                         way a transmissive material tints is per-interaction albedo
+
+    before   purple  3.1%   warm rock 0.0%   saturation 0.302 (and flat at every exposure)
+    after    purple 13.3%   warm rock 1.2%   contrast 0.468
+
+AMETHYST COLOUR ZONING was added at the same time and is the physically-motivated part: real amethyst
+gets its colour from Fe centres that concentrate as the crystal grows, so tips are saturated and
+bases near the wall are pale, often near-clear quartz. Modelled from the one thing the field knows --
+distance inward from the cavity wall. MEASURED spread in the render: purple saturation p10 0.253,
+p50 0.422, p90 0.595, so the gradient survives into the image rather than being a uniform wash.
+
+COST IS DRIVEN BY GLASS COVERAGE, NOT PIXELS -- the estimate that failed twice. Tighter framing raised
+glass from 28.8% to 36.6% of frame, and every glass pixel spawns refracted rays that MARCH THROUGH
+crystal interiors. A 280x230 tight render overran 29 minutes where the pixel count alone predicted
+~10. Fewer, larger crystals cut field cost linearly without changing coverage: 30 crystals at 240x200
+/ 16 spp / 5 bounces runs in 214 s.
+
+KEPT NEGATIVES (loud)
+* NO BEER-LAMBERT is now the dominant realism gap, not a footnote. Without path-length absorption a
+  thick crystal is no darker than a thin one, so depth reads as albedo and the fix had to be
+  ARTIFICIAL pigment deepening. That is the next real feature, and it would also make the zoning
+  physical rather than a positional tint.
+* WARM ROCK IS ONLY 1.2% of the frame. The rind is genuinely narrow at this framing; it reads more
+  as a dark border than as stone.
+* 16 spp, 5 bounces, no NEE: still plausible rather than photographic.
+
+
+## BEER-LAMBERT ABSORPTION -- implemented, promoted, integrated, and it fixed the gem look
+
+The kept negative I had been restating for three sessions is now a feature. 1 new tracer channel,
+2 faculties (127 on p14), 1 catalog entry (167), absorption constants for 12 materials.
+
+### THE IMPLEMENTATION WAS SMALL BECAUSE THE INFORMATION WAS ALREADY THERE
+
+The path tracer's refraction branch already marches to the EXIT face to bend the ray a second time,
+so the interior path length was computed and thrown away every bounce. Absorption is
+`throughput *= exp(-sigma * |exit - entry|)` on the transmitted ray only. An 8th material channel
+carries sigma per RGB; the 4/5/6/7-tuple callbacks are untouched and default to 0.
+
+MEASURED on glass pixels (the whole frame dilutes it -- averaging in the background sky, which no
+absorption ever touches, hid a real shift until the test masked to the ball):
+
+    sigma = 0      (0.928, 0.928, 0.955)
+    absorbing      (0.107, 0.103, 0.163)      darker AND hue-shifted, blue surviving as designed
+    thin ball 0.974 vs thick ball 0.836       thickness dependence, which is the entire point
+
+### PROMOTED, so the next channel does not get missed the same way
+
+`trace_channels(name)` returns a material as the tracer's full 8-channel callback. Every caller in
+this arc hand-assembled that tuple, and each one silently dropped whatever channel had not existed
+when it was written -- which is EXACTLY how the gem renders ran an entire arc with absorption unset
+while I kept writing "no Beer-Lambert" in the negatives. A promoted builder means a new physical
+channel reaches every caller that uses it instead of each having to be found and edited.
+
+### INTEGRATED, and the artificial fix could be deleted
+
+Last session I deepened amethyst's pigment BY HAND to get colour back, because without absorption a
+transmissive material barely tints. That hack is gone: colour zoning now rides on SIGMA rather than
+albedo (pigment concentrates toward the tips, so absorption rises inward), which stacks with path
+length instead of replacing it.
+
+    purple coverage   3.1% -> 13.3% (warm light) -> 29.5% (absorption)
+    contrast          0.388 -> 0.468 -> 0.499
+    crystal luminance p10 0.175 / p50 0.273 / p90 0.396 -- a real spread between thin edges and
+                      deep interiors, which is the depth cue absorption exists to produce
+
+### DENOISED with the engine's own SVGF
+
+The grain needed the G-buffer SVGF wants, which the tracer does not return -- so it is built by
+sphere-tracing the same camera rays for depth, normal and albedo. MEASURED grain (mean absolute
+neighbour difference in luminance): 0.0738 -> 0.0202, 73% LESS, with the edges kept because the
+filter is normal- and depth-aware rather than a blur.
+
+### KEPT NEGATIVES (loud)
+
+* THE SIGMA VALUES ARE A MODELLING CHOICE, not spectroscopy. Real absorption is a per-wavelength
+  curve; three numbers per material is the same three-sample approximation as the dispersion work,
+  and the two are not yet coupled (a dispersive render still uses one sigma set for all three passes).
+* SIGMA IS IN 1/SCENE-UNIT, so a gem modelled at 1 unit and the same rock at 10 units need different
+  numbers. `trace_channels(scale=)` exposes that rather than hiding it, but nothing derives the scale
+  from the object's size automatically.
+* ABSORPTION APPLIES ONLY TO THE ENTRY->EXIT SEGMENT the refraction branch computes. A ray that
+  re-enters the solid gets attenuated again, correctly, but total internal reflection paths inside a
+  crystal are not tracked as a continuous interior walk.
+* THE DENOISER IS SINGLE-FRAME. SVGF's temporal half needs motion vectors and a frame history; this
+  is the spatial edge-aware pass alone, so very sparse samples still smear rather than resolve.
+
+
+## CRYSTAL IMPERFECTIONS -- what separates a specimen from glass
+
+New module `holographic_crystalflaw` (600 modules), 6 faculties (133 on p14), 1 catalog entry (168).
+Audits 0/0/0, drift clean, compile-all clean.
+
+### THE DESIGN DECISION: FLAWS ARE OPTICS, NOT SHAPE
+
+Cloudiness, inclusions, phantoms and fractures all change ABSORPTION, ALBEDO and ROUGHNESS as a
+function of position and leave the geometry alone. Only chipping touches the SDF. That split is why
+they compose: a modifier works with any habit, any growth mode and any host material, instead of
+each crystal type needing its own flawed variant.
+
+It is also physically right. An inclusion is seen THROUGH the host, so what matters optically is that
+light crossing that region is absorbed and coloured differently -- not that the surface changed.
+
+### THE MEASUREMENTS THAT MAKE THEM MORE THAN TINTS
+
+    CLOUDINESS IS SCATTERING, NOT PIGMENT. Milky quartz is quartz full of sub-micron fluid
+    inclusions, so it WHITENS rather than saturating. Gated on exactly that: added absorption came
+    out [1.92, 1.92, 1.92] -- equal across RGB to within 0% -- and albedo saturation fell 0.571 ->
+    0.296. A version that just added more of the gem's own colour would fail this.
+
+    PHANTOMS ARE CONCENTRIC BY CONSTRUCTION. A growth pause dusts the surface and later growth
+    buries it, so the ghost is the SAME habit scaled down. Built by evaluating the habit's own field
+    at a scaled position; measured, the veil hugs the scaled habit surface to |d| 0.011. That is what
+    distinguishes a phantom from an arbitrary interior blob, and it falls out of reusing the habit
+    rather than inventing a shape.
+
+    INCLUSIONS read as opaque specks: 8x the host's absorption and a darker albedo.
+    CHIPS ONLY SUBTRACT -- asserted, because a "damage" operator that can add material is a bug.
+
+### SHOWCASE
+
+Four specimens in ONE scene -- clear (with fractures), milky, amethyst with phantoms, and rutilated
+(needle inclusions, elongation 5, golden albedo) -- so it is one trace and every crystal sees the
+same light, which is what makes the comparison fair. 65 s at 380x170 / 20 spp / 5 bounces, far
+cheaper than the geode because cost tracks CRYSTAL COUNT and glass coverage, not resolution.
+
+Denoised 0.0735 -> 0.0241 grain, 67% less. Per-column measurements confirm the four differ rather
+than being one material relabelled:
+
+    clear     luminance 0.745  saturation 0.185  variance 0.0044
+    milky     luminance 0.726  saturation 0.198  variance 0.0081
+    phantom   luminance 0.691  saturation 0.236  variance 0.0229
+    rutile    luminance 0.738  saturation 0.190  variance 0.0061
+
+The variance column is the informative one: the phantom specimen is 5x more spatially varied than the
+clear one, which is the internal structure showing up as measurable image content.
+
+### KEPT NEGATIVES (loud)
+
+* PHENOMENOLOGICAL, NOT MINERALOGICAL. Real inclusions are minerals with their OWN refractive index,
+  so light refracts at their boundary; here they are absorption and albedo variations within the
+  host's index. Good for small scattered flecks, poor for a large included crystal.
+* CLOUDINESS DOES NOT SCATTER, IT ABSORBS NEUTRALLY. True milkiness is multiple scattering, which
+  would brighten the crystal from within and blur what is seen through it; neutral absorption only
+  dims and desaturates. The `sss` channel exists and is not used here.
+* THE FLAW FIELDS ARE SUMMED SINUSOIDS, chosen for C-infinity smoothness because absorption is
+  sampled at arbitrary points along a ray and a discontinuous field bands the transmitted light.
+  They are not a mineral texture model.
+* CHIPPING IS SPHERE SUBTRACTION, so damage is round. Real conchoidal fracture in quartz leaves
+  curved shell-shaped scars with sharp edges, which a sphere cannot make.
+
+### CLUSTERS UNDER A STRUCTURED SKY -- why the flat showcase was flat
+
+The user: clusters for each, and the environment is boring, which makes the crystals boring. Both
+correct, and the second is the causal one.
+
+A CRYSTAL SHOWS YOU THE ENVIRONMENT, REFRACTED. A uniform sky dome and a mirror-flat grey floor put
+the SAME constant into every facet, so a transmissive object comes back featureless no matter how
+good its material is. That is why the single-prism showcase read as plastic: the materials were fine
+and there was nothing for them to transmit. Three fixes, all environment rather than gem:
+
+    BROKEN CLOUD          cirrus 0.55 + altostratus 0.45, so each face picks up something different
+    WARM/COOL GRADIENT    low sky warmed, zenith cooled -- a real gradient rather than one colour
+    MOTTLED ROLLING GROUND  a gently undulating floor with two-scale rock colour, so the bounce into
+                          the crystals varies across the frame
+
+MEASURED, and this is the check that says the environment is doing work:
+
+    sky band     mean 0.649  std 0.0457     structure, not a flat dome
+    floor band   mean 0.198  std 0.0274     mottled, not a constant
+    crystal band mean 0.258  std 0.2032     4.5x the floor's variation -- the gems are picking it up
+
+CLUSTERS, not lone prisms: each specimen is a 5-crystal druse from `cluster()`, which also gives every
+crystal NEIGHBOURS to refract. A lone prism against a blank sky has nothing in it to see.
+
+Denoised 0.0608 -> 0.0141, 77% less grain. Per-cluster, the four still differ measurably:
+
+    clear    lum 0.677  sat 0.077  variance 0.0130
+    milky    lum 0.665  sat 0.081  variance 0.0177
+    phantom  lum 0.597  sat 0.189  variance 0.0340
+    rutile   lum 0.672  sat 0.077  variance 0.0046
+
+COST, again the binding constraint: 4 clusters x 7 crystals with chipping overran 29 minutes. Cut to
+5 crystals per cluster and 4 chips each -- 20 crystals, 340x155, 16 spp, 5 bounces, 148 s. The cost
+curve is crystal COUNT x glass coverage, and chipping multiplies it because each chip is another
+sphere in the per-query loop.
+
+KEPT NEGATIVE: the RUTILE cluster has the LOWEST variance (0.0046) of the four, which is the opposite
+of what needles should do. At this crystal size the inclusions are near the resolution limit, so they
+average into a tint instead of reading as individual needles -- the feature works (the selftest
+measures 8x absorption in the specks) but the RENDER cannot resolve it. It needs either bigger
+crystals in frame or a closer camera, not more samples.
+
+### FINAL SHOWCASE PASS -- and calibrating instead of estimating
+
+Contrast 0.536 -> 0.682, grain -71%, and every specimen now measurably distinct. Changes:
+
+    GOLDEN-HOUR KEY   hour 7.6, sun 38, cirrus 0.60 + altostratus 0.40. A LOW sun rakes the faces so
+                      each catches a different angle; a high sun lights them all the same.
+    RICHER SKY        warm/cool gradient on top of the cloud model -- sky band std 0.1557, so the
+                      dome the crystals transmit actually has content.
+    THREE-SCALE ROCK  floor std 0.0487 (was 0.0274), so the bounce into the gems varies too.
+    BIGGER IN FRAME   camera closer, clusters tighter. This was aimed at a MEASURED defect: the
+                      rutile needles were below the resolution limit last pass, showing up as the
+                      LOWEST image variance of the four when needles should give the highest.
+
+    clear    lum 0.606  sat 0.109  variance 0.0459
+    milky    lum 0.527  sat 0.131  variance 0.0623
+    phantom  lum 0.526  sat 0.254  variance 0.0537
+    rutile   lum 0.662  sat 0.087  variance 0.0247   (0.0046 -> 0.0247, 5.4x better resolved)
+
+Rutile is still the flattest of the four, so the fix helped without closing the gap -- the needles are
+resolved 5x better and still average toward a tint. Honest state: partially fixed.
+
+### THE COST LESSON, FINALLY MEASURED RATHER THAN GUESSED
+
+FOUR overruns across two sessions estimating this scene. The calibration probe (90x42, 6 spp, 5
+bounces, 7.1 s) gives 0.0003 s per pixel*spp, which predicts 360x165 at 22 spp as ~510 s -- and that
+run exceeded 1700 s. So COST IS SUPERLINEAR IN SPP on glass-heavy scenes: more samples means more
+rays surviving deep enough to enter glass, and interior marching dominates. Linear extrapolation from
+a cheap probe UNDERSTATES a transmissive scene, every time.
+
+The rule that actually works here: probe, then take a size well BELOW the linear estimate. 300x138 at
+16 spp / 5 bounces ran in 175 s against a 208 s linear prediction, which is the regime where the
+estimate is roughly honest.
+
+### DISPERSION WAS DROPPED ON PURPOSE
+
+The 3-wavelength Cauchy path exists and works, but quartz's Abbe number gives a spread of 0.0079
+against diamond's 0.0258 -- quartz barely splits light, which is WHY quartz has no fire. Spending 3x
+the budget to render a physically negligible effect, at the cost of resolution and samples that are
+visible, is the wrong trade. Recorded as a decision, not an omission: for a diamond or zircon
+showcase it would be the right call.
+
+KEPT NEGATIVE: highlights sit at 25.8% at the chosen exposure, which is high -- the sweep preferred
+it because contrast scored well, but a stricter penalty would have picked wp98.0 (contrast 0.574,
+highlights 2.2%). The two are genuinely in tension here and I took contrast; a photographer might not.
+
+## MERGE WITH UPDATED MAIN
+
+Main had moved on substantially while this arc ran. Merged rather than overwritten, because both
+sides had real work and either file taken whole would have deleted the other's.
+
+### ESTABLISHING A BASE INSTEAD OF GUESSING
+
+No pristine base existed locally, so a two-way copy would have been the only option -- and it would
+have been wrong. GitHub was reachable, so the repo was cloned and history searched for the commit our
+tree forked from: e82562a matched 3 of 4 untouched probe files. The uploaded zip turned out to be
+AHEAD of pushed main (it contains hrnn.py, absent from origin), so the zip is the merge target and
+the clone supplied only the base.
+
+    ours = /home/claude/work    theirs = uploaded zip    base = e82562a
+
+### WHAT EACH SIDE HAD
+
+    only in main   31 files -- hrnn, supermemory, superposed, sentinel, statedemand, triage,
+                   modeltrain, nested, program induction, and 42 NEW FACULTIES on p14
+    only in ours    9 files -- crystalgrow, crystalflaw, creatureconv, creatureproportion,
+                   creaturereport, creaturetissue, creaturetree, rig, test_crystalgrow
+    both changed   36 files
+
+### HOW EACH CLASS WAS RESOLVED
+
+    18 files   git merge-file 3-way, clean
+     3 files   real conflicts, resolved by inspection:
+                 sdf.py        our fillet_union, which main simply lacks -> ours
+                 pipelines.json a generated coverage tally -> main's (rebuilt anyway)
+                 catalog_p06   BOTH sides registered capabilities, 17 ours / 25 theirs, ZERO
+                               overlap -> UNION. Taking either alone would have silently deleted
+                               the other's entire catalogue contribution.
+     7 files   ours is a strict superset (no main-only defs) -> ours
+     1 file    p14_organics -- METHOD-LEVEL UNION, described below
+     6 files   generated (CAPABILITIES, REFERENCE, capabilities.json, doc maps) -> NOT merged,
+               regenerated from the merged sources afterwards. Merging two derived artefacts
+               reconciles the outputs instead of the inputs.
+     1 file    NOTES_concepts.md -- append-only on both sides, unioned by section heading
+
+### THE BUG THE VERIFICATION CAUGHT
+
+The first p14 union appended our 51 methods at END OF FILE. It compiled, it parsed, and EVERY ONE OF
+OUR FACULTIES WAS MISSING from UnifiedMind -- because the class body had already ended at a
+module-level `def _selftest():`, so 4-space-indented methods after it became part of THAT FUNCTION'S
+BODY rather than the class. Python was happy; the API was gone.
+
+Caught only because the check was "does the mind actually have these methods", not "does it compile".
+Redone by finding the first column-0 statement after the class and inserting there. A compile-clean
+merge that silently drops 51 faculties is exactly the failure this arc keeps finding, and it would
+have shipped on a syntax check.
+
+### VERIFIED
+
+    compile-all clean; 608 modules documented (was 599 ours / ~599 main)
+    p14 selftest: 167 members reached UnifiedMind (main's 116 + our 51), none shadowed
+    catalog: 193 capabilities, no duplicates
+    both sides exercised FUNCTIONALLY, not just for presence: geode hollow 0.00 / rind 1.00,
+      ruby absorption (0.35, 3.2, 2.6), entropy_rate 1.024, triage_cascade, easy_model, gait_frames
+    627 passed in the touched areas; skill_lint 0 gaps; catalog_gaps 0
+    clean-extract from the rebuilt zip re-verified both sides through the front door
+
+### TWO PRE-EXISTING FAILURES, CONFIRMED NOT OURS
+
+Both fail IDENTICALLY on unmerged main, and the test files are byte-identical:
+    test_all_selftests::test_no_selftest_budget_only_shrinks -- holographic_superposed (a MAIN
+      module) ships without a selftest and is not in the budget
+    test_cad_backlog::test_every_mesh_reducing_faculty_is_silhouette_guarded -- scatter_lod
+Also 13 does-length catalog regressions, present in unmerged main too. Reported rather than
+"fixed", because silently repairing someone else's red test inside a merge hides it.
+
+### FIXING THE THREE PROBLEMS THE MERGE SURFACED
+
+All three were pre-existing in main and are now closed. One of them turned out to be a real bug
+hiding behind a test-shaped complaint.
+
+#### 1. holographic_superposed shipped without a selftest
+
+It is a compatibility shim, and it RE-EXPORTED `_selftest` from the module it forwards to. That looks
+reasonable and is why it slipped through, but the CI census matches the TEXT `def _selftest` -- an
+imported name is not a definition -- so the module counted as "has an entry point, asserts nothing".
+
+Re-exporting was also testing the WRONG THING: running the target's selftest through the old name
+proves the TARGET works, not the SHIM. What can actually break in a shim is the re-export -- a name
+dropped from the star-import, a rename on the far side. So the new `_selftest` asserts the shim's own
+contract: every public name still resolves through the old path and is the SAME OBJECT (identity, not
+equality, so the two names cannot diverge), then delegates to the target so a broken target cannot
+hide behind a healthy shim. 16 public names verified.
+
+#### 2. scatter_lod "unguarded" -- and the guard it did have was broken
+
+The test wanted a `silhouette=` parameter on every mesh-reducing faculty. `scatter_lod` takes
+TRANSFORMS and returns a kept subset; it never sees geometry, so a silhouette IoU is not computable
+from its inputs. Exempting it is correct -- but only if the guard it DOES have is real, so I wrote a
+test for `min_keep`, its floor on the surviving fraction.
+
+THE TEST FAILED. `min_keep` was a THRESHOLD on a hash rank (`rank < frac`), so the realised fraction
+is stochastic: measured 14 of 400 kept (0.035) against a documented floor of 0.05, a 30% undershoot.
+A floor that sampling noise can breach is not a floor -- at distance the ground goes BALD instead of
+sparse, which is the scatter equivalent of decimating a limb away.
+
+Fixed by keeping the k LOWEST RANKS instead of everything under a threshold, with
+k = max(round(frac*n), ceil(min_keep*n)). The count is now exact, and it STRENGTHENS the nesting
+property the function exists for: a prefix of a rank ordering is always contained in a longer prefix,
+so far sets are subsets of near ones BY CONSTRUCTION rather than by the threshold happening to be
+monotone. Floor verified exact at 0.05 and 0.25; the anti-flicker nesting test still passes.
+
+THE LESSON: the exemption was the right call, but writing the test that JUSTIFIED the exemption is
+what found the bug. Exempting without it would have left a broken guard behind a green suite.
+
+#### 3. Thirteen catalog entries over the 600-char does limit
+
+The `does` field feeds find_capability's routing, and an essay-length entry is a token sponge that
+out-ranks better matches. Trimmed all 13 to under 600 by dropping trailing sentences, printing each
+dropped fragment so nothing vanished silently.
+
+KEPT NEGATIVE, and it is a real cost: trimming DELETED detail rather than relocating it. The lint
+offers "shorten, or move prose to the module docstring", and moving would have preserved everything.
+What was dropped is mostly secondary (return-shape notes, one extra measured number, a cross-
+reference); the load-bearing claim and the headline measurement survive in every case. Each dropped
+fragment is in this session's transcript if any needs restoring to its module docstring.
+
+VERIFIED AFTER ALL THREE: compile-all clean, skill_lint 0 gaps / 0 length regressions, catalog_gaps
+0, catalog 193 capabilities, 122 + 118 + 216 tests passing across the selftest, cad-backlog, crystal,
+LOD/scatter/memory and creature/organics suites. Docs regenerated: 608 modules, 209,743 lines.
+
+## INTEGRATION, NOT JUST MERGE
+
+A merge that compiles and keeps every faculty is half the job. Rule 0 against main's new capabilities
+found two places where its work should have been improving the crystal/creature work and was not.
+
+### 1. THE ADAPTIVE TRACER EXISTED THE WHOLE TIME
+
+`path_trace_adaptive` (CI-driven sampling: state a TOLERANCE, converged pixels stop being sampled)
+landed on main while the crystal arc ran on a branch. That arc spent four render overruns and a
+whole session's cost-model work on FIXED spp -- and the tool that removes the guess was sitting in
+the trunk. Measured on our geode scene:
+
+    fixed spp16      77.7 s   grain 0.0797
+    adaptive tol .03 40.7 s   grain 0.0992   -- 48% faster, equal mean radiance, 83% of a flat
+                                                48-spp render's samples avoided
+
+AND A REAL TRAP, measured rather than assumed: at `min_spp=8` the per-block confidence interval is
+OPTIMISTIC and declares convergence everywhere (spp 8-8 flat, even at tol=5e-4), while `min_spp=16`
+escalates properly (spp 16-96). min_spp is not a quality floor, it is what makes the CI trustworthy
+at all. Pinned in the selftest, because a silently-flat spp map looks exactly like a working
+adaptive render.
+
+### 2. THE FIVE-STEP RENDER WAS HAND-WIRED EVERY TIME
+
+Trace -> G-buffer -> SVGF denoise -> firefly clamp -> exposure grade. Every step was somebody's
+shipped capability; what was missing was the WIRING, and hand-assembling it per render is precisely
+how the newest step keeps getting dropped. Promoted to `holographic_gemrender` +
+`mind.render_specimen`, one call, plus `render_grade` and `render_gbuffer` for the pieces.
+
+The G-buffer is in there because SVGF needs depth/normal/albedo and the tracer returns radiance only
+-- the shipped `sdf_depth_cpu` fixes its own camera orientation and cannot match an arbitrary view,
+which is why this had to be written rather than reused.
+
+### 3. GAIT AND OUR RIG ROLES AGREE -- an independent cross-check
+
+Main's `gait_report` counts legs; our `auto_roles` labels feet from geometry. Built independently, on
+opposite sides of the merge, and they AGREE on both a quadruped and a CENTAUR -- 4 legs, 4 foot
+chains, arms correctly excluded by both. That agreement is evidence for both, so it is pinned as a
+test rather than left as a happy coincidence.
+
+### WHAT WAS PINNED
+
+`tests/test_merge_integration.py`, four tests across the seam:
+    gait leg count == our role-derived foot count (quadruped AND centaur)
+    gait actually displaces a pose, not just reports a stride
+    render_specimen on OUR crystal cluster with OUR flaw materials through MAIN's adaptive tracer and
+      SVGF -- asserting samples WERE saved and grain DID fall, since a pipeline that merely runs
+      would pass a smoke test while doing neither
+    absorption reaches the tracer through the promoted `material_trace_channels` builder
+
+VERIFIED: compile-all clean, skill_lint 0 gaps / 0 length regressions, catalog_gaps 0, reachability
+0 undocumented, delegation drift 0, 194 capabilities, 170 faculty members on p14, 126 tests passing
+across the integration, crystal, selftest and cad-backlog suites. Docs 609 modules, 210,010 lines.
+
+KEPT NEGATIVES (loud)
+* ADAPTIVE IS NOT UNIFORMLY FASTER. At a tight tolerance it spends MORE than a flat render (tol 6e-4
+  took 108 s against 43 s at spp24) and buys better grain (0.063 vs 0.078). It converts "how many
+  samples" into "how good", which is the right knob but not a free speedup -- claiming it as one
+  would be the strawman-baseline error this codebase keeps catching.
+* THE EXPOSURE SWEEP IS A TASTE FUNCTION with a scoring weight. `prefer="colour"` vs `"contrast"`
+  changes the pick; neither is derived from anything measurable about what a viewer wants.
+* GAIT IS NOT WIRED INTO build_creature. It works on a creature and agrees with our roles, but a
+  posed, walking creature is still assembled by the caller.
+* COMPUTE_PLAN AND ADVISE_SCALE ARE STILL UNUSED by the render path, even though render cost was the
+  binding constraint all arc. Consulting the scale advisor before a long trace is the obvious next
+  integration and is not done.
+
+### INTEGRATION, ROUND 2 -- the two items left open
+
+Both were named as kept negatives last round and are now closed.
+
+#### GAIT IS WIRED INTO build_creature
+
+`build_creature(pose=0.25)` builds the body MID-STRIDE: `gait_pose` IK-solves the legs so the feet
+land where the gait says, the joints are applied to a DEEP COPY, and the same skinning pipeline runs.
+A walking creature is now the same builder with different joints, not a separate animation path.
+
+AND IT EXPOSED A REAL BUG AT THE SEAM. `ground_creature` derives support from geometry and assumes a
+STATIC stance -- so mid-stride, where a leg is legitimately in the air, it reported a perfectly normal
+walk cycle as `supported=False`. Two independently-correct components disagreeing at the join, which
+is the classic integration failure and invisible until they are actually composed. Fixed by taking
+the gait's CONTACT SET as the authority when a gait supplied the pose, keeping the geometric count
+alongside it rather than discarding it. Measured across the cycle: 3 feet planted at every phase.
+
+Pinned: posing must CHANGE the geometry (a bookkeeping-only pose would pass a smoke test), different
+phases must differ, and the source creature must be unmutated.
+
+#### RENDER COST IS MEASURED, NOT ESTIMATED
+
+`render_plan` probes a tiny tile, derives seconds per pixel-sample, and reports what fits;
+`render_specimen(budget_s=...)` resizes to fit instead of overrunning. This encodes the lesson that
+cost FOUR overruns in this arc: linear extrapolation off a cheap probe always understates a
+transmissive scene, because more samples means more rays surviving deep enough to enter glass and
+march through interiors. The estimate is deliberately pessimistic (0.55 of linear) and the raw
+measurement is reported beside it.
+
+Measured in the selftest: 5.6e-05 s per pixel-sample, a 400x320 64-spp glass render estimated at
+832 s, REFUSED against a 1 s budget with 60x48 suggested; an 8 s budget rendered 110x88. Resolution
+is shrunk before samples, because samples are what quality is measured in and cost is superlinear in
+them on glass -- pixels are the cheaper thing to give up.
+
+`compute_plan`'s tier and rationale ride along in the report, so the amortisation advice is attached
+to the decision rather than sitting unconsulted.
+
+#### A NAME COLLISION THE GUARD CAUGHT
+
+`plan_render` already existed elsewhere in the mind; p14's selftest refused the duplicate ("a name
+must live in exactly one part, or the MRO silently drops one of them") before it could ship. Renamed
+to `render_plan`, and the module function renamed to match so `delegation_drift` pairs them by name.
+
+VERIFIED: compile-all clean, skill_lint 0/0, catalog_gaps 0, reachability 0 undocumented, 171 faculty
+members on p14 with none shadowed, 195 capabilities, 7 integration + 189 crystal/organics tests
+passing. Docs 609 modules, 210,138 lines.
+
+KEPT NEGATIVES (loud)
+* `render_plan` SHOWS AS `missing: mind` IN delegation_drift, because the faculty supplies `self` as
+  the module function's `mind` argument. Four faculties already have this exact shape, so it is a
+  tolerated pre-existing pattern rather than something new -- but it is a false positive the tool
+  cannot currently distinguish from a real dropped parameter.
+* THE BUDGET SHRINKS RESOLUTION ONLY. It never lowers `max_spp`, tolerance or bounce depth, so a
+  budget far too small yields a tiny image rather than a coarser one of the requested size.
+* GAIT POSES ONLY LEGS. `gait_pose` solves limbs with foot targets; the spine, head and any arms are
+  carried rigidly, so a posed creature walks but does not yet bob, lean or swing.
+* THE SAFETY FACTOR (0.55) IS FITTED TO ONE SCENE CLASS -- glass. On an opaque scene the linear
+  estimate is closer to honest and 0.55 will under-promise.
+
+## GPU, AND THE BUG THAT WAS ACTUALLY COSTING THE TIME
+
+Asked whether the GPU/WGSL work could make rendering realtime. Measured rather than assumed, and the
+answer splits into a hard no and a real 9x.
+
+### THERE IS NO GPU ON THIS HOST -- MEASURED, NOT INFERRED
+
+`wgpu` was not installed; installing it and querying gives one adapter:
+
+    llvmpipe (LLVM 20.1.2, 256 bits) (CPU) via OpenGL      and nproc = 1
+
+llvmpipe is a SOFTWARE rasteriser: WGSL kernels would execute on the same single CPU core with driver
+overhead added. The engine's own `gpu_crossover` refuses to report a number for exactly this reason --
+"MEANINGLESS ON THIS ADAPTER: a CPU adapter, so these timings are NumPy against a CPU driver emulating
+a GPU. Run on real hardware." That refusal is correct and was left alone. Realtime game graphics is
+not reachable here; it is a hardware fact, not a wiring gap.
+
+### THE PROFILE SAID SOMETHING ELSE ENTIRELY
+
+Profiling a geode render: 84% of the time is SDF EVALUATION -- 93,870 field calls, each looping over
+30 crystals in Python. The tracer was never the bottleneck; the field was.
+
+### THE ADAPTIVE SAMPLER HAD A REAL BUG: THE CI MEASURED NOTHING
+
+`render_adaptive` computed variance only where `count > block`, but tested convergence with
+`done = count >= min_spp`. After the FIRST round `count == block`, so variance was still exactly 0,
+the CI half-width was 0, and every pixel passed `half <= tol*scale`. It declared the whole image
+converged having measured no variance at all.
+
+MEASURED CONSEQUENCE: any configuration where one round reached min_spp returned exactly `block`
+samples regardless of tolerance -- block 8 / 16 / 24 gave mean spp 8.0 / 16.0 / 24.0 flat, and `tol`
+had NO EFFECT. Fixed with `done = (count >= min_spp) & nz`. Now tolerance controls sampling: loose
+26.7 -> tight 56.1 mean spp, spatially adaptive 16-64.
+
+THIS RETRACTS AN EARLIER ENTRY. I recorded "at min_spp=8 the block CI is optimistic" as a statistical
+property and pinned it in a selftest. It was not optimistic, it was ABSENT -- I described a symptom as
+a mechanism and gated on it, which turned a bug into a documented feature. The gate now pins the
+property a caller depends on (tighter tolerance buys more samples) instead.
+
+### AND THE TRACER PAID FULL-IMAGE COST PER ROUND
+
+`path_trace` allocated O, D, throughput, radiance at FULL IMAGE SIZE every sample even when `active`
+marked a handful of pixels, so adaptive paid whole-image cost per round however few pixels remained.
+That is why adaptive could spend FEWER samples than flat (21.9 vs 24 mean spp) and still take longer
+(40.5 s vs 29.1 s). The bounce loop is entirely index-relative, so the per-sample arrays now compact
+to the active subset and scatter back. Tracer selftests unchanged (white-furnace unbiased, noise still
+falls as sqrt(spp)).
+
+### THE 9x THAT IS ACTUALLY AVAILABLE: BAKE THE FIELD
+
+`bake_sdf` already shipped -- Rule 0 found it -- and precomputes the field onto a grid whose sample
+cost is INDEPENDENT of primitive count. On the geode scene:
+
+    field evaluation   16x faster at res 96 (0.206 s -> 0.013 s per 40k points)
+    a whole frame      30.2 s -> 3.1 s, 9.6x, and the bake pays for itself after 0.4 FRAMES
+    silhouette         IoU 0.968-0.970 -- the SHAPE survives
+
+AND THE COST, which is why it is opt-in: trilinear interpolation makes the gradient piecewise
+constant, so shading NORMALS come out quantised. Radiance differs by ~0.2 mean AND THE ERROR DOES NOT
+CONVERGE WITH RESOLUTION (0.2074 at res 112, 0.2059 at 176) -- it is the interpolation scheme, not the
+spacing. Tested whether refraction was to blame: an OPAQUE material shows the same 0.19, so it is not.
+Good for previews, animation drafts and silhouette-dominated work; not for a final gem.
+
+### KEPT NEGATIVES (loud)
+
+* STILL NOT UNIFORMLY FASTER THAN FLAT SPP on the gem scene: guided adaptive is BETTER (grain 0.0348
+  vs 0.0400) and uses fewer samples, but the remaining per-round overhead -- `camera.ray_dirs` and
+  `base_D` are still built for the WHOLE frame every sample -- keeps wall-clock above a single flat
+  pass. Compacting ray generation is the next concrete step and is NOT done.
+* THE BAKE'S NORMAL QUANTISATION IS UNFIXED. Storing an analytic gradient alongside the distance, or
+  a higher-order interpolant, would address it; trilinear cannot.
+* wgpu IS NOW INSTALLED in this container but there is no device worth targeting. Nothing was wired to
+  it, deliberately -- an emulated adapter would make every GPU claim in this repo untrustworthy.
+
+### CHASING THE LAST OF THE RENDER COST -- two refutations and a correction
+
+Continuing from the ray-generation hypothesis. Both remaining ideas were MEASURED AND FAILED, which is
+the useful outcome to record.
+
+#### RAY GENERATION WAS NOT THE OVERHEAD
+
+The hypothesis was that `camera.ray_dirs` and `base_D`, still built for the whole frame every sample,
+were what kept adaptive above a flat pass. Measured a deliberately sparse round (5% of pixels active)
+and profiled it: the top costs are STILL 103,530 SDF calls. Ray generation does not appear. Cost does
+scale with the active fraction (7.25 s at 100% vs 1.37 s at 5%, against 0.36 s for perfect scaling),
+so ~1 s of per-call overhead exists -- but it is the field, not the camera.
+
+#### HOISTING THE CONVERSIONS: NO MEASURABLE GAIN
+
+The profile showed 225,019 `atleast_2d` and 450,919 `asarray` calls, because 30 crystals each
+re-validated the same array on every query. Converting ONCE per group and passing the validated array
+down is obviously less work, and it bought essentially nothing:
+
+    field, 40k points      0.206 s -> 0.227 s   (noise)
+    full round             7.25 s  -> 6.71 s    (7%)
+    5%-active round        1.37 s  -> 1.47 s    (worse, within noise)
+
+Kept, because it is strictly less work and semantically cleaner, but it is NOT a speedup and is
+recorded as such. A call count is not a cost: 225k cheap calls were a small fraction of the total, and
+the profile's `tottime` column had already said so.
+
+#### BATCHING IS REFUTED AT EVERY SIZE -- AND I HAD WRITTEN THE OPPOSITE
+
+`batched_union` fuses all instances into one einsum. Re-measured after the tracer learned to compact:
+
+    20,000-point bulk query   loop 0.112 s   batched 0.725 s   6.5x SLOWER
+    whole render              loop 1.55 s    batched 1.76 s    13% slower
+
+The docstring previously said it was "genuinely faster for the bulk-query case". That was INFERRED
+FROM THE EINSUM'S SHAPE AND NEVER MEASURED -- exactly the failure this codebase keeps catching, and I
+committed it while documenting a different refutation. The (N,M,3) intermediate costs more to allocate
+and traverse than N sequential passes over (M,3), and OOMs at large M. Corrected in place so nobody
+switches to `batched=True` expecting a win.
+
+#### WHERE THIS LEAVES RENDER SPEED
+
+The honest ledger, all measured on the same geode scene:
+
+    baking the field        9.6x per frame, amortised after 0.4 frames -- THE win, already wired
+    fixing the CI bug       tolerance now controls sampling at all (it did not before)
+    compacting active work  cost now scales with the active fraction
+    conversion hoisting     no measurable gain
+    fused batching          slower, refuted
+    GPU                     no device on this host; llvmpipe is a CPU rasteriser
+
+Adaptive is still not uniformly faster than a flat pass on a gem scene. The remaining gap is the
+per-crystal Python loop itself, and the two ways to remove it that I have measured -- batching and
+conversion hoisting -- do not work. The one that does is baking, which trades shading normals for a
+9.6x. A fused NATIVE kernel (Zig, or WGSL on real hardware) is the untested option.

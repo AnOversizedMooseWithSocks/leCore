@@ -990,6 +990,1007 @@ def register_p06(c):
                               "shrink hypervector memory footprint"))
 
 
+    # --- ORGANICS (crystals / grass / plants / growth scrubbing / creature idle). The aliases here were
+    # written by testing stranger phrasings against the LIVE index first: "cubic lattice", "salt crystal
+    # structure", "put grass on my terrain mesh", "cover a surface in plants", "make a bush", "vegetation
+    # generator", "watch it grow step by step" and "make the creature move a little" all returned unrelated
+    # fallbacks before these entries existed. Each alias below is a phrasing that MEASURABLY failed, not one
+    # that sounded plausible to the implementer.
+    c.register_capability(
+        "Crystal lattices (the 14 Bravais lattices)", "atom SITE positions for any of the 14 Bravais lattices "
+        "(7 crystal systems x P/I/F/C centring), their nearest-neighbour bonds, and a faceted habit SDF from "
+        "Miller-index planes; feed sites to metaball_mesh for ball-and-stick or scatter_mesh for unit cells",
+        example="pts = mind.lattice_sites('cubic', centring='F', extent=2); bonds, d = mind.lattice_bonds(pts)",
+        native=True, aliases=("cubic lattice", "salt crystal structure", "how do crystals stack",
+                              "bravais lattice", "crystal unit cell", "make a crystal", "atom positions",
+                              "face centred cubic", "body centred cubic", "diamond lattice",
+                              "seven crystal systems", "crystal facets", "mineral shape", "gemstone shape"))
+
+    c.register_capability(
+        "Scatter meshes over a surface (grass, rocks, plants)", "place many copies of a mesh across the AREA of "
+        "another mesh -- area-weighted sampling, normal-aligned frames with yaw/scale jitter, optional blue-noise "
+        "thinning and a density mask; merge into one mesh or share one definition across n instances",
+        example="lawn = mind.scatter_mesh(ground, mind.grass_blade(), 500, seed=0, mode='merge')",
+        native=True, aliases=("put grass on my terrain mesh", "cover a surface in plants", "lawn", "grass field",
+                              "scatter grass", "instance a model many times over a mesh", "fur on a mesh",
+                              "rocks on a hill", "barnacles on a hull", "sprinkle objects on a surface",
+                              "distribute meshes over an area", "populate a surface", "foliage scatter"))
+
+    c.register_capability(
+        "Procedural plants & trees (L-system grammar)", "grow branching plants and trees from rewrite rules: "
+        "expand an L-system, walk it with a 3-D turtle into branch segments, then mesh it as tapered limbs; also "
+        "greebles, seeded procedural objects and terrain vegetation",
+        example="ls = mind.lsystem('F', {'F': 'F[+F]F[-F]F'}); mesh, segs, scene = mind.grow_plant(ls, 3)",
+        native=True, aliases=("branching plant generator", "make a bush", "vegetation generator", "procedural tree",
+                              "grow a tree from rules", "l-system", "turtle graphics", "foliage generation",
+                              "tree generator", "shrub", "fern", "plant model", "branch structure"))
+
+    c.register_capability(
+        "Scrub through growth (staged growers + verification)", "step a plant, crystal or dendrite from nothing to "
+        "finished form: discrete stages or a continuous t in [0,1]. grow_at is PURE, so scrubbing backwards is safe; "
+        "growth_report checks purity and that nothing retracts between stages. t is growth PROGRESS, not time",
+        example="stages = mind.grow_stages('crystal', {'system': 'cubic', 'centring': 'F'}, 8); "
+                "rep = mind.growth_report('crystal', {'system': 'cubic', 'centring': 'F'})",
+        native=True, aliases=("watch it grow step by step", "scrub through growth", "growth stages",
+                             "step through crystal formation", "growth preview", "intermediate growth stages",
+                             "time lapse of growth", "grow over time", "check the growth is right",
+                             "verify growth order", "replay growth"))
+
+    c.register_capability(
+        "Creature idle animation (show where the joints bend)", "a simple looping idle that flexes each joint within "
+        "its OWN stored limit, so knees/elbows/hips visibly show where they are and which way they bend -- the limit "
+        "is the driver, so an impossible bend cannot be shown. A limits demo, NOT locomotion (no gait or balance)",
+        example="c = mind.creature(mind.quadruped_spec()); frames = mind.creature_idle_frames(c, 24)",
+        native=True, aliases=("make the creature move a little", "show me where the joints bend",
+                              "idle animation", "creature idle", "which way does the elbow bend",
+                              "animate a creature", "simple animation for a monster", "joint limit preview",
+                              "test my rig", "does the knee bend the right way", "breathing idle"))
+
+
+    # --- ORGANICS, second pass (trees by space colonization, Spore-style creature skin + spine edits).
+    # Same discipline: these aliases are phrasings that MEASURABLY returned unrelated fallbacks before
+    # the entry existed -- "leaves on a tree" returned a code-shape capability, "oak tree" returned
+    # file_tree, "make the belly fatter" returned NOTHING, "fat torso thin neck" returned a cache.
+    c.register_capability(
+        "Trees by space colonization (branches, taper, leaves)", "grow a tree by racing branches into an "
+        "attractor crown (Runions 2007) -- natural limb spread and a shaped canopy; thickness by the da Vinci "
+        "rule (parent^2 = sum of children^2); leaves placed at the golden angle. Segments come out in growth "
+        "order, so scrubbing is free",
+        example="A = mind.crown_attractors(n=250); t = mind.grow_tree(A); mesh = mind.tree_mesh(t)",
+        native=True, aliases=("leaves on a tree", "oak tree", "how thick should a branch be",
+                              "tree branches thickness", "grow a realistic tree", "space colonization",
+                              "branch taper", "canopy", "conifer", "foliage on branches",
+                              "realistic tree generator", "limb growth", "crown shape"))
+
+    c.register_capability(
+        "Spore-style creature skin & spine sculpting", "skin a creature as a chain of METABALLS spaced from "
+        "their own radius, so stretching a spine or limb adds balls instead of stretching a shape, and limbs "
+        "blend into the torso; per-node spine radii give a fat belly and a thin neck, and the spine can be "
+        "extended, subdivided, re-thickened and reshaped -- every edit returning a new spec",
+        example="s = mind.spine_profile(mind.quadruped_spec(), [.06,.16,.2,.16,.06]); "
+                "mesh = mind.creature_skin_mesh(mind.creature(s, skin=False), s)",
+        native=True, aliases=("make the belly fatter", "fat torso thin neck", "sculpt the torso",
+                              "spore style body", "blobby creature skin", "stretch the spine",
+                              "adjust thickness around the spine", "add more spine segments",
+                              "thicken the body", "smooth skin over bones", "metaball body",
+                              "edit the backbone", "make a creature rounder"))
+
+
+    # --- ORGANICS, third pass: the HOLOGRAPHIC half (parts as a bound record, symmetry groups, skin
+    # weights as a soft mixture, scatter layers as content-addressable bundles, generated variants).
+    # Aliases again from measured misses: "snap parts onto a creature" returned shrinkwrap, "library of
+    # body parts" returned Water body, "which bone controls this vertex" returned a cross field,
+    # "is anything scattered here" returned Cloud stack, "five fins around the body" returned a cache.
+    c.register_capability(
+        "Creature parts, sockets & symmetry (holographic assembly)", "a rigblock LIBRARY whose parts are codebook "
+        "atoms with authored deformation handles; attaching to sockets builds ONE bound record, so the layout is "
+        "queryable (what is on this socket), comparable between creatures, and mirrored or radially repeated by a "
+        "symmetry GROUP. assembly_report measures the bundle's recall margin rather than assuming capacity",
+        example="lib = mind.part_library(); lib.define('horn', handles={'length': (0.5, 2.0)}); "
+                "a, v = mind.attach_part({}, 'shoulder', 'horn', lib, symmetry='bilateral')",
+        native=True, aliases=("snap parts onto a creature", "library of body parts", "rigblock",
+                              "what part is on the left shoulder", "mirror parts to both sides",
+                              "five fins around the body", "radial symmetry", "attach horns",
+                              "body part library", "symmetry group", "creature accessories",
+                              "put an eye on the head"))
+
+    c.register_capability(
+        "Skin weights from metaball provenance (soft mixture over bones)", "per-vertex bone weights read off which "
+        "bones produced the metaballs near each vertex -- skinning as the soft mixture of experts it already is. "
+        "Returns the compact indexed form linear_blend_skin_indexed wants. Distance-based, not geodesic: touching "
+        "limbs bleed weight",
+        example="C, R, bones = mind.creature_metaballs(cr); idx, w, names, book = "
+                "mind.skin_weights_from_balls(mesh.vertices, C, R, bones)",
+        native=True, aliases=("which bone controls this vertex", "automatic skin weights",
+                              "bind vertices to bones", "weight painting", "rig a generated creature",
+                              "bone influence per vertex", "skinning weights"))
+
+    c.register_capability(
+        "Content-addressable scatter layers & generated variants", "bundle every placement of a scattered field "
+        "into ONE vector bound by region code, so you can ask whether anything is scattered near a point without a "
+        "spatial index; plus deterministic spec VARIANTS, so a pool of twenty different plants is a loop over seeds "
+        "rather than twenty authored assets, and never needs storing",
+        example="g = mind.scatter_mesh(ground, mind.grass_blade(), 500, holographic=True); "
+                "mind.region_occupancy(g['layer'], g['instance'], g['transforms'][0, :3, 3])",
+        native=True, aliases=("is anything scattered here", "query the grass field", "twenty different ferns",
+                              "random variations of a plant", "what is scattered near this point",
+                              "plant permutations", "vary a plant", "scattered field query",
+                              "grass blades from hair strands", "ribbon strands"))
+
+
+    # --- ORGANICS, final pass (paint mode + scatter bake/LOD). Measured misses again: "skin markings"
+    # returned pose_asset, "colour the body" returned Water body, "level of detail for grass" returned
+    # Gabor volumes, "thin distant grass" returned iridescent thin-film, "cheaper geometry far away"
+    # returned reprojection velocity.
+    c.register_capability(
+        "Paint a creature (markings bound to the rig)", "procedural per-vertex colour mixing a BONE tint with a "
+        "pattern (stripes/dots/checker/noise): because the tint reads the skin weights, markings follow the "
+        "anatomy and travel with a pose instead of swimming through world-space noise, and a limb is its own "
+        "colour region for free. Per-vertex -- finer detail needs a texture bake",
+        example="idx, w, names, book = mind.skin_weights_from_balls(V, C, R, bones); "
+                "cols = mind.paint_creature(V, idx, w, names, pattern='stripes')",
+        native=True, aliases=("skin markings", "colour the body", "stripes on an animal",
+                              "paint a creature", "creature colours", "fur pattern", "spots and stripes",
+                              "colour a monster", "texture a creature", "animal markings"))
+
+    c.register_capability(
+        "Scatter bake & level of detail (measured)", "bake a scattered population once, then serve any distance "
+        "from the cache: thin the population and drop to a coarser blade as it recedes. Thinning is deterministic "
+        "and NESTED, so the far set is a subset of the near set and blades never flicker as the camera moves. "
+        "Reports exact triangle counts against the full-resolution baseline",
+        example="b = mind.scatter_bake(g['transforms'], mind.grass_blade()); print(b.report())",
+        native=True, aliases=("level of detail for grass", "thin distant grass", "cheaper geometry far away",
+                              "cache a scatter", "lod for scattered objects", "reduce grass in the distance",
+                              "bake the grass", "scatter performance", "too many blades"))
+
+
+    # --- ORGANIC CREATURE MATERIALS. Measured misses before registration: 'chitin' and 'exoskeleton'
+    # returned NOTHING at all; 'scales for a lizard' returned Fourier-Mellin; 'frog skin' and 'eel skin'
+    # returned pose_asset; 'beetle shell' returned the soap-bubble thin-film.
+    c.register_capability(
+        "Creature skin materials (scales, chitin, mucus, fur)", "integument by TAXON -- reptile/fish scales, "
+        "amphibian glands, insect chitin plates, worm annuli, mammal pores -- as channel fields evaluated in the "
+        "creature's own BODY frame, so scale rows elongate down the body and travel with it. Feeds render_surface "
+        "as a solid 3-D texture: no UV unwrap, no seams",
+        example="mat = mind.creature_surface_material('reptile', axis=(0,0,1)); "
+                "img = mind.render_surface(field, cam, 256, 256, {0: mat})",
+        native=True, aliases=("scales for a lizard", "frog skin", "eel skin", "beetle shell", "chitin",
+                              "fish scales", "snake skin", "reptile skin", "amphibian skin",
+                              "insect shell", "worm skin", "mammal skin", "wet slimy skin",
+                              "scaly texture", "creature skin"))
+
+    c.register_capability(
+        "Layered creature anatomy (bone, organ, dermis, epidermis, coat)", "an integument as the stack of tissues it "
+        "really is, composed through the layered-material order schema so base<diffuse<specular<coat is enforced at "
+        "compose time. INSECTS REFUSE A BONE LAYER -- an arthropod's rigid structure is its exoskeleton. Interior "
+        "layers only show through translucency; this is not an x-ray",
+        example="st = mind.anatomy_stack('reptile'); print(st['layers'], st['interior_visible'])",
+        native=True, aliases=("bone and organ layers", "layered skin", "exoskeleton", "endoskeleton",
+                              "what is my creature made of", "skin layers", "tissue stack",
+                              "anatomy material", "dermis and epidermis", "organ material",
+                              "bone material", "invertebrate"))
+
+
+    # --- THE CREATURE EDITOR LOOP. Measured misses: "undo my last change" returned file_undo, "save a
+    # creature to a file" returned a tensor-train container, "where did i click on the model" returned a
+    # cache, "stick a horn on the back" returned a decomposition contract, "dna points" returned
+    # vanishing points, "is my creature valid" / "how complex is my creature" returned the idle animation.
+    c.register_capability(
+        "Creature editor session (undo, save, validate, build)", "the object an app drives: holds the creature "
+        "document, records every change so it can be undone and redone, saves and loads as JSON that round-trips "
+        "exactly, validates that the thing is buildable, meters a Spore-style complexity budget, and builds skin "
+        "plus placed parts. Edits return self, so a UI can chain and still undo each step",
+        example="ed = mind.creature_editor(); ed.extend_spine(2).set_thickness(0.5, 0.22, falloff=0.3); "
+                "ed.undo(); print(ed.validate(), ed.complexity())",
+        native=True, aliases=("spore creature creator", "creature editor", "undo my last change",
+                              "save a creature to a file", "load a creature", "is my creature valid",
+                              "how complex is my creature", "dna points", "creature document",
+                              "edit a creature", "creature save format", "redo", "creature budget"))
+
+    c.register_capability(
+        "Creature sockets: where a part lands on the body", "attach points in ANATOMY space -- (t along the spine, "
+        "theta around it) -- resolved by marching the creature's own skin field outward. Because a socket stores "
+        "anatomy coordinates rather than a world position, a part rides the skin through every later spine and "
+        "thickness edit. Includes the inverse (click point -> socket) and a viewport ray pick, which round-trip",
+        example="cr, f = ed.creature(), ed.field(); s = mind.pick_socket(cr, f, eye, ray); "
+                "ed.add_part('horn', s['t'], s['theta'], symmetry='bilateral')",
+        native=True, aliases=("click to place a part", "where did i click on the model",
+                              "stick a horn on the back", "drag a part onto the body",
+                              "attach a part to a creature", "part placement", "snap a part to the surface",
+                              "socket position", "pick a point on a creature", "put horns on it"))
+
+
+    # --- THE PARAMETRIC PART LIBRARY. Measured misses: "give it eyes" returned scene-from-description,
+    # "add a mouth" returned encyclopedia_add, "three toed foot" returned Arrow of time, "how many
+    # fingers" returned batched cleanup, "tapered tube" returned sweep_tube (which cannot taper).
+    c.register_capability(
+        "Creature body parts (eyes, mouths, feet, claws, fins)", "eleven PARAMETRIC body parts -- eye (optionally "
+        "on a stalk), mouth, foot and hand with a variable number of digits, claw, horn, spike, fin, antenna, ear "
+        "-- each with authored handle ranges that clamp. Procedural, so digits=3 versus digits=5 is a genuinely "
+        "different foot rather than one mesh scaled, which is what a rigblock handle is supposed to mean",
+        example="lib = mind.creature_parts(); ed = mind.creature_editor(part_library=lib); "
+                "ed.add_part('eye', 0.95, 0.7, symmetry='bilateral')",
+        native=True, aliases=("give it eyes", "add a mouth", "three toed foot", "how many fingers",
+                              "make a claw", "wings or fins", "antennae", "body part library",
+                              "what parts can i use", "horns", "eyeball", "hand with fingers",
+                              "foot with toes", "part palette"))
+
+    c.register_capability(
+        "Tapered sweep (varying-radius tube along a path)", "sweep a circular cross-section whose RADIUS varies "
+        "along the path, in a rotation-minimizing frame so the ring does not spin on a curve. The shipped "
+        "sweep_tube takes one profile for the whole tube and so cannot taper -- which is the one thing every "
+        "organic appendage does, and why every part in the creature library is built on this",
+        example="import numpy as np; P = np.stack([np.zeros(6), np.zeros(6), np.linspace(0, 1, 6)], 1); "
+                "m = mind.sweep_profile(P, np.linspace(0.1, 0.01, 6))",
+        native=True, aliases=("tapered tube", "varying radius sweep", "cone along a curve",
+                              "taper a sweep", "swept profile", "tapered extrusion"))
+
+
+    # --- GAIT. Measured misses: "trot gallop" and "moonwalk" returned NOTHING; "make it walk" and
+    # "does my creature walk properly" collided with the Walk-on-Stars PDE solver; "locomotion"
+    # returned the IDLE animation, which is explicitly not locomotion; "stride length" returned
+    # packet_demux.
+    c.register_capability(
+        "Creature gait (make it walk, any body plan)", "locomotion for a generated creature: legs are found by "
+        "MEASUREMENT (which limbs reach the ground), stride comes from their reach, and phase offsets come from "
+        "the classic gait diagrams -- walk, trot, pace, bound, gallop for tetrapods, a metachronal wave for any "
+        "other leg count. Body speed is DERIVED from stride/(duty*period), never a free input, which is what "
+        "keeps planted feet from sliding. Legs are posed through the rig's own limit-constrained IK",
+        example="rep = mind.gait_report(cr, gait='trot'); frames = mind.gait_frames(cr, n_frames=24)",
+        native=True, aliases=("make it walk", "trot gallop", "locomotion", "walk cycle", "gait",
+                              "animate walking", "step cycle", "stride length", "which limbs are legs",
+                              "quadruped walk", "biped walk", "hexapod walk", "run cycle"))
+
+    c.register_capability(
+        "Foot slip (is this walk actually correct?)", "the objective measure of a walk: how far a PLANTED foot "
+        "slides in world space, absolutely and as a fraction of stride. Sliding feet are the moonwalk artifact, "
+        "and this is a number rather than a matter of taste. Also reports distance travelled, measured duty per "
+        "foot, and any leg the IK could not place. KEPT NEGATIVE: a foot that never moves cannot slip, so a low "
+        "score means nothing unless `unreachable` is empty -- check it first",
+        example="r = mind.gait_report(cr); print(r['slip_ratio'], r['unreachable'], r['duty_measured'])",
+        native=True, aliases=("foot slip", "moonwalk", "does my creature walk properly",
+                              "feet sliding", "walk quality", "sliding feet", "verify a walk cycle",
+                              "gait measurement", "duty factor"))
+
+
+    # --- BODY SHAPING / MESH QUALITY / PART FUSION. Measured misses: "barrel chested" returned
+    # NOTHING; "flat belly" returned flat_recall; "why is my creature lumpy" returned a navigator;
+    # "beaded mesh" returned closest-point; "make the horn look attached" returned a message bus.
+    c.register_capability(
+        "Creature body shape (non-circular cross-section)", "metaballs are spheres, so every cross section of a "
+        "creature is a CIRCLE and no profile edit changes that -- a fat belly is still a round belly. This warps "
+        "SPACE in the body frame instead of using ellipsoid primitives, so every ball becomes the same ellipse for "
+        "free: broaden across, flatten front-to-back, raise a spinal crest, flatten the underside. Measured: no "
+        "evaluation cost over spheres",
+        example="w = mind.section_warp(cr, width=1.5, depth=0.75, ridge=0.3, belly=0.35); "
+                "f = mind.creature_skin_field(cr, spec, warp=w)",
+        native=True, aliases=("make the body wider than deep", "flat belly", "barrel chested",
+                              "body shape not round", "squash the body", "body silhouette",
+                              "cross section shape", "slab sided", "deep chested", "spinal ridge"))
+
+    c.register_capability(
+        "Mesh quality guard (why is my creature lumpy?)", "how many marching cells span the THINNEST feature, and "
+        "the resolution that would fix it. A feature needs at least 4 cells to mesh smoothly; below 2 it BEADS "
+        "into visible lumps -- which is what a thin limb does inside the bounding box of a much larger body, "
+        "because the cell size is set by the whole body and the limb gets no say",
+        example="q = mind.skin_quality(cr, spec, resolution=104); print(q['verdict'], q['recommended_resolution'])",
+        native=True, aliases=("why is my creature lumpy", "beaded mesh", "what resolution do i need",
+                              "lumpy limbs", "bumpy surface", "marching resolution", "sausage limbs",
+                              "mesh looks bad"))
+
+    c.register_capability(
+        "Fuse parts into the skin (attached, not glued)", "parts become metaballs in the SAME implicit surface as "
+        "the body, so a horn is one continuous mesh with a smooth fillet where it meets the flank instead of a "
+        "cone resting against it. Only tapered-tube parts survive being reduced to a ball chain; fins, hands and "
+        "mouths would become blobs and are returned for placing as geometry instead",
+        example="fld, fused, unfused = mind.fused_field(cr, spec, spec['sockets'], lib)",
+        native=True, aliases=("make the horn look attached", "parts blended into the body",
+                              "fuse a part", "seamless parts", "parts look glued on",
+                              "blend a horn into the skin", "continuous skin"))
+
+
+    # --- LIMB SOCKETS / AUTO FEET / CEL SHADING. Measured misses: "flat cartoon look" returned
+    # conditional statistics, "outline the creature" returned the parts list, "put feet on the legs"
+    # returned the gait.
+    c.register_capability(
+        "Feet on the legs (limb sockets, not spine sockets)", "attach points on a LIMB -- at a fraction along it, "
+        "angle around it, and optionally down its own AXIS, which is what a foot needs because a foot goes on the "
+        "END of a leg rather than its side. auto_feet identifies legs the way the gait does (which limbs reach the "
+        "ground) and sockets a foot on each, so an arm correctly gets none",
+        example="feet = mind.auto_feet(cr, ed.field(), part='foot', scale=1.2); "
+                "ed.spec['sockets'].extend(feet)",
+        native=True, aliases=("put feet on the legs", "attach a foot", "socket on a limb",
+                              "limb tip socket", "hands on the arms", "part on a leg",
+                              "knee spur", "foot placement on a creature"))
+
+    c.register_capability(
+        "Cel shading (flat cartoon bands + silhouette)", "quantise the light into flat BANDS and darken the "
+        "silhouette, per vertex, so it composes with vertex paint and the existing rasteriser instead of needing a "
+        "new render path. The silhouette comes from GEOMETRY (the surface turning away from the eye) rather than "
+        "from filtering the image, which would trace colour edges on a flat belly just as happily. Darkens the "
+        "silhouette only -- interior creases need an image pass with depth and ids",
+        example="cols = mind.toon_shade(mesh, cols, cam['eye'], bands=3, rim=0.42); "
+                "img = mind.render_mesh(mesh, cam, vertex_colors=cols, lights=[], ambient=1.0)",
+        native=True, aliases=("cel shading", "toon shading", "flat cartoon look", "outline the creature",
+                              "posterize shading", "non photorealistic render", "comic book look",
+                              "quantize shading bands", "cartoon render", "rim darkening"))
+
+
+    c.register_capability("Superposed key-value memory (capacity law + allocator + gated resonator decode)",
+        "mind.superposed_memory(vocab=V) stores pairs as ONE vector (sum of bind(k,v)); "
+        "mind.memory_capacity_law(dim,V,alpha) PREDICTS how many fit in closed form (the V-scaling is the "
+        "Qinv((1-a)/V)^2 term, measured); mind.allocate_memory_dim(n,V) inverts it BEFORE storing. "
+        "recall(decoder='pic') is resonator-style interference cancellation, exact to ~1.5x the one-shot wall, "
+        "and LOAD-GATED: past its phase transition it refuses and answers matched-filter (kept negative: "
+        "undamped PIC there is WORSE than one-shot). int8 memory is decision-free; sign keeps ~70% capacity.",
+        example="import numpy as np; mem=mind.superposed_memory(vocab=256); n=mind.memory_capacity_law(vocab=256); "
+                "ks=np.arange(n); vs=(ks*7)%256; r=mem.store(ks,vs).recall(ks, decoder='pic'); "
+                "print(n, (r['values']==vs).mean(), r['decoder'])",
+        native=True, aliases=("how many pairs fit in a vector", "associative memory size",
+                              "store facts in one hypervector", "key value bundle capacity",
+                              "what dimension do I need for N items", "allocate dimension before storing",
+                              "iterative cleanup decoder", "interference cancellation recall",
+                              "CDMA memory", "superposition recall limit"))
+
+    c.register_capability("State demand meter (how much memory does this stream need)",
+        "Measure BEFORE allocating: mind.state_demand(x) returns the TT-SVD bond dimensions (causal-state "
+        "counts) of the stream's block distribution, thresholded against the SAME stream shuffled -- iid "
+        "reads rank 1, period-p reads p, sampling noise cannot inflate it. mind.entropy_rate(x) returns "
+        "{h, E}: h~0 marks the deterministic regime (a generator exists), h>0 prices irreducible novelty; "
+        "dense-regime GUARDED (refuses block lengths the sample count cannot support -- the measured "
+        "silent-low-bias failure of naive plug-in). Feed demand into allocate_memory_dim.",
+        example="import numpy as np; x=np.tile(np.arange(4),5000); print(mind.state_demand(x)['ranks'], "
+                "mind.entropy_rate(x)['h'])",
+        native=True, aliases=("how much state does this stream need", "count causal states",
+                              "bond dimension of a process", "entropy rate of a signal",
+                              "how many bits to remember this", "is this stream predictable",
+                              "excess entropy", "memory demand before allocating"))
+
+    c.register_capability("Compressibility gate with horizon (does a generator exist, certified at this window)",
+        "mind.compressibility_check(x): stage 1 rejects on measured entropy rate (catches walk/AR/white -- "
+        "the nulls a phase-randomised surrogate provably misses); stage 2 calibrates fit_deterministic's "
+        "correlation against phase-randomised surrogates of the SAME signal (catches spectrum-matched "
+        "stochastic imposters). Every verdict carries a HORIZON: the same process honestly earns different "
+        "verdicts at different windows (measured -- short windows of a long randomisation ARE locally pure), "
+        "so a pass certifies THIS window only; extrapolating past it is the caller's declared risk.",
+        example="import numpy as np; t=np.arange(2000.); print(mind.compressibility_check(np.sin(2*np.pi*t/210))['passed'])",
+        native=True, aliases=("is this signal compressible", "does a deterministic generator exist",
+                              "is this noise or structure", "compressibility test with null",
+                              "should I fit or refuse", "certified at what horizon",
+                              "entropy gate before fitting", "generator existence check"))
+
+    c.register_capability("The Holographic RNN (measure -> identify | price | refuse, with provenance)",
+        "mind.holographic_rnn().process_stream(x) walks the abstention ladder: calibrated gate first (a "
+        "pass = a GENERATOR exists AT THIS HORIZON, identified via fit_deterministic, returned as bytes + "
+        "predict); a refusal prices state demand (TT ranks) and routes to associative() (capacity-law "
+        "allocation, load-gated resonator decode) or classifier() (trajectory readout carrying BOTH "
+        "invariances: arrival-time traps AND Levy areas -- neither subsumes the other). Incompressible "
+        "streams are refused WITH an allocator quote. Every verdict carries {regime, h, horizon, why}.",
+        example="import numpy as np; eng=mind.holographic_rnn(); t=np.arange(1000.); "
+                "r=eng.process_stream(np.sin(2*np.pi*t/150)); print(r['regime'], r['horizon'])",
+        native=True, aliases=("holographic rnn", "better rnn", "sequence model that abstains",
+                              "recurrent model with provenance", "route a stream to the right model",
+                              "should I fit a generator or a memory", "sequence engine",
+                              "rnn that measures first", "adaptive sequence architecture",
+                              "trajectory classifier with signatures"))
+
+    c.register_capability("Stream sentinel (regime watch + change events + priced recorder)",
+        "mind.stream_sentinel().watch(x) slides the HRNN ladder along a stream, segments it by regime, and "
+        "raises change events (regime flip or entropy-rate jump) carrying BOTH windows' provenance -- alarms "
+        "arrive with evidence. record(x) stores each window at its cheapest FAITHFUL form: generator params "
+        "(~30 floats, prefix-fit/suffix-CERTIFIED so a lone tone's surrogate degeneracy cannot block it), "
+        "quantile symbols at the measured rate, or raw floats -- noise is never fake-compressed. replay() "
+        "reconstructs in-window only (no extrapolation past any horizon), certificates riding every entry.",
+        example="import numpy as np; s=mind.stream_sentinel(); t=np.arange(4000.); "
+                "x=np.concatenate([np.sin(2*np.pi*t[:2000]/170), np.random.default_rng(0).standard_normal(2000)]); "
+                "w=s.watch(x); print(len(w['events']), [seg['regime'] for seg in w['segments']])",
+        native=True, aliases=("watch a stream for changes", "regime change detector", "drift monitor",
+                              "segment a signal by behavior", "compress telemetry honestly",
+                              "priced recorder", "anomaly boundary detector", "when did the process change",
+                              "adaptive stream compression", "record a stream with certificates"))
+
+    c.register_capability("Horizon profile (one stream, verdicts across scales -- drift localization)",
+        "mind.holographic_rnn().route_profile(x) runs the routing ladder on tail-anchored windows at "
+        "geometric scales and returns the verdict PER HORIZON. Compressibility is scale-relative (measured), "
+        "so one verdict is a point sample; the profile is the function. Scale DISAGREEMENT is the signal: a "
+        "regime change appears as the small-window verdict diverging from the large one, and the divergence "
+        "scale brackets when it happened (measured on a sine->noise splice: h climbs 0.87 -> 1.34 -> 1.98 as "
+        "the window narrows onto the noise). Memoised meters keep the repeated sub-window work cheap.",
+        example="import numpy as np; e=mind.holographic_rnn(); x=np.concatenate([np.sin(np.arange(1500.)/24), "
+                "np.random.default_rng(0).standard_normal(500)]); print([(p['window'],p['regime']) for p in e.route_profile(x)])",
+        native=True, aliases=("did the regime change", "when did this stream change", "drift detection",
+                              "verdict at multiple scales", "is it still the same process",
+                              "localize a change point", "multi-horizon check", "stream drift profile"))
+
+    c.register_capability("Triage cascade (a little model that amortises an expensive check, fast-REJECT only)",
+        "mind.triage_cascade() fronts an expensive predicate (default: the full compressibility gate, "
+        "n_null+1 generator fits) with a tiny ridge over cheap features (memoised entropy rate, top-bin "
+        "power, derivative skew, lag-1 autocorr). THE CONTRACT: the fast path may only reject -- every "
+        "accept runs the full machinery, so accept decisions are the oracle's by construction. Calibrated "
+        "so training positives are never fast-rejected (threshold below the lowest positive, minus a "
+        "safety spread); held-out false-reject rate is measured, not assumed. Trained heads save()/load().",
+        example="import numpy as np; t=np.arange(600.); casc=mind.triage_cascade(); "
+                "casc.fit([np.sin(2*np.pi*t/105), np.random.default_rng(0).standard_normal(600)]); "
+                "print(casc(np.random.default_rng(1).standard_normal(600))['path'])",
+        native=True, aliases=("speed up an expensive check", "fast pre-filter before fitting",
+                              "little model shortcut", "amortize a slow test", "cheap gate first",
+                              "branch predictor for faculties", "triage before computing",
+                              "skip the expensive path when obvious"))
+
+    c.register_capability("Train a model, one front door (honest about when it's actually trained)",
+        "mind.train_model(examples, labels=...) routes to the right learner and tells the truth: "
+        "sequences + labels -> trajectory classifier, REFUSING to call an underdetermined ridge "
+        "'trained' (the measured learning-curve knee -- flat until n_train exceeds the feature count, "
+        "0.62 -> 0.91 across it -- enforced at the API, with the row count that flips the verdict); "
+        "(keys, values) -> pair memory with dimension allocated from the capacity law BEFORE storing; "
+        "a bare stream -> the HRNN ladder (a generator with predict(), or an honest verdict). Every "
+        "result: {kind, trained, why}; every model ...",
+        example="import numpy as np; r=mind.train_model((np.arange(50), (np.arange(50)*7)%%97)); "
+                "print(r['kind'], r['trained'], r['model'].recall(np.arange(5))['values'])",
+        native=True, aliases=("train a model on my data", "make a classifier from examples",
+                              "learn from labeled sequences", "train and export a model",
+                              "is my model actually trained", "how many examples do I need",
+                              "fit a model to a stream", "one call training"))
+
+    c.register_capability("Structure fingerprint + drift (did this stream change between releases)",
+        "mind.structure_fingerprint(x) -> {h, E, ranks, demand_bits, horizon}: a tiny structural signature "
+        "of any stream (asset bytes, CI timings, solver residuals), memoised so logging it per artifact per "
+        "release is near-free. mind.structure_drift(a, b) compares two and answers in MEASURED units -- "
+        "'entropy rate moved 0.00 -> 1.99', 'state demand moved: max rank 4 -> 1' -- with tolerances set "
+        "from this tree's own observed spreads. The regression detector for pipelines: structure changes "
+        "move the fingerprint before they break a unit test.",
+        example="import numpy as np; a=mind.structure_fingerprint(np.tile(np.arange(4),2000)); "
+                "b=mind.structure_fingerprint(np.random.default_rng(0).integers(0,4,8000)); "
+                "print(mind.structure_drift(a,b)['why'])",
+        native=True, aliases=("did this data change", "detect drift between versions",
+                              "structural regression check", "fingerprint a stream",
+                              "compare two datasets structurally", "pipeline output changed",
+                              "release regression detector", "signature of a signal"))
+
+    c.register_capability("Nested memory library (many knowledge bases in ONE vector, one-unbind queries)",
+        "mind.nested_memory(n_bases=M, facts_per_base=n) allocates ONE vector (flat capacity law at "
+        "the product load M*n) holding a whole shelf of pair-memory bases: add(name, keys, values) "
+        "superposes a base under its name atom; shelve(name, memory) ingests an existing trained "
+        "SuperposedMemory; query(name, keys) answers (base, key) -> value in a SINGLE unbind, because "
+        "bind's associativity flattens sum_i bind(name_i, sum_j bind(k,v)) into composite-key pairs "
+        "-- no base is ever reconstructed to be read. Load-gated PIC decode; int8 decision-free; "
+        "exports at 1 bit/dim.",
+        example="lib=mind.nested_memory(n_bases=2, facts_per_base=3); import numpy as np; "
+                "lib.add('a', np.arange(3), np.arange(3)*7); lib.add('b', np.arange(3), np.arange(3)*11); "
+                "print(lib.query('b', np.arange(3))['values'])",
+        native=True, aliases=("many databases in one vector", "library of memories",
+                              "nested knowledge bases", "memory of memories",
+                              "query across model shelf", "holographic library",
+                              "two level lookup one operation", "shelve a trained memory"))
+
+    c.register_capability("Easy model: train it, ask it, save it (three verbs, any kind)",
+        "m = mind.easy_model(data, labels=...) trains the right model (pair memory / sequence "
+        "classifier / generator) behind ONE handle; m.ask(query) answers regardless of kind; NOTE its "
+        "scope honestly: exact or fuzzy (edit-distance, correction reported) lookup over YOUR stored "
+        "keys and labels, NOT natural-language prompting -- semantic queries belong to "
+        "find_capability, comprehension to DECLARE (key ids -> values, sequences -> labels, a count "
+        "-> that many forecast steps); m.save(path) and mind.load_easy_model(path) round-trip it as a "
+        "small npz. All train_model honesty guards apply: ...generator ...",
+        example="import numpy as np; m2=mind.easy_model((np.arange(30),(np.arange(30)*7)%%64)); "
+                "print(m2.ask(np.arange(3))['answer']); m2.save('/tmp/em.npz'); "
+                "print(mind.load_easy_model('/tmp/em.npz').ask(np.arange(3))['answer'])",
+        native=True, aliases=("easiest way to train a model", "train then query a model",
+                              "simple model api", "ask a trained model", "three verb model",
+                              "load a model and use it", "train ask save", "beginner model training"))
+
+    c.register_capability("HRNN domain recipes (forecasting, markets, science, data, text, audio)",
+        "mind.hrnn_recipes(topic) is the use-case front door: a working call sequence per domain -- "
+        "'forecasting' (certify-then-extend, horizon-scoped), 'market analysis' (route + fingerprint "
+        "+ drift; returns honestly refused), 'scientific study' (generator existence, causal-state "
+        "demand, trajectory classification), 'data processing' (per-release fingerprints, triage "
+        "cascades), 'text generation' (price the corpus; generation routes to n-gram faculties; "
+        "comprehension to DECLARE), 'audio' (streams route like any signal). Every recipe carries an "
+        "HONEST field stating what the mechanism will not do.",
+        example="print(mind.hrnn_recipes()); print(mind.hrnn_recipes('weather forecasting')['how'])",
+        native=True, aliases=("forecast the weather", "weather forecasting", "analyze market data",
+                              "predict a time series", "process my data with hrnn", "scientific data analysis",
+                              "generate text with hrnn", "audio analysis", "what can the hrnn do for me",
+                              "hrnn use cases", "domain recipes"))
+
+    c.register_capability("Behavior meter for creature and agent minds (wrong-habit alarm)",
+        "mind.behavior_meter(actions, rewards, prev=last_epoch) is the two-meter learning instrument: "
+        "entropy rate of the action stream measures policy FORMATION (h_norm 1.0 = acting at chance, "
+        "<0.6 = crystallised), rewards measure CORRECTNESS, and formation advancing while reward stays "
+        "flat fires the WRONG-HABIT ALARM -- measured live on a real CreatureMind that crystallised "
+        "(h 1.96 -> 0.97) at policy-correct 0.25. Neither meter alone can see a confidently wrong habit. "
+        "Cheap (memoised fingerprints), online, per creature per epoch; actions may be any hashables.",
+        example="import numpy as np; r=np.random.default_rng(0); "
+                "e0=mind.behavior_meter(r.integers(0,4,240), rewards=r.random(240)*0.1); "
+                "e1=mind.behavior_meter(np.tile(np.arange(4),60), rewards=r.random(240)*0.1, prev=e0); "
+                "print(e1['formation'], e1['alarm'])",
+        native=True, aliases=("is my creature actually learning", "wrong habit alarm",
+                              "agent learning progress meter", "did the policy crystallise wrong",
+                              "creature behavior formation", "reinforcement learning sanity check",
+                              "behavior entropy meter", "policy formation vs correctness"))
+
+    c.register_capability("Dynamic model synthesis (emit the pipeline as an inspectable recipe)",
+        "mind.synthesize_model(data, labels=...) measures the data and EMITS the pipeline as a JSON recipe "
+        "-- each stage (adapter, features, readout/decoder, guards) recorded WITH the measurement that "
+        "justified it -- then compiles and trains it. Recipes are artifacts like stored VM programs: "
+        "diffable, versionable, replayable. v1 scope stated honestly: choices are measurement-driven rules "
+        "over the shipped stages, not open-ended codegen. Also: mind.find_capability is now BAKED (per-cap "
+        "haystacks precomputed + cross-session memo keyed by catalog hash: 50ms -> 1ms warm, repeats free).",
+        example="r=mind.synthesize_model((__import__('numpy').arange(40),(__import__('numpy').arange(40)*3)%%50)); "
+                "print([s['stage']+':'+s['choice'] for s in r['recipe']['stages']])",
+        native=True, aliases=("build a model pipeline automatically", "synthesize a model on the fly",
+                              "emit a training recipe", "why did it choose this model",
+                              "dynamic model construction", "model as a stored program")) 
+
+    c.register_capability("Certified surrogate layer (serve computation from a model, never fabricate)",
+        "mind.make_surrogate(fn, sample_inputs) runs fn ONCE over the samples and returns a callable with a "
+        "three-way contract: CERTIFIED EXTENSION where the ladder certifies a generator (measured 9078x on "
+        "a fine-step simulation, NRMSE 0.041), EXACT hash-replay on seen inputs, and the real computation "
+        "(memoised) otherwise -- never fabrication. .provenance states which contract is in force and why. "
+        "For big-vocab context stores, mind.big_pair_memory streams seed-derived codebooks in chunks (the "
+        "MQAR pattern) so the state is ONE vector and materialised codebooks cost nothing.",
+        example="s=mind.make_surrogate(lambda i: float(__import__('numpy').sin(2*3.14159*i/40)), range(400)); "
+                "print(s(7)['path'], s(450)['path'])",
+        native=True, aliases=("replace heavy computation with a model", "surrogate for a simulation",
+                              "cache a computation as a model", "certified surrogate",
+                              "speed up repeated computation", "big vocabulary pair memory",
+                              "context memory at dictionary scale", "streamed codebook memory"))
+
+    c.register_capability("Enriched capability search (dictionary-augmented routing) + recipe replay",
+        "mind.find_capability_enriched(q): words the catalog does not know are looked up in the "
+        "in-tree 144k dictionary and their definition tokens (suffix-stemmed) join the search -- "
+        "'prognosticate the morrow' reaches forecasting, 'an augury of my ledgers' reaches "
+        "drift/fingerprints. Additive by construction (tokens only added: raw hits can never be "
+        "lost); expansions reported, never silent. Also mind.replay_model_recipe(recipe, data): "
+        "retrain from a stored synthesis recipe and ASSERT the stage choices reproduce -- a recipe is "
+        "a contract, drift raises with the diff.",
+        example="r=mind.find_capability_enriched('prognosticate the morrow'); "
+                "print(r['expansions'], [str(c)[:30] for c in r['results'][:2]])",
+        native=True, aliases=("search with synonyms", "dictionary augmented search", "enriched routing",
+                              "find capability with rare words", "replay a training recipe",
+                              "reproduce a model exactly", "rag routing"))
+
+    c.register_capability("Scale advisor (consult every capacity law BEFORE hitting the wall)",
+        "mind.advise_scale(n_pairs=..., vocab=..., dim=..., bundle_k=..., factors=..., depth=...) "
+        "applies every measured law in one checkpoint -- pair capacity via allocate (alpha-exact "
+        "dim), the PIC decoder transition, the bundle linear-readout ceiling k*~0.13*D (sparse "
+        "decoders hold ~8.7x more), the factorization hard wall F=4 (split factor groups beyond it) "
+        "-- and returns margins, the BINDING constraint, and a concrete prescription; fix=True "
+        "returns the corrected spec. Empirical knobs (depth) route to mind.auto_scale by name, which "
+        "doubles the responsive knob and diagnoses genuine walls.",
+        example="print(mind.advise_scale(n_pairs=200, vocab=1000, dim=512, fix=True)['prescription'])",
+        native=True, aliases=("hit a capacity wall", "how big should dim be", "auto scale capacity",
+                              "overcome depth limit", "memory is full", "bundle overloaded",
+                              "too many factors", "which constraint is binding", "grow the dimension",
+                              "capacity check before building", "nesting depth wall", "tree too deep", "probe depth limit"))
+
+    c.register_capability("Compute plan (amortisation tiers before the backend race)",
+        "mind.compute_plan(n, calls_expected, repeat_fraction=..., stream=...) routes a computation "
+        "through the FULL menu, not just raw backends: exact-replay memo for repeats (recomputing a "
+        "known answer is the only true waste), certified surrogate when a sample output stream passes "
+        "the ladder (measured 9078x; exact-cycle for symbolic), then the real zig policy (measured "
+        "2-5x regime) and the real gpu_crossover row when hardware has measured one -- an unmeasured "
+        "device is NAMED blocked, never guessed. Where the GPU wins raw throughput, the winning move "
+        "is often shrinking the work: superposition, ...",
+        example="print(mind.compute_plan(10**6, repeat_fraction=0.9)['tier']); "
+                "print(mind.compute_plan(10**6)['why'])",
+        native=True, aliases=("should this run on the gpu", "cpu or gpu decision", "route a computation",
+                              "avoid recomputing", "beat the gpu", "compute dispatch policy",
+                              "which backend should I use", "shrink the work"))
+
+    c.register_capability("Convergence guard for adaptive sampling (is the CLT stop trustworthy here?)",
+        "mind.convergence_guard(increments) checks the assumption the variance-based stop silently "
+        "makes: adaptive_sample_budget's interval is exactly right for i.i.d. increments and exactly "
+        "a lie for a pixel whose stream still carries structure -- drift (a caustic path being "
+        "discovered) or correlated/periodic sampling. Measured trap on record: two streams with "
+        "near-identical CLT half-widths (~0.008, both claiming converged), one with TRUE error 0.083 "
+        "-- 10x its interval.",
+        example="import numpy as np; r=np.random.default_rng(0); "
+                "print(mind.convergence_guard(r.standard_normal(400)*0.1)['iid_ok']); "
+                "print(mind.convergence_guard(r.standard_normal(400)*0.1+np.linspace(0,.2,400))['why'][:60])",
+        native=True, aliases=("is this pixel really converged", "can I stop sampling", "clt assumption check",
+                              "adaptive sampling guard", "simulation reached steady state check",
+                              "settle detector", "render convergence check", "iid increments test"))
+
+    c.register_capability("Settle-gated simulation runner (pay for dynamics, not equilibrium)",
+        "mind.run_until_settled(step, state, steps) runs any simulation step function until the "
+        "residual stream passes convergence_guard (i.i.d.: no drift, no order), then serves remaining "
+        "frames from the settled state. MEASURED on the real fluid solver: a 600-frame decaying 64x64 "
+        "shot settled at step 96 -- 504 frames served from equilibrium, 4.7x wall-clock, final-frame "
+        "max error vs the fully-simulated ground truth 0.00e+00."
+        "cloth settling, particle systems; pair with make_surrogate for settled-but-oscillatory regimes.",
+        example="import numpy as np; r=mind.run_until_settled(lambda v: v*0.7, np.ones(32), steps=200); "
+                "print(r['why'])",
+        native=True, aliases=("stop simulating when settled", "simulation early exit", "fluid settle speedup",
+                              "skip equilibrium frames", "softbody relaxation stop", "cloth settle",
+                              "speed up my simulation", "graphics optimization pass")) 
+
+    c.register_capability("Behavior pool (LOD for minds: tick 50k NPCs on one box)",
+        "mind.behavior_pool() manages a population of ticking agents with behavior level-of-detail: "
+        "an agent whose recent output stream certifies as an EXACT CYCLE (the symbolic surrogate "
+        "contract) is demoted to a served cycle at near-zero cost; any input to that agent promotes "
+        "it back to live ticking instantly; agents that never certify -- driven, chaotic, LEARNING -- "
+        "are never demoted, and report() says which and why. pool.add(name, tick_fn, state); "
+        "pool.step_all(inputs); pool.report()."
+        "behavior costs what its information content costs.",
+        example="p=mind.behavior_pool(window=48); p.add('npc', lambda st,inp: ((st or 0)%%4,(st or 0)+1), 0); "
+                "[p.step_all() for _ in range(120)]; print(p.report()['why'])",
+        native=True, aliases=("tick many agents cheaply", "npc crowd on one server", "behavior level of detail",
+                              "agent pool", "mmorpg npc optimization", "demote idle npcs",
+                              "game server agent scaling", "lots of npcs cheap", "npc archetypes share memory", "cohort compaction", "per region ai health", "zone behavior monitor"))
+
+    c.register_capability("Streaming meters (live convergence guard and entropy, O(1) per sample)",
+        "mind.stream_meter(window=256) returns an online meter: push(x) per sample or block (O(1) in "
+        "stream length), verdict() runs the convergence guard on the live window -- BIT-IDENTICAL to the "
+        "batch guard on the same bytes, the property the selftest pins -- and entropy() gives the live "
+        "rate report. For audio blocks, simulation residuals, and agent action streams: the instruments "
+        "run where the data is born instead of re-scanning history. Warmup answers iid_ok=None honestly. "
+        "Over HTTP the meter travels as an object handle (call push/verdict via the handle registry).",
+        example="sm=mind.stream_meter(window=64); import numpy as np; "
+                "[sm.push(v) for v in np.random.default_rng(0).standard_normal(64)*0.1]; "
+                "print(sm.verdict()['iid_ok'])",
+        native=True, aliases=("online convergence check", "live entropy meter", "streaming guard",
+                              "real time stream analysis", "audio block meter", "push samples get verdict",
+                              "monitor a live stream", "incremental meters"))
+
+    c.register_capability("Carrier-elevated deep trees (depth survives: readable leaves at depth 32)",
+        "mind.encode_tree_carrier(tree) encodes each tree LEVEL on its own carrier, making depth "
+        "contribution linear instead of geometric. Measured against the flat encoder's "
+        "dim-independent wall (depth_probe): holistic separability moves d5 -> d7 and decays "
+        "polynomially instead of snapping to 1.0; the real payoff is DEPTH-ADDRESSABILITY -- unbind "
+        "level-d's carrier, strip the position tag, clean up: deep-leaf recovery 0.94-1.00 at depths "
+        "7-32 where the flat encoding carries ZERO bits about the leaf."
+        "depth must survive. The advisor (advise_scale) prescribes exactly this lever past depth 4.",
+        example="v=mind.encode_tree_carrier(('add',('mul','x','y'),'z')); print(len(v), float((v*v).sum()))",
+        native=True, aliases=("encode a deep tree", "tree too deep to encode", "carrier levels",
+                              "depth addressable structure", "read a leaf from a deep tree",
+                              "nested structure beyond depth limit", "deep hierarchy encoding", "why is my deep tree unreadable", "capacity warning at encode time", "unmix a bundle with sparse decoding", "recover all bundle members", "omp bundle readout"))
+
+    c.register_capability("Fluid boundaries & performance (leStudio backlog: dtype, RGB, walls, ROI)",
+        "The fluid stack is float32-clean end to end (P1: advect 2.62 -> 1.25 ms at 144x192; "
+        "projection and diffuse preserve input dtype -- every float32 pipeline stays float32). advect "
+        "accepts (H,W,C) fields sharing one backtrace (P2: RGB dye 7.23 -> 3.01 ms/step combined with "
+        "P1), plus out= buffer reuse and roi=(y0,y1,x0,x1) windows (P4: sound for advection -- the "
+        "backtrace is local; projection stays global; coarse-global + fine-local is the standard "
+        "hybrid)."
+        "projection only.",
+        example="import numpy as np; z=np.zeros((32,32),np.float32); "
+                "print(mind.fluid_step(z,z.copy(),z.copy(),boundary='wall')[0].dtype)",
+        native=True, aliases=("fluid walls not torus", "canvas edges are walls", "ink wraps around the edge",
+                              "mass conserving boundary", "advect rgb dye", "float32 fluid",
+                              "solve only a region of the grid", "fluid roi", "document solid mask"))
+
+    c.register_capability("Adaptive path tracing (CI-driven sampling: stop when the pixel is proven)",
+        "mind.path_trace_adaptive(sdf, camera, tol=0.02) samples in blocks and stops each pixel when "
+        "its CLT 95% half-width falls under tol*scale -- the statedemand stopping rule per pixel, "
+        "valid because Monte-Carlo samples are iid by construction (scope stated, not assumed). Sky "
+        "and flat regions stop at min_spp; edges and high-variance paths run to max_spp. MEASURED "
+        "(lit sphere, 48x48): 84% of a flat 128-spp render's samples avoided, error 7x under the "
+        "contracted tolerance, spp 16-112 spatially adaptive. Uses path_trace's own active mask -- "
+        "the shipped tracer, not a fork.",
+        example="import numpy as np; from holographic.rendering.holographic_render import Camera; "
+                "img,rep=mind.path_trace_adaptive(lambda P: np.linalg.norm(P,axis=-1)-1.0, Camera(), "
+                "width=24, height=24, max_spp=32); print(rep['why'])",
+        native=True, aliases=("adaptive sampling render", "stop sampling converged pixels",
+                              "render faster same quality", "variance based sampling",
+                              "spend samples where noisy", "progressive render with a stopping rule"))
+
+    c.register_capability(
+        "Creature readability reports (webbing, silhouette gaps, per-part ids)",
+        "the three instruments a creature rebuild is judged against. webbing_report counts "
+        "NON-ADJACENT bone pairs with material in the corridor between them (one global implicit "
+        "surface webs independent limbs together) -- 50/99 on the shipped quadruped, and it RESPONDS "
+        "to blend (k=0.01 -> 10, k=0.30 -> 52). silhouette_report counts ENCLOSED negative-space "
+        "holes (a blob scores 0; the quadruped scores 0). part_ids says which rig segment owns a "
+        "point, for the flat per-part colour seam test. KEPT NEGATIVE: a corridor blocked by a third "
+        "bone is `shielded` and excluded -- watch the TREND, not the absolute.",
+        example="cr, _sdf = mind.creature(mind.quadruped_spec()); "
+                "print(mind.creature_webbing_report(cr)['webbing_pairs'], "
+                "mind.creature_silhouette_report(cr, res=64)['holes'])",
+        native=True, aliases=("does my creature look like a blob", "webbing between limbs",
+                              "limbs melting into the body", "measure creature readability",
+                              "negative space between legs", "silhouette gaps", "webbing pairs",
+                              "why does my creature look wrong", "is the skin blending too much",
+                              "which part owns this point", "flat colour per part test"))
+
+
+    c.register_capability(
+        "One rig type (shared skeleton view + capability roles)",
+        "there is not a creature rig and a humanoid rig. mind.rig(x) is the shared joints + "
+        "per-segment bones + chains view over ANY skeleton, with canonical '<chain>#<index>' tags "
+        "IDENTICAL to the skin's bone_of, so weights, reports and roles join with no translation "
+        "table. rig_invariant pins one bone = one rigid segment (no bending mid-shaft) on creature "
+        "AND humanoid. rig_roles labels foot/tip/torso from geometry. KEPT NEGATIVE: "
+        "find_by_role is the EXACT dict and is authoritative; the VSA unbind path is exact at 16 "
+        "segments but recall falls to 0.04 by 128 (module docstring has the table).",
+        example="cr, _s = mind.creature(mind.quadruped_spec()); print(mind.rig_invariant(cr)); "
+                "print(mind.rig_roles(cr).find_by_role('foot'))",
+        native=True, aliases=("one rig for creatures and humanoids", "shared skeleton type",
+                              "which segments are feet", "tag parts by role", "capability tags",
+                              "does my rig have one bone per segment", "bone bends in the middle",
+                              "find the legs on any body plan", "unify creature and humanoid rig",
+                              "segment tags", "how big is my creature", "reference length of a rig"))
+
+
+    c.register_capability(
+        "Creature skin as a composition tree (metaball groups)",
+        "the fix for limbs melting into the torso. The old skin summed everything into ONE global "
+        "field with ONE blend radius, so anything near anything else blended. creature_tree compiles "
+        "the rig into the existing SDF DSL: parent-child segments blend at their shared joint, all "
+        "else HARD-unions, so webbing between unrelated limbs is UNEXPRESSIBLE. MEASURED: webbing "
+        "76 -> 0, negative space 0.130 -> 0.443. Returns an SDF; default-off. Joint blend is "
+        "RELATIVE to the limb (D-7). KEPT NEGATIVE: an ABSOLUTE 0.30 blend still webs (58 smooth / "
+        "60 exact-fillet) -- the bounded operator did not rescue it.",
+        example="cr, _s = mind.creature(mind.quadruped_spec()); sdf = mind.creature_tree(cr); "
+                "print(mind.creature_webbing_report(cr, field=sdf)['webbing_pairs'])",
+        native=True, aliases=("limbs melt into the body", "stop the skin blending everything",
+                              "metaball groups", "webbing between limbs fix", "creature sdf tree",
+                              "composition tree skin", "blend only at joints",
+                              "why do my legs merge together", "separate limbs from the torso",
+                              "creature skin without melting"))
+
+
+    c.register_capability(
+        "Volumetric tissue: bone, muscle, fat, skin as nested fields",
+        "real anatomy, not a shading trick. tissue_fields returns a nested SDF per tissue, grown "
+        "OUTWARD from bone -- set muscle and fat PER BONE and the skin falls out, which is why one "
+        "skeleton can be a whippet or a bulldog. tissue_at(P) names the tissue at a point; "
+        "anatomy_report checks bone-in-muscle-in-fat-in-skin (0/396 violations). "
+        "tissue_visible_field hides layers and/or cuts with a plane -- hide the skin and the WHOLE "
+        "skeleton shows in place, no separate geometry. ORGANS are metaballs in anatomy space (the "
+        "one place metaballs are right), fitted inside muscle with bone subtracted.",
+        example="cr, _s = mind.creature(mind.quadruped_spec()); f = mind.tissue_fields(cr); "
+                "print(mind.anatomy_report(cr, fields=f)['fractions'])",
+        native=True, aliases=("see inside my creature", "show the skeleton", "muscle and fat sliders",
+                              "what tissue is at this point", "cross section of a creature",
+                              "hide the skin", "cutaway view", "layers of anatomy",
+                              "is the bone inside the skin", "skin weights from anatomy",
+                              "fat belly thick thighs", "x-ray my creature", "put organs in my creature",
+                              "where is the heart", "viscera", "internal organs"))
+
+
+    c.register_capability(
+        "Hybrid body plans (a centaur is a spec, not a code path)",
+        "a limb can mount ON another limb ({'on': 'torso', 'u': 0.85}) instead of on the spine, which "
+        "is the one structural thing a hybrid needs. mind.centaur_spec() is a horse with a humanoid "
+        "torso and arms on it -- and NOTHING in the engine knows what a centaur is. VERIFIED end to "
+        "end on the same code as a quadruped: 26 segments, webbing 0, negative space 0.585, anatomy "
+        "nesting 0 violations, and it WALKS on its four horse legs (slip 7.0% of stride) with the "
+        "arms correctly not treated as legs. Chains can be named for readability; unnamed keeps the "
+        "old L0/L0m tags byte-for-byte.",
+        example="cr, _s = mind.creature(mind.centaur_spec()); print(mind.rig_invariant(cr)['segments'], "
+                "mind.gait_report(cr)['slip_ratio'])",
+        native=True, aliases=("centaur", "hybrid creature", "half horse half human",
+                              "mount a limb on another limb", "torso on a quadruped",
+                              "minotaur", "mermaid", "chimera body plan", "arms on a horse"))
+
+
+    c.register_capability(
+        "Body-relative sizing (texture that survives a resize)",
+        "a spatial frequency must declare its reference length, or the same animal wears finer skin "
+        "just for being bigger: tripling a creature took an insect from 17 sclerite plates to 38. "
+        "Pass creature= to creature_material and the pattern is sized BY THE BODY. scale_invariance_probe "
+        "is the generalised check: this bug hit DISTANCES four times. rotation_invariance_probe is its "
+        "directional twin -- it hit DIRECTIONS three more (mirror plane, limb dir, spine arch). "
+        "Neither knows which quantities SHOULD vary: shape belongs to the BODY frame, gravity to the "
+        "WORLD.",
+        example="cr, _s = mind.creature(mind.quadruped_spec()); "
+                "mat = mind.creature_material('insect', creature=cr)",
+        native=True, aliases=("my creature breaks when I rotate it", "rotation invariance check",
+                              "which frame should this be in", "body relative or world relative",
+                              "my scales get smaller when I resize", "texture changes with body size",
+                              "how many scales across the body", "physical scale size",
+                              "keep the texture the same when scaling", "body relative texture",
+                              "does this survive a resize", "scale invariance check",
+                              "absolute vs relative units"))
+
+
+    c.register_capability(
+        "One pipeline, three bodies (the unification regression)",
+        "the honest test of D-1 is not that a quadruped still works -- it is that a HYBRID and a rig "
+        "recovered from a POINT CLOUD walk the same calls. creature_regression_report runs one "
+        "skin/tissue/readability pipeline over a quadruped, a centaur and a fitted rig: 0 webbed "
+        "pairs and 0 nesting violations on each, 16/26/4 segments. rig_from_primitives closes the "
+        "loop -- a fitted capsule IS a bone segment, so observe and generate produce the same type. "
+        "KEPT NEGATIVE: a fitted rig has no spine so it gets no organs, reported not hidden.",
+        example="print(mind.creature_regression_report(res=48))",
+        native=True, aliases=("does the centaur work", "hybrid body plan test",
+                              "rig from a point cloud", "fitted rig", "close the loop",
+                              "photo to creature rig", "do all body plans use one code path",
+                              "regression specs", "prove the unification"))
+
+
+    c.register_capability(
+        "Recover a body from a mesh (spine, thickness, inferred tissue)",
+        "the observe half of the pipeline. rig_from_mesh takes the medial-axis centerline as a real "
+        "SPINE chain carrying the medial radius -- the shape's own thickness measurement -- so a "
+        "scanned body gets parented segments, joint blending, anatomy space AND organs, none of "
+        "which rig_from_primitives could give it. infer_tissue_fractions derives muscle/fat from the "
+        "gap between fitted bone and observed skin, body_params-shaped so an inferred body drives "
+        "tissue_fields like an authored one. KEPT NEGATIVES: single-branch (torso, not limbs); the "
+        "muscle/fat split is not observable from a silhouette.",
+        example="cr, _s = mind.creature(mind.quadruped_spec()); "
+                "lo, hi = mind.rig(cr).extent(); "
+                "mesh = mind.mesh_from_sdf(mind.creature_tree(cr), (tuple(lo-0.1), tuple(hi+0.1)), res=32, vectorized=True); "
+                "rig, thick = mind.rig_from_mesh(mesh, res=24); print(len(rig.tags))",
+        native=True, aliases=("find the spine of a mesh", "recover a rig from a scan",
+                              "how thick is this body", "infer muscle and fat",
+                              "backbone from geometry", "reverse engineer a creature",
+                              "mesh to rig", "medial axis to spine"))
+
+
+    c.register_capability(
+        "Scaffold meshing (a cage on the skeleton, projected onto the field)",
+        "the fix for lumpy limbs. Marching cubes sizes ONE grid for the whole body, so a thin limb "
+        "gets a couple of cells across it and beads; a scaffold's density follows the SKELETON. "
+        "MEASURED on the quadruped's thinnest segment: radial ripple 25.4% (marching, res 40) -> 1.6% "
+        "(scaffold), with FEWER verts (7,570 vs 10,754), landing on the isosurface to 1e-16. A "
+        "composition, not a new mesher: skin_skeleton + shrinkwrap_field + creature_tree. KEPT "
+        "NEGATIVE: closest-POINT, so a cage vertex nearer a neighbouring limb is pulled onto it.",
+        example="cr, _s = mind.creature(mind.quadruped_spec()); "
+                "out = mind.creature_scaffold_mesh(cr); print(len(out['mesh'].vertices))",
+        native=True, aliases=("my limbs look lumpy", "beading on thin limbs", "better mesh than marching cubes",
+                              "quad cage on a skeleton", "project a mesh onto an sdf",
+                              "scaffold polygonisation", "retopo onto a field", "shrinkwrap onto a field"))
+
+
+    c.register_capability(
+        "Creature readability: proportion as a SEARCH, not a rule table",
+        "per Togelius et al.'s search-based PCG, quality comes from an evaluation function you SEARCH, "
+        "so this scores specs with the metric already trusted for the field rebuild rather than "
+        "hand-coding proportions. TWO TERMS, because one is degenerate: negative space alone is "
+        "MONOTONE in limb thickness (0.470 -> 0.332), so maximising it yields a spider-legged wisp; "
+        "mass dominance runs the other way (0.817 -> 0.516), giving an interior optimum. Webbing is a "
+        "hard GATE, not a term. Also grounds a creature (A-4) so it reads as an animal.",
+        example="print(mind.creature_proportion_search(mind.quadruped_spec(), res=48)['chosen'])",
+        native=True, aliases=("my creature looks wrong but I don't know why", "proportion rules",
+                              "does this read as a creature", "make the limbs subordinate",
+                              "stand my creature on the ground", "line of action",
+                              "my creature has no neck", "the head does not read", "head to body ratio",
+                              "score a body plan", "big shape small shape", "why does it look spindly"))
+
+
+    c.register_capability(
+        "Make a creature (spec -> body, skin, mesh, parts, grounded)",
+        "THE entry point. build_creature(spec) runs the whole pipeline: rig, metaball-group skin, "
+        "scaffold mesh, role-driven part sockets (feet on whatever the feet are, eyes and mouth on the "
+        "head, ANY body plan, no per-plan table), grounding and a readability score. It exists because "
+        "dogfooding found find_capability('make a creature') returned the parts library, the body-shape "
+        "module and the editor -- everything except how to make one. KEPT NEGATIVE: a placed foot does "
+        "not yet make a leg READ as footed; the limb's capsule already caps that space (0.58% of "
+        "pixels change).",
+        example="out = mind.build_creature(mind.quadruped_spec(), quads=True); "
+                "print(len(out['mesh'].faces), out['quads']['quad_fraction'])",
+        native=True, aliases=("make a creature", "create a creature", "design a monster from scratch",
+                              "build an animal", "generate a creature from a spec", "creature pipeline",
+                              "how do I make a creature", "put feet and eyes on my creature",
+                              "attach parts to a body", "creature with quads and lods",
+                              "retopologise my creature", "game ready creature mesh",
+                              "make my creature fat", "obese creature", "pot belly", "fat tummy",
+                              "how do I control body fat", "muscular creature",
+                              "my creature loses legs when I rotate it", "spine along a different axis",
+                              "body relative limb directions", "dir_space body"))
+
+
+    c.register_capability(
+        "Ratios that carry their denominator (and role-driven part coverage)",
+        "measured_ratio(n, d, of=...) will not state a percentage without naming what it is a percentage "
+        "OF -- the measurement twin of D-7's reference length. It exists because 'parts change 0.58% of "
+        "pixels, so parts do not read' was ONE mistake: that was 0.58% of the whole IMAGE (~95% "
+        "background); against the BODY the same parts add 11% of silhouette. Alongside it, "
+        "creature_auto_sockets places parts by ROLE -- ground tip -> foot, LATERAL tip -> hand, head -> "
+        "eyes/mouth. One rule set: quadruped 4+0, centaur 4+2, humanoid 2+2.",
+        example="print(mind.measured_ratio(694, 6162, of='body silhouette')['value']); "
+                "cr, _s = mind.creature(mind.quadruped_spec()); print(len(mind.creature_auto_sockets(cr)))",
+        native=True, aliases=("percent of what", "state the denominator", "is this ratio meaningful",
+                              "put hands on the arms", "where do parts go on any body plan",
+                              "horns and ears and spikes", "part coverage by role"))
+
+
+    c.register_capability(
+        "Convolution surfaces (hands, feet, digits without bulges)",
+        "the right tool for extremities. Bloomenthal & Shoemake 1991: summing convolutions of "
+        "CONTIGUOUS skeletal primitives gives NO bulge at joints (superposition), where a "
+        "smooth_union's blend IS the bulge -- measured, right-angle corner 0.1065 vs 0.0788, 26% "
+        "less. Fuentes Suarez/Hubert/Zanni 2019 adds ELLIPSOIDAL sections so a sole is flat (4:1) "
+        "without extra primitives. KEPT NEGATIVE, Bloomenthal's own: convolution SUMS, so separate "
+        "digits still web (3-toe fan: 1 blob summed, 3 grouped) -- grouping is required.",
+        example="g, _a = mind.foot_skeleton(digits=3); f = mind.convolution_groups(g); "
+                "print(float(f([[0.0, 0.0, 0.05]])[0]))",
+        native=True, aliases=("how do I model a hand", "fingers and toes", "no bulge at joints",
+                              "convolution surface", "skeleton to smooth surface",
+                              "why do my joints bulge", "flat sole section", "model a foot properly"))
+
+
+    c.register_capability(
+        "Crystal FORMS ({hkl} means every equivalent face)",
+        "in crystallography braces denote the FORM -- all symmetry-equivalent faces -- so cubic {100} "
+        "is SIX faces (a cube) and {111} is EIGHT (an octahedron). crystal_habit takes EXPLICIT faces "
+        "and adds only the centrosymmetric pair, so asking for {100} and expecting a cube silently "
+        "gives a SLAB: measured volume 5.76 where a cube is 1.00, and not invariant under a 90-degree "
+        "turn (pointwise field difference 0.97). Pass form=True and you get a real cube (1.0022) and "
+        "octahedron (0.8495 vs 0.866 analytic), symmetric to 1e-16.",
+        example="s = mind.crystal_habit('cubic', ((1,0,0),), 0.5, form=True)",
+        native=True, aliases=("make a cube crystal", "crystal form vs face", "miller indices braces",
+                              "octahedron crystal", "why is my crystal a slab", "crystal symmetry faces"))
+
+
+    c.register_capability(
+        "Grow crystals (on a surface, as a cluster, in a geode, gated by a field)",
+        "crystal_habit gives the SHAPE a lattice permits; this places it. One rule covers every case: "
+        "A CRYSTAL GROWS PERPENDICULAR TO ITS SUBSTRATE, because a crystal pointing away from the wall "
+        "keeps reaching fresh solution while one lying flat gets buried. So a druse radiates, and a "
+        "geode is the SAME call with inward=True. `where` takes a weight FIELD, so crystals grow only "
+        "where a material says -- measured, gating lifted the mean field value under the crystals from "
+        "0.313 to 0.577. Geode measured hollow: 0.00 filled at centre, 1.00 rind.",
+        example="g = mind.crystal_geode(radius=0.7, count=40); "
+                "print(float(mind.crystal_cut(g).cut_face_normal[0]))",
+        native=True, aliases=("grow crystals on a surface", "crystal cluster", "druse",
+                              "make a geode", "crystals inside a rock", "crystals in a cavern",
+                              "crystals only where the material is", "crystal growth",
+                              "geode cross section", "crystal lining a cavity"))
+
+
+    c.register_capability(
+        "Beer-Lambert absorption (why a thick gem is darker than a thin one)",
+        "light is attenuated by the DISTANCE it travels INSIDE a transmissive solid, so depth reads: a "
+        "gem's thick parts come out darker and more saturated than its edges. Albedo alone tints once "
+        "per interaction and cannot tell a thick crystal from a sliver, which is why gems looked like "
+        "coloured glass. The path tracer takes sigma per RGB as an 8th material channel and uses the "
+        "interior path length it already computes for refraction. MEASURED on glass pixels: sigma=0 "
+        "gives (0.93,0.93,0.96), absorbing gives (0.11,0.10,0.16) -- darker AND hue-shifted, since "
+        "each channel is absorbed at its own rate.",
+        example="cb = mind.material_trace_channels('amethyst'); "
+                "print(mind.material_absorption('amethyst'))",
+        native=True, aliases=("beer lambert", "absorption through glass", "why is my gem flat",
+                              "thick crystal darker", "extinction coefficient", "gem depth",
+                              "transmissive material depth", "attenuate light through a solid"))
+
+
+    c.register_capability(
+        "Crystal imperfections (cloudiness, inclusions, phantoms, fractures, chips)",
+        "a PERFECT crystal reads as glass; specimens read as mineral because they are flawed in "
+        "structured ways. All but chipping are MATERIAL modifiers -- they change absorption, albedo "
+        "and roughness by position and leave the shape alone, so they compose with any habit and any "
+        "growth mode. Cloudiness is SCATTERING not pigment, so it raises absorption NEUTRALLY across "
+        "RGB (measured [1.92,1.92,1.92]) and desaturates 0.571 -> 0.296. Phantoms are the same habit "
+        "scaled down, so they hug it to |d| 0.011. Chips only ever subtract.",
+        example="cl = mind.crystal_cloudiness(seed=1); "
+                "cb = mind.crystal_flawed_material('quartz', cloud=cl)",
+        native=True, aliases=("milky quartz", "cloudy crystal", "inclusions in a crystal",
+                              "rutilated quartz", "phantom quartz", "crystal flaws",
+                              "imperfections in a gem", "chipped crystal", "fractures in quartz"))
+
+
+    c.register_capability(
+        "Render a specimen (adaptive trace + denoise + graded, one call)",
+        "trace -> G-buffer -> SVGF denoise -> firefly clamp -> SEARCHED exposure, composed. `tol` "
+        "replaces a sample count: state the quality and converged pixels stop being sampled (measured "
+        "83% of a flat 48-spp render's samples avoided at equal mean radiance; grain 0.080 -> 0.032 "
+        "after denoise). Every step already shipped separately and was hand-wired per render, which is "
+        "how the adaptive tracer went unused by an entire crystal arc. CAUTION: at min_spp=8 the block "
+        "CI is optimistic and pins spp at the floor; 16 escalates properly.",
+        example="img, rep = mind.render_specimen(sdf, (1.3,0.7,1.5), (0,0,0), mat, "
+                "mind.sky_model(hour=10.0), width=48, height=40); print(rep['sample_saving'])",
+        native=True, aliases=("render a crystal", "render until converged", "one call render",
+                              "denoised render", "adaptive sampling render", "how do I render a gem",
+                              "trace denoise and tone map"))
+
+
+    c.register_capability(
+        "Pose a creature mid-stride, and budget a render before running it",
+        "build_creature(pose=0.25) builds the body MID-WALK: the legs are IK-solved so the feet land "
+        "where the gait says, and support then comes from the gait's CONTACT set instead of geometry "
+        "-- a walking body legitimately lifts a foot, and the static test called that unstable "
+        "(supported False on a normal walk cycle). render_plan MEASURES cost on a tiny tile instead of "
+        "extrapolating: four overruns here came from linear estimates, which understate glass because "
+        "more samples means more rays marching through interiors.",
+        example="o = mind.build_creature(mind.quadruped_spec(), pose=0.25, cage_res=16); "
+                "print(o['ground']['planted'], o['ground']['supported'])",
+        native=True, aliases=("pose a creature", "walking creature", "creature mid stride",
+                              "how long will this render take", "render budget",
+                              "will this render finish", "animate and build"))
+
+
 _PART = "holographic_catalog_p06"
 
 

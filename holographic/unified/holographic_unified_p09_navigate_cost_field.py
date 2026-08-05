@@ -420,6 +420,18 @@ class _UnifiedPart09:
         abstain). Returns (packed_vectors, buckets). `apply_in_superposition` does one op on each bundle at once.
         See holographic_superschedule."""
         from holographic.scene_and_pipeline.holographic_superschedule import superpose_batch
+        if not gated and len(items) > 0:
+            import numpy as _np
+            _d = int(_np.asarray(items[0]).size)
+            if len(items) > 0.13 * _d:
+                # gated=True spills correctly on its own; this tap fires only on
+                # the MANUAL override crossing the measured readout law.
+                self._scale_tap(
+                    "ungated superposition of %d items in dim %d exceeds the "
+                    "measured linear readout law k* ~ 0.13*D (~%d): recovery "
+                    "will degrade. Use gated=True (spills into buckets) or "
+                    "decode with mind.bundle_decode(method='omp') (4x the "
+                    "linear ceiling)." % (len(items), _d, int(0.13 * _d)))
         return superpose_batch(keys, items, gated=gated)
 
     def apply_in_superposition(self, keys, items, op, gated=True):

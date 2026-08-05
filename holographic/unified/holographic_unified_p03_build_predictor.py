@@ -1361,6 +1361,18 @@ class _UnifiedPart03:
         """Encode an expression tree as a typed structure at this mind's dim/seed. A leaf is a str symbol;
         an internal node is (op, *children). The EML-tree's holographic encoding, generalised."""
         from holographic.misc.holographic_typed import tree_to_recipe
+        def _depth(t):
+            return 1 + max((_depth(c) for c in t[1:]), default=0) \
+                if isinstance(t, (tuple, list)) else 0
+        d = _depth(tree)
+        if d > 4:
+            # the measured wall (depth_probe): flat encoding's separability
+            # collapses dim-INDEPENDENTLY at d5-7 -- more dim does not help.
+            self._scale_tap(
+                "tree depth %d exceeds the flat encoder's measured wall (d5-7, "
+                "dim-independent): deep leaves become unreadable. Use "
+                "mind.encode_tree_carrier for depth-addressable encoding "
+                "(leaf recovery 0.94-1.00 at depths 7-32)." % d)
         return tree_to_recipe(self.dim, self.seed, tree)
 
     def nested_scene_structure(self, groups):

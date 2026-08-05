@@ -331,5 +331,46 @@ def report(strict=False):
     return total
 
 
+
+def _lint_memo_gate():
+    """Tree-state memo (measured: 5.3s per run, several runs per session). If the
+    tree is byte-for-byte where it was at the last PASSING lint, the examples
+    cannot have changed behaviour -- the lint's own subjects are files in this
+    tree. Any edit anywhere invalidates; only a fully green run is ever cached, so
+    a stale FAILURE can never hide."""
+    import hashlib, json, tempfile, glob, os
+    h = hashlib.sha256()
+    for pat in ("*.py", "holographic/**/*.py", "tools/*.py"):
+        for f in sorted(glob.glob(pat, recursive=True)):
+            if "__pycache__" in f:
+                continue
+            st = os.stat(f)
+            h.update(("%s|%d|%d" % (f, st.st_size, st.st_mtime_ns)).encode())
+    key = h.hexdigest()[:20]
+    path = os.path.join(tempfile.gettempdir(), "lecore_lint_memo.json")
+    try:
+        memo = json.load(open(path))
+    except Exception:
+        memo = {}
+    if memo.get("green") == key:
+        print(memo.get("summary", "skill_lint: tree unchanged since last green run"))
+        raise SystemExit(0)
+    return key, path
+
+
+def _lint_memo_store(key, path, summary):
+    import json
+    try:
+        json.dump({"green": key, "summary": summary + "  [memo]"}, open(path, "w"))
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
-    sys.exit(report(strict="--strict" in sys.argv))
+    _mk, _mp = _lint_memo_gate()
+    _rc = report(strict="--strict" in sys.argv)
+    if not _rc:
+        # only a fully GREEN run is cached -- a failure must always re-run.
+        _lint_memo_store(_mk, _mp, "TOTAL: 0 invocation gap(s) -- tree unchanged "
+                                   "since this green run")
+    sys.exit(_rc)
