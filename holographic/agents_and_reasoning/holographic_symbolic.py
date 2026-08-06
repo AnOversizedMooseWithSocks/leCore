@@ -241,3 +241,49 @@ def full_fit(x, y, dictionary=None):
     A = np.column_stack([_eval_atom(k, p, x) for (k, p) in atoms] + [np.ones(len(y))])
     beta, *_ = np.linalg.lstsq(A, y, rcond=None)
     return Formula(beta[-1], [(atoms[i], float(beta[i])) for i in range(len(atoms))])
+
+
+def multitone_formula(x, y, max_terms=6):
+    """Fit y(x) as INDEPENDENT sinusoids and package the result as a Formula (the savable seed).
+
+    Bridges holographic_hrnn.fit_multitone into the symbolic decomposition path, which the shipped
+    bases could not cover: they fit harmonics of ONE detected period, so incommensurate tones fell
+    outside the model entirely (measured n_terms=0 and residual 1.00 -- no better than the mean).
+
+    THE DOMAIN CONVERSION IS THE WHOLE CORRECTNESS ISSUE, and getting it wrong is silent. fit_multitone
+    works on integer SAMPLE INDICES, so its frequencies are cycles-per-sample. Every consumer of a
+    Formula evaluates it at the caller's own COORDINATES -- holographic_scaffold generates at
+    linspace(0,1,n), not at 0..n-1. A Formula carrying per-sample frequencies looks perfectly valid
+    there and produces garbage: the explained fraction collapsed and a lawful sine was reported as
+    'no structure found'. So the angular frequency is rescaled into x-units here, once, where the two
+    conventions meet.
+    """
+    import numpy as _np
+    from holographic.agents_and_reasoning.holographic_hrnn import fit_multitone
+    xx = _np.asarray(x, float).ravel()
+    yy = _np.asarray(y, float).ravel()
+    n = len(yy)
+    mt = fit_multitone(yy, n_tones=max(1, int(max_terms) // 2), r2_floor=0.0)
+    coef = _np.asarray(mt["params"], float)
+    # index -> x: a uniform grid spans (x[-1]-x[0]) over (n-1) samples, so one cycle per sample is
+    # (n-1)/span cycles per x-unit. A degenerate or non-uniform x falls back to index units.
+    span = float(xx[-1] - xx[0]) if n > 1 else 0.0
+    per_x = (float(n - 1) / span) if abs(span) > 1e-300 else 1.0
+    x0 = float(xx[0]) if n else 0.0
+    terms = []
+    for k, fr in enumerate(mt["frequencies"]):
+        w = 2.0 * _np.pi * float(fr) * per_x
+        a, b = float(coef[2 * k + 1]), float(coef[2 * k + 2])
+        # shift the phase so the fit still starts at x[0], not at x=0
+        ca, sa = _np.cos(w * x0), _np.sin(w * x0)
+        terms.append((("cos", w), a * ca + b * sa))
+        terms.append((("sin", w), b * ca - a * sa))
+    f = Formula(float(coef[0]), terms)
+    resid = float(_np.sqrt(_np.mean((_np.asarray(f.generate(xx), float) - yy) ** 2)))
+    try:
+        bits = float(f.model_bits())
+    except Exception:
+        bits = float(len(terms) * 64 + 64)
+    return f, {"resid_rms": resid, "n_terms": len(terms), "mdl_bits": bits,
+               "multiplicative": False, "mode": "additive"}
+
