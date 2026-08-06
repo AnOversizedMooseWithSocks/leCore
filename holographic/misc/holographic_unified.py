@@ -53,9 +53,10 @@ from holographic.unified.holographic_unified_p10_unproject_depth import _Unified
 from holographic.unified.holographic_unified_p11_encyclopedia_reset import _UnifiedPart11
 from holographic.unified.holographic_unified_p12_proc_texture import _UnifiedPart12
 from holographic.unified.holographic_unified_p13_recall_and_apply import _UnifiedPart13
+from holographic.unified.holographic_unified_p14_organics import _UnifiedPart14
 
 
-class UnifiedMind(_UnifiedPart01, _UnifiedPart02, _UnifiedPart03, _UnifiedPart04, _UnifiedPart05, _UnifiedPart06, _UnifiedPart07, _UnifiedPart08, _UnifiedPart09, _UnifiedPart10, _UnifiedPart11, _UnifiedPart12, _UnifiedPart13):
+class UnifiedMind(_UnifiedPart01, _UnifiedPart02, _UnifiedPart03, _UnifiedPart04, _UnifiedPart05, _UnifiedPart06, _UnifiedPart07, _UnifiedPart08, _UnifiedPart09, _UnifiedPart10, _UnifiedPart11, _UnifiedPart12, _UnifiedPart13, _UnifiedPart14):
     """Perceive once, into one space; remember, organize, recall, and decide over it.
 
     THE THREE MINDS -- one division of labour, so this never gets confusing again:

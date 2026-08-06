@@ -115,3 +115,50 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+def parabolic_vertex(y0, y1, y2):
+    """The vertex of the parabola through three equally-spaced samples, as an offset in GRID UNITS.
+
+    THE SHARED CORE. `holographic_reproject.parabolic_peak` applies this per axis of an N-D correlation
+    and WRAPS the result into [-n/2, n/2) because a circular shift is signed; `parabolic_refine` below
+    applies it once to a 1-D spectrum and does NOT wrap, because a frequency bin does not wrap. Those
+    two behaviours cannot be one function, but this arithmetic can -- so it lives here once.
+
+    Recorded because it has now happened twice: reproject's own docstring says it was "GENERALISED ON
+    CONTACT" after a reachability audit found two homes, and this sweep created a third before the
+    collision audit caught it. Returns 0.0 on a flat top, where there is no curvature to solve.
+    """
+    den = float(y0) - 2.0 * float(y1) + float(y2)
+    if abs(den) < 1e-20:
+        return 0.0
+    return float(np.clip(0.5 * (float(y0) - float(y2)) / den, -0.5, 0.5))
+
+
+def parabolic_refine(y, k):
+    """Sub-grid refinement of a peak at index `k` in the sampled curve `y`.
+
+    Fits a parabola through (y[k-1], y[k], y[k+1]) and returns (delta, height) where `delta` is the
+    vertex offset in GRID UNITS, clamped to +-0.5, and `height` the interpolated peak value. The true
+    frequency is then grid[k] + delta * spacing.
+
+    WHY THIS IS ONE FUNCTION AND NOT THREE. Any spectral estimator that takes an argmax over a sampled
+    grid inherits that grid's quantisation, and the fix is always this parabola. Found in two places
+    during one sweep, and they had it in neither:
+      * audio.dominant_frequencies -- 440 Hz reported as 441.406 (1.4 Hz, ~5.5 cents, 36% of a bin),
+        used to DRIVE a resonance, which is sharp.
+      * lombscargle.best_period -- 0.17-0.54% period error, which Kepler's third law (a^3 ~ P^2)
+        turns into a 0.11-0.36% error in the semi-major axis it feeds.
+
+    KEPT NEGATIVE: the parabola assumes a smooth peak. On a RAW rectangular-windowed FFT magnitude the
+    peak is a sinc and the skirts bias the vertex -- measured in audio, parabolic alone stalled at
+    0.90 Hz until a Hann taper went in, then reached 0.19. Taper first, then refine. A Lomb-Scargle
+    periodogram is already smooth in frequency, so it needs no taper.
+    """
+    y = np.asarray(y, float).ravel()
+    k = int(k)
+    if k <= 0 or k >= len(y) - 1:
+        return 0.0, float(y[k]) if 0 <= k < len(y) else 0.0
+    a, b, c = float(y[k - 1]), float(y[k]), float(y[k + 1])
+    delta = parabolic_vertex(a, b, c)
+    return delta, b - 0.25 * (a - c) * delta

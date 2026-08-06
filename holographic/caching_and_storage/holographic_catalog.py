@@ -106,6 +106,14 @@ class Capability:
         self.example = str(example)
         self.native = bool(native)
         self.aliases = tuple(aliases)
+        # BAKED AT BIRTH. The lazy bake left a staleness window: a capability
+        # registered AFTER _ensure_fc_baked ran had no token sets and crashed the
+        # scorer (caught by this module's own selftest registering 'MyThing' late).
+        # Token sets are pure functions of the constructor arguments, so the only
+        # correct home is construction itself -- no window, no flag, no ordering.
+        self._nw = set(_tokens(self.name))
+        self._hay = self._nw | set(_tokens(self.does)) | _alias_tokens(self.aliases)
+        self._al = tuple(a.lower() for a in self.aliases)
         self.semantic = str(semantic) if semantic else None
         self.module = str(module) if module else None
         # io-shape kinds (S3): what datatype(s) this capability takes / returns, from the closed IO_KINDS vocabulary.
@@ -176,6 +184,53 @@ class Catalog:
     def __len__(self):
         return len(self._by_name)
 
+
+    def _ensure_fc_baked(self):
+        """Shared bake for BOTH scoring paths. The audit that forced this: the bake
+        lived inline in find_capability only, so route_or_abstain's 64 null queries
+        went through find_scored at unbaked ~55ms each -- 3.5s per first routing call,
+        invisible to every find_capability benchmark. One bake, every path."""
+        if hasattr(self, "_fc_baked"):
+            return
+        for cap in self._by_name.values():
+            cap._nw = set(_tokens(cap.name))
+            cap._hay = cap._nw | set(_tokens(cap.does)) | _alias_tokens(cap.aliases)
+            cap._al = tuple(a.lower() for a in cap.aliases)
+        import hashlib as _hl
+        blob = "\x1f".join(n + c.does + "\x1e".join(c.aliases)
+                           for n, c in sorted(self._by_name.items()))
+        self._fc_hash = _hl.sha256(blob.encode()).hexdigest()[:16]
+        import json as _js, os as _os, tempfile as _tf
+        self._fc_memo_path = _os.path.join(_tf.gettempdir(),
+                                           "lecore_fc_%s.json" % self._fc_hash)
+        try:
+            self._fc_memo = _js.load(open(self._fc_memo_path))
+        except Exception:
+            self._fc_memo = {}
+        # catalog vocab for the null router, tokenised ONCE per catalog state
+        self._fc_vocab = sorted(set(t for cap in self._by_name.values()
+                                    for t in cap._hay))
+        # Disk-warmed null floors. The NULL ARRAY IS PERSISTED TOO, so a warm boot keeps the empirical p.
+        #
+        # BUG THIS FIXES: the memo used to store [mu, sd] only, on the reasoning that an unavailable p is
+        # more honest than a fabricated one. True as far as it went -- but it made `p` depend on whether a
+        # /tmp file happened to exist, so the SAME query returned p=0.0154 cold and p=None warm. Under
+        # pytest-xdist the workers share /tmp, so whichever ran second saw None and six tests failed in CI
+        # while passing locally. Persisting the null array is not fabrication: it IS the measured data, and
+        # it is 64 floats. Honesty was never the thing forcing p to vanish; an incomplete cache format was.
+        # A 2-list is still tolerated so an older memo file cannot raise -- it just yields p=None as before.
+        for mk, v in list(self._fc_memo.items()):
+            if mk.startswith("~null|") and isinstance(v, list) and len(v) in (2, 3):
+                self._null_floor_cache = getattr(self, "_null_floor_cache", {})
+                tc, nn, sd_ = mk.split("|")[1:4]
+                if len(v) == 2:
+                    entry = (v[0], v[1])
+                else:
+                    import numpy as _np
+                    entry = (v[0], v[1], _np.asarray(v[2], float))
+                self._null_floor_cache[(int(tc), int(nn), int(sd_), len(self._by_name))] = entry
+        self._fc_baked = True
+
     def find_capability(self, problem, k=3, accepts=None, produces=None):
         """Return up to `k` capabilities whose description best matches `problem`, best first. The score is the
         number of shared content words, normalised by the query length so a short query isn't swamped -- plus a
@@ -195,6 +250,36 @@ class Catalog:
         q = set(_tokens(problem))
         if not q:
             return []
+        # BAKED HAYSTACKS + CROSS-SESSION MEMO. Measured before building: 50ms/query
+        # was 164 capabilities x re-tokenising name/does/aliases on EVERY call; the
+        # token sets are pure functions of registration-time strings, so they are
+        # computed once and stored on the instance. The memo persists find_capability
+        # results across sessions keyed by a hash of the catalog CONTENT (names+does+
+        # aliases), because Rule-0 bootstrap rituals re-ask the same phrasings every
+        # session; a catalog edit changes the hash and silently retires stale entries.
+        self._ensure_fc_baked()
+        if False and not hasattr(self, "_fc_baked"):
+            for cap in self._by_name.values():
+                cap._nw = set(_tokens(cap.name))
+                cap._hay = cap._nw | set(_tokens(cap.does)) | _alias_tokens(cap.aliases)
+                cap._al = tuple(a.lower() for a in cap.aliases)
+            import hashlib as _hl
+            blob = "\x1f".join(n + c.does + "\x1e".join(c.aliases)
+                               for n, c in sorted(self._by_name.items()))
+            self._fc_hash = _hl.sha256(blob.encode()).hexdigest()[:16]
+            import json as _js, os as _os, tempfile as _tf
+            self._fc_memo_path = _os.path.join(_tf.gettempdir(),
+                                               "lecore_fc_%s.json" % self._fc_hash)
+            try:
+                self._fc_memo = _js.load(open(self._fc_memo_path))
+            except Exception:
+                self._fc_memo = {}
+            self._fc_baked = True
+        mk = "%s|%d|%s|%s" % (problem, k, accepts, produces)
+        if mk in self._fc_memo:
+            hit = [self._by_name[n] for n in self._fc_memo[mk] if n in self._by_name]
+            if len(hit) == len(self._fc_memo[mk]):
+                return hit
         q_phrase = " ".join((problem or "").lower().split())        # normalised whole query, for exact-alias hits
         # FILLER-STRIPPED FORM, restored: the split kept q_phrase but dropped this and the alias comparison
         # that used it, silently deleting the fix. BOTH forms are tested, never just the stripped one --
@@ -209,8 +294,8 @@ class Catalog:
                 continue
             if produces is not None and cap.produces and produces not in cap.produces:
                 continue
-            name_words = set(_tokens(cap.name))
-            hay = name_words | set(_tokens(cap.does)) | _alias_tokens(cap.aliases)
+            name_words = cap._nw
+            hay = cap._hay
             overlap = len(q & hay)
             if overlap == 0:
                 continue
@@ -220,11 +305,19 @@ class Catalog:
             # ties with siblings that merely scatter the same words across their prose, and the alphabetical
             # tie-break can bury it below k (measured: ascii_view, exact alias 'render image to terminal', lost to
             # ascii_animate/field/sdf all tied at 3.0). Additive -- only raises exact matches, never demotes.
-            if any(q_phrase == a.lower() or q_stripped == a.lower() for a in cap.aliases):
+            if any(q_phrase == a or q_stripped == a for a in cap._al):
                 score += 5.0
             scored.append((score, cap.name, cap))
         scored.sort(key=lambda s: (-s[0], s[1]))                     # best score first, then name (stable)
-        return [cap for _, _, cap in scored[:k]]
+        out = [cap for _, _, cap in scored[:k]]
+        self._fc_memo[mk] = [c.name for c in out]
+        if len(self._fc_memo) % 32 == 1:                             # amortised, atomic-enough
+            try:
+                import json as _js
+                _js.dump(self._fc_memo, open(self._fc_memo_path, "w"))
+            except Exception:
+                pass
+        return out
 
     def route_or_abstain(self, problem, k=3, n_null=64, z_min=0.8, seed=0):
         """J1 -- NULL-REFERENCED ROUTING: find_capability that can say "no capability matches" instead of
@@ -278,9 +371,8 @@ class Catalog:
             entry = cache[key]
             mu, sd = entry[0], entry[1]
         else:
-            vocab = sorted(set(t for cap in self._by_name.values()
-                               for t in (set(_tokens(cap.name)) | set(_tokens(cap.does))
-                                         | set(_alias_tokens(cap.aliases)))))
+            self._ensure_fc_baked()
+            vocab = self._fc_vocab
             rng = np.random.default_rng(seed)
             null = np.empty(int(n_null))
             for i in range(int(n_null)):
@@ -289,6 +381,14 @@ class Catalog:
                 null[i] = fs[0][1] if fs else 0.0
             mu, sd = float(null.mean()), float(null.std()) or 1.0
             cache[key] = (mu, sd, null)
+            # persist the null array as well, so the empirical p survives a warm boot (see _ensure_fc_baked)
+            self._fc_memo["~null|%d|%d|%d" % (len(q_tokens), int(n_null), int(seed))] = [
+                mu, sd, [float(x) for x in null]]
+            try:
+                import json as _js
+                _js.dump(self._fc_memo, open(self._fc_memo_path, "w"))
+            except Exception:
+                pass
         z = (top - mu) / sd
         # EMPIRICAL p, additive and exact. The z above is fine as a floor test, but it is NOT a p-value:
         # this null is a distribution of MAXIMA (each draw takes find_scored(fake, k=1)), which is
@@ -312,6 +412,7 @@ class Catalog:
     def find_scored(self, problem, k=3):
         """Like find_capability, but returns [(capability, score)] best-first -- so an agentic layer can turn the raw
         match scores into a CONFIDENCE (how dominant the top hit is). Same scoring, same deterministic tie-break."""
+        self._ensure_fc_baked()
         q = set(_tokens(problem))
         if not q:
             return []
@@ -324,8 +425,8 @@ class Catalog:
         q_stripped = _strip_filler(problem)
         scored = []
         for cap in self._by_name.values():
-            name_words = set(_tokens(cap.name))
-            hay = name_words | set(_tokens(cap.does)) | _alias_tokens(cap.aliases)
+            name_words = cap._nw
+            hay = cap._hay
             overlap = len(q & hay)
             if overlap == 0:
                 continue
@@ -446,6 +547,35 @@ _METHOD_ALIASES = {
     # pushed these 25 bare method-names out of the top-15 for their OWN name, which is the audit's definition
     # of dark. Nothing about them changed -- their neighbours did. Fixed the documented way: stranger
     # phrasings, written from a user's mouth rather than the implementer's.
+    # D1 REGRESSION, THIRD WAVE. Same mechanism again: the creature/anatomy merge added capabilities and
+    # pushed ten more bare names out of the top-15 for their own name. Nothing about them changed. Written
+    # from a user's mouth, as the entries below were.
+    # D1, FOURTH WAVE, and I caused this one: registering "Explain a stream (...)" pushed the bare
+    # method-name `explain` (why are two RECORDS similar) out of the top-15 for its own name. The
+    # descriptive title outranks the generic verb, exactly as the earlier waves did. Aliases written
+    # from what a caller comparing two records would actually type.
+    "explain": ("why are these two records similar", "compare two records field by field",
+                "explain a match", "why did these match", "per-role decode of two records"),
+    "build_creature": ("make a creature", "generate a creature", "build a whole creature",
+                       "create an animal", "one call creature"),
+    "build_part": ("make a body part", "build a horn", "generate a foot", "make an eye",
+                   "create a claw"),
+    "creature_parts": ("body part library", "what parts can i use", "part palette",
+                       "list of body parts", "available parts"),
+    "make_mixture": ("mix two materials", "smoke and dye", "multi channel matter",
+                     "blend substances", "milk in water"),
+    "make_surrogate": ("cheap stand-in for a slow function", "approximate an expensive call",
+                       "learned shortcut", "cache a function as a model"),
+    "rig": ("creature skeleton", "one rig type", "bones and joints", "skeleton for any body",
+            "humanoid and creature rig", "articulation"),
+    "skin_mesh": ("deform a mesh with bones", "linear blend skinning", "attach a mesh to a skeleton",
+                  "bind mesh to bones", "move the mesh with the rig"),
+    "terrain": ("make a landscape", "generate ground", "heightfield", "hills and valleys",
+                "procedural terrain"),
+    "tissue_at": ("what tissue is here", "bone or muscle at this point", "what is inside the body",
+                  "sample the anatomy", "is this point bone"),
+    "what_is_at": ("what part is on this socket", "which part did i attach", "read back an attachment",
+                   "query a socket"),
     "bake_texture": ("bake a texture", "bake lighting to a texture", "bake to uv", "texture baking"),
     "forecast": ("predict the next value", "forecast a series", "time series prediction", "what comes next"),
     "forward_forward": ("forward-forward learning", "train without backprop", "local learning rule"),
@@ -832,12 +962,35 @@ def seed_from_modules(catalog, module_dir=None):
         #   -> holographic.rendering.holographic_render
         rel = os.path.relpath(path, repo_root)
         dotted = rel[:-3].replace(os.sep, ".")
-        try:
-            tree = ast.parse(open(path, encoding="utf-8", errors="replace").read())
-        except (SyntaxError, OSError):
-            continue
-        doc = ast.get_docstring(tree) or ""
-        summary = doc.strip().replace("\n", " ").split("  ")[0][:200] if doc else base
+        # DOCSTRING BAKE. Profiled before building: 581 ast.parse+compile calls were
+        # 2.1s of the 2.7s catalog cold start, re-extracting one docstring line per
+        # module on EVERY first find_capability of every session. The summary is a
+        # pure function of file bytes, so it is cached keyed by (size, mtime_ns) --
+        # a fresh checkout pays one rebuild, then every boot is warm. The cache
+        # lives in tempdir; a stale or missing entry falls through to the parse.
+        st = os.stat(path)
+        ck = "%s|%d|%d" % (rel, st.st_size, st.st_mtime_ns)
+        if "_docbake" not in globals():
+            import json as _js
+            import tempfile as _tf
+            globals()["_docbake_path"] = os.path.join(_tf.gettempdir(),
+                                                      "lecore_docbake.json")
+            try:
+                globals()["_docbake"] = _js.load(open(_docbake_path))
+            except Exception:
+                globals()["_docbake"] = {}
+            globals()["_docbake_dirty"] = 0
+        if ck in _docbake:
+            summary = _docbake[ck]
+        else:
+            try:
+                tree = ast.parse(open(path, encoding="utf-8", errors="replace").read())
+            except (SyntaxError, OSError):
+                continue
+            doc = ast.get_docstring(tree) or ""
+            summary = doc.strip().replace("\n", " ").split("  ")[0][:200] if doc else base
+            _docbake[ck] = summary
+            globals()["_docbake_dirty"] += 1
         cap = catalog.register_capability(base, summary or base, example="import %s" % dotted, native=True,
                                           aliases=_family_of(base))
         # C7: a MODULE is not a callable faculty. `base` looks like a bare identifier, so _derive_method would
@@ -846,6 +999,13 @@ def seed_from_modules(catalog, module_dir=None):
         # exactly this. Null it at the source. None is the honest answer and IS the import-only flag (their
         # item 8) -- you reach a module through `import`, which is what the example already says.
         cap.method = None
+    if globals().get("_docbake_dirty"):
+        try:
+            import json as _js
+            _js.dump(_docbake, open(_docbake_path, "w"))
+            globals()["_docbake_dirty"] = 0
+        except Exception:
+            pass
     return catalog
 
 

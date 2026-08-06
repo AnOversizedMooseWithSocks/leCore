@@ -992,7 +992,31 @@ _GUARD_EXEMPT = {
     "splat_lod_chain",
     # explicit-budget wrapper whose guard parameter has its own name (asserted separately below):
     "mesh_decimate_to",
+    # POPULATION thinner, not a mesh reducer: scatter_lod takes TRANSFORMS and returns a kept subset,
+    # so it never sees geometry and a silhouette IoU is not computable from its inputs. Its guard is
+    # `min_keep` -- a floor on the surviving fraction -- plus the nesting property that stops blades
+    # flickering. BOTH are asserted in test_organics_integration (nesting) and in
+    # test_scatter_lod_honours_its_min_keep_floor below, so this is exempt from the WRONG guard, not
+    # from having one.
+    "scatter_lod",
 }
+
+
+def test_scatter_lod_honours_its_min_keep_floor(mind):
+    """`min_keep` is scatter_lod's guard, standing in for the silhouette IoU a mesh reducer uses.
+
+    Without it, thinning at a great distance can take a population to (near) zero, which is the
+    scatter equivalent of decimating a limb away -- the ground goes bald instead of sparse. Asserted
+    at an absurd distance, because that is where an unguarded thinner fails.
+    """
+    import numpy as _np
+    M = mind.placement_frames(_np.random.default_rng(5).uniform(0, 10, size=(400, 3)),
+                              _np.tile([0., 0, 1], (400, 1)), seed=5)
+    for floor in (0.05, 0.25):
+        kept, frac = mind.scatter_lod(M, 10_000.0, min_keep=floor, seed=5)
+        assert frac >= floor - 1e-9, "min_keep=%.2f breached at range: kept %.4f" % (floor, frac)
+        assert len(kept) >= int(floor * len(M)) - 1, \
+            "min_keep=%.2f kept only %d of %d instances" % (floor, len(kept), len(M))
 
 
 def test_every_mesh_reducing_faculty_is_silhouette_guarded(mind):

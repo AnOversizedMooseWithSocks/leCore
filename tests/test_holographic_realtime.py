@@ -360,11 +360,18 @@ def test_every_sdf_node_kind_is_emitted_or_refused():
     from holographic.mesh_and_geometry.holographic_sdfemit import coverage
 
     cov = coverage()
-    # 27 node kinds: 18 emitted + 9 refused. mirror is an exact isometry and EMITS in all four dialects; bend is
-    # INEXACT (a domain warp) and is refused alongside twist/displace. The authoritative pin lives in
+    # 28 node kinds: 17 emitted + 11 refused. `fillet_union` was added (an exact bounded rounded-union) and
+    # EMITS in all four dialects. `fold_fractal` and `mandelbulb` moved into the refused set -- they never had a
+    # dialect rule, but they were not DECLARED either, and the old coverage() computed emitted = ARITY minus the
+    # declared list WITHOUT EMITTING ANYTHING, so it reported them as covered and the table as complete. coverage()
+    # now builds a probe node per kind and actually emits it. The authoritative pin lives in
     # holographic_sdfemit._selftest; this is the realtime-suite mirror of it (both must move together).
-    assert cov["complete"] is True and cov["total"] == 27
-    assert set(cov["refused"]) == {"menger", "twist", "displace", "bend", "ellipsoid", "capsule", "cone", "octahedron", "elongate"}
+    assert cov["complete"] is True and cov["total"] == 28, cov
+    assert set(cov["refused"]) == {"menger", "twist", "displace", "bend", "ellipsoid", "capsule", "cone",
+                                   "octahedron", "elongate", "fold_fractal", "mandelbulb"}
+    # The load-bearing one: nothing may fail to emit without being declared, in ANY dialect.
+    for dialect in ("wgsl", "glsl", "c_f32", "c_f64"):
+        assert coverage(dialect=dialect)["broken"] == [], dialect
 
 
 def test_kept_negative_scale_keeps_its_outer_factor():

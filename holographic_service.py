@@ -214,6 +214,42 @@ class Service:
             args = self.refs.resolve(args)
         except KeyError as e:
             return {"ok": False, "error": str(e).strip('"')}      # a bad handle is a CALLER error, not a 500
+        # METHOD-ON-HANDLE (completes J-3D-24's symmetry): {name:'call', args:{handle,
+        # method, args}} calls a PUBLIC method on a held object and mints handles for
+        # any non-JSON result. WHY here: the registry could hold objects but not USE
+        # them -- behavior_pool round-tripped as a handle an agent could name but
+        # never step. Public-only mirrors the faculty rule; a bad handle stays a
+        # caller error, not a 500.
+        if name == "call":
+            h, meth = args.get("handle"), str(args.get("method", ""))
+            margs = args.get("args", {}) or {}
+            if not meth or meth.startswith("_"):
+                return {"ok": False, "error": "invalid or private method: %r" % meth}
+            # accept the minted envelope verbatim (symmetry: what /invoke hands back
+            # can be posted straight into the next /invoke) or a bare id string.
+            if isinstance(h, dict):
+                h = next((h[k] for k in ("$ref", "ref", "handle", "id") if k in h), h)
+            # refs.resolve already ran on args: a ref-string inside the envelope has
+            # ALREADY been swapped for the live object -- asking the registry to look
+            # an object up by itself was the bug this comment marks. A string here is
+            # an unresolved handle (bad or from a dead session); anything else IS the
+            # object.
+            if isinstance(h, str):
+                try:
+                    obj = self.refs.get(h)
+                except KeyError as e:
+                    return {"ok": False, "error": str(e).strip('"')}
+            else:
+                obj = h
+            fn = getattr(obj, meth, None)
+            if not callable(fn):
+                return {"ok": False, "error": "%s has no method %r" % (type(obj).__name__, meth)}
+            try:
+                result = fn(**margs) if isinstance(margs, dict) else fn(*margs)
+            except Exception as e:
+                return {"ok": False, "error": "%s: %s" % (type(e).__name__, str(e)[:200])}
+            return {"ok": True, "name": "call:%s" % meth,
+                    "result": _jsonable(result, self.refs)}
         try:
             result = self.mind.invoke(name, args)
         except ValueError as e:

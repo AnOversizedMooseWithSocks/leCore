@@ -264,6 +264,30 @@ _FIBER_PHYS = {"fur_brown": (0.28, -4.0), "fur_ginger": (0.26, -4.0), "fur_gray"
                "hair_red": (0.18, -3.0)}
 
 
+# BEER-LAMBERT ABSORPTION, sigma per RGB in 1/scene-unit. This is what gives a transmissive material
+# DEPTH: light is attenuated by the distance it travels INSIDE the solid, so a thick part of a gem is
+# darker and more saturated than a thin edge. Albedo alone tints once per interaction and cannot tell
+# them apart, which is why gems rendered before this looked like coloured glass rather than stone.
+#
+# The numbers are the COMPLEMENT of each gem's transmitted colour, scaled by how strongly it colours:
+# ruby and emerald are strongly selective (they owe their colour to Cr absorbing specific bands),
+# diamond and quartz are nearly clear so their sigma is ~0. Stated as a modelling choice, not as
+# measured spectroscopy -- real absorption spectra are per-wavelength curves, not three numbers.
+_ABSORB = {
+    "amethyst":   (1.10, 2.30, 0.55),
+    "quartz":     (0.05, 0.05, 0.04),
+    "diamond":    (0.01, 0.01, 0.01),
+    "emerald":    (2.60, 0.45, 1.70),
+    "ruby":       (0.35, 3.20, 2.60),
+    "sapphire":   (2.90, 1.90, 0.30),
+    "jade":       (1.60, 0.70, 1.50),
+    "ice":        (0.03, 0.02, 0.01),
+    "glass_clear": (0.02, 0.02, 0.02),
+    "glass_tinted": (0.60, 0.35, 0.55),
+    "water":      (0.05, 0.02, 0.01),
+    "water_deep": (0.35, 0.12, 0.05),
+}
+
 # subsurface strength for translucent materials (0 = opaque). Wax/skin glow softly; jade/marble a bit; honey/milk too.
 _SSS = {"wax": 1.0, "skin_light": 0.9, "skin_dark": 0.7, "jade": 0.8, "marble": 0.5, "milk": 0.9,
         "honey": 0.6, "flesh": 0.9, "leaf": 1.0}
@@ -286,6 +310,11 @@ def _apply_physical(mat, cls, name, rgb):
         mat.transmission = 1.0
         mat.ior = _IOR.get(name, _CLASS_IOR.get(cls, 1.5))
         mat.attenuation_color = tuple(float(c) for c in rgb)     # the tint transmitted light picks up
+        # ABSORPTION per RGB (Beer-Lambert sigma, 1/scene-unit). Carried on the material so a renderer
+        # can attenuate by the distance light travelled INSIDE the solid -- the thing that makes a
+        # thick gem darker than a thin one. Defaults to the class's near-clear value, so a
+        # transmissive preset without a measured entry behaves like clear glass rather than vanishing.
+        mat.absorption = tuple(float(x) for x in _ABSORB.get(name, (0.05, 0.05, 0.05)))
     if cls == "fiber":
         mat.fiber = True
         r, tilt = _FIBER_PHYS.get(name, (0.20, -3.0))
@@ -298,6 +327,36 @@ def _apply_physical(mat, cls, name, rgb):
 
 
 # --------------------------------------------------------------------------- renderer adapters
+def trace_channels(name, scale=1.0):
+    """A named material as the PATH TRACER's per-point channel callback -- albedo, metallic, roughness,
+    emission, IOR, subsurface, iridescence and ABSORPTION, in one call.
+
+    Exists because every caller was hand-assembling that tuple from a PBRMaterial and, doing so,
+    quietly dropped the channels it did not know about: the gem renders ran for a whole arc with
+    absorption unset because the callbacks were written before absorption existed. A promoted builder
+    means a new physical channel reaches every caller that uses it, instead of each one having to be
+    found and updated.
+
+    `scale` multiplies absorption, which is the honest knob: sigma is in 1/scene-unit, so a gem
+    modelled at 1 unit across and one at 10 units across need different numbers for the same rock.
+    """
+    mat = material(name)
+    alb = np.array(mat.base_color[:3], float)
+    ior = float(getattr(mat, "ior", 0.0) if getattr(mat, "transmission", 0.0) else 0.0)
+    rough = float(getattr(mat, "roughness", 0.5))
+    metal = float(getattr(mat, "metallic", 0.0))
+    sss = float(_SSS.get(name, 0.0))
+    irid = float(_IRIDESCENT.get(name, 0.0))
+    absorb = np.array(getattr(mat, "absorption", (0.0, 0.0, 0.0)), float) * float(scale)
+
+    def cb(P, _a=alb, _m=metal, _r=rough, _i=ior, _s=sss, _d=irid, _b=absorb):
+        n = len(np.atleast_2d(np.asarray(P, float)))
+        return (np.tile(_a, (n, 1)), np.full(n, _m), np.full(n, _r), np.zeros((n, 3)),
+                np.full(n, _i), np.full(n, _s), np.full(n, _d), np.tile(_b, (n, 1)))
+    cb.material = mat
+    return cb
+
+
 def shade(mat, n):
     """Hand the path tracer its per-hit tuple (albedo(n,3), metallic(n,), roughness(n,), emission(n,3), ior(n,))
     for `n` points all of material `mat` -- physical data read straight off the material instead of a hand-typed

@@ -179,23 +179,16 @@ def add_breasts(chest, params, torso_radius=0.10):
 
 
 def _bone_sdf(a, b, r):
-    """A capsule bone between joints `a` and `b` of radius `r` (a sphere if the bone is degenerate). Rotates the
-    Y-axis capsule onto the bone direction -- the same oriented-primitive trick fit_primitives uses."""
-    from holographic.mesh_and_geometry.holographic_sdf import capsule, sphere, SDF
-    a = np.asarray(a, float); b = np.asarray(b, float)
-    mid = (a + b) / 2.0
-    d = b - a; L = float(np.linalg.norm(d))
-    if L < 1e-6:
-        return SDF("translate", tuple(float(x) for x in mid), (sphere(float(r)),))
-    dn = d / L
-    y = np.array([0.0, 1.0, 0.0]); ax = np.cross(y, dn); s = float(np.linalg.norm(ax)); c = float(np.dot(y, dn))
-    if s < 1e-8:
-        axis, ang = np.array([1.0, 0.0, 0.0]), (0.0 if c > 0 else np.pi)
-    else:
-        axis, ang = ax / s, float(np.arctan2(s, c))
-    cap = capsule(L / 2.0, float(r))
-    return SDF("translate", tuple(float(x) for x in mid),
-               (SDF("rotate", (float(axis[0]), float(axis[1]), float(axis[2]), float(ang)), (cap,)),))
+    """A capsule bone between joints `a` and `b` of radius `r` (a sphere if the bone is degenerate).
+
+    DELEGATES to holographic_creaturetree.bone_capsule. This function used to BE that code, private to
+    the humanoid while being the one primitive every rig needs -- so the creature grew its own copy
+    and the two could drift silently. It was promoted rather than duplicated, and this body is now a
+    one-line forward: verified bit-identical (max error 0.0e+00 over 64 sampled points) at the moment
+    of promotion, so no humanoid render moved.
+    """
+    from holographic.mesh_and_geometry.holographic_creaturetree import bone_capsule
+    return bone_capsule(a, b, r)
 
 
 class Humanoid:

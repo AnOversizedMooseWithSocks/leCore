@@ -109,10 +109,11 @@ def parabolic_peak(c):
             _rest[_axis] = i % n
             return c[tuple(_rest)]
 
+        # the vertex arithmetic is shared with the spectral refiners; only the WRAPPING below is
+        # specific to a circular correlation. See holographic_fft.parabolic_vertex.
+        from holographic.sampling_and_signal.holographic_fft import parabolic_vertex
         y0, y1, y2 = _at(k - 1), _at(k), _at(k + 1)
-        den = y0 - 2.0 * y1 + y2
-        delta = 0.5 * (y0 - y2) / den if abs(den) > 1e-12 else 0.0
-        shift = k + delta
+        shift = k + parabolic_vertex(y0, y1, y2)
         if shift > n / 2.0:
             shift -= n
         out.append(float(shift))

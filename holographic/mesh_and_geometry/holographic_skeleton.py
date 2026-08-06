@@ -30,7 +30,19 @@ def interior_distance_field(mesh, res=32, pad=0.1):
     axes = [np.linspace(lo[d], hi[d], res) for d in range(3)]
     XX, YY, ZZ = np.meshgrid(axes[0], axes[1], axes[2], indexing="ij")
     pts = np.stack([XX.ravel(), YY.ravel(), ZZ.ravel()], axis=1)
-    win = winding_number(pts, V, np.array(F))
+
+    # CHUNKED, because the winding number is dense in POINTS x FACES and this grid is res^3 points.
+    # MEASURED before the fix: a 3,686-vertex creature mesh at res=24 peaked at 2.7 GB, and a
+    # 10,776-vertex one at res=32 was killed outright -- so the medial axis simply could not be taken
+    # of a creature, which is what the fit-a-spine work needs. The chunk size caps the transient at
+    # roughly (chunk x faces) instead of (res^3 x faces); it is lever 5 (tile the domain) from the
+    # standing playbook, and it changes NO result -- the winding number of a point does not depend on
+    # which other points share the call (the batch-independence rule, one level up).
+    Fa = np.array(F)
+    chunk = max(1, int(4_000_000 // max(len(Fa), 1)))
+    win = np.empty(len(pts))
+    for s in range(0, len(pts), chunk):
+        win[s:s + chunk] = winding_number(pts[s:s + chunk], V, Fa)
     inside = np.abs(win) > 0.5
     grid, tri, glo, cell = build_face_grid(V, F, cell_scale=1.0)
     depth = np.zeros(len(pts))

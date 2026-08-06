@@ -704,12 +704,13 @@ class _UnifiedPart08:
         from holographic.misc.holographic_fields import advect
         return advect(field, vx, vy, dt)
 
-    def fluid_step(self, vx, vy, density, dt=0.1, viscosity=0.0, fx=None, fy=None, source=None, solid=None):
+    def fluid_step(self, vx, vy, density, dt=0.1, viscosity=0.0, fx=None, fy=None, source=None, solid=None,
+                   boundary="wrap"):
         """One Stable-Fluids step on the torus (add force -> diffuse -> project -> advect), built on the FFT.
         Returns (vx, vy, density). Pass `solid` (a 0/1 mask) for an obstacle the flow goes around. See
         holographic_fields.fluid_step."""
         from holographic.misc.holographic_fields import fluid_step
-        return fluid_step(vx, vy, density, dt=dt, viscosity=viscosity, fx=fx, fy=fy, source=source, solid=solid)
+        return fluid_step(vx, vy, density, dt=dt, viscosity=viscosity, fx=fx, fy=fy, source=source, solid=solid, boundary=boundary)
 
     def smoke_step(self, vx, vy, density, temperature, dt=0.1, viscosity=0.0, ambient=0.0,
                    buoyancy=1.0, gravity=0.0, confinement=0.0, dens_source=None, temp_source=None, solid=None):

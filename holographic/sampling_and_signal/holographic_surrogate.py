@@ -33,18 +33,28 @@ NumPy only. Deterministic given the seed.
 import numpy as np
 
 
-def phase_randomize(x, seed=0):
+def phase_randomize(x, seed=0, rng=None):
     """Return a PHASE-RANDOMIZED surrogate of a 1-D real signal `x`: same power spectrum (same autocorrelation) as
     `x`, but random phases -- so any deterministic/nonlinear structure is destroyed while the linear second-order
     statistics are preserved EXACTLY (Theiler et al. 1992). The phases are kept antisymmetric so the inverse
     transform is real, and the DC / Nyquist bins are left real. Deterministic given `seed`. This is the honest
     null for a continuous, autocorrelated signal -- unlike a permutation, it does NOT destroy the autocorrelation
-    a trivial forecaster would exploit."""
+    a trivial forecaster would exploit.
+
+    `rng` accepts an ALREADY-CONSTRUCTED generator, for callers drawing many surrogates in a loop who must
+    not restart the stream each time. Added when four modules (hrnn, statedemand, triage, unified_p14) were
+    found to have each inlined this function verbatim -- they took a live rng, which is the only reason they
+    could not call this one. Passing `rng` bypasses `seed`; the seed path is untouched and bit-identical.
+
+    KEPT NEGATIVE, and the reason unifying them was a CORRECTNESS fix rather than tidying: all four copies
+    set the DC phase to literal 0.0. DC is real, so its true phase is 0 OR pi -- and for a signal with a
+    NEGATIVE mean it is pi. Forcing 0.0 silently FLIPS THE SIGN OF THE MEAN in the surrogate. This function
+    preserves np.angle(F[0]) instead, which is why the copies had to go rather than be budgeted."""
     x = np.asarray(x, float).ravel()
     n = len(x)
     F = np.fft.rfft(x)
     mag = np.abs(F)
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(seed) if rng is None else rng
     # random phases for the interior bins; DC (0) and, for even n, Nyquist stay at their original (real) phase.
     phases = rng.uniform(0, 2 * np.pi, size=len(F))
     phases[0] = np.angle(F[0])                                 # DC must stay real

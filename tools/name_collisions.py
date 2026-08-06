@@ -51,6 +51,36 @@ except Exception:
 # remove the entry, or accept it as a benign homonym / pinned divergence and leave it -- WITH the reason on the
 # line. Never add an entry just to make the test pass without reading. The budget may shrink, never grow.
 KNOWN_COLLISIONS = {
+    # ---- REVIEWED IN THE CREATURE/ANATOMY MERGE. Both bodies read for each; reasons below. ----
+    # A real ARCHITECTURAL TRANSITION, not a homonym: two implementations of "the creature's skin as a
+    # field" -- the shipped metaball route and the new grouped-convolution route (bulge-free joints,
+    # grouped limbs) that is meant to replace it. Deliberately co-existing while the convolution path
+    # is proven; additive, old route still default. UNIFY (delete the metaball one) once it is default
+    # -- this entry should NOT outlive that switch.
+    "creature_field": frozenset({"creatureconv", "creatureskin"}),
+    # Same word, different KERNEL and different domain: creatureskin is a sum-of-blobs (polynomial,
+    # per-ball varying radius) for skin; meshbridge is a sum-of-GAUSSIANS, the engine's splat/bundle
+    # representation lifted to an implicit field. Not interchangeable; delegation would be wrong.
+    "metaball_field": frozenset({"creatureskin", "meshbridge"}),
+    # Same concept, different INPUT TYPE: creaturereport projects a FIELD along an axis; render takes a
+    # MESH orthographically. A field has no triangles and a mesh has no interior samples, so neither can
+    # delegate. Candidates to unify behind one dispatcher if a third caller ever appears.
+    "silhouette_mask": frozenset({"creaturereport", "render"}),
+    # Both make pinhole rays, but zigmarch's is deliberately ISOLATED and f64: its docstring states
+    # camera math is kept OUTSIDE the identity surface so both marchers are fed byte-identical rays.
+    # Delegating it to gemrender would put the shared camera back inside the thing being compared.
+    "camera_rays": frozenset({"gemrender", "zigmarch"}),
+    # Pure homonyms, unrelated jobs, read and benign:
+    "cluster": frozenset({"crystalgrow", "query"}),        # a druse of crystals vs semantic GROUP BY
+    "fingerprint": frozenset({"assets", "modeltrain"}),    # file state record vs stream signature
+    # Same FAMILY, different roles: modeltrain BUILDS a certified surrogate from a function; surrogate
+    # RESOLVES a name to a callable. Genuinely confusable -- flagged as the one pair here worth renaming
+    # (e.g. resolve_surrogate) rather than budgeting forever, but both predate this review.
+    "make_surrogate": frozenset({"modeltrain", "surrogate"}),
+    # Related but at different LEVELS: adaptive PLANS which render method to use for a scene; pathtrace
+    # adapts SAMPLE COUNT within path tracing. One dispatches, one refines.
+    "render_adaptive": frozenset({"adaptive", "pathtrace"}),
+
     # -- different-domain homonyms: same English word, unrelated jobs. Read, benign. --
     # Same CONCEPT at two LEVELS (continuous vs discrete) -- delegation impossible, a mesh has no surf_uv:
     "gaussian_curvature": frozenset({"surfanalysis", "meshcurvature"}),  # analytic K from fundamental forms

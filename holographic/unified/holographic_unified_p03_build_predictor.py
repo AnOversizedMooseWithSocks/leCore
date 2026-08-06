@@ -1361,6 +1361,18 @@ class _UnifiedPart03:
         """Encode an expression tree as a typed structure at this mind's dim/seed. A leaf is a str symbol;
         an internal node is (op, *children). The EML-tree's holographic encoding, generalised."""
         from holographic.misc.holographic_typed import tree_to_recipe
+        def _depth(t):
+            return 1 + max((_depth(c) for c in t[1:]), default=0) \
+                if isinstance(t, (tuple, list)) else 0
+        d = _depth(tree)
+        if d > 4:
+            # the measured wall (depth_probe): flat encoding's separability
+            # collapses dim-INDEPENDENTLY at d5-7 -- more dim does not help.
+            self._scale_tap(
+                "tree depth %d exceeds the flat encoder's measured wall (d5-7, "
+                "dim-independent): deep leaves become unreadable. Use "
+                "mind.encode_tree_carrier for depth-addressable encoding "
+                "(leaf recovery 0.94-1.00 at depths 7-32)." % d)
         return tree_to_recipe(self.dim, self.seed, tree)
 
     def nested_scene_structure(self, groups):
@@ -1694,6 +1706,31 @@ class _UnifiedPart03:
                                             max_terms=max_terms, coef_bits=coef_bits)
             info["mode"] = "multiplicative" if f.log_space else "additive"
             info["compression_ratio"] = f.compression_ratio(len(y))
+        # MULTI-TONE CANDIDATE. The bases above are harmonics of ONE detected period (ring/torus) or
+        # elementary functions on a line -- neither can express INCOMMENSURATE tones, and the measured
+        # cost of that gap was severe: on sin(t/50)+0.8 sin(t/97.3) this returned n_terms=0 and a
+        # residual of 1.00 (no better than the mean), while a matching-pursuit fit reached 4.03e-02.
+        # So multitone competes as one more candidate and wins only on RESIDUAL, exactly as the
+        # additive/multiplicative auto-rule already chooses. Expressible as a Formula because its
+        # atoms are ('sin', w)/('cos', w) at arbitrary w -- verified exact.
+        try:
+            from holographic.agents_and_reasoning.holographic_symbolic import multitone_formula
+            f2, info2 = multitone_formula(x, y, max_terms=max_terms)
+        except Exception:
+            f2 = None
+        # PARSIMONY IS NOT OPTIONAL HERE. This is a SYMBOLIC decomposition -- a 2-term exact formula
+        # beats a 6-term exact one, and the shipped path is MDL-gated for that reason. Comparing on
+        # residual alone made multitone win EVERY case, including a harmonic stack it expressed in 6
+        # terms where the harmonic basis used 2. So multitone must beat the incumbent MATERIALLY
+        # (half the residual or better), not merely tie it, before its extra terms are justified.
+        _r1 = float(info.get("resid_rms", np.inf))
+        _r2 = float(info2["resid_rms"]) if f2 is not None else np.inf
+        if f2 is not None and _r2 < 0.5 * _r1:
+            info2["topology"] = info.get("topology"); info2["period"] = info.get("period")
+            info2["basis"] = "multitone"
+            info2["compression_ratio"] = f2.compression_ratio(len(y))
+            return f2, info2
+        info.setdefault("basis", info.get("mode", "harmonic"))
         return f, info
 
     def find_pattern_by_downscale(self, data, kind="vectors", k=3, n_null=80, seed=0):
