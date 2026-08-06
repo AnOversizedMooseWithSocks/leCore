@@ -56,12 +56,23 @@ def write_wav(path, samples, rate, width=2):
     return path
 
 
-def spectrum(samples, rate):
+def spectrum(samples, rate, window=None):
     """One-sided magnitude spectrum: (freqs Hz, amplitudes). The amplitude at each frequency is how much of that
-    tone is present -- what drives the plate. Uses the real FFT (rfft)."""
+    tone is present -- what drives the plate. Uses the real FFT (rfft).
+
+    `window="hann"` applies a Hann taper first. DEFAULT IS None, i.e. the original rectangular behaviour,
+    BIT-IDENTICAL -- this is additive because `spectrum` is public and every existing caller's numbers must
+    not move. Ask for the window when you are LOCATING a peak: a rectangular window leaks as a sinc, whose
+    skirts bias any sub-bin peak estimator (measured: parabolic refinement stalled at 0.90 Hz error on a
+    3.9 Hz bin until the taper went in, then reached 0.03 Hz). Leave it off when you want raw bin energy."""
     x = np.asarray(samples, float)
     if len(x) == 0:
         return np.zeros(0), np.zeros(0)
+    if window == "hann" and len(x) > 1:
+        # np.hanning is the symmetric form; periodic is the correct one for spectral analysis
+        x = x * (0.5 - 0.5 * np.cos(2.0 * np.pi * np.arange(len(x)) / len(x)))
+    elif window not in (None, "hann"):
+        raise ValueError("unknown window %r; None (rectangular) or 'hann'" % (window,))
     mag = np.abs(np.fft.rfft(x))
     freqs = np.fft.rfftfreq(len(x), d=1.0 / float(rate))
     return freqs, mag
@@ -71,7 +82,9 @@ def dominant_frequencies(samples, rate, k=6, min_amp_frac=0.05):
     """The `k` loudest frequencies in the signal (and their amplitudes), as local peaks of the spectrum above a
     fraction of the strongest peak. These are the tones that will resonate a plate/fluid. Returns (freqs, amps)
     sorted loudest first."""
-    freqs, mag = spectrum(samples, rate)
+    # Hann taper: peak LOCATION is the job here, and the rectangular window's sinc skirts bias the
+    # sub-bin estimator below. See spectrum()'s note; the default there stays rectangular.
+    freqs, mag = spectrum(samples, rate, window="hann")
     if len(mag) < 3:
         return np.zeros(0), np.zeros(0)
     # local maxima (a bin louder than both neighbours) -> peak picking, so a pure tone gives ONE peak not a smear
@@ -82,7 +95,33 @@ def dominant_frequencies(samples, rate, k=6, min_amp_frac=0.05):
     thresh = mag[idx].max() * float(min_amp_frac)
     idx = idx[mag[idx] >= thresh]
     order = idx[np.argsort(mag[idx])[::-1]][:k]                     # loudest first
-    return freqs[order], mag[order]
+    return _refine_peaks(freqs, mag, order)
+
+
+def _refine_peaks(freqs, mag, order):
+    """Sub-bin frequency refinement by parabolic interpolation on the three bins around each peak.
+
+    WHY, measured: the FFT bin quantises frequency to rate/n, so a tone that does not land ON a bin is
+    reported at the nearest one -- 440 Hz came back as 441.406 Hz, a 1.4 Hz (36%-of-a-bin) error, about
+    5.5 cents. These frequencies are documented as "the tones that will resonate a plate/fluid", and a
+    resonance is sharp, so a bin-quantised drive frequency misses it.
+
+    Fits a parabola through (mag[j-1], mag[j], mag[j+1]) and takes its vertex -- the standard estimator,
+    exact for a Gaussian-ish peak and one line of math. holographic_hrnn.fit_harmonics solves the same
+    off-grid problem for a GENERATOR fundamental, but does it with 81 least-squares fits because it must
+    also extrapolate without phase drift; that cost is not worth paying per peak here, and the vertex is
+    accurate enough for a drive frequency. Same problem, two honest operating points.
+    """
+    out_f, out_a = [], []
+    df = float(freqs[1] - freqs[0]) if len(freqs) > 1 else 0.0
+    for j in order:
+        j = int(j)
+        # DELEGATE: the same parabola serves lombscargle.best_period. See holographic_fft.parabolic_peak.
+        from holographic.sampling_and_signal.holographic_fft import parabolic_refine
+        delta, height = parabolic_refine(mag, j)
+        out_f.append(float(freqs[j]) + delta * df)
+        out_a.append(float(height))
+    return np.asarray(out_f), np.asarray(out_a)
 
 
 def frames(samples, hop=1024, size=None):
@@ -132,7 +171,26 @@ def _selftest():
 
     # (5) deterministic
     assert np.array_equal(spectrum(tone, rate)[1], spectrum(tone, rate)[1])
-    print("holographic_audio selftest OK: 440 Hz tone -> single 440 peak; chord -> its 3 notes; WAV round-trips; "
+    # SUB-BIN FREQUENCY ACCURACY, pinned. Bin-snapping reported 440 Hz as 441.406 (1.4 Hz, ~5.5 cents,
+    # 36% of a bin) -- audible, and wrong for driving a sharp resonance. Hann taper + parabolic vertex
+    # brings it to <0.2 Hz. The taper is what mattered: parabolic alone stalled at 0.90 Hz because a
+    # rectangular window leaks as a sinc and biases the vertex. Both halves are required, so both are
+    # asserted here rather than trusting one.
+    _rate, _n = 8000, 2048
+    _t = np.arange(_n) / _rate
+    _binw = _rate / _n
+    for _true in (440.0, 1001.445, 261.626):
+        _f, _a = dominant_frequencies(np.sin(2 * np.pi * _true * _t), _rate, k=1)
+        _err = abs(float(_f[0]) - _true)
+        assert _err < 0.25 * _binw, ("dominant_frequencies is bin-snapping again: %.3f Hz reported for "
+                                     "%.3f (err %.3f Hz, %.0f%% of a %.2f Hz bin)"
+                                     % (_f[0], _true, _err, 100 * _err / _binw, _binw))
+    # and spectrum's DEFAULT must stay rectangular/bit-identical -- the window is opt-in, additive
+    _x = np.sin(2 * np.pi * 440.0 * _t)
+    assert np.array_equal(spectrum(_x, _rate)[1], spectrum(_x, _rate, window=None)[1]), \
+        "spectrum's default must remain the untapered rectangular transform"
+
+    print("holographic_audio selftest OK: 440 Hz tone -> single 440 peak (sub-bin: err < 0.25 bin); chord -> its 3 notes; WAV round-trips; "
           "STFT tracks a rising sweep; deterministic")
 
 

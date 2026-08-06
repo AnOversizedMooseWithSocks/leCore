@@ -341,13 +341,14 @@ class Model:
         coef = z["params"]; f0 = float(z["fundamental"]); hor = int(z["horizon"])
         nh = (len(coef) - 1) // 2
 
+        # DELEGATE to the one decoder. Re-inlining this splits the serialisation contract across two
+        # files, and a harmonic-convention change would then make saved models decode differently
+        # than they were encoded -- silently. See holographic_hrnn.fourier_series_eval.
+        from holographic.agents_and_reasoning.holographic_hrnn import fourier_series_eval
+
         def predict(idx):
-            idx = _np.asarray(idx, dtype=float)
-            out = _np.full(idx.shape, coef[0])
-            for k in range(1, nh + 1):
-                w = 2.0 * _np.pi * f0 * k
-                out = out + coef[2*k-1]*_np.cos(w*idx) + coef[2*k]*_np.sin(w*idx)
-            return out
+            """Decode the saved generator model. See holographic_hrnn.fourier_series_eval."""
+            return fourier_series_eval(idx, coef, f0, nh)
         return cls({"kind": "generator", "predict": predict, "horizon": hor,
                     "model": {"params": coef, "fundamental": f0}, "why": "loaded"})
 

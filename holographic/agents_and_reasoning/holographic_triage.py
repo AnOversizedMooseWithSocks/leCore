@@ -177,12 +177,13 @@ def _selftest():
 
     # a deliberately expensive-ish oracle: the phase-sensitive skew score against 20
     # phase-randomised surrogates (the statedemand selftest's calibrated stand-in).
+# UNIFIED: this was an inline copy of holographic_surrogate.phase_randomize. All four copies
+    # forced the DC phase to 0.0, which FLIPS THE SIGN OF THE MEAN for a negative-mean signal
+    # (measured -2.933 -> +2.933). The canonical one preserves angle(F[0]). Delegate, never re-inline.
     def phase_rand(v, r):
-        X = np.fft.rfft(v)
-        ph = r.uniform(0, 2 * np.pi, len(X)); ph[0] = 0.0
-        if len(v) % 2 == 0:
-            ph[-1] = 0.0
-        return np.fft.irfft(np.abs(X) * np.exp(1j * ph), n=len(v))
+        """Phase-randomised surrogate. See holographic_surrogate.phase_randomize."""
+        from holographic.sampling_and_signal.holographic_surrogate import phase_randomize
+        return phase_randomize(v, rng=r)
 
     def skew(v):
         d = np.diff(v)

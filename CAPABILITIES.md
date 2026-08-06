@@ -2613,6 +2613,14 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); s=m.game_shard(seed=0); s.s
 ```
 *Find it by:* build a video game, game server, multiplayer game world, authoritative server tick, game loop, fixed timestep game, deterministic lockstep, player input command queue
 
+### Cycle certificate (does this sequence repeat, and at what period)
+the SMALLEST period at which every recent frame matches the one p back, certified at a numeric tolerance -- or certified=False, never a best guess. Works on any sequence, not just a simulation: a REGIME STREAM is a square wave that a harmonic fit rings on (NRMSE 0.584) while an exact cycle certificate replays it at 0.037.
+
+```python
+c = mind.certify_cycle(series.reshape(-1, 1), tol=0.15); print(c['period'], c['certified'])
+```
+*Find it by:* does this repeat, is it cycling, find the period of a sequence, limit cycle detection, period of a repeating state, has the simulation started looping, detect a loop, cycle period
+
 ### Hydraulic terrain erosion (droplet simulation)
 ERODE a height grid hydraulically (holographic_terrain.erode): m.terrain_erode(height, droplets, steps, seed) runs the classic droplet simulation -- momentum downhill walk, capacity-limited sediment pickup, deposition on overload/uphill, evaporation, radius-brushed carving so channels have WIDTH. Carves drainage, softens peaks (max never grows). Additive: returns an eroded COPY. Deterministic under seed. NOTE: material leaving the tile edge is lost, like real drainage..
 
@@ -2980,6 +2988,14 @@ u = mind.solve_poisson_periodic(f, dx=1/64); T = mind.diffuse_periodic(T0, alpha
 ```
 *Find it by:* spectral laplace, poisson fft, closed form heat, exact diffusion, periodic pde, fourier solve, no time step, steady state exact
 
+### Explain a stream (one call: what it is, what to do, what it will NOT do)
+hand it any 1-D series and get plain English back: whether it has a GENERATOR (a few floats that reproduce and extend it), real STRUCTURE (predictable but not reducible), is INCOMPRESSIBLE (independent facts -- do not fit a model), or UNMEASURED (a refusal, not a finding). Carries the recommended next call as runnable code, the honest refusal, the measured evidence, a predict() callable when there is one, and the verdict as a hypervector.
+
+```python
+r = mind.explain_stream(series); print(r['headline'], r['what_to_do'], r['wont_do'])
+```
+*Find it by:* analyse my time series, what should i do with this stream, is my data predictable, explain this signal, what is this data, should i fit a model to this, does my data have a pattern, understand a signal
+
 ### HRNN domain recipes (forecasting, markets, science, data, text, audio)
 mind.hrnn_recipes(topic) is the use-case front door: a working call sequence per domain -- 'forecasting' (certify-then-extend, horizon-scoped), 'market analysis' (route + fingerprint + drift; returns honestly refused), 'scientific study' (generator existence, causal-state demand, trajectory classification), 'data processing' (per-release fingerprints, triage cascades), 'text generation' (price the corpus; generation routes to n-gram faculties; comprehension to DECLARE), 'audio' (streams route like any signal). Every recipe carries an HONEST field stating what the mechanism will not do..
 
@@ -3255,6 +3271,14 @@ import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); s=m.measure(la
 ## Navigation, planning & programs
 
 *find paths, plan routes, and run stored vector programs on the VSA machine.*
+
+### Fleet anomaly (compare sensors by STRUCTURE, across units)
+summarise a whole cohort of streams as ONE hypervector, then ask whether a stream behaves unlike its cohort. Compares STRUCTURE, not values, so it is EXACTLY invariant to scale, offset and sign -- a pressure sensor and a temperature sensor are directly comparable with no normalisation and no per-sensor calibration, and the signature does not grow with cohort size. Catches DRIFT, which amplitude and spectral baselines miss. Kept negative: a FLATLINE is not caught (a constant IS a generator) -- pair it with an amplitude check.
+
+```python
+sig = mind.fleet_signature(streams); r = mind.fleet_anomaly(new_stream, sig); print(r['score'], r['floor'], r['anomalous'])
+```
+*Find it by:* is this sensor behaving like the others, which machine is misbehaving, compare sensors in different units, fleet anomaly, cohort outlier, which sensor is faulty, sensor drift across a fleet, compare many streams
 
 ### Graph traversal (exact)
 reachability over a table's edges -- neighbors, descendants, reachable, shortest path -- what recursive SQL CTEs make painful. Uses an EXACT adjacency index by design: the holographic graph store's recall collapses at scale, so traversal is a plain deterministic graph (tombstone-aware, directed or undirected).
@@ -3670,6 +3694,13 @@ mind.conditional(values, condition): any measurement FOUR ways in one call -- ov
 import numpy as np; r=np.random.default_rng(0); v=r.normal(0,1,600); f=np.zeros(600,bool); f[::3]=True; v[f]+=1.0; c=mind.conditional(v,f); print(round(c['diff'],2), c['separates'], c['causal'])
 ```
 
+### Convergence acceleration (jump to a solver's limit, or decline)
+a convergence sequence is a STREAM, so the ladder's question applies to it: does it have a generator? When it does, three iterates give the limit in closed form -- measured 7 iterations where plain iteration needed 70, to machine precision. A jump is taken ONLY if it VALIDATES against one more step, because naive extrapolation on a multi-mode solve measured 250x WORSE than simply iterating. Works on any fixed-point iteration: relaxation sweeps, physics settling, IK passes.
+
+```python
+r = mind.accelerate_convergence(step_fn, x0); print(r['iters'], r['jumps'], r['why'])
+```
+
 ### Convolution surfaces (hands, feet, digits without bulges)
 the right tool for extremities. Bloomenthal & Shoemake 1991: summing convolutions of CONTIGUOUS skeletal primitives gives NO bulge at joints (superposition), where a smooth_union's blend IS the bulge -- measured, right-angle corner 0.1065 vs 0.0788, 26% less. Fuentes Suarez/Hubert/Zanni 2019 adds ELLIPSOIDAL sections so a sole is flat (4:1) without extra primitives. KEPT NEGATIVE, Bloomenthal's own: convolution SUMS, so separate digits still web (3-toe fan: 1 blob summed, 3 grouped) -- grouping is required..
 
@@ -4025,6 +4056,13 @@ the geometry kernel foundation: ONE ModelTolerance authority (abs/rel/angular) e
 
 ```python
 import lecore; m=lecore.UnifiedMind(); m.orient2d((0,0),(1,0),(0,1))
+```
+
+### Multi-tone generator (independent, incommensurate frequencies)
+fit a signal as a sum of INDEPENDENT sinusoids -- the generator class the harmonic fit cannot express, since that one fits harmonics of ONE fundamental and refuses on incommensurate tones (beating oscillators, two-rotor vibration, tidal constituents). Greedy matching pursuit with off-grid refinement, deliberately NOT a sparse solve over a frequency dictionary: a dense dictionary is coherent and blows up across its density parameter.
+
+```python
+m = mind.fit_multitone(x, n_tones=3); print(m['ok'], [1/f for f in m['frequencies']])
 ```
 
 ### N filter passes in one evaluation (shader algebra)
@@ -4823,4 +4861,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*616 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*621 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

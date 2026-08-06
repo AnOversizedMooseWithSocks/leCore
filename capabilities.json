@@ -2088,6 +2088,27 @@
     },
     {
       "aliases": [
+        "make my solver converge faster",
+        "skip iterations",
+        "jump to the answer",
+        "accelerate an iterative solve",
+        "extrapolate a fixed point",
+        "fewer iterations",
+        "speed up relaxation",
+        "converge in fewer steps"
+      ],
+      "consumes": [],
+      "does": "a convergence sequence is a STREAM, so the ladder's question applies to it: does it have a generator? When it does, three iterates give the limit in closed form -- measured 7 iterations where plain iteration needed 70, to machine precision. A jump is taken ONLY if it VALIDATES against one more step, because naive extrapolation on a multi-mode solve measured 250x WORSE than simply iterating. Works on any fixed-point iteration: relaxation sweeps, physics settling, IK passes",
+      "example": "r = mind.accelerate_convergence(step_fn, x0); print(r['iters'], r['jumps'], r['why'])",
+      "method": "accelerate_convergence",
+      "name": "Convergence acceleration (jump to a solver's limit, or decline)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "is this pixel really converged",
         "can I stop sampling",
         "clt assumption check",
@@ -2640,6 +2661,27 @@
       ],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "does this repeat",
+        "is it cycling",
+        "find the period of a sequence",
+        "limit cycle detection",
+        "period of a repeating state",
+        "has the simulation started looping",
+        "detect a loop",
+        "cycle period"
+      ],
+      "consumes": [],
+      "does": "the SMALLEST period at which every recent frame matches the one p back, certified at a numeric tolerance -- or certified=False, never a best guess. Works on any sequence, not just a simulation: a REGIME STREAM is a square wave that a harmonic fit rings on (NRMSE 0.584) while an exact cycle certificate replays it at 0.037",
+      "example": "c = mind.certify_cycle(series.reshape(-1, 1), tol=0.15); print(c['period'], c['certified'])",
+      "method": "certify_cycle",
+      "name": "Cycle certificate (does this sequence repeat, and at what period)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Simulation & physics"
     },
     {
       "aliases": [
@@ -3851,6 +3893,31 @@
     },
     {
       "aliases": [
+        "analyse my time series",
+        "what should i do with this stream",
+        "is my data predictable",
+        "explain this signal",
+        "what is this data",
+        "should i fit a model to this",
+        "does my data have a pattern",
+        "understand a signal",
+        "one call for a stream",
+        "analyse a series",
+        "is this signal random",
+        "what kind of data is this"
+      ],
+      "consumes": [],
+      "does": "hand it any 1-D series and get plain English back: whether it has a GENERATOR (a few floats that reproduce and extend it), real STRUCTURE (predictable but not reducible), is INCOMPRESSIBLE (independent facts -- do not fit a model), or UNMEASURED (a refusal, not a finding). Carries the recommended next call as runnable code, the honest refusal, the measured evidence, a predict() callable when there is one, and the verdict as a hypervector",
+      "example": "r = mind.explain_stream(series); print(r['headline'], r['what_to_do'], r['wont_do'])",
+      "method": "explain_stream",
+      "name": "Explain a stream (one call: what it is, what to do, what it will NOT do)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Data analysis & signals"
+    },
+    {
+      "aliases": [
         "explain code",
         "explain what code does in english",
         "summarize a function",
@@ -4138,6 +4205,28 @@
       "produces": [],
       "semantic": "analyze/measure",
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "is this sensor behaving like the others",
+        "which machine is misbehaving",
+        "compare sensors in different units",
+        "fleet anomaly",
+        "cohort outlier",
+        "which sensor is faulty",
+        "sensor drift across a fleet",
+        "compare many streams",
+        "is this one different from the rest"
+      ],
+      "consumes": [],
+      "does": "summarise a whole cohort of streams as ONE hypervector, then ask whether a stream behaves unlike its cohort. Compares STRUCTURE, not values, so it is EXACTLY invariant to scale, offset and sign -- a pressure sensor and a temperature sensor are directly comparable with no normalisation and no per-sensor calibration, and the signature does not grow with cohort size. Catches DRIFT, which amplitude and spectral baselines miss. Kept negative: a FLATLINE is not caught (a constant IS a generator) -- pair it with an amplitude check",
+      "example": "sig = mind.fleet_signature(streams); r = mind.fleet_anomaly(new_stream, sig); print(r['score'], r['floor'], r['anomalous'])",
+      "method": "fleet_signature",
+      "name": "Fleet anomaly (compare sensors by STRUCTURE, across units)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Navigation, planning & programs"
     },
     {
       "aliases": [
@@ -6504,6 +6593,28 @@
       "produces": [],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "two tones at once",
+        "incommensurate frequencies",
+        "beating oscillator",
+        "sum of sinusoids",
+        "multi tone fit",
+        "several frequencies at once",
+        "two rotors",
+        "fit multiple sine waves",
+        "not a harmonic stack"
+      ],
+      "consumes": [],
+      "does": "fit a signal as a sum of INDEPENDENT sinusoids -- the generator class the harmonic fit cannot express, since that one fits harmonics of ONE fundamental and refuses on incommensurate tones (beating oscillators, two-rotor vibration, tidal constituents). Greedy matching pursuit with off-grid refinement, deliberately NOT a sparse solve over a frequency dictionary: a dense dictionary is coherent and blows up across its density parameter",
+      "example": "m = mind.fit_multitone(x, n_tones=3); print(m['ok'], [1/f for f in m['frequencies']])",
+      "method": "fit_multitone",
+      "name": "Multi-tone generator (independent, incommensurate frequencies)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -14440,7 +14551,7 @@
       "theme": "Scenes you can describe & adjust"
     }
   ],
-  "count": 616,
+  "count": 621,
   "schema_version": "1.0",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

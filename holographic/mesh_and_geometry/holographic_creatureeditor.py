@@ -44,6 +44,19 @@ import json
 import numpy as np
 
 
+def _foot_scale(library, part, spec, width_ratio):
+    """A foot sized to the LIMB it sits on, measured rather than assumed: the part's own default
+    extent against the mean limb radius, so a thin-legged creature does not get boots."""
+    base_w = 1.0
+    if library is not None:
+        geo = getattr(library, "parts", {}).get(str(part), {}).get("geometry")
+        if geo is not None:
+            V = np.asarray(geo.vertices, float)
+            base_w = float(np.max(V.max(0) - V.min(0))) or 1.0
+    rs = [float(l.get("radius", 0.05)) for l in (spec.get("limbs") or [])]
+    return float(width_ratio) * (float(np.mean(rs)) if rs else 0.05) / base_w
+
+
 class SpecCommand:
     """One reversible edit to the creature document.
 
@@ -199,6 +212,56 @@ class CreatureEditor:
             sock["theta"] = float(theta)
         return self._commit("move_part", s)
 
+    def add_feet(self, part="foot", scale=None, digits=3, only_legs=True, ground_frac=0.35,
+                 width_ratio=2.2):
+        """Put a FOOT at the tip of every LEG -- what makes a creature stand rather than taper away.
+
+        Uses the gait analyzer to decide which limbs are legs (by asking which reach the ground), so
+        a body with arms up gets feet only where they belong and a hexapod gets six without anything
+        authored. Sockets are derived from each tip via socket_at_point, so feet are stored in ANATOMY
+        coordinates like every other part and ride the body through later edits.
+
+        `scale=None` SIZES THE FOOT FROM THE LEG rather than from a magic constant. Measured on a real
+        body, the old scale=1.0 default gave a foot 3.2x the limb RADIUS and 0.4x the whole leg's
+        reach -- feet visibly larger than the torso, which is what dogfooding actually rendered. The
+        foot's width is now `width_ratio` times the limb radius, so a chunky leg gets a chunky foot
+        and a spindly one does not. Same class of error as a texture frequency in world units: an
+        ABSOLUTE size where a RELATIVE one was needed.
+
+        ONE undoable step even though it may add six parts: "add feet" is one action to a user, so it
+        is one entry in the history.
+        """
+        import copy as _copy
+        import holographic.mesh_and_geometry.holographic_gait as _g
+        import holographic.mesh_and_geometry.holographic_creaturesocket as _sk
+        cr = self.creature()
+        rig = _g.analyze_rig(cr, ground_frac=ground_frac)
+        chains = rig["legs"] if only_legs else list(cr.chains)
+        s = _copy.deepcopy(self.spec)
+        socks = s.setdefault("sockets", [])
+        # the part's own default extent, so the ratio is measured rather than assumed
+        base_w = 1.0
+        if self.library is not None:
+            geo = getattr(self.library, "parts", {}).get(str(part), {}).get("geometry")
+            if geo is not None:
+                V = np.asarray(geo.vertices, float)
+                base_w = float(np.max(V.max(0) - V.min(0))) or 1.0
+        # DELEGATE to auto_feet, which emits LIMB sockets. This method used to build SPINE-relative
+        # sockets via socket_at_point -- the approximation already on record as a kept negative ("a
+        # socket on a limb tip uses the nearest spine station and is approximate"). A foot belongs to
+        # its LIMB's axis, not the spine's: resolve_limb_socket casts along_axis=True, which is what a
+        # foot actually needs, and place_parts already dispatches on the socket kind. So this is not
+        # deduplication for tidiness -- the spine-relative version was the WORSE of the two.
+        sc = float(scale) if scale is not None else _foot_scale(self.library, part, s, width_ratio)
+        for sock in _sk.auto_feet(cr, self.field(), part=part, scale=sc,
+                                  ground_frac=ground_frac,
+                                  handles={"digits": float(digits)}):
+            if only_legs or sock.get("limb") in cr.chains:
+                socks.append(dict(sock))
+        chains = [k["limb"] for k in socks if k.get("part") == str(part)]
+        self._added_feet = len(chains)
+        return self._commit("add_feet:%d" % len(chains), s)
+
     # ------------------------------------------------------------------ build --
     def creature(self):
         """The rig for the current document."""
@@ -218,14 +281,79 @@ class CreatureEditor:
         """
         import holographic.mesh_and_geometry.holographic_creatureskin as cs
         import holographic.mesh_and_geometry.holographic_creaturesocket as sk
+        from holographic.mesh_and_geometry.holographic_meshbridge import (
+            sample_field as _sample_field, marching_tetrahedra as _march)
         cr = self.creature()
-        skin = cs.creature_metaball_mesh(cr, self.spec, spacing=spacing, resolution=resolution)
+        # MESH THE SAME SURFACE THE SOCKETS RESOLVE ON. `field()` returns the DISTANCE form and
+        # `creature_metaball_mesh` meshes the DENSITY form -- and their zero level sets are NOT the
+        # same surface. Measured on a real body: density crosses zero at r=0.2651, distance at
+        # r=0.4195 -- a 0.154 gap. Parts therefore reported "placed, 0 missed" (they sat exactly on
+        # the distance surface, field-dist 0.00000) while rendering 0.15 OFF the skin, visibly
+        # floating. Two doors to "the creature's surface" that disagree is worse than one door.
+        fld = cs.creature_field(cr, self.spec, spacing=spacing)
+        lo, hi = fld.bounds()
+        vals, axes = _sample_field(fld, (tuple(lo), tuple(hi)), int(resolution))
+        skin = _march(vals, axes, level=0.0)
         out = {"skin": skin, "parts": None, "placements": [], "missed": []}
         if with_parts and self.spec.get("sockets"):
-            fld = cs.creature_field(cr, self.spec, spacing=spacing)
             r = sk.place_parts(cr, fld, self.spec["sockets"], self.library, mode=mode)
             out.update({"parts": r["geometry"], "placements": r["placements"], "missed": r["missed"]})
         return out
+
+    def render(self, width=640, height=640, resolution=96, direction=(1.0, -1.1, 0.35),
+               fov_deg=40.0, background=(0.08, 0.09, 0.12), paint=True, seed=0, **kw):
+        """BUILD AND RENDER IN ONE CALL -- skin and parts merged, camera framed, body painted.
+
+        Found by dogfooding: rendering a creature took six manual steps that every caller had to
+        rediscover, and two of them were traps.
+          * `build()` returns skin and parts SEPARATELY, so every caller hand-merged them with an
+            index offset -- easy to get wrong and pure boilerplate.
+          * `fit_camera()` returns a DICT while `render_mesh` wants a Camera OBJECT, so every caller
+            wrote the same four-field conversion.
+          * an unpainted creature renders pure WHITE, which reads as a bug rather than a default.
+        Returns (image, mesh) so the mesh is still available for anything else.
+        """
+        from holographic.mesh_and_geometry.holographic_mesh import Mesh
+        from holographic.rendering.holographic_render import Camera, Light
+        import holographic.mesh_and_geometry.holographic_creatureskin as cs
+        out = self.build(resolution=resolution)
+        SV = np.asarray(out["skin"].vertices, float)
+        SF = np.asarray(out["skin"].faces, int)
+        if out["parts"] is not None:
+            PV = np.asarray(out["parts"].vertices, float)
+            PF = np.asarray(out["parts"].faces, int)
+            mesh = Mesh(np.vstack([SV, PV]), np.vstack([SF, PF + len(SV)]))
+        else:
+            PV = np.zeros((0, 3)); mesh = out["skin"]
+        cols = None
+        if paint:
+            cr = self.creature()
+            C, R, bones = cs.creature_metaballs(cr, self.spec, spacing=0.9)
+            from holographic.mesh_and_geometry.holographic_creatureparts import skin_weights
+            from holographic.mesh_and_geometry.holographic_paintlod import paint_creature
+            idx, w, names, _bk = skin_weights(SV, C, R, bones, dim=256, seed=seed)
+            body = paint_creature(SV, idx, w, names, seed=seed)
+            cols = np.vstack([body, np.tile(np.array([0.86, 0.82, 0.70]), (len(PV), 1))]) \
+                if len(PV) else body
+        cam = self._mind_fit_camera(mesh, direction, fov_deg, width, height)
+        from holographic.rendering.holographic_render import rasterize_mesh as _render_mesh
+        img = _render_mesh(mesh, cam, width=width, height=height, vertex_colors=cols,
+                           lights=[Light("directional", direction=(-0.5, 0.6, -0.5), intensity=1.2),
+                                   Light("directional", direction=(0.7, 0.3, -0.2), intensity=0.4)],
+                           ambient=0.45, background=background, smooth=True, **kw)
+        return np.asarray(img), mesh
+
+    def _mind_fit_camera(self, mesh, direction, fov_deg, width, height):
+        """fit_camera returns a dict; render_mesh wants a Camera. One place to convert, not every
+        call site -- this conversion was the second friction point dogfooding surfaced."""
+        from holographic.rendering.holographic_render import fit_camera as _fit
+        from holographic.io_and_interop.holographic_coerce import as_camera
+        c = _fit(mesh, direction=direction, up=(0.0, 0.0, 1.0), fov_deg=fov_deg,
+                 aspect=float(width) / max(float(height), 1.0), margin=1.10)
+        # `as_camera` already coerces fit_camera's DICT into a Camera. Dogfooding logged this
+        # conversion as friction before finding it -- the capability existed, the discoverability did
+        # not, which is the failure mode this engine names most often.
+        return as_camera(c)
 
     # --------------------------------------------------------- validate & budget --
     def validate(self):

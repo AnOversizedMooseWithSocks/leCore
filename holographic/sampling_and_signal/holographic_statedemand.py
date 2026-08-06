@@ -317,6 +317,48 @@ class StreamMeter:
         return entropy_rate_report(quantize_stream(self.snapshot(), k=k), k=k)
 
 
+def certify_cycle(frames, tol=1e-6, pmax=None, hint=0, flatten=None):
+    """Does this sequence REPEAT at some period, certified at a numeric tolerance?
+
+    Returns {"period", "deviation", "scale", "certified"} -- the SMALLEST p for which every recent
+    frame matches the one p back to within `tol * scale`, where scale is the WINDOW PEAK (not the last
+    frame, whose phase-dependent magnitude made the tolerance breathe -- a measured fix).
+
+    PROMOTED OUT OF `run_until_settled`, where it was the settled-but-oscillatory branch. It was
+    reachable only by running a simulation, so nothing else could ask "does this repeat?" -- and the
+    question is general: a REGIME STREAM (the sequence of HRNN verdicts over windows) is a square
+    wave, and `fit_harmonics` fits it at NRMSE 0.58 because a harmonic stack cannot represent a
+    plateau without ringing. An exact cycle certificate is the right readout there, and it already
+    existed one level down. Same ladder, different rung, because level-2 data has a different
+    character than level-1 data.
+
+    The claim type is a STATE CYCLE at a tolerance -- certify the quantity you serve -- not a
+    frequency estimate. No qualifying period returns certified=False rather than a best guess.
+    """
+    fl = [np.asarray(f, dtype=float).ravel() if flatten is None else flatten(f) for f in frames]
+    n = len(fl)
+    if n < 6:
+        return {"period": None, "deviation": None, "scale": 0.0, "certified": False}
+    pmax = int(pmax if pmax is not None else (n - 1) // 3)
+    pmax = max(2, min(pmax, (n - 1) // 3))
+    scale = max(float(max(np.max(np.abs(f)) for f in fl)), 1e-12)
+    best = None
+    for pp in ([int(hint)] if int(hint) >= 2 else []) + list(range(2, pmax + 1)):
+        if pp > pmax:
+            continue
+        need = 3 * pp
+        devs = [float(np.max(np.abs(fl[-k] - fl[-k - pp])))
+                for k in range(1, need + 1) if k + pp <= len(fl)]
+        if not devs:
+            continue
+        dev = max(devs)
+        if dev <= tol * scale:
+            best = {"period": int(pp), "deviation": dev, "scale": scale, "certified": True}
+            break
+    return best or {"period": None, "deviation": None, "scale": scale, "certified": False}
+
+
+
 def run_until_settled(step, state, steps, residual=None, window=96, check_every=16,
                       max_lag=48, cycle_handoff=False, cycle_tol=1e-6, settle_tol=1e-2):
     """Settle-gated simulation runner: pay for dynamics, not for equilibrium. Runs
@@ -379,19 +421,13 @@ def run_until_settled(step, state, steps, residual=None, window=96, check_every=
                 # p=31 dev 13%) -- so the state scan gets its own, longer horizon;
                 # and 'scale' must be the WINDOW PEAK, not the instantaneous last
                 # frame, whose phase-dependent magnitude made the tolerance breathe.
+                # DELEGATE to the promoted certifier -- see certify_cycle, which exists so that a
+                # REGIME STREAM can ask the same question without running a simulation.
                 pmax = min(2 * max_lag, (len(frames) - 1) // 3)
-                fl = [_flat(f) for f in frames[-(3 * pmax + 1):]]
-                scale = max(float(max(np.max(np.abs(f)) for f in fl)), 1e-12)
-                for pp in ([hint] if hint >= 2 else []) + list(range(2, pmax + 1)):
-                    if pp > pmax:
-                        continue
-                    need = 3 * pp
-                    dev = max(float(np.max(np.abs(fl[-k] - fl[-k - pp])))
-                              for k in range(1, need + 1) if k + pp <= len(fl))
-                    if dev <= cycle_tol * scale:
-                        cycle_at, period, guard = i + 1, pp, g
-                        break
-                if cycle_at is not None:
+                cyc = certify_cycle(frames[-(3 * pmax + 1):], tol=cycle_tol, pmax=pmax,
+                                    hint=hint, flatten=_flat)
+                if cyc["certified"]:
+                    cycle_at, period, guard = i + 1, cyc["period"], g
                     break
     served = 0
     if settle_at is not None:
@@ -449,12 +485,13 @@ def _selftest():
     t = np.arange(2000, dtype=float)
     saw = ((t % 210.0) / 210.0) * 2 - 1          # determinism lives in phase-LOCKED harmonics
 
+# UNIFIED: this was an inline copy of holographic_surrogate.phase_randomize. All four copies
+    # forced the DC phase to 0.0, which FLIPS THE SIGN OF THE MEAN for a negative-mean signal
+    # (measured -2.933 -> +2.933). The canonical one preserves angle(F[0]). Delegate, never re-inline.
     def phase_rand(x, r):
-        X = np.fft.rfft(x)
-        ph = r.uniform(0, 2 * np.pi, len(X)); ph[0] = 0.0
-        if len(x) % 2 == 0:
-            ph[-1] = 0.0
-        return np.fft.irfft(np.abs(X) * np.exp(1j * ph), n=len(x))
+        """Phase-randomised surrogate. See holographic_surrogate.phase_randomize."""
+        from holographic.sampling_and_signal.holographic_surrogate import phase_randomize
+        return phase_randomize(x, rng=r)
 
     def toy_score(x):
         # a PHASE-SENSITIVE stand-in for fit_deterministic: the sawtooth's jumps make its
@@ -533,6 +570,17 @@ def _selftest():
         assert abs(a["drift_z"] - b["drift_z"]) < 1e-9
     smw = StreamMeter(window=128)
     assert smw.push(np.zeros(8)).verdict()["iid_ok"] is None    # honest warmup
+
+    # THE PROMOTED CERTIFIER, on the data it was promoted FOR: a REGIME STREAM is a square wave, and
+    # a harmonic fit rings on it (measured NRMSE 0.584). An exact cycle certificate replays it at
+    # 0.037 -- 16x better -- and returns the true period. Pinned so the promotion cannot rot back
+    # into a simulation-only branch.
+    _sq = np.array([0.62, 0.62, 1.65, 1.98, 1.99, 1.68] * 5, dtype=float)
+    _c = certify_cycle(_sq.reshape(-1, 1), tol=0.15)
+    assert _c["certified"] and _c["period"] == 6, "square regime stream must certify period 6: %s" % _c
+    # ...and it must REFUSE on a stream that does not repeat, or the certificate means nothing
+    _nr = certify_cycle(np.random.default_rng(0).normal(size=40).reshape(-1, 1), tol=0.15)
+    assert not _nr["certified"], "a non-repeating stream must not be certified: %s" % _nr
 
     print("holographic_statedemand selftest OK -- ranks {p4:%s iid:%s walk:%s}, "
           "h {periodic:%.3f iid:%.2f}, gate {white:stage1-reject, sine:pass p=%.3f, "

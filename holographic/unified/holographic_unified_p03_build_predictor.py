@@ -23,6 +23,38 @@ from holographic.misc.holographic_creature import HolographicMind
 from holographic.unified import check_part
 
 
+def _multitone_formula(y, max_terms=6):
+    """Fit y as independent sinusoids and package the result as a Formula (the savable seed).
+
+    Bridges holographic_hrnn.fit_multitone into the symbolic decomposition path: its output is
+    coefficients at arbitrary angular frequencies, and a Formula term is exactly ('sin'|'cos', w) at
+    arbitrary w, so the translation is lossless. Returns (Formula, info) shaped like compress_signal's.
+    """
+    import numpy as _np
+    from holographic.agents_and_reasoning.holographic_hrnn import fit_multitone
+    from holographic.agents_and_reasoning.holographic_symbolic import Formula
+    yy = _np.asarray(y, float).ravel()
+    n_tones = max(1, int(max_terms) // 2)
+    mt = fit_multitone(yy, n_tones=n_tones, r2_floor=0.0)
+    coef = _np.asarray(mt["params"], float)
+    terms = []
+    for k, fr in enumerate(mt["frequencies"]):
+        w = 2.0 * _np.pi * float(fr)
+        terms.append((("cos", w), float(coef[2 * k + 1])))
+        terms.append((("sin", w), float(coef[2 * k + 2])))
+    f = Formula(float(coef[0]), terms)
+    resid = float(_np.sqrt(_np.mean((_np.asarray(f.generate(_np.arange(len(yy), dtype=float)), float) - yy) ** 2)))
+    # mdl_bits must be a REAL number: downstream consumers (holographic_scaffold's decomposition
+    # contract among them) do float(info["mdl_bits"]) and a None here raises there. The Formula
+    # already knows its own size, so use it rather than inventing a placeholder.
+    try:
+        bits = float(f.model_bits())
+    except Exception:
+        bits = float(len(terms) * 64 + 64)               # coefficients + intercept, conservatively
+    return f, {"resid_rms": resid, "n_terms": len(terms), "mdl_bits": bits,
+               "multiplicative": False, "mode": "additive"}
+
+
 class _UnifiedPart03:
 
     def build_predictor(self, order=2, reinforce_threshold=0.15, novelty_threshold=0.55):
@@ -1706,6 +1738,30 @@ class _UnifiedPart03:
                                             max_terms=max_terms, coef_bits=coef_bits)
             info["mode"] = "multiplicative" if f.log_space else "additive"
             info["compression_ratio"] = f.compression_ratio(len(y))
+        # MULTI-TONE CANDIDATE. The bases above are harmonics of ONE detected period (ring/torus) or
+        # elementary functions on a line -- neither can express INCOMMENSURATE tones, and the measured
+        # cost of that gap was severe: on sin(t/50)+0.8 sin(t/97.3) this returned n_terms=0 and a
+        # residual of 1.00 (no better than the mean), while a matching-pursuit fit reached 4.03e-02.
+        # So multitone competes as one more candidate and wins only on RESIDUAL, exactly as the
+        # additive/multiplicative auto-rule already chooses. Expressible as a Formula because its
+        # atoms are ('sin', w)/('cos', w) at arbitrary w -- verified exact.
+        try:
+            f2, info2 = _multitone_formula(y, max_terms=max_terms)
+        except Exception:
+            f2 = None
+        # PARSIMONY IS NOT OPTIONAL HERE. This is a SYMBOLIC decomposition -- a 2-term exact formula
+        # beats a 6-term exact one, and the shipped path is MDL-gated for that reason. Comparing on
+        # residual alone made multitone win EVERY case, including a harmonic stack it expressed in 6
+        # terms where the harmonic basis used 2. So multitone must beat the incumbent MATERIALLY
+        # (half the residual or better), not merely tie it, before its extra terms are justified.
+        _r1 = float(info.get("resid_rms", np.inf))
+        _r2 = float(info2["resid_rms"]) if f2 is not None else np.inf
+        if f2 is not None and _r2 < 0.5 * _r1:
+            info2["topology"] = info.get("topology"); info2["period"] = info.get("period")
+            info2["basis"] = "multitone"
+            info2["compression_ratio"] = f2.compression_ratio(len(y))
+            return f2, info2
+        info.setdefault("basis", info.get("mode", "harmonic"))
         return f, info
 
     def find_pattern_by_downscale(self, data, kind="vectors", k=3, n_null=80, seed=0):

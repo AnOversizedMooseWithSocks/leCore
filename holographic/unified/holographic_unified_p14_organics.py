@@ -308,13 +308,15 @@ class _UnifiedPart14:
         return _cs.move_node(spec, curve=curve, length=length, axis=axis)
 
     # ------------- HOLOGRAPHIC creature parts, symmetry, skin weights (R-3 / R-4 / R-7) --
-    def part_library(self, dim=1024, seed=0):
+    def part_library(self, dim=None, seed=0, expect_sockets=32, alpha=0.90):
         """A RIGBLOCK library: named parts, each an atom in a codebook, each carrying its own authored
         deformation handles so a part deforms only within ranges its author sanctioned. Parts are
         derived from their names, so the same name is the same vector in every session with no stored
-        state. See holographic_creatureparts.PartLibrary."""
+        state. See `dim=None` PRICES the dimension from `expect_sockets` via the capacity law rather than
+        guessing -- a part assembly is a superposed pair memory, so the closed form applies. See
+        holographic_creatureparts.PartLibrary."""
         import holographic.mesh_and_geometry.holographic_creatureparts as _cp
-        return _cp.PartLibrary(dim=dim, seed=seed)
+        return _cp.PartLibrary(dim=dim, seed=seed, expect_sockets=expect_sockets, alpha=alpha)
 
     def attach_part(self, assembly, socket, part_name, library, symmetry=None, n=2):
         """ATTACH A PART to a socket, holographically: the layout becomes ONE vector,
@@ -553,6 +555,97 @@ class _UnifiedPart14:
         return _pl.toon_shade(mesh, colours, eye, light_dir=light_dir, bands=bands, rim=rim,
                               rim_power=rim_power, ambient=ambient, band_floor=band_floor)
 
+    def accelerate_convergence(self, step, x0, max_iters=200, tol=1e-12, r2_floor=0.99, probe=3):
+        """JUMP TO AN ITERATIVE SOLVER'S LIMIT when its convergence is lawful, or decline. `step(x)->x`
+        is any fixed-point iteration -- a relaxation sweep, a physics settle, an IK pass. A convergence
+        sequence is a STREAM, so the ladder's question applies to it: does it have a generator? When it
+        does, three iterates give the limit in closed form (measured: 7 iterations where plain needed
+        70, to machine precision). A jump is taken ONLY if it VALIDATES -- one more step must move it
+        less than it moves the plain iterate -- because naive extrapolation on a multi-mode solve
+        measured 250x WORSE than simply iterating. See holographic_hrnn.accelerate_convergence."""
+        import holographic.agents_and_reasoning.holographic_hrnn as _h
+        return _h.accelerate_convergence(step, x0, max_iters=max_iters, tol=tol,
+                                         r2_floor=r2_floor, probe=probe)
+
+    def fleet_signature(self, streams, dim=None, seed=0):
+        """ONE hypervector summarising how a whole COHORT of streams behaves structurally, plus the
+        cohort's own calibrated `floor`. Does NOT grow with the number of streams and retains none of
+        the raw data. See holographic_hrnn.fleet_signature."""
+        import holographic.agents_and_reasoning.holographic_hrnn as _h
+        return _h.fleet_signature(streams, dim=dim or self.dim, seed=seed)
+
+    def fleet_anomaly(self, x, signature, dim=None, seed=0):
+        """Is this stream behaving unlike its cohort? Compares STRUCTURE, not values -- EXACTLY
+        invariant to scale, offset and sign (measured identical across 15 orders of magnitude), so a
+        pressure sensor and a temperature sensor are directly comparable with no normalisation and no
+        per-sensor calibration. Catches DRIFT, which amplitude and spectral baselines miss. KEPT
+        NEGATIVE: a flatline is NOT caught -- a constant IS a generator -- so pair it with an
+        amplitude check. See holographic_hrnn.fleet_anomaly."""
+        import holographic.agents_and_reasoning.holographic_hrnn as _h
+        return _h.fleet_anomaly(x, signature, dim=dim or self.dim, seed=seed)
+
+    def explain_stream(self, x, dim=None, seed=0, alpha=0.9, n_tones=4):
+        """ONE CALL, PLAIN ENGLISH -- hand it a stream, get what it IS and what to DO about it.
+        Returns {headline, what_it_is, what_to_do, wont_do, confidence, predict, record, verdict}:
+        a sentence a non-specialist can act on, the recommended next call written as runnable code,
+        and the HONEST refusal saying what the verdict does not license. `predict` is the callable
+        when a generator was found; `record` is the verdict as one hypervector for composing into a
+        VSA application. This is the front door for the whole HRNN ladder -- everything else is
+        reachable through it. See holographic_hrnn.explain_stream."""
+        import holographic.agents_and_reasoning.holographic_hrnn as _h
+        return _h.explain_stream(x, dim=dim or self.dim, seed=seed, alpha=alpha, n_tones=n_tones)
+
+    def fit_multitone(self, x, n_tones=4, r2_floor=0.95, stages=1):
+        """Fit a signal as a sum of INDEPENDENT sinusoids -- the generator class `fit_harmonics`
+        cannot express, since it fits harmonics of ONE fundamental and honestly refuses on
+        incommensurate tones (beating oscillators, two-rotor vibration, tidal constituents). Measured
+        8.9-10.3x better there, with no regression on a harmonic stack. Greedy matching pursuit with
+        off-grid refinement, deliberately NOT a sparse solve over a frequency dictionary -- a dense
+        one is coherent and CoSaMP over it spans NRMSE 3.45e-01 to 2.24e+04 across density. See
+        holographic_hrnn.fit_multitone."""
+        import holographic.agents_and_reasoning.holographic_hrnn as _h
+        return _h.fit_multitone(x, n_tones=n_tones, r2_floor=r2_floor, stages=stages)
+
+    def certify_cycle(self, frames, tol=1e-6, pmax=None, hint=0, flatten=None):
+        """DOES THIS SEQUENCE REPEAT? The smallest period p at which every recent frame matches the
+        one p back, certified at a numeric tolerance -- or certified=False, never a best guess.
+        Promoted out of run_until_settled's oscillatory branch, where it was reachable only by
+        running a simulation. Use it on any sequence: a REGIME STREAM (HRNN verdicts over windows) is
+        a square wave that a harmonic fit rings on (NRMSE 0.584) and a cycle certificate replays at
+        0.037. See holographic_statedemand.certify_cycle."""
+        import holographic.sampling_and_signal.holographic_statedemand as _sd
+        return _sd.certify_cycle(frames, tol=tol, pmax=pmax, hint=hint, flatten=flatten)
+
+    # ------------------------------------- HRNN verdicts as hypervectors (VSA-native) --
+    def verdict_to_record(self, verdict, dim=None, seed=0):
+        """Carry an HRNN stream VERDICT as ONE hypervector -- each field bound to its role, bundled.
+        Turns a plain dict into something the VSA layer can actually use: compare two streams by
+        COSINE, bundle a whole workspace of them into one vector, unbind a field and clean it up.
+        Kept negative: the record carries the verdict, NOT the model -- the `predict` closure has no
+        hypervector form and a lossy encode of the coefficients would predict the wrong thing. See
+        holographic_hrnn.verdict_to_record."""
+        import holographic.agents_and_reasoning.holographic_hrnn as _h
+        return _h.verdict_to_record(verdict, dim=dim or self.dim, seed=seed)
+
+    def verdict_from_record(self, record, dim=None, seed=0, vocabulary=None):
+        """Recover a verdict's fields from its hypervector: unbind each role, clean up against the
+        codebook. Returns the fields plus `_confidence` per field, so a degraded bundle is VISIBLE
+        rather than confidently wrong. See holographic_hrnn.verdict_from_record."""
+        import holographic.agents_and_reasoning.holographic_hrnn as _h
+        return _h.verdict_from_record(record, dim=dim or self.dim, seed=seed, vocabulary=vocabulary)
+
+    def verdict_vocabulary(self, regimes=None, mechanisms=None, dim=None, seed=0):
+        """The codebook a recalled verdict field is cleaned up against. An unbound role gives a NOISY
+        vector; reading it without cleanup is the mistake this engine keeps a negative about. See
+        holographic_hrnn.verdict_vocabulary."""
+        import holographic.agents_and_reasoning.holographic_hrnn as _h
+        kw = {}
+        if regimes is not None:
+            kw["regimes"] = regimes
+        if mechanisms is not None:
+            kw["mechanisms"] = mechanisms
+        return _h.verdict_vocabulary(dim=dim or self.dim, seed=seed, **kw)
+
     # ----------------------------------------------------------------- GAIT (locomotion) --
     def analyze_rig(self, creature, ground_frac=0.35):
         """Work out which limbs are LEGS -- by asking which reach the ground, so it is MEASURED, not
@@ -776,12 +869,13 @@ class _UnifiedPart14:
                 c = f.get("correlation")
                 return 0.0 if c is None else float(_np.ravel(c)[0])
 
+# UNIFIED: this was an inline copy of holographic_surrogate.phase_randomize. All four copies
+            # forced the DC phase to 0.0, which FLIPS THE SIGN OF THE MEAN for a negative-mean signal
+            # (measured -2.933 -> +2.933). The canonical one preserves angle(F[0]). Delegate, never re-inline.
             def surrogate_fn(v, rng):
-                X = _np.fft.rfft(v)
-                ph = rng.uniform(0, 2 * _np.pi, len(X)); ph[0] = 0.0
-                if len(v) % 2 == 0:
-                    ph[-1] = 0.0
-                return _np.fft.irfft(_np.abs(X) * _np.exp(1j * ph), n=len(v))
+                """Phase-randomised surrogate. See holographic_surrogate.phase_randomize."""
+                from holographic.sampling_and_signal.holographic_surrogate import phase_randomize
+                return phase_randomize(v, rng=rng)
         return compressibility_gate(_np.asarray(x, dtype=float).ravel(), k=k, h_max=h_max,
                                     score_fn=score_fn, surrogate_fn=surrogate_fn,
                                     n_null=n_null, alpha=alpha)

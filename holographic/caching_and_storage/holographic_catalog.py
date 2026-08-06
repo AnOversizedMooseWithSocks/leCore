@@ -210,15 +210,25 @@ class Catalog:
         # catalog vocab for the null router, tokenised ONCE per catalog state
         self._fc_vocab = sorted(set(t for cap in self._by_name.values()
                                     for t in cap._hay))
-        # disk-warmed null floors: mu/sd only (the empirical-p null array is not
-        # persisted; the router already treats a 2-tuple as "p unavailable, never
-        # fabricated", so a warm boot gets the floor and stays honest about p).
+        # Disk-warmed null floors. The NULL ARRAY IS PERSISTED TOO, so a warm boot keeps the empirical p.
+        #
+        # BUG THIS FIXES: the memo used to store [mu, sd] only, on the reasoning that an unavailable p is
+        # more honest than a fabricated one. True as far as it went -- but it made `p` depend on whether a
+        # /tmp file happened to exist, so the SAME query returned p=0.0154 cold and p=None warm. Under
+        # pytest-xdist the workers share /tmp, so whichever ran second saw None and six tests failed in CI
+        # while passing locally. Persisting the null array is not fabrication: it IS the measured data, and
+        # it is 64 floats. Honesty was never the thing forcing p to vanish; an incomplete cache format was.
+        # A 2-list is still tolerated so an older memo file cannot raise -- it just yields p=None as before.
         for mk, v in list(self._fc_memo.items()):
-            if mk.startswith("~null|") and isinstance(v, list) and len(v) == 2:
+            if mk.startswith("~null|") and isinstance(v, list) and len(v) in (2, 3):
                 self._null_floor_cache = getattr(self, "_null_floor_cache", {})
                 tc, nn, sd_ = mk.split("|")[1:4]
-                self._null_floor_cache[(int(tc), int(nn), int(sd_),
-                                        len(self._by_name))] = (v[0], v[1])
+                if len(v) == 2:
+                    entry = (v[0], v[1])
+                else:
+                    import numpy as _np
+                    entry = (v[0], v[1], _np.asarray(v[2], float))
+                self._null_floor_cache[(int(tc), int(nn), int(sd_), len(self._by_name))] = entry
         self._fc_baked = True
 
     def find_capability(self, problem, k=3, accepts=None, produces=None):
@@ -371,7 +381,9 @@ class Catalog:
                 null[i] = fs[0][1] if fs else 0.0
             mu, sd = float(null.mean()), float(null.std()) or 1.0
             cache[key] = (mu, sd, null)
-            self._fc_memo["~null|%d|%d|%d" % (len(q_tokens), int(n_null), int(seed))] = [mu, sd]
+            # persist the null array as well, so the empirical p survives a warm boot (see _ensure_fc_baked)
+            self._fc_memo["~null|%d|%d|%d" % (len(q_tokens), int(n_null), int(seed))] = [
+                mu, sd, [float(x) for x in null]]
             try:
                 import json as _js
                 _js.dump(self._fc_memo, open(self._fc_memo_path, "w"))
@@ -535,6 +547,35 @@ _METHOD_ALIASES = {
     # pushed these 25 bare method-names out of the top-15 for their OWN name, which is the audit's definition
     # of dark. Nothing about them changed -- their neighbours did. Fixed the documented way: stranger
     # phrasings, written from a user's mouth rather than the implementer's.
+    # D1 REGRESSION, THIRD WAVE. Same mechanism again: the creature/anatomy merge added capabilities and
+    # pushed ten more bare names out of the top-15 for their own name. Nothing about them changed. Written
+    # from a user's mouth, as the entries below were.
+    # D1, FOURTH WAVE, and I caused this one: registering "Explain a stream (...)" pushed the bare
+    # method-name `explain` (why are two RECORDS similar) out of the top-15 for its own name. The
+    # descriptive title outranks the generic verb, exactly as the earlier waves did. Aliases written
+    # from what a caller comparing two records would actually type.
+    "explain": ("why are these two records similar", "compare two records field by field",
+                "explain a match", "why did these match", "per-role decode of two records"),
+    "build_creature": ("make a creature", "generate a creature", "build a whole creature",
+                       "create an animal", "one call creature"),
+    "build_part": ("make a body part", "build a horn", "generate a foot", "make an eye",
+                   "create a claw"),
+    "creature_parts": ("body part library", "what parts can i use", "part palette",
+                       "list of body parts", "available parts"),
+    "make_mixture": ("mix two materials", "smoke and dye", "multi channel matter",
+                     "blend substances", "milk in water"),
+    "make_surrogate": ("cheap stand-in for a slow function", "approximate an expensive call",
+                       "learned shortcut", "cache a function as a model"),
+    "rig": ("creature skeleton", "one rig type", "bones and joints", "skeleton for any body",
+            "humanoid and creature rig", "articulation"),
+    "skin_mesh": ("deform a mesh with bones", "linear blend skinning", "attach a mesh to a skeleton",
+                  "bind mesh to bones", "move the mesh with the rig"),
+    "terrain": ("make a landscape", "generate ground", "heightfield", "hills and valleys",
+                "procedural terrain"),
+    "tissue_at": ("what tissue is here", "bone or muscle at this point", "what is inside the body",
+                  "sample the anatomy", "is this point bone"),
+    "what_is_at": ("what part is on this socket", "which part did i attach", "read back an attachment",
+                   "query a socket"),
     "bake_texture": ("bake a texture", "bake lighting to a texture", "bake to uv", "texture baking"),
     "forecast": ("predict the next value", "forecast a series", "time series prediction", "what comes next"),
     "forward_forward": ("forward-forward learning", "train without backprop", "local learning rule"),

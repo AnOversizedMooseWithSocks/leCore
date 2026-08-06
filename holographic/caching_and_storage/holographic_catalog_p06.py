@@ -1991,6 +1991,85 @@ def register_p06(c):
                               "will this render finish", "animate and build"))
 
 
+    # --- CYCLE CERTIFICATE. Measured misses: "does this repeat" returned the Mobius fraction, "is it
+    # cycling" returned token sampling, "limit cycle detection" returned the creature gait.
+    c.register_capability(
+        "Cycle certificate (does this sequence repeat, and at what period)", "the SMALLEST period at which every "
+        "recent frame matches the one p back, certified at a numeric tolerance -- or certified=False, never a best "
+        "guess. Works on any sequence, not just a simulation: a REGIME STREAM is a square wave that a harmonic fit "
+        "rings on (NRMSE 0.584) while an exact cycle certificate replays it at 0.037",
+        example="c = mind.certify_cycle(series.reshape(-1, 1), tol=0.15); print(c['period'], c['certified'])",
+        native=True, aliases=("does this repeat", "is it cycling", "find the period of a sequence",
+                              "limit cycle detection", "period of a repeating state",
+                              "has the simulation started looping", "detect a loop", "cycle period"))
+
+
+    # --- MULTI-TONE GENERATOR. Measured misses: "two tones at once" returned the Zig raymarcher,
+    # "beating oscillator" returned the modal jump solver, "multi tone fit" returned the sentinel.
+    c.register_capability(
+        "Multi-tone generator (independent, incommensurate frequencies)", "fit a signal as a sum of INDEPENDENT "
+        "sinusoids -- the generator class the harmonic fit cannot express, since that one fits harmonics of ONE "
+        "fundamental and refuses on incommensurate tones (beating oscillators, two-rotor vibration, tidal "
+        "constituents). Greedy matching pursuit with off-grid refinement, deliberately NOT a sparse solve over a "
+        "frequency dictionary: a dense dictionary is coherent and blows up across its density parameter",
+        example="m = mind.fit_multitone(x, n_tones=3); print(m['ok'], [1/f for f in m['frequencies']])",
+        native=True, aliases=("two tones at once", "incommensurate frequencies", "beating oscillator",
+                              "sum of sinusoids", "multi tone fit", "several frequencies at once",
+                              "two rotors", "fit multiple sine waves", "not a harmonic stack"))
+
+
+    # --- THE HRNN FRONT DOOR. Measured misses, all of them the phrasing a NON-SPECIALIST would type:
+    # "analyse my time series" -> Arrow of time; "is my data predictable" -> Cold storage;
+    # "what should i do with this stream" -> Compute plan; "explain this signal" -> Event study.
+    # The ladder was reachable only by someone who already knew it existed.
+    c.register_capability(
+        "Explain a stream (one call: what it is, what to do, what it will NOT do)", "hand it any 1-D series and get "
+        "plain English back: whether it has a GENERATOR (a few floats that reproduce and extend it), real "
+        "STRUCTURE (predictable but not reducible), is INCOMPRESSIBLE (independent facts -- do not fit a model), "
+        "or UNMEASURED (a refusal, not a finding). Carries the recommended next call as runnable code, the honest "
+        "refusal, the measured evidence, a predict() callable when there is one, and the verdict as a hypervector",
+        example="r = mind.explain_stream(series); print(r['headline'], r['what_to_do'], r['wont_do'])",
+        native=True, aliases=("analyse my time series", "what should i do with this stream",
+                              "is my data predictable", "explain this signal", "what is this data",
+                              "should i fit a model to this", "does my data have a pattern",
+                              "understand a signal", "one call for a stream", "analyse a series",
+                              "is this signal random", "what kind of data is this"))
+
+
+    # --- FLEET ANOMALY BY VERDICT ALGEBRA. Measured misses: "is this sensor behaving like the others"
+    # returned the spectrum Observer, "which machine is misbehaving" returned the hardware model,
+    # "compare sensors in different units" returned conditional statistics.
+    c.register_capability(
+        "Fleet anomaly (compare sensors by STRUCTURE, across units)", "summarise a whole cohort of streams as ONE "
+        "hypervector, then ask whether a stream behaves unlike its cohort. Compares STRUCTURE, not values, so it "
+        "is EXACTLY invariant to scale, offset and sign -- a pressure sensor and a temperature sensor are "
+        "directly comparable with no normalisation and no per-sensor calibration, and the signature does not grow "
+        "with cohort size. Catches DRIFT, which amplitude and spectral baselines miss. Kept negative: a FLATLINE "
+        "is not caught (a constant IS a generator) -- pair it with an amplitude check",
+        example="sig = mind.fleet_signature(streams); r = mind.fleet_anomaly(new_stream, sig); "
+                "print(r['score'], r['floor'], r['anomalous'])",
+        native=True, aliases=("is this sensor behaving like the others", "which machine is misbehaving",
+                              "compare sensors in different units", "fleet anomaly", "cohort outlier",
+                              "which sensor is faulty", "sensor drift across a fleet",
+                              "compare many streams", "is this one different from the rest"))
+
+
+    # --- CONVERGENCE ACCELERATION. Measured misses: "make my solver converge faster" returned the
+    # compute plan, "skip iterations" returned the settle-gated runner (which stops at equilibrium --
+    # this PREDICTS the limit before reaching it).
+    c.register_capability(
+        "Convergence acceleration (jump to a solver's limit, or decline)", "a convergence sequence is a STREAM, "
+        "so the ladder's question applies to it: does it have a generator? When it does, three iterates give the "
+        "limit in closed form -- measured 7 iterations where plain iteration needed 70, to machine precision. A "
+        "jump is taken ONLY if it VALIDATES against one more step, because naive extrapolation on a multi-mode "
+        "solve measured 250x WORSE than simply iterating. Works on any fixed-point iteration: relaxation sweeps, "
+        "physics settling, IK passes",
+        example="r = mind.accelerate_convergence(step_fn, x0); print(r['iters'], r['jumps'], r['why'])",
+        native=True, aliases=("make my solver converge faster", "skip iterations", "jump to the answer",
+                              "accelerate an iterative solve", "extrapolate a fixed point",
+                              "fewer iterations", "speed up relaxation", "converge in fewer steps"))
+
+
 _PART = "holographic_catalog_p06"
 
 

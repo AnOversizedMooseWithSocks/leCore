@@ -58,7 +58,23 @@ class PartLibrary:
     cleaned up to the nearest real part instead of returning noise.
     """
 
-    def __init__(self, dim=1024, seed=0):
+    def __init__(self, dim=None, seed=0, expect_sockets=32, alpha=0.90):
+        """`dim=None` PRICES the dimension from the expected load instead of guessing.
+
+        A part assembly IS a superposed pair memory -- bundle(bind(socket, part)) -- so the closed-form
+        capacity law applies and there is no reason to hard-code a dimension. `expect_sockets` is the
+        largest assembly you intend to build; the allocator returns the dimension that recalls that many
+        pairs at accuracy `alpha`. This is the 'price the demand, then spend' step, and it replaces a
+        magic 1024 that had no relationship to how many parts a creature actually carries.
+
+        MEASURED, and the direction matters: the law is ~2x CONSERVATIVE for this encoding (dim 1024,
+        vocab 8 -> predicts 50, measures 96), because allocate() deliberately uses the low edge so it
+        errs toward extra dimension rather than toward silent misses. Extra dimension costs bytes; a
+        miss costs a part that comes back as the wrong part with no error raised.
+        """
+        if dim is None:
+            from holographic.caching_and_storage.holographic_supermemory import allocate
+            dim = allocate(int(expect_sockets), max(2, int(expect_sockets)), alpha=float(alpha))
         self.dim = int(dim)
         self.seed = int(seed)
         self.parts = {}                                      # name -> {"handles": {...}, "geometry": ...}
@@ -161,9 +177,16 @@ def assembly_report(assembly, library):
         best_wrong = max((float(sims[int(i)]) for i in order if names[int(i)] != want), default=-1.0)
         margins.append(float(sims[names.index(want)] - best_wrong))
     n = max(len(assembly), 1)
+    # PREDICTED capacity alongside the MEASURED accuracy, so a caller sees the headroom BEFORE the
+    # bundle degrades rather than discovering it when a part recalls as the wrong part. The law is
+    # conservative here by ~2x (see PartLibrary.__init__), so `capacity` is a floor, not a ceiling.
+    from holographic.caching_and_storage.holographic_supermemory import capacity_law
+    cap = capacity_law(library.dim, max(2, len(library.parts)), alpha=0.90)
     return {"n_parts": len(assembly), "correct": correct, "accuracy": correct / n,
             "min_margin": float(min(margins)) if margins else 0.0,
-            "mean_cosine": float(np.mean(cosines)) if cosines else 0.0}
+            "mean_cosine": float(np.mean(cosines)) if cosines else 0.0,
+            "capacity": int(cap), "headroom": int(cap) - len(assembly),
+            "within_capacity": len(assembly) <= int(cap)}
 
 
 # --------------------------------------------------------------------- R-4: symmetry groups --
@@ -356,10 +379,27 @@ def _selftest():
     bi, _ = nearest(wv, book)
     assert names[int(bi)] == "armL", "the weight bundle must name its dominant bone"
 
+    # 10) THE CAPACITY LAW IS CONSULTED, not rediscovered by measurement. A part assembly is a
+    #     superposed pair memory, so the closed form applies: price the dimension from the expected
+    #     load instead of hard-coding one, and report headroom so a caller sees degradation coming.
+    priced = PartLibrary(expect_sockets=24, seed=0)
+    assert priced.dim > 0 and PartLibrary(dim=512, seed=0).dim == 512, "explicit dim must still win"
+    for _p in ("a", "b", "c", "d", "e", "f", "g", "h"):
+        priced.define(_p)
+    _small = {"s%d" % i: sorted(priced.parts)[i % 8] for i in range(12)}
+    _rep = assembly_report(_small, priced)
+    assert _rep["within_capacity"] and _rep["headroom"] > 0 and _rep["accuracy"] == 1.0
+    # ...and the flag must actually FIRE when overloaded -- a capacity report that never says no
+    # measures nothing, the same trap as every other gate in this engine.
+    _big = {"s%d" % i: sorted(priced.parts)[i % 8] for i in range(400)}
+    _over = assembly_report(_big, priced)
+    assert not _over["within_capacity"] and _over["headroom"] < 0
+    assert _over["accuracy"] < 1.0, "an overloaded bundle must actually lose recall, not just be flagged"
+
     print("creatureparts selftest OK: 24 parts recalled 100%% (margin %.3f, cos %.3f -> %.3f under "
           "load), 60@dim64 degrades as predicted, radial-5 + bilateral groups exact, weights partition "
-          "of unity with correct provenance"
-          % (rep["min_margin"], small["mean_cosine"], rep["mean_cosine"]))
+          "of unity with correct provenance; capacity priced (dim %d, cap %d) and the overload flag fires"
+          % (rep["min_margin"], small["mean_cosine"], rep["mean_cosine"], priced.dim, _rep["capacity"]))
 
 
 if __name__ == "__main__":
