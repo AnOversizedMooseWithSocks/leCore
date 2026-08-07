@@ -18,14 +18,29 @@ the CORE never depends on this; it is a dev/derivation tool whose OUTPUT (a nump
 
 import numpy as np
 
-try:
-    import sympy as sp
-    HAS_SYMPY = True
-except Exception:                                            # pragma: no cover - exercised only without sympy
-    HAS_SYMPY = False
+# S-2: sympy imported lazily (see holographic_jit for the pattern and the reason).
+
+
+def _ensure_sympy():
+    g = globals()
+    if "HAS_SYMPY" in g:
+        return
+    try:
+        import sympy as _sp
+        g["sp"], g["HAS_SYMPY"] = _sp, True
+    except Exception:                                        # pragma: no cover - exercised only without sympy
+        g["sp"], g["HAS_SYMPY"] = None, False
+
+
+def __getattr__(name):
+    if name in ("sp", "HAS_SYMPY"):
+        _ensure_sympy()
+        return globals()[name]
+    raise AttributeError(name)
 
 
 def _require():
+    _ensure_sympy()
     if not HAS_SYMPY:
         raise ImportError("holographic_codegen needs sympy (a design-time derivation dependency). "
                           "Install it from requirements-accel.txt; the generated functions are pure NumPy.")

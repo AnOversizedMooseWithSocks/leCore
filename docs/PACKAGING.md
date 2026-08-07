@@ -206,3 +206,30 @@ JSON, routing indices) is looked up by trying the `lecore_data` package first, t
 | `setup.py`, `pyproject.toml`, `lecore.py`, `build_package.sh` | repo root |
 | `package.yml` | `.github/workflows/package.yml` |
 | `PACKAGING.md` | repo root (or `docs/`) |
+
+## Mounting the engine FLAT (client S-1 -- the shim, shipped)
+
+Flat modules internally perform packaged imports; `flat_mount.py` at the repo root is the
+supported two-way shim. One line before any engine import:
+
+    import flat_mount; flat_mount.install("/path/to/flat/modules")
+
+Packaged mount present -> flat names (`import holographic_terrain`) alias to the package.
+Flat mount only -> the `holographic.*` package is synthesised over the flat files, so the flat
+modules' own internal packaged imports resolve. Stdlib-only, deterministic, idempotent.
+
+## The analytic-preservation contract (client S-3)
+
+The analytic form IS the type. Every `SDF` combinator/transform returns another `SDF` node
+(`node.preserves_analytic == True` on all of them); any operation returning a `Mesh` has crossed
+the boundary and the analytic description is gone -- a Mesh carries no such attribute, and
+`getattr(result, "preserves_analytic", False)` is the documented branch. No mesh verb silently
+"keeps" an analytic form: none ever could, and the contract now says so instead of leaving the
+caller to guess.
+
+## Build identification (client S-4)
+
+`VERSION` at the repo root is the single source of truth (setup.py reads it; 0.0.0 in a build
+means the file was missing). It ships in the delivery zip alongside `capabilities.json`, which
+is a PLAIN JSON file -- read it with `json.load(open(...))`, no engine import required; a tool
+can ask "what can this engine do" before committing to importing anything.

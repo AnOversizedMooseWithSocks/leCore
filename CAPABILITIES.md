@@ -556,6 +556,14 @@ mind.vm_decode_plan(True); mind.run_procedure([('LOAD','a'),('BIND','b'),('HALT'
 ```
 *Find it by:* decoded instruction cache, instruction cache, decode cache, vectorize the interpreter, batch decode a program, decode once execute many times, why is my program slow, speed up run_procedure
 
+### Dependence voids, the residual ladder, and one merged watch timeline
+mind.panel_gauge catches the void a single-series gauge cannot see: the state is the Fisher-z trailing CORRELATION structure, gauged causally -- a correlation crisis leaves all history while every marginal sleeps (planted and proven; outside the history's own bounding box is void BY GEOMETRY, never clipped). mind.residual_ladder climbs a structured residual through the next grammar (closed-form AR rung) until a rung prices it as noise or admits 'rungs-exhausted'. mind.stream_watch merges sentinel regime events and gauge void/recovered events into ONE time-ordered timeline.
+
+```python
+pg = mind.panel_gauge(panel); rl = mind.residual_ladder(y); sw = mind.stream_watch(y)
+```
+*Find it by:* correlation regime change, correlations all jumped together, relationships between my streams changed, assets crashing at the same time, dependence structure never seen before, climb the residual, which model finally explains the noise, one timeline for all stream events
+
 ### Dependency-keyed cache (key on what the operator reads)
 Part C's compute model: every triangle is THE canonical triangle plus a recognised chain of deltas; a computation runs on the canonical ONCE and its RESULT is transformed through the deltas, while deltas the computation never reads -- a material, for a geometric quantity -- never enter the cache key at all. mind.delta_cache(op, canonical, policy=...) and mind.delta_cache_report carry the comparison. Which deltas an operator reads is MEASURED, not guessed: mind.equivariance_table decides. MEASURED on 400 triangles (64 rotation deltas x 8 materials; the first 400 contain 50 distinct shapes): brute 400 computes; `read_set` 50 computes, 8.0x, BIT-IDENTICAL, because the material never enters the key; `equivariant` 1 compute, 400x, because `area` is measured INVARIANT under rotation so the shape delta drops out too. KEPT NEGATIVE: the equivariant path is NOT bit-identical -- max|diff| 8.3e-17. Rotating a triangle and re-integrating accumulates round-off the canonical evaluation never incurs, so the CACHE is the one that is right and the BRUTE path carries the error; `max_abs_diff` is reported rather than a boolean, and `equivariant` is opt-in because this engine's constitution says a change at 1e-12 has still flipped a creature's trajectory. C4: THE CACHE IS ONLY SOUND OVER DETERMINISTIC EVALUATORS. mind.is_deterministic is the gate, and DeltaCache REFUSES an evaluator that draws from a global RNG stream (measured: the same input returned 0.4019 then 0.3188) -- the cache would serve its first draw forever while the uncached path kept drawing, and the cache would get blamed. Key the sampler by its input's coordinates with hash_unit. PART C, END TO END: mind.evaluate_elements(elements, op, op_name, family) takes RAW point sets with no shape ids -- canonmesh.recognize derives the classes (C3), the equivariance table says what the operator reads (C2), and the cache keys on that (C1). MEASURED on 200 raw triangles from 5 base shapes: area under `similarity` is 5 classes, 5 computes, exact to 1.4e-14 -- 40x. A COMPOSITE FAMILY'S VERDICT IS THE WEAKEST OF ITS PARTS (mind.family_verdict): area is invariant under `rigid` but only equivariant under `similarity`, because a uniform scale moves it. AND RECOGNITION ALONE IS NOT ENOUGH -- reusing the canonical's area directly under `similarity` is wrong by 8.54. `max_x` finds 5 classes and still does 200 computes, because `recompute` means there is no dividend and it says so..
 
@@ -760,6 +768,14 @@ sheet = mind.machine_spec_sheet(); print(mind.machine_place_unit('t2_baked_grid'
 ```
 *Find it by:* machine model, hardware units, spec sheet, cost model, what hardware units does this engine have, gpu equivalent, what is the gpu equivalent here, memory hierarchy
 
+### Transit hunter (box-matched period search with a matched null)
+mind.transit_search: phase-coherent period search with Box Least Squares -- the BOX-matched filter, measured 6.3x more peak contrast than the sinusoid template near the detection floor, where planets are lost. Verdicts vs the block-shuffle null (red noise survives, phase coherence dies; the iid null flags red noise as planets -- reported, not used); harmonic families reported; an impassable p-floor refuses. mind.transit_detection_floor: the detection-limit curve with per-transit SNR. The ladder gained a fold rung: comb detects, BLS names, the folded median consumes.
+
+```python
+r = mind.transit_search(t, flux, 60, 400); print(r['verdict'], r['period'], r['family'])
+```
+*Find it by:* find a transit in a light curve, exoplanet transit search, fold on the holographic substrate, kernel fold uneven sampling, how faint a signal can you detect, how faint a signal can you still detect, subtract the periodic part, remove a known period from a series
+
 ### VSA cleanup on ANY GPU (matvec + argmax, fused)
 the codebook similarity is 98-100% of a cleanup's cost at any real M (the argmax is single-digit microseconds), so the SIMILARITY is what to offload. One workgroup per row, rows never communicate. Similarity and argmax FUSED in one dispatch -- splitting pays submission twice and ships the intermediate back. Index resolves host-side by lowest index (canonical tie rule). MEASURED RISK: a similarity gap <=1e-7 can flip (3/150); that is 4 orders below any sensible tie margin, so pair with tied_candidates.
 
@@ -859,6 +875,14 @@ atmospheric post-effects over a rendered image (holographic_atmosphere, W16): de
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=np.full((32,32,3),0.3); d=np.full((32,32),5.0); print(m.depth_fog(img,d,density=0.2).shape)
 ```
 *Find it by:* volumetric fog, depth fog, atmospheric fog, light shafts, god rays, sun rays, crepuscular rays, add fog to a render
+
+### Audio drift (train on clips, generate more -- the abstention ladder as the adapter)
+mind.train_audio_drift maps each clip by what it honestly is: (freq, amp) tone parameters when the multitone r2 gate passes (frequency-sorted, phase is gauge), a log-band envelope when it is a STATIONARY texture, refused when neither (a chirp). A corpus must be ONE space; mixed corpora refuse with the counts. mind.generate_audio drifts in that space and resynthesizes deterministically (exact additive sine / seeded envelope-shaped noise), always attaching the audit + nearest-training spectral distance. Save with mind.write_wav.
+
+```python
+m2, meta = mind.train_audio_drift(clips, 8000); out = mind.generate_audio(m2, meta, n=4)
+```
+*Find it by:* generate audio like this folder, train on my sound clips, make more sounds like these, audio texture generation, synthesize similar tones, sound model from examples
 
 ### Background cloud bake (resumable)
 run the slow fBm noise bake behind a cloud render as a monitorable background JOB you can pause/resume/cancel (even across a process restart), then feed the baked grid straight into a render without re-baking. The agent-friendly way to handle a render that takes minutes: kick it off, poll progress, do other work.
@@ -1708,6 +1732,14 @@ the brain/muscle format contract: leCore bakes, the front end consumes. mind.str
 import numpy as np; g = np.linspace(0,1,12); X,Y,Z = np.meshgrid(g,g,g,indexing='ij'); F = sum(w*np.sin((k+1)*np.pi*X)*np.cos((k+1)*np.pi*Y)*np.exp(-(k+1)*Z) for k,w in enumerate([1,.5,.25,.12])); p = mind.stream_encode(F); r = mind.stream_report(F, p); print(r['monotone_rms'], p['descriptor']['bytes'], mind.stream_prefix(p, 1000))
 ```
 *Find it by:* progressive level of detail stream, progressive LOD, LOD stream, stream a field to the browser, rank ordered payload, truncate to a byte budget, format contract for the front end, brain muscle protocol
+
+### Pulsar panel (Hellings-Downs pattern test with a sky-scramble null)
+mind.hd_search asks the NANOGrav question of a panel of timing residuals: whiten each series (raw red-vs-red correlations are spurious, pinned), correlate every pair, judge the pattern with TWO matched nulls -- AAFT per series (does ANY cross-correlation exist) and the SKY SCRAMBLE (positions permuted against residuals: correlations survive, geometry dies). Verdicts: hd-consistent / correlated-not-sky-patterned (the monopole clock-error diagnosis) / independent; amplitude a stated lower bound, the certified quantity is the curve SHAPE. mind.hd_panel_demo plants ground truth (hd | mono | none).
+
+```python
+p, pos = mind.hd_panel_demo(); r = mind.hd_search(p, pos); print(r['verdict'], r['shape'])
+```
+*Find it by:* gravitational wave background, hellings downs curve, correlated pulsar timing residuals, pulsar timing array analysis, is the correlation explained by sky geometry, sky scramble test, common signal across pulsars, quadrupole correlation pattern
 
 ### Quad remesh (field-guided tris-to-quads)
 FIELD-GUIDED tri-to-quad RETOPOLOGY: m.quad_remesh(mesh) pairs adjacent triangles into quads, preferring pairs whose edges align with the 4-RoSy cross field and form convex near-square quads. Returns a QUAD-DOMINANT mesh + report {quads, tris, quad_fraction, field_used}. Reuses cross_field, so input wants a CLOSED oriented manifold TRIANGLE mesh -- run mesh_repair(triangulate=True) first; falls back to squareness if the field cannot solve. HONEST: places quads on EXISTING vertices, does NOT move vertices or regularise valence, so NOT a full Instant-Meshes remesh (deferred)..
@@ -2874,6 +2906,14 @@ import numpy as np; saw=(np.arange(1024)%50)/50.0; print(round(mind.trev(saw),2)
 ```
 *Find it by:* time reversal asymmetry, is this series time reversible, arrow of time in a signal, trev statistic, does the series look different backwards, detect nonlinearity in a time series, irreversibility test, asymmetry between rises and falls
 
+### Auto-scale a drift model's knobs (dim x bandwidth through auto_scale)
+mind.drift_autoscale(points) routes HDRIFT's two knobs through the mind's EXISTING auto_scale loop -- eval is the bandwidth prober's spread-fidelity at the current operating point; the most responsive knob is doubled until the target is met or a WALL is named (no knob helps: stop and say so). No private tuner grown; every step in the trajectory carries the probe that justified it.
+
+```python
+traj = mind.drift_autoscale(pts, target_spread=0.9); print(traj)
+```
+*Find it by:* tune the drift model automatically, autoscale generative knobs, pick dim and bandwidth for me, scale the generator
+
 ### Blend M shader variants into one transfer
 an LOD stack, a multi-scale filter, an MIS-weighted combination, a parameter sweep you intend to average -- any FIXED linear combination of compiled pipelines is itself linear and shift-invariant, so the transfers just add. mind.shader_combine(pipes, weights) returns one Pipeline; the cost does not depend on M (measured exact to 2.2e-16, and 4.3x / 9.3x / 30.0x faster at M = 4 / 16 / 64 than staging the variants and blending their images). KEPT NEGATIVE: superposing the variants under distinct keys so you can unbind any one back out does NOT work -- unbinding recovers a variant at 1/sqrt(M), real variants are correlated copies of one field so cleanup cannot resolve them, and the bank still pays M inverse transforms, so it measured slower than the direct path. Superposition buys width only when items are near-orthogonal AND a cleanup follows the readout..
 
@@ -3036,6 +3076,14 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); rng=np.
 ```
 *Find it by:* lomb scargle, lomb scargle periodogram, period of a light curve, find period unevenly sampled, periodogram irregular sampling, detect periodicity with gaps, orbital period from radial velocity, phase fold a time series
 
+### Residual explorer (noise is data without an explanation yet)
+'noise' is unexplained structure until matched nulls say otherwise: mind.residual_verdict explains a series, subtracts, and judges the remainder against AAFT AND a block shuffle -- 'structured' only past both, else 'irreducible' with p-values (an efficient market's residual SHOULD read irreducible); mind.support_gauge: a CAUSAL inside/sparse/void monitor per step, the void closing as the trailing window absorbs it; mind.hidden_drivers: a common factor in a panel's RESIDUALS beyond surrogated nulls -- the puppet string no single series discloses.
+
+```python
+rv = mind.residual_verdict(y); g = mind.support_gauge(y); hd = mind.hidden_drivers(panel)
+```
+*Find it by:* noise is not noise, structure hidden in the noise, puppet strings in market data, the noise has patterns, is the leftover signal meaningful, structure in my residuals, common cause across my sensors, hidden influences across many series
+
 ### Scale (distribute)
 make something bigger than one box / one pass can hold: partition a job, run the pieces independently, reassemble with a commutative monoid -- map_reduce, load-balanced partition, image tiles / volume bricks; strategies tiling/octree/multires/superposed/sparsefield.
 
@@ -3067,6 +3115,14 @@ Smallest eigenpair of a Hermitian PSD operator from ONLY its matvec -- no matrix
 import numpy as np, lecore; m=lecore.UnifiedMind(); rng=np.random.default_rng(3); Q=rng.standard_normal((30,30)); A=Q@Q.T; c=float(np.abs(A).sum(1).max()); u,lam,mv=m.smallest_eigenpair(lambda x: A@x, 30, c, dtype=float); (round(lam,6), round(float(np.linalg.eigh(A)[0][0]),6))
 ```
 *Find it by:* smallest eigenvector of an operator, dominant eigenpair without scipy, matvec only eigensolver, spectral solve without building the matrix, smallest eigenvalue of a laplacian, inverse iteration eigensolver
+
+### Spectroscopist's bench (lines, identity with abstention, redshift verdict, decay)
+mind.spectral_lines: median continuum off, candidates gated against a max-hunting noise-only bootstrap (a permutation null contains its own lines -- pinned), sub-bin centers; with a catalog, cleanup-with-margin identification that ABSTAINS between lines. mind.redshift_verdict: ONE shared shift must explain every line vs scrambled catalogs -- a single match is numerology; z = median per-line. mind.fit_decay: A exp(-lambda t)+C, d^2 delta-method weights (d-weights read 17% low, pinned), bootstrap CI, bias-aware truncation flag. Doppler math delegates to dedoppler.
+
+```python
+fl = mind.spectral_lines(x, y, catalog=BALMER); rz = mind.redshift_verdict([l['center'] for l in fl['lines']], BALMER)
+```
+*Find it by:* find spectral lines, identify emission lines, what element is this line, measure the redshift, radial velocity from spectrum, fit an exponential decay, half life from counts, randomized benchmarking decay
 
 ### Stream sentinel (regime watch + change events + priced recorder)
 mind.stream_sentinel().watch(x) slides the HRNN ladder along a stream, segments it by regime, and raises change events (regime flip or entropy-rate jump) carrying BOTH windows' provenance -- alarms arrive with evidence. record(x) stores each window at its cheapest FAITHFUL form: generator params (~30 floats, prefix-fit/suffix-CERTIFIED so a lone tone's surrogate degeneracy cannot block it), quantile symbols at the measured rate, or raw floats -- noise is never fake-compressed. replay() reconstructs in-window only (no extrapolation past any horizon), certificates riding every entry..
@@ -3216,6 +3272,14 @@ from holographic.io_and_interop.holographic_video import ...; mind.blend_images(
 ```
 *Find it by:* video, compress a video, temporal compression, frames, motion, interpolate frames, keyframe, sequence of images
 
+### Video drift (train on short clips, generate coherent motion)
+mind.train_video_drift turns each short clip into a keyframe-PAIR point [start splats, end-minus-start delta]: motion is the JOINT structure between keyframes -- the quantity the H1.4 verdict proved drift preserves and independent marginals scramble -- with end splats re-matched by nearest centre so the delta is motion, not relabelling. mind.generate_video drifts a pair, interpolates splat params across n_frames, renders every frame, and reports per-clip max frame-to-frame RMS in the audit: the smoothness claim carries its own number. Single-frame clips refuse.
+
+```python
+vm, vmeta = mind.train_video_drift(clips); out = mind.generate_video(vm, vmeta, n=2, n_frames=8)
+```
+*Find it by:* generate video like these clips, train on my short clips, make more motion like this, video texture generation, animate like my examples, motion model from clips
+
 ### Will compression pay? (area law vs volume law)
 mind.tensor_structure(X) answers, before you pay to find out, whether a tensor factorisation can help. It compares the rank kept at every cut (how many numbers must cross that boundary) to the most it could possibly be. Ranks far below the bound = an AREA LAW: the cost of a cut is set by its boundary, not the volume it encloses, and a tensor train is cheap. Ranks that saturate = a VOLUME LAW: every degree of freedom is independent, store it raw. Measured: a diffusing field scores 0.21 (TT: 4,394 B vs int8 24,576); white noise scores 1.00 (TT: 104,782 B)..
 
@@ -3243,6 +3307,14 @@ measure claims honestly: error bars + significance (measure), ablation studies (
 from holographic.misc.holographic_measure import ...; from holographic.misc.holographic_ablate import ...
 ```
 *Find it by:* measure, error bars, significance, ablation, false discovery rate, calibrated, benchmark, variance
+
+### Science report (one front door: transit / pulsar / spectrum / decay / levels / CHSH / series)
+mind.science_report(data, kind) routes named data to the matching science instrument and returns one uniform report {kind, verdict, why, result-with-audit-trail}. Kinds: light_curve (box transit hunt), pulsar_panel (Hellings-Downs + sky scramble), spectrum (lines + margin identification + one-shift-or-refuse redshift), decay (A exp(-lam t)+C), levels (Poisson/GOE/GUE spacing ratios), chsh (Bell verdict with the Tsirelson alarm), series (the residual interrogation tower). Unknown kind raises WITH the list -- the door never guesses. Citations map: docs/SCIENCE_INSTRUMENTS.md.
+
+```python
+rep = mind.science_report({'t': t, 'y': counts}, kind='decay'); print(rep['verdict'], rep['why'])
+```
+*Find it by:* analyze my scientific data, run the science instruments, one report for my measurement, which instrument fits my data, analyze my experiment, science front door, statistics verdict for my data
 
 ### Screen a battery of detectors (honesty gates inside the loop)
 mind.signal_program() -> SignalProgram: add_check registers detectors, screen(states, targets) evaluates ALL at once -- every effect returns WITH its split-half replication and FDR verdict; no path yields the seductive number alone. Passers are correlation-clustered (0.9-correlated checks = ONE finding); an empty pass-list is a RESULT with a reason. build_committee seats a VETO COMMITTEE (one rep per cluster, tie=abstain) that must pass ITS OWN gates on fresh data; empty committee refuses. program_vector fingerprints the battery..
@@ -3827,6 +3899,13 @@ SIX doc generators exist -- docgen.py (REFERENCE.md, every module), capdoc.py (C
 import subprocess; print(subprocess.run(['python3','docmap.py'],capture_output=True,text=True).stdout)
 ```
 
+### Drift model algebra (compose + ablate + transport trained models)
+the verbs no per-dataset-trained generator has, each a vector operation because the model IS vectors: mind.drift_compose(a, b) MERGES two models trained separately (moments add, evidence-weighted); mind.drift_ablate(a, b) REMOVES b's contribution (unlearning / a negative prompt with no retraining -- exact when b's data is a subset of a's, an approximation otherwise, stated); mind.drift_transport(m, delta) MOVES the whole distribution by shift-is-a-bind with the first-moment cross-term the naive shift drops. Models must share one encoder space (enforced).
+
+```python
+ab = mind.drift_compose(a, b); mind.drift_generate(ab, n=16)
+```
+
 ### Durability & crash recovery
 B7: make the query store survive a crash. Take a durable SNAPSHOT of the persistent tiers (replay-based, so it rebuilds byte-identically), keep a write-ahead JOURNAL of inserts/updates/deletes since the snapshot, and RECOVER to the last consistent point by loading the snapshot and replaying the journal. The snapshot+WAL discipline, on top of the plain save/load the service already exposes.
 
@@ -3911,11 +3990,25 @@ a quadrature rule, a filter stencil or a set of light samples -- sum_j w_j f(u_j
 b = mind.bake_field(xs, ys); Q = mind.gather_rule(b, us, ws); v = mind.gather_field(b, Q)
 ```
 
+### Generation audit (memorisation + coverage gate)
+novelty and mode coverage of generated samples against their training set in ONE report, because memorisation manifests as SUCCESS (perfect samples) and fixing it usually costs coverage -- so both are measured together. novelty ~0 = memorised (nearest-training distance in units of the training set's own NN scale); coverage = fraction of k data modes some sample lands nearest to. mind.generate_media attaches this automatically; nothing generated should ship without it.
+
+```python
+a = mind.generation_audit(samples, train); print(a['novelty_mean'], a['coverage'])
+```
+
 ### Graph connected components (the generic flood fill)
 Partition nodes into CONNECTED COMPONENTS under an undirected edge list -- the generic GRAPH FLOOD FILL under every 'island' in the engine: physics constraint graphs, mesh edge adjacency, conflict graphs, DDM subdomain splits. m.graph_connected_components(n_nodes, edges) returns a list of sorted index lists, ordered by each component's smallest member (deterministic, independent of edge order); isolated nodes are singletons. The reusable primitive that mesh_connected_components and route's component count both delegate to -- one flood fill for every island in the engine..
 
 ```python
 import lecore; m=lecore.UnifiedMind(); comps=m.graph_connected_components(5, [(0,1),(1,2),(3,4)]); (len(comps)==2, comps[0]==[0,1,2], comps[1]==[3,4])
+```
+
+### Holographic drift generative model (HDRIFT: train on points, generate by drift)
+the generative model AS d+1 moment hypervectors: mind.drift_train(points) encodes ONCE (bandwidth probed from the data; a collapsing dataset is REFUSED, not served as a mean-generator) and mind.drift_generate samples by particle drift read off the vectors by dot products -- attraction to the data field minus repulsion from the batch's own field (the corrective for the measured attraction-only memorisation, max-cos 1.000). No adversary, no backprop, no learned weights; field cost is independent of N. labels= packs every class into ONE vector set; condition= unbinds one.
+
+```python
+mdl = mind.drift_train(pts); X = mind.drift_generate(mdl, n=32); print(mind.generation_audit(X, pts))
 ```
 
 ### Horizon profile (one stream, verdicts across scales -- drift localization)
@@ -4028,6 +4121,13 @@ see as a MANTIS SHRIMP does: 12 spectral receptors from deep UV to far red PLUS 
 
 ```python
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); L=np.linspace(300,720,140); b=np.exp(-0.5*((L-500)/60)**2); S=np.zeros(L.shape+(4,)); S[...,0]=b; S[...,3]=b; print(m.mantis_view(S,L)['handedness_sign'])
+```
+
+### Market residual report (the stylized facts, measured on checked-in data)
+mind.market_residual_report runs the residual ladder over the vendored real datasets and names which grammar terminates each stream. First run reproduced finance's stylized facts with no market knowledge in the code: 1h returns level-clean but scale-structured (volatility clustering; the vol rung terminates), tick moves fire the AR rung with a NEGATIVE lag-1 coefficient (the bid-ask bounce, ~-0.21), tiny-n returns read irreducible (the EMH at acknowledged low power), and price levels are an AR fit's favourite meal. Slow-ish (surrogate ensembles per stream); the selftest pins a reduced pass.
+
+```python
+rep = mind.market_residual_report(); print({k: v['terminal'] for k, v in rep.items()})
 ```
 
 ### Mask refraction (2D lens/droplet distortion)
@@ -4161,6 +4261,13 @@ a quantum dot as a potential well or barrier, and the MEASURED transmission of a
 
 ```python
 import lecore; m=lecore.UnifiedMind(); d=m.quantum_dot_well((160,80),(80,40),depth=-8.0,width=2.5); m.quantum_transmission(0.7,dot_V=d,shape=(160,80),steps=300)
+```
+
+### Quantum statistics (spacing-ratio regime classifier + the Bell verdict)
+mind.level_statistics reads integrable-vs-chaotic off a spectrum with the unfolding-free spacing RATIO (Atas 2013; a wrong unfolding manufactures or erases repulsion), classifying Poisson / GOE / GUE by bootstrap CI, REFUSING with the n that would decide when classes overlap. mind.chsh_verdict: pairing-scramble null (correlated at all?), bootstrap CI vs the classical bound 2 (beyond every local hidden-variable model?), and the TSIRELSON ALARM -- data past 2*sqrt(2) accuses the apparatus, not the theory. mind.chsh_demo plants quantum / classical / independent / broken trials.
+
+```python
+r = mind.level_statistics(eigvals); q = mind.chsh_verdict(*mind.chsh_demo(4000, 'quantum'))
 ```
 
 ### Ratios that carry their denominator (and role-driven part coverage)
@@ -4397,6 +4504,13 @@ mind.train_model(examples, labels=...) routes to the right learner and tells the
 import numpy as np; r=mind.train_model((np.arange(50), (np.arange(50)*7)%%97)); print(r['kind'], r['trained'], r['model'].recall(np.arange(5))['values'])
 ```
 
+### Train on images and generate more (media in, media out)
+mind.train_media_model(images) fits each image to k anisotropic splats (hand-derived-gradient Adam) and drifts in SPLAT-PARAMETER space -- dozens of dimensions, not thousands, which is the curse-of-dimensionality answer the 2026 drifting papers solve with a frozen network encoder. mind.generate_media(model, meta, n) drifts new splat sets and renders them, ALWAYS attaching the generation audit when audit_train is given. HONEST v1 SCOPE: generated images render isotropic (soft-edged) splats; the aniso structure is not yet carried through the drift space.
+
+```python
+mdl, meta = mind.train_media_model(images, k=8); out = mind.generate_media(mdl, meta, n=4)
+```
+
 ### Translate kernels between languages (one IR, exact)
 mind.translate_kernel(src, from_dialect, to_dialect) moves a kernel between python, C, WGSL, JS and Zig through the ONE shared IR: parse back (C2's reverse parsers, inverted from the emit tables so they cannot drift), then re-emit. THE BAR IS EXECUTED: round-trip byte-identity over all 144 dialect pairs, asserted per pair, none sampled; hand-written C with real precedence parses too. Refusals by name outside the kernel grammar (K10); zigv_* is derived exhaust, not parsed. dialect= on mind.explain_code gives English for all 7 languages through ONE verbalizer (C4). See holographic_codeparse..
 
@@ -4474,6 +4588,13 @@ the engine's cross-cutting UTILITY tools: content addressing & hashing (uri), ta
 from holographic.io_and_interop.holographic_uri import address_from_content, make_key; from holographic.misc.holographic_verify import CompositionTree
 ```
 
+### Void explorer (what the corpus implies but does not contain)
+'undiscovered' as a MEASURED set, three warrants: mind.void_map finds bootstrap-null-gated low-density regions inside the support (sparsity the data's own noise explains is never called void; the instrument probes its own sharpest honest bandwidth -- the sampler's smooth kernel smears absence); mind.structured_voids is the Mendeleev move -- combinations every observed pairwise slot co-occurrence licenses but the full set lacks, REFUSED when the structure cannot beat a shuffle; mind.transfer_voids: present in B, absent in A -- instantiated elsewhere, the cross-disciplinary warrant.
+
+```python
+vm = mind.void_map(mdl, pts); sv = mind.structured_voids(rows); tv = mind.transfer_voids(a, b)
+```
+
 ### Volumetric tissue: bone, muscle, fat, skin as nested fields
 real anatomy, not a shading trick. tissue_fields returns a nested SDF per tissue, grown OUTWARD from bone -- set muscle and fat PER BONE and the skin falls out, which is why one skeleton can be a whippet or a bulldog. tissue_at(P) names the tissue at a point; anatomy_report checks bone-in-muscle-in-fat-in-skin (0/396 violations). tissue_visible_field hides layers and/or cuts with a plane -- hide the skin and the WHOLE skeleton shows in place, no separate geometry. ORGANS are metaballs in anatomy space (the one place metaballs are right), fitted inside muscle with bone subtracted..
 
@@ -4507,6 +4628,13 @@ three oracles answered three placement questions and none knew about the others 
 
 ```python
 mind.place_work(n_buckets=64, est_ms_per_bucket=50.0, n_bytes=10**8, flops_per_byte=40.0)
+```
+
+### Write a WAV audio file
+mind.write_wav(path, samples, rate) writes float samples in [-1,1] to 16-bit PCM -- the OUT half of read_wav, shipped in holographic_audio all along but never wired to the mind (a generation pipeline that cannot emit audio is not a pipeline). Round-trips read_wav to 1/32768.
+
+```python
+mind.write_wav('/tmp/tone.wav', np.sin(np.linspace(0, 2*np.pi*440, 8000)), 8000)
 ```
 
 ### amplitude_adjusted_surrogate
@@ -4861,4 +4989,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*621 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*638 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

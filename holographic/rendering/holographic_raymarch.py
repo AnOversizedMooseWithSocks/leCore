@@ -311,12 +311,37 @@ def subsurface(sdf, P, N, Ldir, depth=0.6, steps=10, sigma=4.0, jitter=None):
 def render_sdf(sdf, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3), base_color=(0.85, 0.5, 0.35),
                sky=None, ao=True, shadows=True, reflect=0.25, refract=0.0, ior=1.5, sss=0.0,
                sss_color=(1.0, 0.4, 0.3), ambient=0.25, pbr=None, sun_intensity=3.14159, jit_expr=None,
-               post=None, return_depth=False):
+               post=None, return_depth=False, mask=None):
     """Compose the field-native effects into one image. Primary rays are sphere-traced; hits get Lambert direct
     light gated by a SOFT SHADOW, ambient gated by AMBIENT OCCLUSION, an environment REFLECTION sampled from the
     HDRI sky, optional REFRACTION (the sky seen bent through the surface), and optional SUBSURFACE glow; misses
     show the sky dome. Returns (H,W,3) in [0,1]. `sky` may be an equirectangular HDRI array. Vectorised over all
-    pixels."""
+    pixels.
+
+    `mask` (P-1, the incremental-viewport ask): a boolean (height, width) array -- shade ONLY the
+    True pixels, at FULL quality (ao/shadows/reflect/refract/sss all intact), cost proportional
+    to the masked fraction. Every stage of this renderer is per-ray independent, so masked pixels
+    are BIT-IDENTICAL to the same pixels of an unmasked render (pinned in the selftest); unmasked
+    pixels return 0 -- the caller composites over the previous frame, which is the whole point.
+    Masked depth (return_depth) reports 1e30 (the miss value) at unmasked pixels.
+    `jit_expr` (S-5): produce it from any analytic SDF node with `node.to_jit_expr()` -- the
+    compiled path pays off (~9-15x) on repeated full-frame renders of exact-primitive scenes;
+    bound-only kinds (twist/bend/ellipsoid/fractals) refuse there and render here. `mask` with
+    `post=` raises: post-processing programs may mix across pixels (blur, DOF), which makes a
+    partial frame ill-defined -- run post on the composited full frame instead. `mask` with
+    `jit_expr=` falls through to the numpy path (the compiled renderer shades whole frames)."""
+    if mask is not None:
+        if post is not None:
+            raise ValueError("mask= with post= is ill-defined: post programs may mix across "
+                             "pixels (blur, DOF); composite the full frame first, then post")
+        mask = np.asarray(mask, bool)
+        if mask.shape != (height, width):
+            raise ValueError("mask shape %s must be (height, width) = (%d, %d)"
+                             % (mask.shape, height, width))
+        if not mask.any():
+            frame0 = np.zeros((height, width, 3))
+            return (frame0, np.full((height, width), 1e30)) if return_depth else frame0
+        jit_expr = None                                       # compiled path shades whole frames only
     if jit_expr is not None and pbr is None and refract == 0.0 and sss == 0.0:
         try:                                                 # OPT-IN: fully-JIT'd analytic-SDF renderer (~9-15x)
             from holographic.rendering.holographic_sdf_render import render_analytic
@@ -326,6 +351,9 @@ def render_sdf(sdf, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3), 
             pass                                             # sympy/numba missing -> fall through to the numpy path
     eye, dirs = camera.ray_dirs(width, height)
     D = dirs.reshape(-1, 3); O = np.broadcast_to(eye, D.shape)
+    if mask is not None:
+        _mflat = mask.ravel()
+        D = D[_mflat]; O = O[_mflat]                          # trace ONLY the masked rays
     L = np.asarray(light_dir, float); L = L / (np.linalg.norm(L) + 1e-12)
     skyfn = (lambda d: sky_dome(d, env=sky)) if sky is not None else (lambda d: sky_dome(d))
 
@@ -367,6 +395,14 @@ def render_sdf(sdf, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3), 
             trans = subsurface(sdf, Ph, Nh, L)
             shade = shade + sss * trans[:, None] * np.asarray(sss_color)
         col[hit] = np.clip(shade, 0, 1)
+    if mask is not None:
+        col_full = np.zeros((height * width, 3))
+        col_full[_mflat] = np.clip(col, 0, 1)                 # scatter shaded rays; unmasked = 0
+        d_full = np.full(height * width, 1e30)
+        d_full[_mflat] = np.where(hit, t, 1e30)
+        frame = col_full.reshape(height, width, 3)
+        depth_img = d_full.reshape(height, width)
+        return (frame, depth_img) if return_depth else frame
     frame = np.clip(col.reshape(height, width, 3), 0, 1)
     depth_img = np.where(hit, t, 1e30).reshape(height, width)     # ray distance at the hit; 1e30 = miss (for DOF)
     if post is not None:                                          # compose the post-processing PROGRAM onto the frame
@@ -407,6 +443,13 @@ def _selftest():
     cam = Camera(eye=(1.6, 1.0, 2.4), target=(0, 0, -0.2), fov_deg=45)
     img = render_sdf(scene, cam, 64, 64, ao=True, shadows=True, reflect=0.2)
     assert img.shape == (64, 64, 3) and 0.0 <= img.min() and img.max() <= 1.0
+    # P-1 (client backlog), pinned: mask= shades only the masked pixels at FULL quality, and the
+    # masked pixels are BIT-IDENTICAL to the unmasked render -- the whole incremental-viewport
+    # contract in one assert. (Measured on the reproducer: 25% mask cost 14% of the full frame.)
+    _mk = np.random.default_rng(0).random((64, 64)) < 0.25
+    _pt = render_sdf(scene, cam, 64, 64, ao=True, shadows=True, reflect=0.2, mask=_mk)
+    assert np.array_equal(_pt[_mk], img[_mk]), "mask= must be bit-identical on masked pixels"
+    assert (_pt[~_mk] == 0).all(), "unmasked pixels must return 0 for compositing"
     # AO must DARKEN the crease where the sphere meets the plane vs an unoccluded patch of plane
     P_open = np.array([[3.0, -0.8, 0.0]])                     # open floor, far from the sphere
     P_crease = np.array([[0.0, -0.78, 0.78]])                # near the sphere/plane contact

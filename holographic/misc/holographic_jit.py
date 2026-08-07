@@ -22,13 +22,32 @@ way.
 
 import numpy as np
 
-try:
-    from numba import njit                              # the real JIT
-    HAS_NUMBA = True
-except Exception:                                       # pragma: no cover - exercised only without numba installed
-    HAS_NUMBA = False
+# S-2 (client backlog): numba is imported LAZILY -- no top-level `import numba` node, so a static
+# dependency scan of a numpy-only install reports numpy. `from holographic_jit import njit` and
+# `... import HAS_NUMBA` still work via module __getattr__ (PEP 562); behaviour is unchanged, the
+# import just happens at first use instead of at module load.
 
-    def njit(*args, **kwargs):
+
+def _ensure_numba():
+    g = globals()
+    if "HAS_NUMBA" in g:
+        return
+    try:
+        from numba import njit as _njit                 # the real JIT
+        g["njit"], g["HAS_NUMBA"] = _njit, True
+    except Exception:                                   # pragma: no cover - exercised only without numba installed
+        g["njit"], g["HAS_NUMBA"] = _njit_fallback, False
+
+
+def __getattr__(name):
+    if name in ("njit", "HAS_NUMBA"):
+        _ensure_numba()
+        return globals()[name]
+    raise AttributeError(name)
+
+
+if True:
+    def _njit_fallback(*args, **kwargs):
         """Identity-decorator fallback: with no Numba, the decorated source just runs as ordinary (slow) Python,
         so every kernel here stays callable on a NumPy-only install."""
         if len(args) == 1 and callable(args[0]) and not kwargs:
@@ -77,7 +96,20 @@ def _fast_sweep_2d_impl(dist, h, n_rounds):
 
 
 # Compile once if Numba is present; otherwise this IS the pure-Python function.
-_fast_sweep_2d = njit(cache=True)(_fast_sweep_2d_impl) if HAS_NUMBA else _fast_sweep_2d_impl
+def _wrap_kernel(name, impl):
+    """Lazy JIT wrap (S-2): the numba import and the njit compilation happen at the FIRST call,
+    not at module import -- so importing this module on a numpy-only install touches numpy only,
+    and importing it WITH numba costs nothing until a kernel actually runs."""
+    def caller(*a, **kw):
+        _ensure_numba()
+        g = globals()
+        fn = njit(cache=True)(impl) if HAS_NUMBA else impl
+        g[name] = fn                                    # replace the trampoline after first use
+        return fn(*a, **kw)
+    return caller
+
+
+_fast_sweep_2d = _wrap_kernel("_fast_sweep_2d", _fast_sweep_2d_impl)
 
 
 def distance_transform(seed_mask, h=1.0, n_rounds=2):
@@ -158,7 +190,7 @@ def _fast_sweep_3d_impl(dist, h, n_rounds):
     return dist
 
 
-_fast_sweep_3d = njit(cache=True)(_fast_sweep_3d_impl) if HAS_NUMBA else _fast_sweep_3d_impl
+_fast_sweep_3d = _wrap_kernel("_fast_sweep_3d", _fast_sweep_3d_impl)
 
 
 def distance_transform_3d(seed_mask, h=1.0, n_rounds=2):
