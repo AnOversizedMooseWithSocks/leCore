@@ -175,28 +175,32 @@ def erode(height, droplets=2000, steps=30, inertia=0.05, capacity=1.0, depositio
     (stable and still carving); 4.0 grew peaks even on the module's own fBm terrain, which is why the default
     changed. Lower capacity = gentler carving, higher = more aggressive; above ~2.0 risks the old feedback.
 
-    STABILITY LIMIT, MEASURED -- THE DEFAULT IS SAFE, HEAVY USE IS NOT. `cap` scales with the local
-    drop and the drop is a consequence of prior erosion, so the loop has positive gain. Lowering the
-    default capacity to 1.0 moved the threshold; it did not remove the loop. On a 128x128 grid, one
-    fBm terrain, same seed, varying ONLY the droplet count:
+    STABILITY: FIXED BY A GLOBAL MASS CONSTRAINT (the fix this docstring used to prescribe for
+    itself). Total material moved across ALL droplets is bounded at capacity * sqrt(h*w)
+    normalised units, each droplet receiving W_total/droplets as its lifetime budget -- so
+    raising the droplet count refines how the SAME total erosion is distributed instead of
+    multiplying it. Measured on the client's rough multi-frequency reproducer (48x48, the case
+    that previously ran 0.60 -> 400.67 at 10k droplets): peak 0.590-0.591 at every count from
+    3k to 40k, successive-count mean|difference| SHRINKING 0.0018 -> 0.0007 (true convergence),
+    and the old 128x128 stress table (which reached mean height -4.9e8 at 60k) now stays inside
+    the input range at 60k. `capacity` is thereby a meaningful WORK knob: 1/3/6 carve
+    progressively deeper (moved 21/52/85 units) with the peak bounded at every setting.
 
-        2,000 droplets (default)   range   0.03 ..    1.00      clean
-       20,000                             -1.44 ..    7.05      already outside the input range
-       30,000                             -2.36 ..    5.94
-       40,000                            -20.21 ..   48.26
-       50,000                          -1.6e+07 .. 3.8e+07      runaway
-       60,000                     mean height -4.9e+08
+    THREE MORE LEGS OF THE FIX, each measured: (1) terminal velocity -- speed capped at 4
+    normalised units; cap scales with speed and an uncapped descent carries unbounded capacity;
+    (2) EROSION/DEPOSITION SYMMETRY -- deposition goes through the same disc brush as erosion;
+    the old point-deposit built single-cell spikes whose -dh raised the next droplet's cap (the
+    spike factory that closed the feedback loop); (3) the MASS LEAK closed -- a droplet dying
+    inside the tile (pit bottom, zero gradient) now deposits its load where it dies; previously
+    the sediment vanished with it, so pits eroded forever (floors ran to -7.2 at 20k droplets
+    with every peak bounded). Edge exits still lose their sediment: real drainage off the tile.
 
-    So: STAY NEAR THE DEFAULT DROPLET COUNT for a grid this size, and check the output range if you
-    raise it. Erosion at the default is well behaved and genuinely channelised -- the top 5% of cells
-    carry 42% of all material moved, which diffusion does not do -- it is only the high-droplet
-    regime that diverges.
-
-    KEPT NEGATIVE: clamping the drop that feeds `cap` does NOT fix this. Tried and measured: it made
-    30,000 droplets worse (-2.4..5.9 became -18.7..52.7), because a smaller cap trips the
-    `sediment > cap` branch and trades the erosion runaway for a DEPOSITION runaway. The loop has two
-    signs and clamping one end feeds the other. A real fix needs a per-droplet budget or a global
-    mass constraint, not a clamp.
+    KEPT NEGATIVES, both measured, do not re-derive: clamping the drop that feeds `cap` trades
+    the erosion runaway for a DEPOSITION runaway (the loop has two signs; bound the exchange,
+    not either branch). A FIXED per-droplet budget (without the global constraint) fails at high
+    counts because pits are ATTRACTORS: dying droplets deposit at the same cells and ~1-unit
+    loads piled into spikes (peak 2.37 at 20k) -- the budget must shrink as the count grows,
+    which is exactly what the global constraint does.
 
     Returns the eroded copy. Conservation note: sediment leaving the grid edge with a dying droplet is lost --
     total material is NOT exactly conserved, matching real drainage out of the tile.
@@ -234,10 +238,31 @@ def erode(height, droplets=2000, steps=30, inertia=0.05, capacity=1.0, depositio
         hh = h00 * (1 - fx) * (1 - fy) + h10 * fx * (1 - fy) + h01 * (1 - fx) * fy + h11 * fx * fy
         return hh, gx, gy
 
+    def _splat(H, cy, cx, signed_amt):
+        # one shared write path for BOTH signs (see the symmetry note at the deposit branch)
+        y0, y1 = cy - radius, cy + radius + 1
+        x0, x1 = cx - radius, cx + radius + 1
+        if 0 <= y0 and y1 <= h and 0 <= x0 and x1 <= w:
+            H[y0:y1, x0:x1] += signed_amt * brush
+        else:
+            H[cy, cx] += signed_amt
+
     starts = rng.uniform([1.0, 1.0], [w - 2.0, h - 2.0], size=(droplets, 2))
+    # THE GLOBAL MASS CONSTRAINT (the docstring's own prescription, taken literally). Total
+    # material moved across ALL droplets is fixed at W_total = capacity * sqrt(h*w) normalised
+    # units; each droplet's lifetime budget is W_total / droplets. Raising the droplet count now
+    # refines HOW the same total erosion is distributed (finer channels, better statistics)
+    # instead of multiplying the erosion itself -- which turns "more droplets" from a divergence
+    # axis into a convergence axis, the definition-of-done's exact words. A fixed per-droplet
+    # budget was tried first and failed at high counts (pits are ATTRACTORS: dying droplets
+    # deposit at the same cells, and per-droplet loads of ~1 unit piled into spikes -- measured
+    # peak 2.37 at 20k droplets); the global constraint bounds the pile-up at the source.
+    budget = float(capacity) * float(np.sqrt(h * w)) / max(int(droplets), 1)
     for (px, py) in starts:
         dx = dy = 0.0
         speed, water, sediment = 1.0, 1.0, 0.0
+        eroded_total = 0.0
+        left_tile = False
         for _ in range(steps):
             h0, gx, gy = grad(px, py)
             # momentum blend: pure gradient at inertia=0, straight-line at inertia=1
@@ -249,6 +274,7 @@ def erode(height, droplets=2000, steps=30, inertia=0.05, capacity=1.0, depositio
             dx, dy = dx / n, dy / n
             nx, ny = px + dx, py + dy
             if not (1.0 <= nx < w - 2 and 1.0 <= ny < h - 2):
+                left_tile = True
                 break                                        # droplet leaves the tile; its sediment leaves too
             h1, _, _ = grad(nx, ny)
             dh = h1 - h0
@@ -260,24 +286,43 @@ def erode(height, droplets=2000, steps=30, inertia=0.05, capacity=1.0, depositio
             # for a DEPOSITION runaway. The loop has two signs and clamping one end feeds the other.
             cap = max(-dh, min_slope) * speed * water * capacity
             if sediment > cap or dh > 0:
-                # deposit: over capacity, or moving uphill (fill the pit it just climbed out of)
+                # deposit: over capacity, or moving uphill (fill the pit it just climbed out of).
+                # THE FIX'S THIRD LEG -- SYMMETRY: deposition goes through the SAME brush as
+                # erosion. The old point-deposit built single-cell spikes; a spike is a huge -dh
+                # for the next droplet, which raises ITS cap, which cuts a pit whose wall is the
+                # next spike -- erode-with-a-disc / deposit-at-a-point was the spike factory that
+                # closed the feedback loop the docstring names.
                 amt = min(dh, sediment) if dh > 0 else (sediment - cap) * deposition
                 sediment -= amt
-                H[int(py), int(px)] += amt
+                _splat(H, int(py), int(px), +amt)
             else:
-                # erode, brushed over the disc so channels get width
-                amt = min((cap - sediment) * erosion, -dh)
-                cy, cx = int(py), int(px)
-                y0, y1 = cy - radius, cy + radius + 1
-                x0, x1 = cx - radius, cx + radius + 1
-                if 0 <= y0 and y1 <= h and 0 <= x0 and x1 <= w:
-                    H[y0:y1, x0:x1] -= amt * brush
-                else:
-                    H[cy, cx] -= amt
+                # erode, brushed over the disc so channels get width -- and METERED: the
+                # per-droplet lifetime budget is the docstring's own prescription ("a real fix
+                # needs a per-droplet budget or a global mass constraint, not a clamp"). One
+                # droplet may move at most `capacity` units of material in its whole life; the
+                # runaway needed unbounded per-droplet pickup and this removes it at the source
+                # without touching either branch condition (the two-signs lesson: clamp neither
+                # end, bound the exchange itself).
+                amt = min((cap - sediment) * erosion, -dh, max(budget - eroded_total, 0.0))
+                _splat(H, int(py), int(px), -amt)
                 sediment += amt
-            speed = float(np.sqrt(max(speed * speed + dh * -9.81 * 0.1, 0.0)))
+                eroded_total += amt
+            # terminal velocity: speed^2 grows with every drop and cap scales with speed, so an
+            # uncapped droplet on a long descent carries unbounded capacity -- the second gain
+            # element in the loop. Real droplets have drag; 4 (normalised units) is far above any
+            # speed the stable regime ever reaches, so the cap only engages in the runaway.
+            speed = float(min(np.sqrt(max(speed * speed + dh * -9.81 * 0.1, 0.0)), 4.0))
             water *= (1.0 - evaporation)
             px, py = nx, ny
+        if sediment > 0.0 and not left_tile:
+            # THE MASS LEAK, closed: a droplet that dies INSIDE the tile (pit bottom, zero
+            # gradient, steps exhausted) used to take its sediment with it, so pits eroded
+            # forever and never refilled -- measured: rough 48x48 floors ran to -7.2 at 20k
+            # droplets while every peak stayed bounded. Physically the water dies, the sediment
+            # stays: deposit the load where the droplet ends. Sediment leaving with a droplet
+            # that exits the TILE EDGE is still lost, matching real drainage (the documented
+            # conservation note stands for edges and only for edges).
+            _splat(H, int(py), int(px), sediment)
     return H * _span + _lo                                     # rescale back to the caller's height units
 
 
@@ -305,6 +350,29 @@ def _selftest_erode():
         assert _e.max() <= _peak.max() * _scale + 1e-6, (
             "erode RUNAWAY at scale %g: peak %g grew to %g -- the height-scale feedback is back"
             % (_scale, _peak.max() * _scale, _e.max()))
+    # THE CLIENT REPRODUCER, pinned (C-1): rough multi-frequency terrain, previously
+    # 0.60 -> 2.35 / 9.50 / 400.67 at 3k/6k/10k droplets. Peak bounded AND converging now.
+    _rr = _np.random.default_rng(1)
+    _Hr = _np.zeros((48, 48))
+    for _f, _a2 in ((1, 1.0), (2, 0.5), (4, 0.25), (8, 0.12)):
+        _ph = _rr.uniform(0, 2 * _np.pi, 2)
+        _yy2, _xx2 = _np.mgrid[0:48, 0:48]
+        _Hr += _a2 * (_np.sin(_xx2 / 48 * 2 * _np.pi * _f + _ph[0]) *
+                      _np.sin(_yy2 / 48 * 2 * _np.pi * _f + _ph[1]))
+    _Hr = (_Hr - _Hr.min()) / (_Hr.max() - _Hr.min()) * 0.41 + 0.19
+    _prev, _dp = None, []
+    for _drops in (3000, 6000, 10000):
+        _er = erode(_Hr, droplets=_drops, seed=1)
+        assert _er.max() <= _Hr.max() * 1.05, \
+            "C-1 regression: rough-terrain peak grew (%.3f -> %.3f at %d droplets)" % (
+                _Hr.max(), _er.max(), _drops)
+        if _prev is not None:
+            _dp.append(_np.abs(_er - _prev).mean())
+        _prev = _er
+    assert _dp[1] < _dp[0], \
+        "C-1 regression: droplet count must be a CONVERGENCE axis (mean|d| %.4f -> %.4f)" % (
+            _dp[0], _dp[1])
+
     # SCALE INVARIANCE, pinned: eroding H and eroding 20*H must agree after rescaling (same normalised run).
     _a = erode(_peak, droplets=800, seed=1)
     _b = erode(_peak * 20.0, droplets=800, seed=1) / 20.0

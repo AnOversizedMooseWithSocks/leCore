@@ -3076,7 +3076,7 @@ def rebake_texture(source_mesh, source_uv, texture, target_mesh, size=1024, marg
     return out, new_uv, img, report
 
 
-def textured_lod(mesh, texture, uvs=None, grid=48, size=1024, margin=2):
+def textured_lod(mesh, texture, uvs=None, grid=48, size=1024, margin=2, method="auto"):
     """ONE CALL for the thing everyone actually wants: a decimated mesh that STILL WEARS ITS TEXTURE, by the
     route that is correct for the mesh you actually have. Returns (lod_mesh, uv, image, report).
 
@@ -3106,7 +3106,22 @@ def textured_lod(mesh, texture, uvs=None, grid=48, size=1024, margin=2):
     lod = cluster_decimate(mesh, grid=grid, keep_uv=False)          # geometry only; its uvs would be garbage
     from holographic.mesh_and_geometry.holographic_mesh import Mesh
     src = Mesh(mesh.vertices, mesh.faces, uvs=uv)
-    out, new_uv, img, rep = rebake_texture(src, uv, texture, lod, size=size, margin=margin)
+    # ROUTE THE REBAKE BY SCALE (client P-2: the >500s import-time rebake). Measured on a synthetic
+    # 120k-face fragmented scan: the per-texel "project" bake could not finish 40k decimated faces
+    # in 25 MINUTES, while "scatter" did the same job in 8.2s; on an analytic-ground-truth fixture
+    # scatter's surface error is ~1.5x project's (0.140 vs 0.091 mean), both bands dominated by the
+    # decimation's own geometric displacement. Even small cases are slow under project (12.8s at
+    # 1,653 faces, 41.6s at 4,256), so "auto" uses project only below 2,000 decimated faces --
+    # where its accuracy edge is affordable -- and scatter above, where project is simply not an
+    # import-time path. Pass method="project" or "scatter" to override; "auto" is the new default
+    # because the old implicit default (always project) was the reported bug, not a behaviour
+    # anyone could have relied on at scale.
+    _mth = method
+    if _mth == "auto":
+        _mth = "project" if len(lod.faces) <= 2000 else "scatter"
+    out, new_uv, img, rep = rebake_texture(src, uv, texture, lod, size=size, margin=margin,
+                                           method=_mth)
+    rep["method"] = _mth
     rep.update({"route": "rebake",
                 "reason": "fragmented atlas (median %.1f faces/island, %d islands over %d faces): per-vertex "
                           "transfer cannot preserve it" % (atlas["faces_per_island_median"], atlas["islands"],

@@ -53337,3 +53337,725 @@ Adaptive is still not uniformly faster than a flat pass on a gem scene. The rema
 per-crystal Python loop itself, and the two ways to remove it that I have measured -- batching and
 conversion hoisting -- do not work. The one that does is baking, which trades shading normals for a
 9.6x. A fused NATIVE kernel (Zig, or WGSL on real hardware) is the untested option.
+
+## HDRIFT SHIPPED -- the generative model as moment hypervectors (plan H0.1-H0.3, H1.1-H1.3, H2.1, +autoscale)
+
+`holographic_hdrift` (sampling_and_signal) + `_UnifiedPart15` (11 faculties) + 6 catalog entries.
+Discoverability 10/10 stranger phrasings ("holographic gan", "combine two trained models", "is my
+generator memorising", "make the model forget a class", ...). HTTP proven: all 11 introspect into
+/tools; POST /invoke generation_audit round-trips and correctly reads planted memorisation as 1.0.
+
+THE ARCHITECTURE, one clause per measurement: train = ONE encoding pass into d+1 moment bundles
+(mu = kernel mean embedding, nu_j = first moments; baked field == explicit O(N) field at cos
+>0.9999, cost independent of N) | sample = particle drift, attraction to the data field MINUS
+repulsion from the batch's own field, annealed noise | condition = unbind a label role from ONE
+packed vector set (importance-seeded starts; 1.0/1.0/1.0 class occupancy at dim 1024 AND 2048) |
+compose = vector ADD across separately-trained models | ablate = subtract (unlearning; ablated
+cluster occupancy <0.15) | transport = shift-is-a-bind with the first-moment cross-term
+nu' = shift(nu) + delta*shift(mu) | media: images -> k aniso splats (canonical order, bytewise-
+deterministic adapter) -> drift in splat-parameter space -> render, audit ALWAYS attached.
+
+AUTO-SCALING: no private tuner. mind.drift_autoscale routes (dim, bandwidth) through the existing
+mind.auto_scale with the bandwidth prober's spread-fidelity as eval_fn.
+
+KEPT NEGATIVES (loud), several corrected DURING the build:
+* ATTRACTION-ONLY MEMORISES -- IN ITS REGIME. Pinned at D=512 codebook softmax drift (1.000 ->
+  0.982 with repel 0.5). SECOND-ORDER FINDING: repulsion's leverage GROWS WITH DIMENSION -- in
+  2-D on the unit circle 8 particles cannot budge max-cos at all (1.000 either way). The first
+  draft of the selftest asserted the negative in the smooth-RBF regime where it does not occur;
+  a kept negative pinned in the wrong regime is a false gate.
+* THE FPE BANDWIDTH CONVENTION IS INVERTED from intuition: SMALL bandwidth = WIDE kernel = the
+  collapse direction (the encoder's own docstring says so; the prober's first draft selected
+  "smallest passing" and picked the degenerate end). Selection is now closest-to-unit target
+  spread inside a (0.40, 2.5) window; a ring at wide kernel reads spread ~0.03 and is refused.
+* CONDITIONED FIELDS CARRY CROSSTALK where the class has no density (cos to the clean field down
+  to -0.999 in dead zones) and MORE DIM IS NOT A CLEAN FIX (fracs bounced 0.53-1.0 across dim
+  1024-8192). The fix is structural, not budgetary: importance-seed the starts by unbound density
+  so particles never traverse the garbage. The gated-decode idea as an initialisation rule.
+* splat_render's contract is FLAT (cy, cx, amp, sigma) tuples -- probed live after assuming the
+  aniso (center, amp, L) shape and crashing. Probe live code, not memory, again.
+* v1 SCOPE, honest: generated images render ISOTROPIC splats (soft-edged); aniso structure is not
+  carried through the drift space. drift_ablate is exact only for subset removal. write_wav was
+  a pure WIRING GAP -- shipped in holographic_audio all along, never reached the mind.
+* NAME COLLISION CAUGHT BY THE GUARD: drift_scale already lived in another part; renamed
+  drift_autoscale before it could silently shadow (the plan_render story, again).
+
+VERIFIED: module selftest green (field identity, both negatives, algebra, images e2e); p15
+selftest green (11 members, none shadowed, faculty round-trip + wav round-trip through a real
+mind); compile-all holographic 0 errors; reachability 0 undocumented; catalog_gaps 0; skill_lint
+0 invocation gaps / 0 new does-length regressions; capdoc + docgen regenerated (611 modules,
+212,618 lines). Delegation_drift: 50 pre-existing report-only items, 0 introduced by this arc.
+
+STILL OPEN from the plan (not silently dropped): H0.4 Sinkhorn coupling option; H1.4 verdict
+experiment at real corpus scale (the selftest's blob e2e is a smoke-scale stand-in, NOT the
+verdict); H1.5 fallbacks; H2.2-H2.3 audio adapter/generation; Phase 3 video; H4.2 byte-determinism
+sweep; H4.4 panel review.
+
+## VOID-1 SHIPPED -- the void explorer: "undiscovered" as a measured set
+
+`holographic_voidexplore` (agents_and_reasoning) + 3 faculties on _UnifiedPart15 (now 14 members,
+none shadowed) + 1 catalog entry, discoverability 6/6 stranger phrasings ("explore the unknown",
+"mendeleev gaps", "unknown unknowns in my corpus", ...). HTTP proven: /invoke structured_voids
+recovered the two held-out combinations over the wire.
+
+THREE INSTRUMENTS, THREE WARRANTS, EACH WITH ITS PLANTED-TRUTH TEST AND ITS REFUSAL TEST:
+* void_map -- WHERE IS NOTHING: bootstrap-null-gated low density inside the support. Planted
+  inter-mode gap surfaces as void; a UNIFORM corpus yields (almost) none -- sparsity that the
+  data's own resampling noise explains is named 'sparsity', never 'void'.
+* structured_voids -- WHAT COULD BE THERE (the Mendeleev move): full combinations whose every
+  pairwise slot co-occurrence was observed >= min_count but whose assembly never was. Held-out
+  combinations recovered exactly (p=0.020 on the vouching gate). THE EPICYCLE REFUSAL: a corpus
+  whose slot structure cannot beat a slot-shuffle null gets NO candidates and the p-value --
+  an overgenerating grammar has no right to vouch for its voids.
+* transfer_voids -- INSTANTIATED ELSEWHERE: sample model B, keep z_A-low AND z_B-high (each
+  scaled to its own on-support level). B's extra mode found for A; the REVERSE direction stays
+  near-empty (directionality asserted -- A contains nothing B lacks).
+
+KEPT NEGATIVE (new, load-bearing): THE INSTRUMENT IS NOT THE SAMPLER. The generation-probed
+bandwidth (closest-to-unit field spread) SMEARS ABSENCE -- the planted gap read 56% of data
+density at the sampler's bw 4.0 and -6% at bw 10+ (FPE convention: larger = sharper). void_map
+therefore probes its own bandwidth and takes the SHARPEST candidate inside the honest window.
+One encoder space, two purposes, two different right answers -- resolution for absence, smoothness
+for generation. First selftest draft failed exactly here; the fix is the finding.
+
+HONEST BOUNDARY (in the module docstring, on purpose): the explorer finds what the corpus's
+structure implies and has not shown. It cannot find what needs an axiom the tower never climbed
+-- Mendeleev could predict gallium; the table could not predict quantum mechanics. Every report
+carries its warrant ('grammar' / 'transfer') and its gate verdict; no warrant, no candidate.
+
+VERIFIED: module selftest green (5 planted truths incl. 2 refusals); p15 selftest green; e2e
+through the mind (58 gated voids, instrument bw 24.0 self-probed; Mendeleev warrant p=0.020);
+HTTP round-trip; reachability 0 undocumented / catalog_gaps 0 / skill_lint 0-0-0-0 (one
+does-length regression caught at 724 chars and trimmed to 586 -- the memoized lint run MASKED
+the regression on re-run until --no-memo; watch that); capdoc + docgen regenerated (612 modules).
+
+OPEN, deliberate: ladder-constrained anti-drift (drift with the attraction sign flipped, confined
+to the grammar's valid set) is designed but NOT built -- it needs the H1.4-scale corpus to be
+judged honestly. The voidsynth execute-to-verify gate remains the gold standard the explorer
+should escalate to where candidates are executable; wiring that escalation is the next rung.
+
+## RESID-1 SHIPPED -- the residual-void circuit: "noise is data without an explanation yet"
+
+`holographic_residualvoid` (sampling_and_signal) + 3 faculties on _UnifiedPart15 (now 17 members,
+none shadowed) + 1 catalog entry (550-char does, caught over-budget BEFORE the lint this time),
+discoverability 7/7 ("noise is not noise", "puppet strings in market data", "am I outside anything
+the model has seen", ...). HTTP proven: /invoke residual_verdict returns 'structured' on planted
+AR dependence over the wire.
+
+THREE COMPOSITIONS over existing parts (Rule-0: every composition phrasing returned fallbacks;
+the parts -- decompose_piecewise, iid/block/AAFT surrogates, drift moments, FPE -- all existed):
+* residual_verdict -- explain, subtract, interrogate: iid_shuffle null (marginal EXACT, order
+  destroyed), verdict structured/irreducible + a block-scale containment PROFILE.
+* support_gauge -- causal out-of-support monitor, inside/sparse/void per step; trailing-window
+  moments only (the look-ahead standard applied to the instrument itself).
+* hidden_drivers -- shared factor in a panel's RESIDUALS vs independently-AAFT'd panels; the
+  puppet string no single series discloses; refused when residuals are independent.
+
+FOUR KEPT NEGATIVES, every one found by a failing gate this session:
+* THE EXPLAINER EATS SMOOTH TRUTH. A planted slow sine was ABSORBED by decompose_piecewise's
+  per-segment laws (corr(resid, hidden)=0.04) and the residual honestly read irreducible. The
+  verdict is CONDITIONAL ON THE EXPLAINER'S CAPACITY; what survives is what the grammar could not
+  already say. Plants (and expectations) must be STOCHASTIC (AR) -- also the truer market story.
+* ONE CLAIM, ONE MATCHED NULL. First design demanded AAFT AND block nulls simultaneously; the
+  HTTP e2e at a different n exposed it (p_block 0.122 on real structure). block surrogates
+  CONTAIN structure shorter than the block; AAFT preserves the spectrum that linear dependence
+  IS, so beating it measures the surrogate's approximation gap. The right null for 'did the
+  explanation remove all temporal dependence' is iid_shuffle. Selftest luck had masked this --
+  a green test at one n is not a contract.
+* A CROSSING POINT IS A BRITTLE SUMMARY. Block-containment localization reports the PROFILE
+  (null mean climbing 0.19->0.43 as blocks grow); the first-absorbing block is only a coarse
+  upper bound (the statistic accumulates series-wide, so containment lags correlation length).
+* THE VOID CLOSES AS IT IS OBSERVED. support_gauge flags the excursion INSTANTLY (first
+  post-jump eval = void) then recovers as the trailing window absorbs the regime -- adaptation
+  is the contract, and the instrument-level echo of market reflexivity. First draft asserted
+  voids persist; wrong about the contract, not the code.
+* (wiring) FACULTY WRAPPER DRIFTED against the redesigned function signature (stale block= kw),
+  caught by e2e not by the part selftest -- signature sync is part of the redesign, not cleanup.
+Also: hidden_drivers RECOVERY is bounded by what survives per-series explanation (per-residual
+factor corr 0.24-0.42 -> recovered-factor corr 0.53); the EXISTENCE verdict (z=11.7) is the
+strong claim, the factor estimate its surviving shadow. Loading SIGN pattern recovers exactly.
+
+VERIFIED: module selftest green (5 planted truths incl. 2 refusals + containment-trend assert);
+p15 selftest green (17 members); e2e through the mind; HTTP round-trip; reachability 0 /
+catalog_gaps 0 / skill_lint 0-0-0-0; capdoc + docgen regenerated (613 modules).
+
+SCOPE, stated: discovered structure and EXPLOITABLE structure are different claims separated by
+latency, capacity, and everyone else's copy of the discovery (the Cost wall's standing doctrine).
+This module makes only the first kind. OPEN: wiring support_gauge into stream_sentinel's event
+stream; residual_verdict escalation to the ladder (climb the residual when structured); panel
+gauge (joint state OOD across many series -- the 2008-correlations case).
+
+## RESID-2 SHIPPED -- dependence voids, the residual ladder, one merged watch timeline
+
+Extends `holographic_residualvoid`; _UnifiedPart15 now 20 members, none shadowed; 1 catalog entry
+(trimmed 623->578 BEFORE the lint), discoverability 6/6 ("correlations all jumped together",
+"2008 style correlation crisis", "climb the residual", ...). HTTP: /invoke residual_ladder ->
+terminal 'irreducible' over the wire.
+
+* panel_gauge -- THE 2008 INSTRUMENT, planted and proven: state = Fisher-z upper triangle of the
+  trailing correlation matrix, gauged causally. The plant holds every marginal at unit variance
+  throughout while pairwise dependence flips 0.15 -> 0.95; the panel gauge reads VOID at the flip
+  and the single-series gauge on the same data stays silent (asserted both ways). The void the
+  marginal instrument cannot see, by construction.
+* residual_ladder -- escalation instead of a full stop: piecewise -> closed-form AR rung
+  (deterministic ridge on the lag matrix; no learning loop) -> re-interrogate. Tower for the AR
+  plant: [('piecewise','structured'), ('ar(8)','irreducible')] -- the terminal names WHICH grammar
+  finally priced the remainder as noise. 'rungs-exhausted' is the honest other ending (the
+  Mendeleev boundary in instrument form).
+* stream_watch -- sentinel regime events + gauge void/recovered events in ONE time-ordered list,
+  in the sentinel's own {at, kind, ...} dialect. 'support-recovered' is a first-class event:
+  the void closing by being observed is part of the story.
+* _gauge_states extracted as the shared core (generalize on contact): support_gauge = delay
+  embedding, panel_gauge = dependence embedding; one body, two costumes.
+
+THREE KEPT NEGATIVES, all found by failing gates this session:
+* SELF-TERM INFLATION: the on-support yardstick included each training state's OWN kernel mass
+  while a query has none -- an entire calm regime read 'sparse'. Leave-self-out scale is the fix
+  (subtract the einsum self-term). Any KDE-style 'am I typical' score has this bug available.
+* RAW CORRELATIONS ARE HETEROSCEDASTIC STATE COORDINATES: sampling noise shrinks as |rho|->1, so
+  the crisis regime's states clustered tighter than the calm regime's and the verdicts INVERTED.
+  Fisher-z (arctanh) stabilises the variance; distances then mean the same thing in every regime.
+* CLIPPING IS DENIABILITY: clipping a query into the history's bounds box before scoring collapsed
+  'three box-spans outside' into 'at the boundary' -- the flip read sparse. Outside the box is
+  void BY GEOMETRY (>10% of span past any bound), decided before density is consulted. Also:
+  in 10-D with ~40 states a sharp kernel's cross-mass vanishes (z_scale -> 0, z_rel = noise);
+  panel_bandwidth defaults WIDE (3.0) for dependence states -- dimension sets the kernel, again.
+(wiring) sentinel import path assumed misc/, lives in sampling_and_signal/holographic_sentinel --
+probe live code, not memory, once more.
+
+VERIFIED: module selftest green (8 planted truths incl. marginal-silence cross-check); p15
+selftest green (20 members); e2e (panel void at the flip; ladder terminal-irreducible); HTTP;
+reachability 0 / catalog_gaps 0 / skill_lint 0-0-0-0; capdoc + docgen (613 modules, 213,593 LOC).
+
+OPEN, stated: panel_gauge state maps beyond correlation (lead-lag, tail dependence) are the same
+one-line costume change on _gauge_states; the ladder wants more rungs (vol/GARCH-shaped closed
+forms) before real market residuals exhaust it honestly; stream_watch cadence sensitivity noted
+(a coarse hop can land the first post-jump eval after partial absorption -- parameter, not bug).
+
+## RESID-3 SHIPPED -- the second-moment channel and the vol rung (the false-refusal fix)
+
+Extends residual_verdict + residual_ladder in place (signatures unchanged; return dicts gain
+p_scale / z_vol / channel -- additive). p15 docstrings synced to the new contract (doc drift is
+still drift). No new faculties, no new catalog entries needed: the fix deepens existing verbs.
+
+THE HEADLINE KEPT NEGATIVE, measured before fixing: the single-channel verdict FALSELY REFUSED an
+ARCH(1) residual -- level-stat 0.016 (p=0.388, 'irreducible') while the residual's SQUARED series
+measured 0.694, 43x larger. A refusal-is-a-result instrument whose refusals can be false is worse
+than no instrument; volatility clustering (market noise's signature dependence) lives in the
+second moment and the level channel is structurally blind to it.
+
+THE FIX: two channels, one null. iid_shuffle destroys temporal order in BOTH moments at once and
+the SAME shuffles serve both channels (procedure-matched by identity). Verdict 'structured' if
+EITHER fires, the firing channel NAMED. Ladder rungs now selected BY CHANNEL: level -> AR rung
+(subtract the prediction); scale-only -> vol-AR rung, closed-form ridge of r^2 on its own lags,
+output r/sigma_hat -- a vol model explains the ENVELOPE, not the signs; DIVIDING is what 'explain'
+means in the second moment. ARCH plant tower: [(piecewise, structured/scale), (vol-ar(4),
+irreducible)] -- the vol rung consumes what the AR rung cannot (and would have removed nothing
+from: the level channel was already clean).
+
+Cross-checks green: AR plant now reads level+scale (legitimate -- AR levels induce squared
+dependence), white noise still irreducible on both channels, e2e ladder on mixed data climbs
+piecewise -> ar(8) -> vol-ar(4) -> irreducible.
+
+TEST-HYGIENE NEGATIVE: the stream_watch plant broke when the new ARCH block consumed draws from
+the shared selftest rng and moved a later plant's realization -- planted truths OWN their seeds
+now (dedicated default_rng per plant). A green test that depends on upstream draw order is a
+collision waiting for the next insertion.
+(ritual) the doc-sync heredoc died mid-script on a non-matching old-string AFTER writing the
+module file -- partial-apply. Recovered by grepping actual state before re-patching; multi-file
+doc edits should verify each target's text first, same as code.
+
+VERIFIED: module selftest green (10 planted truths incl. the ARCH false-refusal pin and the
+vol-rung consumption assert); p15 selftest green (20 members); HTTP residual_ladder ->
+'irreducible'; reachability 0 / catalog_gaps 0 / skill_lint 0-0-0-0; capdoc + docgen regenerated.
+
+OPEN, stated: real-data pass (DEX candles in data/dai_weth_ohlcv.json via holographic_market's
+loaders -- run the ladder on actual returns and record which rung terminates); GARCH-with-memory
+rung (current vol rung is ARCH-shaped, no sigma^2 lag term); lead-lag / tail-dependence panel
+state maps (one-line costumes on _gauge_states).
+
+## RESID-4 SHIPPED -- the real-data pass: the stylized facts, read off the tower
+
+`market_residual_report` (holographic_residualvoid + p15 faculty, now 21 members + 1 catalog entry,
+596-char does, discoverability 5/5, HTTP-proven end to end including a full over-the-wire report
+run). The instrument's first contact with non-planted truth, and it reproduced finance's stylized
+facts WITH NO MARKET KNOWLEDGE ANYWHERE IN THE CODE:
+
+* SOL/USDT 1h returns (n=1500): level channel CLEAN (p=0.400 -- no linear predictability), scale
+  channel FIRES (p=0.015-0.020 -- volatility clustering), vol rung terminates. Engle's ARCH
+  finding, recovered as a tower: [(piecewise, structured/scale), (vol-ar(4), irreducible)].
+* SOL tick moves (n=1500): level+scale; the AR rung's lag-1 coefficient is NEGATIVE (-0.209) --
+  the BID-ASK BOUNCE, recovered from data by a rung that has never heard of microstructure.
+  Tower climbs ar(8) then vol-ar(4) to irreducible. The microstructure/efficiency divide in one
+  pair of rows: level dependence at tick scale, none at 1h.
+* DAI/WETH 1m returns (n=99): irreducible on BOTH channels -- the EMH agreeing with the
+  instrument, at acknowledged low power (99 bars).
+* SOL 1h price LEVELS (control): structured, eaten by ar(8) -- a random walk is an AR fit's
+  favourite meal; consistent with holographic_market's own permutation finding (levels ordered,
+  z=+6.8; return signs at chance).
+
+POWER LAW KEPT HONEST: p_scale on the 1h returns swept 0.080 @ (n=900, 24 surr) -> 0.041 @ 48
+surr -> 0.040 @ (1500, 24) -> 0.020 @ (1500, 48) -- monotone in both dials, so the first failing
+pin was UNDER-POWERED, not wrong; the selftest pin uses the cheapest SUFFICIENT setting chosen
+from the sweep, never from the first green run. (The failing assert was the instrument working:
+it refused a claim the evidence at that power could not carry.)
+
+Two headline signatures are PINNED in the module selftest at reduced cost (negative tick lag-1;
+1h scale-channel firing), so the finding cannot rot into a transcript anecdote. The full report
+stays a faculty because it is data-dependent and surrogate-heavy.
+
+(wiring note) load_sol_market returns (array, colnames) -- probed live after the first guess at
+its shape crashed; probe live code, not memory, forever.
+
+VERIFIED: module selftest green (12 planted+real truths); p15 21 members none shadowed; HTTP
+/invoke market_residual_report returns the full table; reachability 0 / catalog_gaps 0 /
+skill_lint 0-0-0-0; capdoc + docgen (613 modules, 213,766 LOC).
+
+OPEN, stated: GARCH-with-memory rung (sigma^2 lag term) -- the vol-ar rung terminated everything
+here, but persistent-vol regimes on longer real series may out-run an ARCH-only envelope;
+lead-lag / tail-dependence panel costumes; onchain_traders.json untouched (trader-level panel =
+a hidden_drivers target: do independent wallets share an unexplained driver?).
+(addendum) P-FLOOR ARITHMETIC, kept: with the +1 plug, n_surrogates=16 makes the minimum possible
+p exactly 1/17 = 0.059 -- ABOVE the 0.05 gate, so no claim can pass at that budget no matter how
+strong the effect. A gate whose passing is arithmetically impossible is a disabled instrument
+wearing a running one's clothes; 24 surrogates (floor 0.04) is the true minimum budget. Caught by
+the clean-extract probe failing at a "reduced" setting.
+
+## RESID-5 SHIPPED -- the GARCH-with-memory rung and the lead-lag / tail panel costumes
+
+Extends residual_ladder (+_garch_fit) and panel_gauge (state_map='corr'|'leadlag'|'tail', tail_q);
+p15 synced (21 members); catalog aliases extended additively; discoverability confirmed.
+
+GARCH RUNG -- three drafts, each refuted by measurement before the fourth held:
+* Draft 1 (two-stage LS, Hannan-Rissanen shape): a slipped line handed stage 2 the squared
+  STANDARDIZED residual (chi^2 noise) instead of sigma^2 -- beta fit ~0 on truth 0.95. Reading a
+  quantity back through a transformation you also wrote is how instrument errors are born.
+* Draft 2 (proxy fixed): beta ATTENUATED to ~0.25 -- errors-in-variables; a noisy proxy regressor
+  shrinks its own coefficient. The proxy route is structurally biased here.
+* Draft 3 finding, load-bearing for the ladder: STACKING vol rungs is wrong. Feeding GARCH the
+  output of a failed ARCH division mangles the r^2 dynamics (fit collapsed to alpha~0); failed
+  vol rungs are ALTERNATIVES applied to the PRE-division residual, never layers.
+* Final: GARCH(1,1) via its AR(infinity) representation -- c_k = alpha*beta^(k-1), so ONE weighted
+  log-linear LS over the ARCH(8) rung's own positive coefficients recovers (alpha, beta). No MLE,
+  no iteration, reuses the fit already computed. Recovery: (0.10,0.85)->(0.127,0.872);
+  6-seed beta_hat 0.86+/-0.04.
+* HONEST SCOPE, 6-seed measured: as a WHITENER the garch rung does NOT beat ARCH(4) (at beta=0.95
+  its standardized output still read structured 5/6 vs ARCH's 3/6; beta biased low ~0.89 by the
+  order-8 tail truncation). The rung's value is DIAGNOSIS: a tower ending 'garch(1,1), structured,
+  beta=0.89' names persistent vol memory and admits no grammar here fully whitens it. Escalation
+  order ARCH-first was MEASURED, not assumed (at beta=0.85 the ARCH envelope is the better tool).
+
+PANEL COSTUMES:
+* leadlag: the ANTISYMMETRIC part of the lag-1 cross-correlation -- who moves first. The pinned
+  discriminating pair: a pure lead-lag flip (A leads B -> B leads A, contemporaneous corr
+  IDENTICAL by construction) fires the leadlag costume void at t=410-440 while the corr costume
+  stays silent at every step -- a symmetric statistic is PROVABLY blind to causality direction.
+* tail: pairwise co-exceedance beyond each series' own trailing tail_q quantile, arcsin-sqrt
+  variance-stabilised (the proportion's Fisher-z). Shared-crash plant fires it.
+* KEPT NEGATIVE (instrument-grade): MIN/MAX GEOMETRY BOUNDS GRANT DENIABILITY -- one straddling
+  transition state in the history stretched the box over the new regime and the tail flip read
+  'inside' at every step. The outside-geometry test now uses the 10-90% ROBUST quantile box
+  (threshold 0.35 robust-spans, set where history's own legitimate tail states do not fire and a
+  regime flip measured 1.5-6 spans out). The encoder keeps full-range bounds; JUDGMENT is robust.
+
+VERIFIED: module selftest green (15 planted+real truths); p15 21 members; audits 0/0/0-0-0-0;
+capdoc+docgen (613 modules, 213,901 LOC). The market arc closes here per direction -- pivot to
+science instruments next (see PLAN_science_instruments.md in outputs).
+
+## SCI-1 SHIPPED -- the transit hunter and the fold rung (the grammar that finds planets)
+
+`holographic_transitbox` (sampling_and_signal) + 2 faculties (p15 now 23 members) + 1 catalog
+entry (571 chars, one trim), discoverability 5/5, HTTP round-trip green (injected P=173 recovered
+at 173.4, p_block=0.040 over the wire). Rule-0 paid immediately: Lomb-Scargle + phase_fold
+ALREADY EXISTED; the measured gap that licensed the module is that LS is a SINUSOID-matched
+filter and a box spreads power -- 6.3x less peak contrast on an injected box, exactly the factor
+that loses planets at the floor. BLS (Kovacs et al. 2002) is the box-matched filter and is
+engine-shaped: closed form, deterministic, no learning.
+
+TRANSIT_SEARCH verdict discipline (RESID lessons, verbatim): block-shuffle null (red noise
+survives, phase coherence dies) decides; the iid null is REPORTED NOT USED (it flags red noise as
+planets -- pinned: a random-walk plant fooled iid, refused by block); harmonic families reported,
+never hidden; an arithmetically impassable p-floor refuses to pretend it ran. Selftest also pins
+fold-template consumption and the measured BLS-vs-LS contrast gap.
+
+THE FOLD RUNG cost SEVEN measured negatives to get right -- the densest instrument-error session
+of the arc, every one caught by a failing gate:
+1. THE INTERROGATION WAS SHORT-SIGHTED: lag-1..8 autocorr is blind to long periods; the ladder
+   could not see the need for its own rung. -> third channel: spectral peak contrast.
+2. SINGLE-BIN SPECTRA MISS BOXES: a box is a HARMONIC COMB (F[7]~10k, F[23]~15k, no single bin
+   significant -- a FALSE IRREDUCIBLE with BLS power 68 still in the residual). -> 4-harmonic
+   comb statistic.
+3. k<6 IS TREND WEARING A PERIOD'S CLOTHES (piecewise leftover peaked at k=3; the rung chased
+   P=n/3). -> repetition floor k>=6 in channel AND rung.
+4. THE COMB PEAKS ON HARMONICS when the fundamental has non-integer k (k0=7.58 leaked; x3 won).
+   -> DETECTOR vs NAMER: comb detects, a fine local BLS scan around candidate fundamentals names
+   (+ a second +/-1.5% refine pass -- at ~7 cycles a 1-sample name error smears a transit width).
+5. MULTIPLICITY: three channels at alpha each = ~14% family-wise false alarm (white-noise plant
+   fired); Bonferroni's alpha/3 sits BELOW the p-floor at ordinary budgets (the RESID-4 arithmetic
+   in a new spot). -> Westfall-Young max-z family gate from the SAME shuffles; floor unchanged.
+6. ROUTING, twice: fixed priority sent an AR(1) residual to fold (red spectra fake low-k combs
+   -> INTERIOR-PEAK guard: a boundary argmax is a decaying spectrum, not a line); dominant-z then
+   sent real tick data to the VOL rung and the bid-ask bounce went unmeasured -> MEAN EQUATION
+   BEFORE VARIANCE EQUATION (guarded priority: fold -> level -> scale), the econometrics ordering,
+   principled not aesthetic.
+7. THE SEGMENTER EATS BOXES: a box transit is piecewise-constant -- the level-0 grammar's food --
+   and the first fold-rung plant was consumed at level 0 (BLS 0.2 on the verdict residual), the
+   'consumption' the first assert measured being power later rungs RE-CREATED, judged against the
+   WRONG BASELINE (raw vs rung-input; detrending CONCENTRATES box power 25.5 -> 68). -> honest
+   plant = periodicity below min_seg (sawtooth-12: fold(P=12) exact, terminal comb contrast 0.0);
+   consumption metered by the periodic channel's own stat (BLS is a BOX meter and reads a
+   sawtooth at ~1).
+
+VERIFIED: transitbox selftest green first run; residualvoid selftest green (17 truths incl. all
+real-data pins unchanged); p15 23 members; HTTP; audits 0/0/0-0-0-0; capdoc+docgen (614 modules,
+214,342 LOC). SCI-1 closes; SCI-2 (pulsar-panel Hellings-Downs costume) is next on the plan.
+
+## SCI-1b -- SUBSTRATE AUDIT: where the VSA/HRNN stack carries the science instruments (directive)
+
+Per direction, audited every RESID/SCI instrument for substrate use; wired where it EARNS the
+method, recorded kept negatives where it measurably does not. The engine's own rule applied to
+the engine's own stack.
+
+ALREADY ON THE SUBSTRATE (no change needed, now stated in one place):
+* support_gauge / panel_gauge / void_map / transfer_voids -- FPE VectorFunctionEncoder + HDRIFT
+  drift moments: every density read is a kernel mean embedding IN HYPERVECTOR SPACE, z(x) one
+  dot product. The gauges were VSA-native from birth.
+* stream_watch -- delegates to StreamSentinel, which watches through the HRNN ladder (regime
+  verdicts, entropy-rate refusals). The HRNN is the regime engine of the merged timeline.
+* the periodic channel + comb -- FFT IS the substrate's transform (FHRR = Fourier Holographic
+  Reduced Representations; the comb statistic is a readout in the engine's native basis).
+
+NEW, EARNED THIS SESSION -- vsa_fold (holographic_transitbox): the phase fold as a CircularEncoder
+bundle pair (value-mass B = sum y_t*enc(phi_t), occupancy C), profile = one dot product at ANY
+phase, no bins, no edges, UNEVEN/JITTERED SAMPLING NATIVE (the same moments-not-samples move as
+HDRIFT's mu, worn by phase). Measured: 92% box-power consumption on even sampling (median engine:
+99.8%, keeps default), 92% on 40%-gapped jittered stamps -- the substrate fold's native case,
+pinned in the selftest. fold_subtract(engine='median'|'vsa'), additive, default unchanged.
+
+TWO INSTRUMENT-GRADE KEPT NEGATIVES from getting vsa_fold true:
+* THE CIRCULAR KERNEL IS SIGNED (Poisson-minus-DC): the raw Nadaraya-Watson occupancy dot
+  hovered around zero and FLIPPED SIGN (den in [-4.6,+6.9] over 2000 uniform phases) -- the
+  ratio became a spike injector that CREATED BLS power 1411 in the 'residual'. A ratio smoother
+  needs a non-negative window: DC-lift c0 >= -min(kernel); the CENTERED numerator is exactly
+  unchanged.
+* UNIFORM OCCUPANCY DESTROYS RATIO CALIBRATION: with phases near-uniform the denominator is
+  ~c0*n everywhere and the estimator degenerates to a convolution with arbitrary scale 1/c0 --
+  shape survives (corr 0.835 vs the binned template), AMPLITUDE does not (depth 0.0026 on truth
+  0.010; narrower kernels made it WORSE, concentration swept 0.85-0.98). Repair: shape from the
+  bundle, amplitude from ONE closed-form projection alpha = <y_c,g>/<g,g>. Depth 0.0087/0.010
+  after; consumption as above.
+
+AUDITED, VSA DOES NOT PAY (kept negatives, not gaps):
+* hidden_drivers' factor extraction: SVD is the exact closed-form optimum for one continuous
+  shared factor; the resonator/bundle-recovery machinery unmixes DISCRETE codebook superpositions
+  and has no purchase on a continuous loading vector. Recorded; not wired.
+* bls_power's binning: O(n) integer bincount with exact medians available; an encoder path costs
+  O(n*dim) for a smoothing the box fit does not want. The vsa fold earns its place at READOUT
+  (arbitrary phase, uneven stamps), not inside the scan loop.
+Also: BLS absolute power is SCALE-DEPENDENT (read 0.00999 on the low-amplitude plant vs 68 on
+another -- looked like zero through a %.2f). Verdicts only ever compare it to its own null, so
+scale never mattered; but formatting hid a working number and cost a debugging detour. Print
+enough digits for the quantity's natural scale.
+
+VERIFIED: transitbox selftest green (now 8 truths incl. both substrate-fold pins), residualvoid
+green (17), p15 green (23), audits 0/0/0-0-0-0, capdoc+docgen (614 modules). Catalog aliases
+extended ("fold on the holographic substrate", "kernel fold uneven sampling"), discoverability
+confirmed.
+
+## WIRING SWEEP (directive: accessible + discoverable) -- the arc audited end to end
+
+Ran a 19-phrase stranger-phrasing battery across every capability shipped since VOID-1, plus a
+faculty-coverage map and a full /tools HTTP surface check. Findings and fixes:
+
+* ONE REAL WIRING GAP: fold_subtract / vsa_fold were module-only -- a user-facing verb ("subtract
+  the periodic part") reachable only by import. Wired as mind.fold_subtract (both engines, p15 now
+  24 members none shadowed), proven over HTTP /invoke (clean box -> residual exactly 0).
+* EIGHT ALIAS MISSES on first battery: generic words ("data", "missing", "signal", "detect") are
+  legitimately contested by other families (File map, Signal & spectral), so stranger phrasings
+  ranked 2-5 instead of 1. Fix per the standing rule taken LITERALLY: the user's exact mouth goes
+  in the aliases ("what is my data missing", "how faint a signal can you still detect", "assets
+  crashing at the same time", "the noise has patterns", ...). Battery now 19/19 top-1.
+* /tools surface: all 23 arc faculties (VOID + RESID + SCI + HDRIFT-era) exposed and callable;
+  skill_lint 0 inert aliases (every new alias resolves), 0 gaps across all four audit classes.
+* Standing, unchanged: the 6 IMPORT-ONLY modules (brdf/fountain/lexicon/lightcache/materialdata/
+  reasoning) predate this arc -- inherited review item, not new debt.
+
+LESSON, kept: internals (bls_power, period_scan, void_probe) are fine as building blocks behind a
+wired instrument, but any function a USER would name as a verb must be a faculty -- 'reachable by
+import' is not reachable. The sweep itself is cheap (one battery script); run it at every arc
+close, not only when asked.
+
+## SCI-2 SHIPPED -- the pulsar panel: Hellings-Downs with a sky-scramble null
+
+`holographic_pulsarpanel` (sampling_and_signal) + 2 faculties (hd_search, hd_panel_demo; p15 now
+26 members none shadowed) + 1 catalog entry (599 chars), discoverability 6/6, HTTP proven
+end-to-end (hd-consistent, shape=0.80, p_scramble=0.040 over the wire). Selftest green FIRST RUN
+-- the arc's accumulated discipline (matched nulls, p-floors, plants that own their seeds, plants
+the whitener cannot eat) is now paying forward.
+
+THE INSTRUMENT: hidden_drivers with GEOMETRY. Whiten each pulsar (closed-form AR rung -- the raw
+red-vs-red spurious-correlation trap is measured and pinned: whitening shrinks mean C^2 by >1.5x
+on independent red panels), correlate every pair, then TWO nulls for TWO claims:
+* AAFT per pulsar -- does ANY cross-correlation exist (spectra kept, alignment destroyed);
+* THE SKY SCRAMBLE -- permute positions against residuals: every pairwise correlation survives
+  untouched, only the angle-pattern dies. This is the discrimination that matters in PTA
+  practice: a common CLOCK ERROR (monopole) co-moves the whole panel and passes the first null
+  -- and FAILS the scramble, because any sky assignment explains a flat pattern equally well.
+
+THREE-WAY VERDICT EXPERIMENT, planted and passed: HD injection -> 'hd-consistent' (curve shape
+certified, amplitude reported as a LOWER BOUND -- per-pulsar whitening filters differ and
+attenuate shared signal; the SHAPE is the certified quantity, the amplitude is honest about its
+bias); monopole control -> 'correlated-not-sky-patterned' (the clock-error diagnosis); no
+injection -> 'independent'; impassable p-floor -> 'underpowered'.
+
+DESIGN NOTE, kept: the planted cross-pulsar process is WHITE IN TIME with HD covariance IN SPACE
+(Cholesky of chi(theta_ij) per timestep) precisely so the per-pulsar whitener cannot eat it --
+the segmenter-eats-boxes lesson applied at design time instead of discovered at test time. The
+real-world version of this trap (a GW background is ALSO red in time, so whitening DOES attenuate
+it) is stated in the module docstring as the standing caveat and the reason amplitude is a bound.
+
+VERIFIED: module selftest green (5 truths incl. monopole discrimination + whitening-trap pin);
+p15 26 members; HTTP; audits 0/0/0-0-0-0; capdoc+docgen (615 modules). Next per plan: SCI-3
+(spectral lines as fit_multitone + line-list codebook cleanup; fit_decay promotion) or SCI-4
+(spacing-ratio quantum regime classifier).
+
+## SCI-3 SHIPPED -- the spectroscopist's bench (lines, identity, shift, decay)
+
+`holographic_spectralline` (sampling_and_signal) + 3 faculties (spectral_lines, redshift_verdict,
+fit_decay; p15 now 29 members none shadowed) + 1 catalog entry (567 chars), discoverability 7/7,
+HTTP proven (redshift_verdict over the wire: z=0.02130 exact on the planted 0.0213, 6386 km/s).
+Rule-0: Doppler math (dedoppler) and fit_multitone EXISTED and are delegated to, not rebuilt;
+what was missing was the bench between a measured (wavelength, flux) spectrum and those verbs.
+
+FOUR INSTRUMENTS, each with its refusal:
+* find_lines -- median continuum (robust to the very lines being hunted), sub-bin parabolic
+  centers, emission AND absorption, max-hunting noise-only bootstrap gate. Lineless spectrum: 0.
+* identify_lines -- the cleanup discipline in scalar costume: nearest catalog entry accepted only
+  with a 2x margin over the runner-up; the planted interloper (Na-ish 589nm, not in the Balmer
+  catalog) is ABSTAINED by name, never force-matched.
+* redshift_verdict -- the Le Verrier move on a line list: one shared z must explain EVERY line vs
+  scrambled catalogs; a single match is numerology. Random centers refused (a coincidence is not
+  a redshift). Velocity via c*z; dedoppler holds the relativistic form.
+* fit_decay -- the RESID-5 geometric-decay estimator promoted: A exp(-lambda t)+C closed form,
+  bootstrap CI, shuffle-ordering null, truncation flag. Truth (0.03, 40, 5) recovered at
+  lambda=0.0298 with CI covering.
+
+FIVE KEPT NEGATIVES, all measured this session:
+* A PERMUTATION NULL CONTAINS ITS OWN LINES: shuffling the residual keeps the values, so the
+  null's max equals the real max and every true line read p=1.0. The multiplicity null must draw
+  from the NOISE-ONLY distribution (central residual, candidates clipped, bootstrap max-of-n).
+* THE SCAN'S BEST-z IS THE TOLERANCE WINDOW'S LOW EDGE (z read 0.0199 on truth 0.0213 -- off by
+  exactly tol): the scan picks the ASSIGNMENT, the VALUE is the median per-line z.
+* d-WEIGHTS READ LAMBDA 17% LOW: the log-linearisation's bias concentrates where SNR is small;
+  the delta method (Var[log d] ~ 1/d^2) says the weights are d^2 -- multi-seed bias then 3%
+  (0.0291 +/- 0.0002 on truth 0.0300).
+* THE COORDINATE-DESCENT BACKGROUND PASS MOVED THE WRONG WAY: a low lambda inflates the
+  late-time model, drags C down, which flattens lambda further -- the errors feed each other.
+  The background stays the tail median; the weighting carries the fix.
+* THE TRUNCATION FLAG'S OWN INPUT IS COMPROMISED: on a truncated record lambda biases HIGH
+  (0.072 on truth 0.030 at range=0.9/lambda), inflating lam*range past a tight bar -- the margin
+  (3.0 not 2.0) must absorb the very bias the flag reports.
+(and once more, the standing seed rule: the decay plant broke by drawing after the spectrum
+plants had consumed the shared rng -- dedicated seeds, every plant, no exceptions.)
+
+VERIFIED: module selftest green (9 truths incl. 4 refusals); p15 29 members; HTTP; audits
+0/0/0-0-0-0; capdoc+docgen (616 modules). Next per plan: SCI-4 (spacing-ratio quantum regime
+classifier: Poisson vs GOE/GUE with a refusing small-n gate; Bell correlations as permutation
+nulls) then SCI-5 (science_report front door + SCIENCE_INSTRUMENTS.md with citations).
+
+## SCI-4 SHIPPED -- quantum statistics: the spacing-ratio classifier and the Bell verdict
+
+`holographic_quantumstats` (sampling_and_signal) + 3 faculties (level_statistics, chsh_verdict,
+chsh_demo; p15 now 32 members none shadowed) + 1 catalog entry (580 chars), discoverability 7/7,
+HTTP proven (GOE spectrum classified over the wire, <r~>=0.5205).
+
+LEVEL_STATISTICS -- integrable vs chaotic with NO unfolding: the Atas spacing-ratio statistic
+cancels the local density exactly (a wrong unfolding manufactures or erases repulsion -- the
+classic instrument error of this field, sidestepped by construction). Poisson (2ln2-1, exact) /
+GOE / GUE classified by bootstrap-CI membership; the refusal is a SAMPLE-SIZE STATEMENT: at 50
+bulk levels the classes overlap and the verdict is 'indeterminate' with the n that would decide
+-- the p-floor lesson translated into levels. Edges trimmed (universality lives in the bulk).
+
+CHSH_VERDICT -- three gates and one alarm: pairing-scramble null (correlated at all? -- B
+shuffled within setting cells, marginals survive), bootstrap CI vs the CLASSICAL BOUND 2 (beyond
+every local-hidden-variable model, the whole polytope not a point null), and the TSIRELSON ALARM:
+a CI past 2*sqrt(2) reads 'suspect-instrument' -- quantum mechanics itself stops there, so the
+data is accusing the apparatus. THE INSTRUMENT THAT CAN CALL ITS OWN DATA BROKEN IS THE ONE WORTH
+TRUSTING NEAR A FAMOUS BOUND. Sign-convention maximisation is scored on the null identically
+(the convention is not evidence -- procedure-matched by construction).
+
+FOUR-WAY VERDICT EXPERIMENT, planted and passed: singlet statistics -> 'nonclassical (violates
+CHSH)'; an EXPLICIT local-hidden-variable model -> 'correlated-classical' (the assert says it in
+the code: if this fires, the instrument, not Bell, is wrong); coins -> 'independent';
+sign-aware post-selection -> 'suspect-instrument'.
+
+KEPT NEGATIVE (the broken plant's first draft): post-selecting on raw agreement only reached
+S=2.21 -- it inflates the positive-correlation cell and DEFLATES the three negative ones, and
+the effects nearly cancel. A real selection loophole inflates each cell toward ITS OWN
+favourable sign; the plant now does what the loophole actually does and clears Tsirelson.
+
+VERIFIED: module selftest green (8 truths incl. 3 refusals + the alarm); p15 32 members; HTTP;
+audits 0/0/0-0-0-0; capdoc+docgen (617 modules). Remaining per plan: SCI-5 -- science_report
+front door + docs/SCIENCE_INSTRUMENTS.md with the citation map.
+
+## SCI-5 SHIPPED -- the front door and the citation map: THE SCIENCE ARC IS COMPLETE
+
+`holographic_sciencereport` (sampling_and_signal) + 1 faculty (science_report; p15 now 33
+members none shadowed) + 1 catalog entry (579 chars, discoverability 6/6) +
+docs/SCIENCE_INSTRUMENTS.md (the faculty-to-ancestor map with real citations: Kovacs 2002;
+Hellings & Downs 1983; Oganesyan-Huse PRB 75 155111; Atas PRL 110 084101; CHSH PRL 23 880;
+Tsirelson LMP 4 93; Magesan-Gambetta-Emerson PRA 85 042311). Selftest green FIRST RUN --
+7 kinds routed (transit, HD panel, redshift, decay, GOE, CHSH violation, ladder terminal),
+unknown kind refused WITH the list. HTTP proven (decay report over the wire: lam=0.0487 on
+truth 0.05, half-life 14.2). The doc's own snippet was RUN in verification, not just written.
+
+DESIGN PRINCIPLE, stated at the door: kind is explicit and mandatory -- the door never guesses,
+because routing a light curve into a spectrum instrument returns a CONFIDENT nonsense verdict,
+and a wrong confident answer is the one failure a refusing instrument family must not commit at
+its own entrance. Every route inherits its instrument's refusals verbatim.
+
+THE ARC IN ONE PARAGRAPH (SCI-1..5, all shipped): a box-matched transit hunter whose null knows
+red noise from planets; a pulsar panel whose sky scramble tells gravitational-wave geometry from
+clock errors; a spectroscopist's bench that abstains between lines and refuses coincidence
+redshifts; a decay fitter whose weights carry the delta method and whose truncation flag absorbs
+its own bias; a spectrum classifier that needs no unfolding and refuses with the n that would
+decide; a Bell verdict that accuses the apparatus past Tsirelson; and one front door with the
+literature ancestry documented so the scientist can audit the method before trusting the
+verdict. Every instrument: one claim, one matched null, p-floors stated, refusal a result,
+kept negatives pinned in selftests.
+
+BACKLOG (unchanged priorities): onchain_traders.json hidden_drivers pass; HDRIFT open items
+(H0.4 Sinkhorn, H1.4 corpus-scale, audio/video adapters); ComfyUI node pack; Abstraction Ladder
+plan; hardware-blocked items; the 6 inherited IMPORT-ONLY modules.
+
+## HDRIFT OPEN ITEMS CLOSED -- H0.4, H1.4 (WIN), H2.2/H2.3 audio, H3.1/H3.2 video
+
+(onchain_traders.json hidden-drivers pass: CANCELLED by direction -- poked enough, not
+interesting. Removed from the backlog, recorded so no future session resurrects it.)
+
+**H0.4 -- Sinkhorn coupling: ESTABLISHED, in its honest form.** Full Sinkhorn needs the
+individual data points, which the drift model deliberately no longer stores (the moments ARE
+the model); what the substrate can express is a moment-native TWO-SIDED BALANCING -- each
+particle's attraction scaled by z_data/z_batch (two dot products), one Sinkhorn iteration worn
+by moments. Measured on the 3-mode collapse plant, 6 seeds: worst-mode share 0.236 +/- 0.020 vs
+rownorm 0.172 +/- 0.059 -- and the headline is the VARIANCE: rownorm has collapse seeds
+(0.08, 0.10), sinkhorn never dropped below 0.20; novelty_min 3x higher (less memorisation).
+He et al.'s two-sided-scaling claim holds on this substrate. Default stays rownorm (backward
+compatible; costs 2n extra dot products per step). Pinned in the hdrift selftest;
+`coupling=` exposed through drift_generate/generate_audio/generate_video.
+
+**H1.4 -- THE CORPUS-SCALE VERDICT: WIN.** 60-image deterministic corpus (blob pairs, three
+separation modes, orientation within mode), 3 seeds: the drift model is the ONLY contender
+simultaneously on-manifold (novelty 0.71 +/- 0.04), non-memorised (memorised_frac 0.00), and
+JOINT-structure-correct (in-mode 1.00 +/- 0.00). Strawman-A (copies): novelty 0.00. Strawman-B
+(independent marginals): in-mode 0.83, novelty 2.03 -- it breaks exactly the correlation the
+model exists to carry. Train 2.3s, 30 images in 6.2s. KEPT NEGATIVE: image-space RMS is
+RENDERER-FLOOR-SATURATED at this scale (all contenders within 1.3% of the 0.152 soft-render
+floor) -- the verdict lives in drift space, stated, not hidden. Regression pinned in the
+selftest. H1.5 (fallback representation) is NOT NEEDED and stays unbuilt -- the pre-registered
+pivot exists only for a refutation that did not happen.
+
+**H2.2/H2.3 -- audio: the abstention ladder IS the adapter** (holographic_driftaudio, 2
+faculties). A clip maps by what it honestly is: (freq, amp) tone parameters when fit_multitone's
+r2 gate passes -- frequency-sorted, PHASE IS GAUGE and deliberately dropped (the H1.1
+canonical-order move one layer deeper) -- or a log-band envelope when it is a STATIONARY texture
+(median frame-cosine floor), or refused (a chirp: one point cannot honestly describe it in v1).
+A corpus must be ONE space: mixed corpora refuse with the mode counts. Resynthesis
+deterministic: exact additive sine (store the formula -- the HRNN move) / seeded envelope-shaped
+noise. Selftest: generated tone INTERVALS stay in the corpus's three interval modes (the joint
+quantity again), textures stay within 3x the training self-NN spectral distance, chirp and mixed
+corpus refused, WAV round-trip pinned at the writer pair's REAL contract (two LSBs -- measured
+3.9e-5, the 32767/32768 convention off-by-one; the test pins the pair as it is).
+KEPT NEGATIVE (probe-the-live-code again): fit_multitone's params are [dc, cos-amp, sin-amp,
+...] with frequencies in their OWN key -- assuming [dc, f, a, ...] produced ratios of 3e6.
+
+**H3.1/H3.2 rung (a) -- video as keyframe-pair drift** (holographic_driftvideo, 2 faculties).
+A clip's point is [start splats, END-MINUS-START]: motion is not machinery, it is the JOINT
+STRUCTURE between keyframes -- precisely what H1.4 proved drift preserves and marginals
+scramble. End splats re-matched to start splats by nearest centre so the delta is motion, not a
+relabelling (the gauge lesson, third costume). Generation interpolates splat params across
+frames; coherence is measured, not asserted (per-clip max frame-to-frame RMS rides in the
+audit). Selftest: generated SPEEDS stay in the corpus's three velocity modes, frames coherent,
+single-frame corpus refused. Rung (b) (bind time under a carrier, whole-trajectory drift)
+remains open as the next escalation IF multi-segment motion is ever needed -- rung (a) closes
+the plan's Phase 3 for linear segments.
+
+VERIFIED: hdrift selftest green (now incl. H0.4 + H1.4 pins), driftaudio green, driftvideo
+green FIRST RUN, p15 37 members none shadowed, HTTP 4/4 new faculties exposed +
+train_audio_drift round-trip (mode 'tones' over the wire), audits 0/0/0-0-0-0, capdoc+docgen
+620 modules. HDRIFT plan status: every phase closed at its planned rung; remaining seeds for a
+future arc: rung (b) trajectories, H1.6 media-level rendered editing-verb demos, byte-
+determinism sweep across platforms (needs other hardware), panel review.
+
+## CLIENT BACKLOG (Poly Studio) -- ALL ELEVEN ITEMS CLOSED, substrate applied where it earns
+
+Directive honored the engine's own way: Rule-0 first on every item, delegate to existing
+machinery where it exists, record where the fancy tech does NOT apply as audited negatives
+(packaging files are not HRNN problems; saying so is the discipline, not a failure of it).
+
+WHERE THE ENGINE'S OWN TECH CARRIED THE FIX (Rule-0 paying, three times):
+* P-4: cluster_decimate(target_faces=) DELEGATES to the shared monotone-knob bisection engine
+  (holographic_numerics.bisect_to_budget -- the primitive already behind decimate_to and
+  ratedistortion). Measured: targets 2k/8k/20k hit at 0.5/1.6/0.3% error. No new search loop
+  exists anywhere.
+* S-5: to_jit_expr() is the THIRD DIALECT of the SDF tree's existing emitter family (GLSL,
+  WGSL/C/JS/Zig), verified by the family's standing discipline -- BOTH EXECUTED, not asserted:
+  12/12 supported kinds agree with _eval to 6.6e-13 on random points; bound-only kinds (the
+  INEXACT set), octahedron (exact only in branchy form -- the one-liner is a bound and
+  disagreed by 0.32, measured) and menger REFUSE with the reason. render_sdf docs now name the
+  producer. S-3 fell out of the same fact: THE ANALYTIC FORM IS THE TYPE -- SDF.preserves_
+  analytic=True on every node, Mesh has none, getattr(x,'preserves_analytic',False) is the
+  documented branch (PACKAGING.md).
+* P-2: textured_lod's >500s rebake -- the fast path (rebake_texture method='scatter', ~1500x)
+  EXISTED and was simply never routed to. method='auto' now switches at 2,000 decimated faces
+  (measured: project could not finish 40k faces in 25 min; scatter 8.2s at ~1.5x its surface
+  error, both bands dominated by decimation displacement). Client's shape: 23.3s.
+
+C-1 (THE P1) -- terrain.erode runaway: FIXED by the docstring's own prescription, four legs,
+each measured: GLOBAL MASS CONSTRAINT (W_total = capacity*sqrt(h*w), per-droplet budget
+W_total/droplets -- droplet count becomes a CONVERGENCE axis: mean|d| 0.0018 -> 0.0007 across
+3k..40k, peak 0.590-0.591 everywhere, the old 60k-droplet -4.9e8 case now inside input range);
+terminal velocity; erode/deposit BRUSH SYMMETRY (point-deposit was the spike factory); the MASS
+LEAK closed (droplets dying at pit bottoms deposit their load; floors ran to -7.2 before).
+KEPT NEGATIVE: a FIXED per-droplet budget fails at high counts -- pits are ATTRACTORS and
+~1-unit dying loads piled into spikes (peak 2.37 at 20k); the budget must shrink with the count.
+capacity is now a stable WORK knob (1/3/6 -> moved 21/52/85, peak bounded). Client reproducer
+pinned; scale invariance now 2e-8.
+
+P-1 -- render_sdf(mask=): every stage per-ray independent, so gather/scatter at FULL quality;
+25% mask = 14% cost, masked pixels BIT-IDENTICAL (pinned), mask+post raises (post mixes across
+pixels). S-2 -- ZERO module-scope heavy imports remain (pyfftw/PIL/sympy/numba -> lazy _ensure +
+PEP 562 __getattr__; from-import contracts intact, jit kernels wrap on first call, fft numpy
+path byte-identical). S-1 -- flat_mount.py ships the two-way shim, BOTH directions executed
+(packaged mount aliases flat names; pure-flat mount synthesises the package). S-4 -- VERSION
+created (0.9.0, was absent entirely; setup.py had been falling back to 0.0.0) and ships in the
+zip; capabilities.json is plain JSON, no import needed, documented. S-6 -- checkerboard AST
+audit: no top-level side effects (no assigns, no expression statements); closed as the client
+suspected. P-3 -- docs/SDF_COOKBOOK.md GENERATED from the live module by tools/
+gen_sdf_cookbook.py (12 constructors, 22 methods, signatures cannot drift) with the worked
+example EXECUTED as a gate before the page writes.
+
+INSTRUMENT ERRORS OF MY OWN, kept: (1) first P-2 ground truth ran through transfer_uv on a
+fragmented atlas -- the documented-invalid path -- and indicted both bake routes equally;
+rebuilt analytically. (2) random-noise textures are the WRONG meter for comparing resamplers
+(sub-texel offsets read as huge diffs); smooth textures, then surface-sampled truth.
+
+VERIFIED: terrain / raymarch / sdf / meshqem / meshtools selftests green; compileall clean;
+audits 0/0/0-0-0-0; flat mount executed both ways; cookbook example executed.
+
+## CI FIX -- D1 dark-capability regression, FIFTH WAVE (this session caused it)
+
+test_no_dark_method_capabilities red: four bare method-names (generate, train_model,
+drift_train, drift_generate) fell out of the top-15 for their OWN names. Mechanism identical to
+waves 1-4, and the cause was ours: the science-instrument + media-drift merges added ~15
+descriptively-titled entries dense with "generate"/"train"/"drift" language, and ranking is
+GLOBAL -- the methods did not change, their neighbours did. Fixed the documented way, in the
+documented place (_METHOD_ALIASES, wave-annotated): aliases from the caller's mouth ("sample
+new points from a drift model", "continue this text", ...), verified BOTH ways -- dark list
+empty AND every new alias routes top-3 (an inert alias is the other failure class; skill_lint
+--no-memo confirms 0). All tests in tests/test_buried_audit.py pass by direct execution.
+
+LESSON, sharpened: every merge that registers descriptively-titled entries should re-run the
+dark-capability sweep BEFORE shipping -- the discoverability battery checks the NEW entries'
+phrasings, but darkness strikes the OLD bare names, and only the global sweep sees it. Added to
+the arc-close ritual next to the 19-phrase battery.

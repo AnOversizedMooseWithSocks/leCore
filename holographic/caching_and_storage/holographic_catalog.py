@@ -554,6 +554,19 @@ _METHOD_ALIASES = {
     # method-name `explain` (why are two RECORDS similar) out of the top-15 for its own name. The
     # descriptive title outranks the generic verb, exactly as the earlier waves did. Aliases written
     # from what a caller comparing two records would actually type.
+    # D1, FIFTH WAVE, and this session caused it: the science-instrument + media-drift merges
+    # (~15 new descriptively-titled entries full of "generate"/"train"/"drift" language) pushed
+    # four more bare names out of the top-15 for their own name. Same mechanism as every wave:
+    # ranking is global, the neighbours changed, the methods did not. Aliases from the caller's
+    # mouth, per the standing rule.
+    "generate": ("continue this text", "next tokens from the model", "text continuation",
+                 "sample from the sequence model", "autocomplete from schema"),
+    "train_model": ("train a classifier on sequences", "fit a trajectory classifier",
+                    "label sequences and learn", "one call training front door"),
+    "drift_train": ("train a generative model on points", "learn a distribution from samples",
+                    "fit a drift model", "moments from my data", "point cloud generative model"),
+    "drift_generate": ("sample new points from a drift model", "generate from the moments",
+                       "draw samples like my data", "run the drift sampler"),
     "explain": ("why are these two records similar", "compare two records field by field",
                 "explain a match", "why did these match", "per-role decode of two records"),
     "build_creature": ("make a creature", "generate a creature", "build a whole creature",

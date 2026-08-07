@@ -706,7 +706,21 @@ def decimate_to(mesh, target_faces=None, target_fraction=None, keep_uv="auto",
     return out, report
 
 
-def cluster_decimate(mesh, grid=16, keep_uv="auto"):    # keep_uv: "auto" (transfer only if the atlas allows) | True (force) | False
+def cluster_decimate(mesh, grid=16, keep_uv="auto", target_faces=None, tol=0.10):    # keep_uv: "auto" (transfer only if the atlas allows) | True (force) | False
+    """(signature note, client P-4) `target_faces=` requests a face BUDGET directly instead of
+    guessing grids: the grid is bisected to the budget by the engine's shared monotone-knob
+    primitive (holographic_numerics.bisect_to_budget -- the same move behind decimate_to and
+    ratedistortion, delegated, not re-rolled), accepting the closest grid within `tol` (10%
+    default). For a guaranteed silhouette, decimate_to remains the budgeted tool of record --
+    this is the fast clustering path with the guessing loop moved inside."""
+    if target_faces is not None:
+        from holographic.misc.holographic_numerics import bisect_to_budget
+        out, g_hit, err = bisect_to_budget(
+            lambda g: cluster_decimate(mesh, grid=int(g), keep_uv=keep_uv),
+            int(target_faces), lo=4, hi=max(int(grid), 8), midpoint="arith",
+            max_iters=12, tol=float(tol), bracket=True,
+            cmp=lambda m_, t: len(m_.faces) < t, key=lambda m_: len(m_.faces))
+        return out
     """PARALLEL decimation by vertex clustering (Rossignac-Borrel / Lindstrom) -- the O(n) counterpart of the greedy
     qem_decimate, for an IMPORTED mesh that has no field behind it. Partition the bounding box into a grid^3 lattice
     (the same floor-divide spatial binning the engine's tilers use), collapse every vertex in a cell to ONE

@@ -239,6 +239,33 @@ class SDF:
             verdict = "heavy -- likely offline or low-res realtime; consider baking or simplifying"
         return {"alu": alu, "nodes": n, "depth": d, "iterative": iterative[0], "verdict": verdict}
 
+    # analytic-preservation contract (client S-3): an SDF node IS the analytic form. Every
+    # combinator/transform method on this class returns another SDF, so the analytic description
+    # survives by TYPE -- `result.preserves_analytic` is True on every node. Operations that
+    # return a Mesh (mesh_from_sdf, decimators, remeshers) have crossed the boundary and the
+    # analytic form is gone; a Mesh has no such attribute, and `getattr(x, "preserves_analytic",
+    # False)` is the documented branch. The contract is the type; this flag makes it spellable.
+    preserves_analytic = True
+
+    def to_jit_expr(self):
+        """Emit this tree as a SINGLE symbolic expression string in (x, y, z) -- the `jit_expr=`
+        that unlocks render_sdf's compiled fast path (client S-5: the fast path existed but
+        nothing produced its input). This is the THIRD dialect of the tree's emitter family
+        (GLSL via to_glsl, WGSL/C/JS/Zig via the dialect emitters); sympy needs one expression
+        rather than statements, so coordinate transforms substitute into the coordinate strings
+        instead of binding temporaries.
+
+        Supported: every exact primitive and boolean, smooth/fillet union, translate / scale /
+        rotate / mirror / round / onion / elongate / repeat. REFUSED with the reason: the
+        INEXACT set (twist, displace, bend, ellipsoid, fold_fractal, mandelbulb -- their fields
+        are bounds, and the compiled marcher cannot be told to under-step) and menger (an
+        iterative loop, not a closed form). Raises ValueError naming the offending kind.
+
+        Verified the way the emitter family is always verified -- BOTH EXECUTED, not asserted:
+        the selftest evaluates the emitted string numerically (Min/Max/Abs/sqrt/Mod mapped to
+        numpy) against node.eval on random points to 1e-9."""
+        return _emit_sympy(self, ("x", "y", "z"))
+
     def to_glsl(self, name="map", camera="fixed"):
         """Emit a complete Shadertoy-ready fragment shader for this SDF (see _emit_shader). camera="fixed" (default)
         is the classic head-on view, byte-identical to the historic output; camera="uniforms" emits an orbit camera
@@ -867,6 +894,97 @@ def _mandelbulb_glsl(power, iters, bailout):
             f"  }}\n  return 0.5*log(max(r,1e-9))*max(r,1e-9)/abs(dr);\n}}")
 
 
+def _emit_sympy(node, xyz):
+    """The sympy-dialect tree walk behind SDF.to_jit_expr (see its docstring). `xyz` is the
+    coordinate EXPRESSION triple at this node -- transforms recurse with substituted strings."""
+    k, p, ch = node.kind, node.params, node.children
+    x, y, z = xyz
+
+    def wrap(s):
+        return "(" + s + ")"
+    if k == "sphere":
+        return f"sqrt({x}**2 + {y}**2 + {z}**2) - {p[0]:.9g}"
+    if k == "plane":
+        return f"{y} - {p[0]:.9g}"
+    if k == "box":
+        qx, qy, qz = (f"(Abs({c}) - {e:.9g})" for c, e in zip(xyz, p))
+        outside = f"sqrt(Max({qx},0)**2 + Max({qy},0)**2 + Max({qz},0)**2)"
+        inside = f"Min(Max({qx}, Max({qy}, {qz})), 0)"
+        return f"{outside} + {inside}"
+    if k == "torus":
+        return f"sqrt((sqrt({x}**2 + {z}**2) - {p[0]:.9g})**2 + {y}**2) - {p[1]:.9g}"
+    if k == "cylinder":
+        dr = f"(sqrt({x}**2 + {z}**2) - {p[1]:.9g})"
+        dy = f"(Abs({y}) - {p[0]:.9g})"
+        return (f"Min(Max({dr}, {dy}), 0) + sqrt(Max({dr},0)**2 + Max({dy},0)**2)")
+    if k == "capsule":
+        h, r = p
+        cy = f"({y} - Min(Max({y}, {-h:.9g}), {h:.9g}))"
+        return f"sqrt({x}**2 + {cy}**2 + {z}**2) - {r:.9g}"
+    if k == "octahedron":
+        # _eval uses iq's EXACT branchy octahedron; the tempting (|x|+|y|+|z|-s)*0.577 one-liner
+        # is only the bound form and disagreed with _eval by 0.32 on the battery (measured) --
+        # the emitter refuses rather than ship a shader that disagrees with the numpy field.
+        raise ValueError("to_jit_expr: 'octahedron' is exact only in branchy form -- use the "
+                         "numpy/GLSL paths (the single-expression form is a bound, refused)")
+    if k == "cone":
+        # iq's exact capped cone is long; the bound form (like ellipsoid) would be INEXACT, so
+        # cone stays supported only through the numpy path -- refuse honestly here.
+        raise ValueError("to_jit_expr: 'cone' has no single-expression exact form wired yet -- "
+                         "use the numpy render path (or contribute the closed form)")
+    if k in ("union", "intersect", "subtract"):
+        a = _emit_sympy(ch[0], xyz); b = _emit_sympy(ch[1], xyz)
+        if k == "union":
+            return f"Min({a}, {b})"
+        if k == "intersect":
+            return f"Max({a}, {b})"
+        return f"Max({a}, -({b}))"
+    if k in ("smooth_union", "fillet_union"):
+        a = _emit_sympy(ch[0], xyz); b = _emit_sympy(ch[1], xyz)
+        kk = max(float(p[0]), 1e-9)
+        # polynomial smin -- expressible in Min/Max/Abs, matching _eval's formula
+        return (f"Min({a}, {b}) - Max({kk:.9g} - Abs(({a}) - ({b})), 0)**2 / {4*kk:.9g}")
+    if k == "translate":
+        nx = f"({x} - {p[0]:.9g})"; ny = f"({y} - {p[1]:.9g})"; nz = f"({z} - {p[2]:.9g})"
+        return _emit_sympy(ch[0], (nx, ny, nz))
+    if k == "scale":
+        s = float(p[0])
+        sub = _emit_sympy(ch[0], (f"({x}/{s:.9g})", f"({y}/{s:.9g})", f"({z}/{s:.9g})"))
+        return f"({sub}) * {s:.9g}"
+    if k == "rotate":
+        # match _eval's semantics EXACTLY (probed, not assumed): params are (axis, angle) and the
+        # evaluator does `ch[0].eval(P @ Rm)` -- a row vector times Rm, so new_i = sum_j c_j*Rm[j][i]
+        Rm = _rot_matrix(p[:3], p[3])
+        nxyz = tuple("(" + " + ".join(f"{Rm[j][i]:.12g}*{c}" for j, c in enumerate(xyz)) + ")"
+                     for i in range(3))
+        return _emit_sympy(ch[0], nxyz)
+    if k == "mirror":
+        # params are (axis, plane) -- reflect about coordinate == plane (matched to _eval)
+        axis, pl = int(p[0]), float(p[1])
+        nxyz = list(xyz)
+        nxyz[axis] = f"(Abs({xyz[axis]} - {pl:.9g}) + {pl:.9g})"
+        return _emit_sympy(ch[0], tuple(nxyz))
+    if k == "round":
+        return f"({_emit_sympy(ch[0], xyz)}) - {p[0]:.9g}"
+    if k == "onion":
+        return f"Abs({_emit_sympy(ch[0], xyz)}) - {p[0]:.9g}"
+    if k == "elongate":
+        # matched to _eval's EXACT opElongate: q = p - clamp(p, -h, h), child(q) + min(max(q), 0)
+        q = tuple(f"({c} - Min(Max({c}, {-e:.9g}), {e:.9g}))" for c, e in zip(xyz, p))
+        inner = _emit_sympy(ch[0], q)
+        return f"({inner}) + Min(Max({q[0]}, Max({q[1]}, {q[2]})), 0)"
+    if k == "repeat":
+        nxyz = tuple(c if e <= 0 else f"(Mod({c} + {e/2:.9g}, {e:.9g}) - {e/2:.9g})"
+                     for c, e in zip(xyz, p))
+        return _emit_sympy(ch[0], nxyz)
+    if k in INEXACT:
+        raise ValueError("to_jit_expr refuses %r: its field is a BOUND, not an exact distance, "
+                         "and the compiled marcher cannot be told to under-step (the INEXACT "
+                         "contract) -- use the numpy render path" % k)
+    raise ValueError("to_jit_expr: %r has no closed-form single expression (iterative kinds "
+                     "stay on the numpy/GLSL paths)" % k)
+
+
 def _emit_body(node, pvar, ctr, helpers):
     """Return (statements, distance_expr) for `node` at point variable `pvar`. `helpers` is a dict
     {fn_name: glsl_source} accumulating the helper functions this tree needs."""
@@ -1056,7 +1174,34 @@ def node_kinds(node):
 
 # ---------------------------------------------------------------------------
 
+def _selftest_jit_expr():
+    """S-5 pin, the emitter family's standing discipline (BOTH EXECUTED, not asserted): the
+    sympy-dialect expression must agree numerically with _eval; the bound-only kinds must
+    refuse rather than ship a shader that disagrees with the numpy field."""
+    env = {"sqrt": np.sqrt, "Abs": np.abs, "Min": np.minimum, "Max": np.maximum, "Mod": np.mod}
+    rng = np.random.default_rng(0)
+    P = rng.uniform(-2, 2, (200, 3))
+    nodes = [sphere(0.7), box(0.5, 0.3, 0.8),
+             sphere(0.8).union(box(0.4, 0.4, 0.4)).subtract(cylinder(1.0, 0.2)),
+             sphere(0.6).smooth_union(box(0.5, 0.2, 0.5), 0.25),
+             sphere(0.5).translate((0.3, -0.2, 0.1)).scale(1.4).rotate((0, 1, 0), 0.7),
+             sphere(0.25).repeat((1.2, 0.0, 1.2))]
+    for node in nodes:
+        expr = node.to_jit_expr()
+        got = eval(expr, {"__builtins__": {}}, dict(env, x=P[:, 0], y=P[:, 1], z=P[:, 2]))
+        err = float(np.max(np.abs(got - node.eval(P))))
+        assert err < 1e-9, "to_jit_expr disagrees with _eval on %s (%.2e)" % (node.kind, err)
+    for bad in (box(0.4, 0.4, 0.4).twist(1.0), menger(3)):
+        try:
+            bad.to_jit_expr()
+            raise RuntimeError("%s must refuse" % bad.kind)
+        except ValueError:
+            pass
+    assert sphere(1.0).preserves_analytic and sphere(1.0).translate((1, 0, 0)).preserves_analytic
+
+
 def _selftest():
+    _selftest_jit_expr()
     # (1) PRIMITIVES are correct distances on known points.
     s = sphere(1.0)
     assert abs(s.eval([[2, 0, 0]])[0] - 1.0) < 1e-9            # outside by 1

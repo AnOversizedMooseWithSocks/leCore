@@ -18,14 +18,27 @@ the default, and switching is an explicit, eyes-open opt-in.
 
 import numpy as np
 
-try:
-    import pyfftw
-    pyfftw.interfaces.cache.enable()                         # cache FFTW plans across calls
-    _PF = pyfftw.interfaces.numpy_fft                        # numpy-compatible drop-in
-    HAS_PYFFTW = True
-except Exception:                                            # pragma: no cover - exercised only without pyfftw
-    HAS_PYFFTW = False
-    _PF = None
+# S-2: pyfftw imported lazily. rfft/irfft only touch _PF when the backend has been switched via
+# use_pyfftw(), which runs _ensure_pyfftw() first -- so the numpy default path never imports it.
+
+
+def _ensure_pyfftw():
+    g = globals()
+    if "HAS_PYFFTW" in g:
+        return
+    try:
+        import pyfftw
+        pyfftw.interfaces.cache.enable()                     # cache FFTW plans across calls
+        g["_PF"], g["HAS_PYFFTW"] = pyfftw.interfaces.numpy_fft, True
+    except Exception:                                        # pragma: no cover - exercised only without pyfftw
+        g["_PF"], g["HAS_PYFFTW"] = None, False
+
+
+def __getattr__(name):
+    if name in ("_PF", "HAS_PYFFTW"):
+        _ensure_pyfftw()
+        return globals()[name]
+    raise AttributeError(name)
 
 _BACKEND = "numpy"                                           # ALWAYS numpy unless explicitly switched (determinism)
 
@@ -34,6 +47,7 @@ def use_pyfftw(on=True):
     """Opt into the pyFFTW backend (off by default). Raises if pyfftw is missing. NOTE: measured to REGRESS at
     typical dims (see benchmark()); enable only for large-single-transform (D>=4096) workloads."""
     global _BACKEND
+    _ensure_pyfftw()
     if on and not HAS_PYFFTW:
         raise ImportError("pyfftw is not installed (see requirements-accel.txt). It also regresses at typical "
                           "dimensions -- run holographic_fft.benchmark() before enabling.")
@@ -63,6 +77,7 @@ def irfft(x, n=None, axis=-1):
 def benchmark(dims=(512, 1024, 2048, 4096, 8192), batched=((256, 1024), (1000, 1024), (4000, 2048)), reps=60):
     """Reproduce the numpy-vs-pyFFTW comparison that justifies keeping numpy the default. Returns a dict of
     {label: speed_ratio (numpy_time / pyfftw_time)} -- ratios < 1 mean pyFFTW is SLOWER. Needs pyfftw installed."""
+    _ensure_pyfftw()
     if not HAS_PYFFTW:
         return {"error": "pyfftw not installed"}
     import time

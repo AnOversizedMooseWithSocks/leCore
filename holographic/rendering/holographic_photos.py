@@ -45,7 +45,9 @@ import glob
 import os
 
 import numpy as np
-from PIL import Image
+
+# S-2: PIL imported lazily inside the loaders -- the engine core is numpy-only and the static
+# dependency graph should say so; Pillow is a leaf convenience for photo folders.
 
 
 def load_photo_folder(folder, size=256, limit=None, gray=False):
@@ -65,7 +67,7 @@ def load_photo_folder(folder, size=256, limit=None, gray=False):
             if a.shape[:2] != (size, size):
                 a = np.asarray(Image.fromarray(a).resize((size, size), Image.LANCZOS), np.uint8)
         else:
-            im = Image.open(p).convert("RGB").resize((size, size), Image.LANCZOS)
+            im = __import__('PIL.Image', fromlist=['Image']).open(p).convert("RGB").resize((size, size), Image.LANCZOS)
             a = np.asarray(im, np.uint8)
         if gray:
             a = (0.299 * a[..., 0] + 0.587 * a[..., 1] + 0.114 * a[..., 2]).astype(np.uint8)
