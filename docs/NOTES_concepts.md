@@ -54042,3 +54042,20 @@ rebuilt analytically. (2) random-noise textures are the WRONG meter for comparin
 
 VERIFIED: terrain / raymarch / sdf / meshqem / meshtools selftests green; compileall clean;
 audits 0/0/0-0-0-0; flat mount executed both ways; cookbook example executed.
+
+## CI FIX -- D1 dark-capability regression, FIFTH WAVE (this session caused it)
+
+test_no_dark_method_capabilities red: four bare method-names (generate, train_model,
+drift_train, drift_generate) fell out of the top-15 for their OWN names. Mechanism identical to
+waves 1-4, and the cause was ours: the science-instrument + media-drift merges added ~15
+descriptively-titled entries dense with "generate"/"train"/"drift" language, and ranking is
+GLOBAL -- the methods did not change, their neighbours did. Fixed the documented way, in the
+documented place (_METHOD_ALIASES, wave-annotated): aliases from the caller's mouth ("sample
+new points from a drift model", "continue this text", ...), verified BOTH ways -- dark list
+empty AND every new alias routes top-3 (an inert alias is the other failure class; skill_lint
+--no-memo confirms 0). All tests in tests/test_buried_audit.py pass by direct execution.
+
+LESSON, sharpened: every merge that registers descriptively-titled entries should re-run the
+dark-capability sweep BEFORE shipping -- the discoverability battery checks the NEW entries'
+phrasings, but darkness strikes the OLD bare names, and only the global sweep sees it. Added to
+the arc-close ritual next to the 19-phrase battery.
