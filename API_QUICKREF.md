@@ -79,6 +79,7 @@
     - `to_tree(self)` -- A nested tuple where the op name folds in the params (e.g.
     - `to_dsl(self)` -- A compact s-expression: (kind p0 p1 ...
     - `cost(self)` -- Estimate the per-ray evaluation COST of this SDF tree (W2) -- a machine-model annotation for deciding if a scene is cheap enough to raymarch in real time.
+    - `to_jit_expr(self)` -- Emit this tree as a SINGLE symbolic expression string in (x, y, z) -- the `jit_expr=` that unlocks render_sdf's compiled fast path (client S-5: the fast path existed but nothing produced its input).
     - `to_glsl(self, name='map', camera='fixed')` -- Emit a complete Shadertoy-ready fragment shader for this SDF (see _emit_shader).
 - `sphere(r=1.0)` -- A sphere of radius `r`, centred at the origin.
 - `box(bx=1.0, by=1.0, bz=1.0)` -- An axis-aligned box with half-extents (bx, by, bz) centred at the origin -- so the box spans [-bx, bx] on x, etc.
