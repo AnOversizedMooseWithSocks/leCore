@@ -1,6 +1,7 @@
 # liblecore — Product Requirements
 
-*Status: proposed · Product boundary and rollout plan for a portable C implementation of leCore's frozen vector algebra.*
+*Status: active · ABI-0 implementation preview and rollout plan for a portable C implementation of leCore's
+frozen vector algebra.*
 
 ---
 
@@ -19,9 +20,24 @@ The primary product value is **one interoperable algebra across projects**, not 
 Optimized FFT, SIMD, and platform backends are replaceable microarchitecture. They ship only after they preserve
 the ISA's tolerant values and exact observable decisions and demonstrate a measured win in a named workload.
 
-The canonical C source will live in this repository under an optional `native/` tree and retain leCore's MIT
-license. Consumers will use pinned release artifacts rather than copying neighboring repositories or relying on a
-machine-global development checkout.
+The canonical C source now lives in this repository under `native/liblecore/` and retains leCore's MIT license.
+The current artifact is an unstable ABI-0 implementation preview: it is suitable for local conformance and
+integration work, but it is not a published release and has not earned downstream adoption claims. Consumers will
+ultimately use pinned release artifacts rather than copying neighboring repositories or relying on a machine-global
+development checkout.
+
+### 1.1 Current product state — 2026-08-08
+
+The branch contains the complete intended ABI-0 kernel surface: direct and portable radix-2 f64/f32 HRR,
+caller-owned batch and mixed scoring, the optional descriptor codec, CMake and `pkg-config` packaging,
+amalgamation, C/C++ examples, strict Python bindings and differential fixtures, audited Rust bindings, WebAssembly
+smoke tooling, ABI symbol guards, benchmarks, and bounded fuzz targets. The delivered artifacts and their local
+validation map to backlog IDs in [`ENG.md` section 16](ENG.md#16-detailed-backlog).
+
+This snapshot does **not** claim a release, green GitHub-hosted CI, a cross-platform `AUTO` crossover policy, or
+Signal/NoSQLite integration. `AUTO` deliberately continues to select the direct backend until representative
+adopter evidence earns a static dispatch rule. Publication, Tier 1 CI evidence, and all downstream migration gates
+remain open.
 
 ## 2. Problem
 
@@ -130,7 +146,7 @@ extension process that prevents experimental semantics from entering the base AB
 
 ## 6. Product scope
 
-### 6.1 Version 1 scope
+### 6.1 Target version 1 scope
 
 - A stable C11 ABI with C++ linkage guards and symbol-visibility macros.
 - Opaque contexts with explicit dimension, composite profile, validation mode, and backend; the profile fixes the
@@ -234,18 +250,18 @@ The conformance kit is a product surface, not internal test debris. It includes:
 
 ## 8. Functional requirements
 
-| ID | Requirement | Acceptance summary |
-|---|---|---|
-| PR-F01 | Implement the caller-supplied-vector ISA subset | Bind, unbind, involution, bundle, cosine, permutation, and cleanup pass the Python definitional reference; `random_vector` is explicitly excluded until a portable generator is versioned. |
-| PR-F02 | Support f64 and f32 HRR profiles | Both profiles have typed APIs, published tolerances, and no implicit conversion. |
-| PR-F03 | Preserve exact decisions | Cleanup ties select the lowest stable index; replay fixtures agree across conformant backends. Any later top-k utility orders score-descending/index-ascending. |
-| PR-F04 | Be zero-safe | Zero normalization, zero-sum bundle, and zero-norm cosine return the documented result without NaN or division by zero. |
-| PR-F05 | Support repeated calls without allocation | Allocation instrumentation reports zero allocations after context initialization. |
-| PR-F06 | Expose batch operations | Batch results conform to scalar operations and define layouts, strides, tails, and allowed aliasing. |
-| PR-F07 | Identify compatibility | Callers can query and compare ABI, ISA, profile, dtype, dimension, backend, and feature versions. |
-| PR-F08 | Fail loudly without rewriting raw semantics | Null, size, profile, and backend errors return documented statuses; raw mode preserves the ISA's NaN/Inf propagation and cleanup behavior, while an explicit checked boundary rejects non-finite input; unavailable acceleration is never silently substituted after an explicit request. |
-| PR-F09 | Cross target boundaries | The same source builds and passes smoke tests on supported native and Emscripten targets. |
-| PR-F10 | Keep policy outside the kernel | No base API refers to pilots, residents, hypotheses, databases, routes, or other domain concepts. |
+| ID | Requirement | State | Acceptance summary |
+|---|---|---|---|
+| PR-F01 | Implement the caller-supplied-vector ISA subset | Implemented · locally verified | Bind, unbind, involution, bundle, cosine, permutation, and cleanup pass the Python definitional reference; `random_vector` is explicitly excluded until a portable generator is versioned. |
+| PR-F02 | Support f64 and f32 HRR profiles | Implemented · locally verified preview | Both profiles have typed APIs, documented preview tolerances, and no implicit conversion; the stable f32 bound remains adopter-gated. |
+| PR-F03 | Preserve exact decisions | Implemented · locally verified | Cleanup ties select the lowest stable index; replay fixtures agree across conformant backends. Any later top-k utility orders score-descending/index-ascending. |
+| PR-F04 | Be zero-safe | Implemented · locally verified | Zero normalization, zero-sum bundle, and zero-norm cosine return the documented result without NaN or division by zero. |
+| PR-F05 | Support repeated calls without allocation | Implemented · locally verified | Allocation instrumentation reports zero allocations after context initialization. |
+| PR-F06 | Expose batch operations | Implemented · locally verified | Batch results conform to scalar operations and define layouts, strides, tails, and allowed aliasing. |
+| PR-F07 | Identify compatibility | Implemented · locally verified | Callers can query and compare ABI, ISA, profile, dtype, dimension, backend, and feature versions. |
+| PR-F08 | Fail loudly without rewriting raw semantics | Implemented · locally verified | Null, size, profile, and backend errors return documented statuses; raw mode preserves the ISA's NaN/Inf propagation and cleanup behavior, while an explicit checked boundary rejects non-finite input; unavailable acceleration is never silently substituted after an explicit request. |
+| PR-F09 | Cross target boundaries | Implemented · CI pending | The same source builds and passes smoke tests on supported native and Emscripten targets. |
+| PR-F10 | Keep policy outside the kernel | Implemented · locally reviewed | No base API refers to pilots, residents, hypotheses, databases, routes, or other domain concepts. |
 
 ## 9. Quality requirements
 
@@ -340,6 +356,11 @@ policies are visibly adapters rather than accidental forks.
 
 ## 12. Roadmap
 
+**Current position (2026-08-08):** the branch implements the Phase 0–2 ABI-0 code and packaging surfaces and has
+locally exercised the native reference/optimized paths plus the Emscripten feature-on/off smoke. Phase exits are
+evidence gates, however: hosted CI, including its WebAssembly lane, has not yet been observed green; no release
+artifact has been published; and Phase 3 adopter work has not begun.
+
 ### Phase 0 — Contract freeze
 
 Produce the ABI decision record, operation table, error model, profile registry, compatibility descriptor, and
@@ -389,17 +410,17 @@ requires a named consumer, separate semantics, fixtures, and a measured reason t
 
 Detailed engineering tasks and dependencies live in [`ENG.md`](ENG.md). Product priority is:
 
-| Epic | Priority | Outcome |
-|---|---|---|
-| LC-E0 Contract and governance | P0 | One implementable ABI, profile registry, and release/version policy. |
-| LC-E1 Reference conformance | P0 | The f64 caller-supplied-vector subset and supporting utilities are correct before optimization. |
-| LC-E2 Portable optimized core | P0 | f32/f64 FFT and batch profiles preserve decisions. |
-| LC-E3 Distribution and CI | P0 | Reproducible C/C++/Rust/Python/WASM consumption. |
-| LC-E4 Signal shadow migration | P0 | Highest-value existing HRR consumer validates the product. |
-| LC-E5 Rust adoption | P0 | NoSQLite proves pinned Cargo consumption and exact host-owned ordering. |
-| LC-E6 Interchange | P0 | The optional descriptor component has immutable, portable bytes and fail-closed compatibility checks. |
-| LC-E7 Memory and world integrations | P1 | Policy-neutral trace helpers, CosyWorld, Zero LM, and dependency cleanup are earned follow-ons. |
-| LC-E8 Additional profiles | P2 | MAP, exact-index, fixed-point, and freestanding work only when earned. |
+| Epic | Priority | State | Outcome |
+|---|---:|---|---|
+| LC-E0 Contract and governance | P0 | ABI-0 implemented · local | One implementable ABI, profile registry, and release/version policy. Stable ABI v1 remains gated. |
+| LC-E1 Reference conformance | P0 | Implemented · locally verified | The f64 caller-supplied-vector subset and supporting utilities are correct before optimization. |
+| LC-E2 Portable optimized core | P0 | Implemented preview · adopter evidence open | f32/f64 radix-2 and batch profiles preserve local fixture decisions; the stable f32 bound and automatic optimized dispatch remain unearned. |
+| LC-E3 Distribution and CI | P0 | Implemented · CI/release pending | Reproducible C/C++/Rust/Python/WASM consumption. |
+| LC-E4 Signal shadow migration | P0 | Blocked · external adopter | Highest-value existing HRR consumer validates the product. |
+| LC-E5 Rust adoption | P0 | Wrapper implemented · adopter blocked | NoSQLite proves pinned Cargo consumption and exact host-owned ordering. |
+| LC-E6 Interchange | P0 | Implemented · locally verified | The optional descriptor component has immutable, portable bytes and fail-closed compatibility checks. |
+| LC-E7 Memory and world integrations | P1 | Proposed | Policy-neutral trace helpers, CosyWorld, Zero LM, and dependency cleanup are earned follow-ons. |
+| LC-E8 Additional profiles | P2 | Proposed | MAP, exact-index, fixed-point, and freestanding work only when earned. |
 
 P0 defines the first usable product. P1 expands proven use. P2 is intentionally excluded from the critical path.
 
@@ -418,15 +439,15 @@ P0 defines the first usable product. P1 expands proven use. P2 is intentionally 
 | C release cadence couples to unrelated Python changes | Unnecessary downstream churn | Version the C ABI and native package independently from the Python package release train. |
 | Optional C becomes mandatory by accident | Breaks leCore's NumPy-only promise | Keep Python packaging and tests functional without a compiler or native artifact. |
 
-## 15. Decisions to resolve before implementation
+## 15. Adopted implementation decisions
 
-| Decision | Recommended starting point |
+| Decision | ABI-0 implementation |
 |---|---|
-| Canonical location | `native/` in leCore; release a small standalone artifact from that source. |
-| Library and symbols | Artifact `liblecore`; public symbols prefixed `lecore_`. |
-| Versioning | Independent native package semver plus ABI, ISA, profile, generator, and format versions. |
+| Canonical location | `native/liblecore/` in leCore; a standalone release artifact remains future publication work. |
+| Library and symbols | Product `liblecore`, linker basename `lecore`, and public symbols prefixed `lecore_`. |
+| Versioning | Native package semver plus ABI, ISA, profile, and format versions; the preview reports ABI `0`. |
 | Allocation | Optional allocator callbacks at context creation; no allocations after creation. |
-| Threading | A context is single-thread-owned; separate contexts may run concurrently with no global mutable state. |
+| Threading | Calls on a live context are single-thread-owned; separate contexts may run concurrently. Destruction may run on another thread only after calls quiesce and the configured deallocator is valid there. |
 | Dimensions | Dimension is an unsigned 32-bit value; the direct backend supports every representable positive dimension subject to checked size/allocation limits, while radix-2 advertises its power-of-two requirement and dispatch never lies. |
 | Binding normalization | Base HRR bind is unnormalized, matching the ISA. Adapters compose normalization explicitly. |
 | Atom generation | Caller-supplied in the first release; `PORTABLE_ATOM_V1` is a separate gated deliverable. |

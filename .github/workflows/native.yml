@@ -1,0 +1,363 @@
+name: native
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["liblecore-v*"]
+    paths:
+      - "native/liblecore/**"
+      - "bindings/python/**"
+      - "bindings/rust/**"
+      - "benchmarks/**"
+      - "tests/native/**"
+      - "tools/generate_liblecore_*.py"
+      - "scripts/lecore_*.py"
+      - "holographic/misc/holographic_reference.py"
+      - "docs/ISA.md"
+      - "LICENSE"
+      - "PRD.md"
+      - "ENG.md"
+      - ".github/workflows/native.yml"
+  pull_request:
+    paths:
+      - "native/liblecore/**"
+      - "bindings/python/**"
+      - "bindings/rust/**"
+      - "benchmarks/**"
+      - "tests/native/**"
+      - "tools/generate_liblecore_*.py"
+      - "scripts/lecore_*.py"
+      - "holographic/misc/holographic_reference.py"
+      - "docs/ISA.md"
+      - "LICENSE"
+      - "PRD.md"
+      - "ENG.md"
+      - ".github/workflows/native.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux GCC static
+            os: ubuntu-latest
+            cc: gcc
+            cxx: g++
+            shared: "OFF"
+          - name: Linux Clang shared
+            os: ubuntu-latest
+            cc: clang
+            cxx: clang++
+            shared: "ON"
+          - name: macOS Clang static
+            os: macos-14
+            cc: clang
+            cxx: clang++
+            shared: "OFF"
+          - name: Windows MSVC shared
+            os: windows-latest
+            cc: ""
+            cxx: ""
+            shared: "ON"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure
+        run: >-
+          cmake -S native/liblecore -B build/liblecore
+          -DLECORE_BUILD_SHARED=${{ matrix.shared }}
+          -DLECORE_BUILD_TESTS=ON
+          -DLECORE_BUILD_EXAMPLES=ON
+          -DLECORE_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/liblecore --config Release --parallel 2
+
+      - name: Test
+        run: ctest --test-dir build/liblecore -C Release --output-on-failure
+
+  sanitizers:
+    name: Linux Clang ASan and UBSan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CC: clang
+      CXX: clang++
+      ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure
+        run: >-
+          cmake -S native/liblecore -B build/liblecore-sanitized
+          -DLECORE_BUILD_SHARED=OFF
+          -DLECORE_BUILD_TESTS=ON
+          -DLECORE_BUILD_EXAMPLES=ON
+          -DLECORE_WARNINGS_AS_ERRORS=ON
+          -DLECORE_ENABLE_SANITIZERS=ON
+          -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build/liblecore-sanitized --parallel 2
+
+      - name: Test
+        run: ctest --test-dir build/liblecore-sanitized --output-on-failure
+
+  fuzz-smoke:
+    name: Public C API fuzz smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CC: clang
+      CXX: clang++
+      ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:abort_on_error=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure libFuzzer targets
+        run: >-
+          cmake -S native/liblecore -B build/liblecore-fuzz
+          -DLECORE_BUILD_SHARED=OFF
+          -DLECORE_BUILD_TESTS=OFF
+          -DLECORE_BUILD_EXAMPLES=OFF
+          -DLECORE_ENABLE_FORMAT=ON
+          -DLECORE_ENABLE_RADIX2=ON
+          -DLECORE_ENABLE_SANITIZERS=ON
+          -DLECORE_BUILD_FUZZERS=ON
+          -DLECORE_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build public API fuzzers
+        run: >-
+          cmake --build build/liblecore-fuzz
+          --target liblecore_fuzz_public_api liblecore_fuzz_format
+          --parallel 2
+
+      - name: Stage writable seed corpora
+        run: |
+          cp -R native/liblecore/tests/fuzz/corpus/public_api \
+            "${{ runner.temp }}/liblecore-public-api-corpus"
+          cp -R native/liblecore/tests/fuzz/corpus/format \
+            "${{ runner.temp }}/liblecore-format-corpus"
+
+      - name: Smoke the context and vector API
+        run: >-
+          build/liblecore-fuzz/tests/fuzz/liblecore_fuzz_public_api
+          -runs=2000
+          "${{ runner.temp }}/liblecore-public-api-corpus"
+
+      - name: Smoke the descriptor codec API
+        run: >-
+          build/liblecore-fuzz/tests/fuzz/liblecore_fuzz_format
+          -runs=2000
+          "${{ runner.temp }}/liblecore-format-corpus"
+
+  fixture-drift:
+    name: Deterministic ISA fixture drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install the pinned numeric reference
+        run: >-
+          python -m pip install --disable-pip-version-check
+          --only-binary=:all: numpy==2.4.4
+
+      - name: Check committed fixtures
+        run: python tools/generate_liblecore_fixtures.py --check
+
+  python-conformance:
+    name: Python ${{ matrix.python }} / NumPy ${{ matrix.numpy }} conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.9"
+            numpy: "1.26.4"
+          - python: "3.12"
+            numpy: "2.4.4"
+    env:
+      CC: gcc
+      CXX: g++
+      PYTHONHASHSEED: "0"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install the pinned numeric reference
+        run: >-
+          python -m pip install --disable-pip-version-check
+          --only-binary=:all: numpy==${{ matrix.numpy }}
+
+      - name: Configure the shared Release library
+        run: >-
+          cmake -S native/liblecore -B build/python-conformance
+          -DLECORE_BUILD_SHARED=ON
+          -DLECORE_BUILD_TESTS=OFF
+          -DLECORE_BUILD_EXAMPLES=OFF
+          -DLECORE_ENABLE_FORMAT=ON
+          -DLECORE_ENABLE_RADIX2=ON
+          -DLECORE_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build the shared Release library
+        run: cmake --build build/python-conformance --parallel 2
+
+      - name: Check direct-backend conformance
+        run: >-
+          python tests/native/test_liblecore_conformance.py
+          --library build/python-conformance/liblecore.so
+          --backend direct
+          --quiet
+
+      - name: Check radix-2-backend conformance
+        run: >-
+          python tests/native/test_liblecore_conformance.py
+          --library build/python-conformance/liblecore.so
+          --backend radix2
+          --quiet
+
+  amalgamation:
+    name: Amalgamation drift and standalone consumers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Check generated-source drift
+        run: python tools/generate_liblecore_amalgamation.py --check
+
+      - name: Compile feature-on and feature-off consumers
+        run: python tests/native/check_liblecore_amalgamation.py
+
+  rust:
+    name: Rust ABI-0 bindings (vendored and installed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install the declared minimum Rust toolchain
+        uses: dtolnay/rust-toolchain@1.77.2
+        with:
+          components: clippy, rustfmt
+
+      - name: Restore Cargo dependency cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-1.77.2-${{ hashFiles('bindings/rust/lecore-sys/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-1.77.2-
+
+      - name: Fetch the locked dependencies
+        run: >-
+          cargo fetch
+          --manifest-path bindings/rust/lecore-sys/Cargo.toml
+          --locked
+
+      - name: Check formatting
+        run: >-
+          cargo fmt
+          --manifest-path bindings/rust/lecore-sys/Cargo.toml
+          --all -- --check
+
+      - name: Lint the vendored bindings offline
+        run: >-
+          cargo clippy
+          --manifest-path bindings/rust/lecore-sys/Cargo.toml
+          --all-targets --locked --offline -- -D warnings
+
+      - name: Test the vendored debug build offline
+        run: >-
+          cargo test
+          --manifest-path bindings/rust/lecore-sys/Cargo.toml
+          --locked --offline
+
+      - name: Test the vendored Release build offline
+        run: >-
+          cargo test
+          --manifest-path bindings/rust/lecore-sys/Cargo.toml
+          --release --locked --offline
+
+      - name: Install a static C prefix
+        run: |
+          cmake -S native/liblecore -B build/rust-installed \
+            -DCMAKE_INSTALL_PREFIX="${{ runner.temp }}/liblecore-prefix" \
+            -DLECORE_BUILD_SHARED=OFF \
+            -DLECORE_BUILD_TESTS=OFF \
+            -DLECORE_BUILD_EXAMPLES=OFF \
+            -DLECORE_WARNINGS_AS_ERRORS=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/rust-installed --target install --parallel 2
+
+      - name: Test explicit installed-prefix mode offline
+        env:
+          LECORE_SYS_INCLUDE_DIR: ${{ runner.temp }}/liblecore-prefix/include
+          LECORE_SYS_LIB_DIR: ${{ runner.temp }}/liblecore-prefix/lib
+          LECORE_SYS_LINK_KIND: static
+        run: >-
+          cargo test
+          --manifest-path bindings/rust/lecore-sys/Cargo.toml
+          --no-default-features --features installed
+          --locked --offline
+
+  webassembly:
+    name: Emscripten WebAssembly standalone smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Install the pinned Emscripten SDK
+        uses: emscripten-core/setup-emsdk@v15
+        with:
+          version: "5.0.1"
+          actions-cache-folder: emsdk-cache
+
+      - name: Compile and run feature-on and feature-off modules
+        run: python tests/native/check_liblecore_wasm.py

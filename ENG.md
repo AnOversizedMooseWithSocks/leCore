@@ -1,6 +1,7 @@
 # liblecore — Engineering Plan
 
-*Status: proposed · Technical architecture, compatibility policy, delivery plan, and dependency-ordered backlog.*
+*Status: active · ABI-0 implementation preview, compatibility policy, validation record, and dependency-ordered
+backlog.*
 
 ---
 
@@ -23,6 +24,28 @@ Existing native implementations are behavioral oracles and workload sources. lib
 implementation derived from leCore's MIT-licensed specification and reference. Code from AGPL or repositories with
 unclear license provenance is not copied into the canonical library without an explicit compatible grant.
 
+### 1.1 Implementation snapshot — 2026-08-08
+
+This snapshot records what is present on the `liblecore-implementation` branch. “Locally verified” means the
+artifact was exercised on the development host; it does not mean the corresponding GitHub Actions lane ran or that
+the backlog item's full cross-platform or adopter acceptance gate is complete.
+
+| Backlog IDs | Delivered artifacts | Evidence and remaining gate |
+|---|---|---|
+| LC-001, LC-002, LC-006 | ABI-0 policy in this plan; `<lecore/lecore.h>` with opaque contexts, fixed-width IDs, C++ guards, allocator hooks, introspection, and typed calls; `VERSION`, `ISA_VERSION`, changelog, and ABI-0 symbol manifest | Headers compile in local C11/C++17 consumers and the exported-symbol check passes locally. ABI v1 remains deliberately unfrozen. |
+| LC-003, LC-008, LC-015 | Independent Python reference helpers, deterministic bit-pattern fixture generator, committed f64/f32 corpus, strict `ctypes` adapter, and JSON differential report | Fixture drift is clean; explicit direct and forced-radix suites each pass 11/11 locally under Python 3.9/NumPy 1.26 and the development Python/NumPy runtime, with complete decision agreement. Worst observed radix error was `5.329e-15` for f64 and `2.861e-06` for f32. Hosted Python 3.9/NumPy 1.26 and Python 3.12/NumPy 2.4 matrix evidence remains pending. |
+| LC-004 | `native/liblecore/PROVENANCE.md`, MIT notices, and clean-room source boundaries | Source inventory is recorded locally; no Signal AGPL or unclear-license implementation source was copied. |
+| LC-007, LC-016 | Optional 96-byte little-endian descriptor codec, CRC64-ECMA implementation, compatibility checks, and format tests | Round-trip, corrupt/truncated/future/incompatible cases pass locally; cross-platform CI remains pending. |
+| LC-010–LC-014, LC-018 | C11 direct f64/f32 kernel, dense/scoring/cleanup APIs, context lifecycle, CMake static/shared installs, `pkg-config`, and C/C++ examples/consumer tests | Strict Release static CTest passes 11/11 and shared CTest passes 13/13 locally, including installed consumers, symbol guard, and Python direct conformance. Sanitizer tests and `cppcheck` are clean locally. The required hosted Tier 1 matrix has not yet run. |
+| LC-020–LC-022, LC-029 | Portable radix-2 f64/f32 backend, batch/fixed-role/unbind-all calls, and ordered f64-query/f32-row scoring | Direct-versus-radix sweeps and fixture decisions pass locally. Forced radix-2 rejects unsupported dimensions; `AUTO` still resolves to direct. The f32 bound remains explicitly preview-grade pending adopter replay. |
+| LC-023 | Reproducible benchmark driver and `native/liblecore/BENCHMARKS.md` with setup, scratch, wins, losses, and numeric error | One local Apple-arm64 baseline exists. Cross-platform and adopter workload evidence is still required before changing `AUTO`. |
+| LC-024, LC-028 | Deterministic single-header/single-source amalgamation, drift checker, feature-on/off standalone builds, install metadata, SONAME/symbol guard | Generated-source drift, standalone C/C++, installed CMake, `pkg-config`, and local symbol checks pass. Release-trigger and hosted CI gates remain pending. |
+| LC-025 | Emscripten feature-on/off compile-and-run checker and a pinned WebAssembly workflow lane | Both variants retain every enabled ABI-0 manifest export and run locally under Node. The GitHub Emscripten lane and full fixture-corpus replay have not yet been observed, so cross-target acceptance remains pending. |
+| LC-026; LC-015 and partial LC-027 | Audited `lecore-sys` raw declarations plus safe non-`Send`/non-`Sync` owner and explicit vendored/installed modes; strict explicit-path NumPy adapter | Rust vendored debug/release, Clippy, and explicit installed-prefix tests pass locally offline; Python consumer/conformance tests also pass. The Python artifact is a conformance adapter, not an automatic production dispatcher. No external Rust adopter or published artifact is claimed. |
+| LC-017 | Dedicated portable, sanitizer, fixture, Python, amalgamation, Rust, fuzz, and WebAssembly workflow definitions | Workflow implementation is present and `actionlint` is clean locally, but GitHub-hosted results are pending; LC-017 is not complete. |
+| LC-038 | Seeded public-API and descriptor libFuzzer targets with ASan/UBSan configuration | Each target completed 2,000 Clang 22 ASan/UBSan runs locally without findings. This is a bounded local smoke only; the configured CI fuzz budget has not run. |
+| LC-005, LC-019, LC-030–LC-037, LC-039 | No release tag/archive is published and no downstream repository was modified | Reference/beta publication, Signal replay, NoSQLite proof, other adopter work, and stable ABI v1 remain blocked on CI, release work, and external adopter evidence. |
+
 ## 2. Engineering goals
 
 - Expose the frozen caller-supplied-vector HRR algebra subset through a stable, language-neutral C ABI;
@@ -33,7 +56,7 @@ unclear license provenance is not copied into the canonical library without an e
   and accelerate power-of-two dimensions with a portable radix-2 backend.
 - Allocate all plans and scratch at context creation; allocate nothing in documented hot-path operations.
 - Keep opaque implementation state behind caller-owned vector buffers and typed operations.
-- Build reproducibly as static, shared, object, installed, vendored, Cargo, and Emscripten forms.
+- Build reproducibly as static, shared, installed, vendored/amalgamated, Cargo, and Emscripten forms.
 - Prove continuous-value conformance and exact decision agreement against the Python authority.
 - Migrate existing consumers through feature flags, shadow execution, and replay evidence.
 - Make failures, backend choice, feature support, and compatibility inspectable.
@@ -94,7 +117,7 @@ math.
 **Consumer adapters.** Live in consumer repositories. They own normalization composition, atom streams, feature
 encoding, memory update rules, action legality, rollout policy, storage, and migrations.
 
-### 4.2 Proposed repository layout
+### 4.2 Implemented repository layout
 
 ```text
 native/liblecore/
@@ -120,6 +143,7 @@ native/liblecore/
   tests/
     c/
     consumers/
+    fuzz/
   cmake/lecoreConfig.cmake.in
   pkgconfig/liblecore.pc.in
   amalgamation/
@@ -128,6 +152,9 @@ bindings/
   rust/lecore-sys/
 tests/native/
   fixtures/
+  check_liblecore_amalgamation.py
+  check_liblecore_symbols.py
+  check_liblecore_wasm.py
   test_liblecore_conformance.py
 benchmarks/
   bench_liblecore.py
@@ -136,7 +163,8 @@ tools/
   generate_liblecore_amalgamation.py
 ```
 
-Generated amalgamation and fixture files are reproducible outputs. CI regenerates them and fails on drift.
+Generated amalgamation and fixture files are reproducible outputs. The native workflow is configured to regenerate
+them and fail on drift; its first hosted run is still pending.
 
 ## 5. Public ABI design
 
@@ -372,11 +400,13 @@ including internal FFT and bundle reductions, remain microarchitecture and may v
 gates. A future relaxed decision profile requires a different ID, explicit selection, fixtures, and consumer
 evidence.
 
-Tier 1 profiles require `CHAR_BIT == 8`, 32-bit radix-2 `float`, 64-bit radix-2 `double`, and IEC 60559 behavior (or
-a configure-time probe proving equivalent NaN/Inf and evaluation semantics). Unsupported representations fail the
-build or omit the relevant capability; they never masquerade as `HRR_F32_V1`/`HRR_F64_V1`. The v1 numeric domain
-excludes subnormal inputs and cases whose required reference output is a nonzero subnormal. Builds report whether
-they preserve or flush subnormals, and a future profile must add explicit fixtures before making them portable.
+Tier 1 profiles require `CHAR_BIT == 8`, 32-bit radix-2 `float`, 64-bit radix-2 `double`, `FLT_EVAL_METHOD == 0`,
+and IEC 60559/default-rounding/evaluation behavior. The native build enforces representation/evaluation guards and
+runs a configure probe; cross builds must explicitly set `LECORE_ASSUME_IEC_60559=ON` after validating the target.
+Unsupported representations fail the build rather than masquerading as `HRR_F32_V1`/`HRR_F64_V1`. The ABI-0
+numeric domain excludes subnormal inputs and cases whose required reference output is a nonzero subnormal, exposes
+no subnormal-preservation capability, and makes no preserve-versus-flush claim. Any such report or guarantee is
+deferred to a later ABI/profile with explicit fixtures.
 
 ## 7. Backend design
 
@@ -426,7 +456,8 @@ path that stays within numeric tolerance yet changes a required winner fails dec
 `lecore_context` owns configuration, backend plan, twiddle data, scratch, allocator metadata, and counters useful
 for tests or diagnostics. It does not own caller vectors, vocabularies, traces, or codebooks.
 
-- A context is single-thread-owned and must not be called concurrently.
+- Calls on a live context are single-thread-owned and must not run concurrently. Destruction is thread-neutral only
+  after all calls have quiesced; a custom allocator's deallocator must be valid on the destroying thread.
 - Distinct contexts are independent and may execute concurrently.
 - The library contains no process-global mutable state or global last-error buffer.
 - Read-only version/status strings have static lifetime.
@@ -519,26 +550,30 @@ Required consumption modes:
 - generated `lecore.c` plus `lecore.h` for Make, Cargo, and Emscripten; and
 - direct static or shared linking from a release archive.
 
-Initial CMake options:
+Implemented CMake options:
 
 ```text
 LECORE_BUILD_SHARED
 LECORE_BUILD_TESTS
+LECORE_BUILD_EXAMPLES
 LECORE_BUILD_AMALGAMATION
-LECORE_ENABLE_F32
-LECORE_ENABLE_F64
+LECORE_BUILD_FUZZERS
 LECORE_ENABLE_RADIX2
 LECORE_ENABLE_FORMAT
 LECORE_ENABLE_SANITIZERS
+LECORE_WARNINGS_AS_ERRORS
+LECORE_ASSUME_IEC_60559
 ```
 
-Options may remove capabilities from a build but never change an enabled profile's semantics. Capability queries
-report what is present.
+The f64 and f32 profiles are part of the ABI-0 kernel rather than independently removable compile options. Format
+and radix-2 may be omitted without changing the enabled base profiles' semantics. Capability queries report what
+is present. Cross builds must explicitly assert a validated IEC 60559 target representation.
 
 ### 11.2 Amalgamation
 
-The amalgamation is generated from canonical sources, carries license/version data, and exposes the same ABI. CI
-regenerates it and fails if the committed output differs. Hand editing an amalgamated file is unsupported.
+The amalgamation is generated from canonical sources, carries license/version data, and exposes the same ABI. Its
+local drift and standalone consumer checks pass; the native workflow is configured to regenerate it and fail if
+the committed output differs. Hand editing an amalgamated file is unsupported.
 
 ### 11.3 Versioning
 
@@ -551,8 +586,9 @@ regenerates it and fails if the committed output differs. Hand editing an amalga
 - Major releases may break ABI and change SONAME.
 - Release tags use a distinct namespace such as `liblecore-v0.1.0`.
 
-The native release workflow triggers explicitly on `liblecore-v*`; it does not assume the repository's existing
-general `v*` Python workflow will recognize or correctly package native tags.
+The native validation workflow is configured to trigger on `liblecore-v*`. A release-packaging workflow still
+needs to be added for `LC-019`/`LC-039`; it must not assume the repository's existing general `v*` Python workflow
+will recognize or correctly package native tags.
 
 Every release archive contains source, public headers, amalgamation, license notices, changelog, build descriptor,
 checksums, and minimal C/C++ examples. Consumers pin the tag/archive and digest. A machine-local installed library
@@ -585,10 +621,11 @@ native-dispatch policy can represent its setup cost and decision gate honestly.
 
 ### 12.2 Rust
 
-`lecore-sys` contains generated or hand-audited raw declarations plus a small safe ownership wrapper:
+`lecore-sys` contains hand-audited raw declarations plus a small safe ownership wrapper:
 
 - `Context` owns and destroys one C context;
-- `Context` is not `Sync`; `Send` is granted only if ownership transfer is verified safe;
+- ABI-0 `Context` is deliberately neither `Send` nor `Sync`; ownership transfer may be reconsidered only after the
+  native contract explicitly permits it;
 - slices are validated for dtype, dimension, count, and overlap before FFI;
 - raw profile and status values remain available for forward compatibility; and
 - both vendored `cc::Build` and installed-library modes have consumer tests.
@@ -597,9 +634,11 @@ Application crates retain domain state and persistence. No Rust binding mirrors 
 
 ### 12.3 WebAssembly
 
-Emscripten compiles the amalgamation with a fixed export list. The WASM test loads fixture bytes, runs operations,
-and writes a compact conformance report. The first milestone requires no threads, dynamic loading, filesystem, or
-network APIs.
+Emscripten compiles the amalgamation as a standalone program. The implemented smoke builds feature-on and
+feature-off variants, exercises ABI/ISA/capability queries, direct/radix binding, and descriptor round-trip, and
+runs them under Node with filesystem support disabled. Loading the complete fixture corpus and emitting a full
+conformance report remains follow-on test depth; the first milestone requires no threads, dynamic loading,
+filesystem, or network APIs.
 
 ## 13. Testing strategy
 
@@ -649,7 +688,8 @@ amalgamation, Cargo, and Emscripten paths.
 
 ### 13.3 CI matrix
 
-A dedicated native workflow runs independently from the Python affected-test selector.
+A dedicated native workflow is defined independently from the Python affected-test selector. It is `actionlint`
+clean locally but has not yet run on GitHub as of the dated snapshot.
 
 | Tier | Lane | Coverage |
 |---|---|---|
@@ -749,8 +789,18 @@ claims are not promoted merely because the dependency builds.
 
 ## 16. Detailed backlog
 
-These are stable planning IDs, not a substitute for an issue tracker. Until an item is accepted into an issue and
-assigned, its state is `proposed`; execution status belongs in the owning repository's tracker. Priorities mean:
+These are stable planning IDs, not a substitute for an issue tracker. Their states record evidence visible on this
+branch as of 2026-08-08:
+
+- **Implemented · locally verified:** the artifact exists and its relevant local checks pass; this is not full
+  completion where the acceptance text requires hosted CI, publication, or an adopter.
+- **Implemented · CI pending:** the implementation and local checks exist, but the required GitHub/cross-platform
+  result has not been observed.
+- **Partial:** only part of the acceptance gate is substantiated.
+- **Blocked · release/adopter:** meaningful next evidence belongs to publication or a downstream repository.
+- **Proposed:** no implementation is claimed.
+
+Priorities mean:
 
 - **P0:** required for the first stable product;
 - **P1:** required for broad, proven adoption but not the initial reference preview;
@@ -772,53 +822,53 @@ assigned, its state is `proposed`; execution status belongs in the owning reposi
 
 ### 16.2 M0 — Contract and provenance
 
-| ID | Pri | Work | Depends on | Acceptance |
-|---|---:|---|---|---|
-| LC-001 | P0 | Freeze v1 scope and non-goals | — | PRD/ENG review confirms raw HRR, profile naming, atom exclusion, policy exclusion, and consumer ownership. |
-| LC-002 | P0 | Draft and review the public ABI | LC-001 | Header compiles as C11/C++17; IDs, statuses, aliasing, validation, threading, allocator, and evolution rules are documented. |
-| LC-003 | P0 | Define the core ISA fixture schema and corpus | LC-001 | Existing caller-supplied-vector fixtures record their input domain, f64 `atol=1e-9`/`rtol=0`, exact decisions/reindexes, zero and non-finite edges, and representative dimensions. |
-| LC-004 | P0 | Create a native provenance/license ledger | LC-001 | Every canonical source is MIT-derived or independently written; no AGPL or unclear-license code is copied. |
-| LC-005 | P0 | Capture adopter replay and benchmark fixtures | LC-001 | Signal replay plus representative Rust/world workloads are reproducible and versioned in their owning repos. |
-| LC-006 | P0 | Freeze native release/version policy | LC-001 | Native semver, ABI, ISA/profile/format versions, tags, checksums, and compatibility rules are accepted. |
-| LC-007 | P0 | Freeze descriptor mechanics and reserve profile IDs | LC-002, LC-003 | C/Python encode the same 96-byte headers; f64 is registered and the f32 ID is reserved without claiming unfinished semantics. |
-| LC-008 | P0 | Complete utility and batch references/fixtures | LC-001, LC-003 | Normalize, dot, cleanup, and admitted batch scoring have explicit slow Python helpers and fixtures independent of production code. |
+| ID | Pri | State | Work | Depends on | Acceptance |
+|---|---:|---|---|---|---|
+| LC-001 | P0 | Implemented · local | Freeze v1 scope and non-goals | — | PRD/ENG review confirms raw HRR, profile naming, atom exclusion, policy exclusion, and consumer ownership. |
+| LC-002 | P0 | Implemented · locally verified | Draft and review the public ABI | LC-001 | Header compiles as C11/C++17; IDs, statuses, aliasing, validation, threading, allocator, and evolution rules are documented. |
+| LC-003 | P0 | Implemented · locally verified | Define the core ISA fixture schema and corpus | LC-001 | Existing caller-supplied-vector fixtures record their input domain, f64 `atol=1e-9`/`rtol=0`, exact decisions/reindexes, zero and non-finite edges, and representative dimensions. |
+| LC-004 | P0 | Implemented · locally reviewed | Create a native provenance/license ledger | LC-001 | Every canonical source is MIT-derived or independently written; no AGPL or unclear-license code is copied. |
+| LC-005 | P0 | Blocked · external adopters | Capture adopter replay and benchmark fixtures | LC-001 | Signal replay plus representative Rust/world workloads are reproducible and versioned in their owning repos. |
+| LC-006 | P0 | Implemented · local preview policy | Freeze native release/version policy | LC-001 | Native semver, ABI, ISA/profile/format versions, tags, checksums, and compatibility rules are accepted. |
+| LC-007 | P0 | Implemented · locally verified | Freeze descriptor mechanics and profile IDs | LC-002, LC-003 | The fixed 96-byte header and compatibility rules are documented; the implemented f64 and f32 profile IDs are registered without conflating payload and semantic metadata. |
+| LC-008 | P0 | Implemented · locally verified | Complete utility and batch references/fixtures | LC-001, LC-003 | Normalize, dot, cleanup, and admitted batch scoring have explicit slow Python helpers and fixtures independent of production code. |
 
 **M0 gate:** a second implementation can be written from the public contract and fixtures without reading a
 consumer's private math.
 
 ### 16.3 M1 — Portable reference preview
 
-| ID | Pri | Work | Depends on | Acceptance |
-|---|---:|---|---|---|
-| LC-010 | P0 | Create CMake/install/source skeleton | LC-002, LC-004 | Static/shared builds, hidden visibility, `lecore::lecore`, and external install test pass. |
-| LC-011 | P0 | Implement context, allocator, status, and introspection | LC-010 | Two contexts execute independently; failures leak nothing; no stderr/global error state. |
-| LC-012 | P0 | Implement f64 dense primitives | LC-003, LC-008, LC-011 | ISA operations retain the frozen absolute gate; supporting utilities pass their separately frozen rules and zero edges. |
-| LC-013 | P0 | Implement direct f64 HRR | LC-003, LC-011 | Raw bind/unbind support every positive fixture dimension with max absolute error `<=1e-9` on the declared ISA corpus. |
-| LC-014 | P0 | Implement scoring, cleanup, and boundary validation | LC-003, LC-008, LC-012, LC-013 | Ordered decisions, first-NaN/lowest-index behavior, raw propagation, checked rejection, and failure tests pass. |
-| LC-015 | P0 | Add Python differential harness | LC-012–LC-014 | ctypes checks every operation and emits target/backend/profile/error/decision report. |
-| LC-016 | P0 | Implement descriptor codec | LC-007, LC-010 | Golden bytes round-trip; truncated, corrupt, future-major, and incompatible records are rejected. |
-| LC-017 | P0 | Add Tier 1 native CI and sanitizers | LC-010–LC-016 | Linux x86_64 GCC/Clang, macOS arm64, sanitizer, and external header-consumer lanes are green. |
-| LC-018 | P0 | Add clean-room embedding examples | LC-017 | C and C++ examples build outside the source tree using installed and vendored paths. |
-| LC-019 | P0 | Publish ABI-0 reference preview | LC-006, LC-017, LC-018 | Versioned archive, checksums, license, changelog, build descriptor, instability notice, and limitations are available. |
+| ID | Pri | State | Work | Depends on | Acceptance |
+|---|---:|---|---|---|---|
+| LC-010 | P0 | Implemented · locally verified | Create CMake/install/source skeleton | LC-002, LC-004 | Static/shared builds, hidden visibility, `lecore::lecore`, and external install test pass. |
+| LC-011 | P0 | Implemented · locally verified | Implement context, allocator, status, and introspection | LC-010 | Two contexts execute independently; failures leak nothing; no stderr/global error state. |
+| LC-012 | P0 | Implemented · locally verified | Implement f64 dense primitives | LC-003, LC-008, LC-011 | ISA operations retain the frozen absolute gate; supporting utilities pass their separately frozen rules and zero edges. |
+| LC-013 | P0 | Implemented · locally verified | Implement direct f64 HRR | LC-003, LC-011 | Raw bind/unbind support every positive fixture dimension with max absolute error `<=1e-9` on the declared ISA corpus. |
+| LC-014 | P0 | Implemented · locally verified | Implement scoring, cleanup, and boundary validation | LC-003, LC-008, LC-012, LC-013 | Ordered decisions, first-NaN/lowest-index behavior, raw propagation, checked rejection, and failure tests pass. |
+| LC-015 | P0 | Implemented · locally verified | Add Python differential harness | LC-012–LC-014 | ctypes checks every operation and emits target/backend/profile/error/decision report. |
+| LC-016 | P0 | Implemented · locally verified | Implement descriptor codec | LC-007, LC-010 | Golden bytes round-trip; truncated, corrupt, future-major, and incompatible records are rejected. |
+| LC-017 | P0 | Implemented · CI pending | Add Tier 1 native CI and sanitizers | LC-010–LC-016 | Linux x86_64 GCC/Clang, macOS arm64, sanitizer, and external header-consumer lanes are green. |
+| LC-018 | P0 | Implemented · locally verified | Add clean-room embedding examples | LC-017 | C and C++ examples build outside the source tree using installed and vendored paths. |
+| LC-019 | P0 | Blocked · CI and publication | Publish ABI-0 reference preview | LC-006, LC-017, LC-018 | Versioned archive, checksums, license, changelog, build descriptor, instability notice, and limitations are available. |
 
 **M1 gate:** the deliberately slow C backend is trustworthy enough to be a native oracle.
 
 ### 16.4 M2 — Optimized beta and distribution
 
-| ID | Pri | Work | Depends on | Acceptance |
-|---|---:|---|---|---|
-| LC-020 | P0 | Implement portable f64 radix-2 backend | LC-013, LC-015 | Power-of-two values meet tolerance; decision corpus agrees; unsupported forced use fails loudly. |
-| LC-021 | P0 | Implement f64 batch and fixed-role APIs | LC-014, LC-020 | Adopter-backed layouts, strides, aliases, and tails are tested; scalar/batch values and decisions conform. |
-| LC-022 | P0 | Define and implement `HRR_F32_V1` | LC-014, LC-020, LC-021 | Complete immutable f32 profile record, domain, fixtures, and bounds freeze; exact reindexes and decision corpus agree. |
-| LC-023 | P0 | Establish benchmark and static AUTO policy | LC-005, LC-020–LC-022 | Reports real dimensions, setup, memory, code size, wins/losses; AUTO only chooses an earned regime. |
-| LC-024 | P0 | Generate amalgamation | LC-017, LC-021, LC-022, LC-029 | Generated source has no drift and passes the complete supported native fixture subset. |
-| LC-025 | P0 | Add Emscripten lane | LC-024 | Amalgamation builds and runs its fixture self-test without OS services or dynamic loading. |
-| LC-026 | P0 | Add `lecore-sys` Rust wrapper | LC-017, LC-024, LC-029 | Safe ownership wrapper, mixed scoring declaration, and vendored/installed Cargo consumer tests pass. |
-| LC-027 | P1 | Add Python runtime wrapper | LC-015, LC-017 | Explicit artifact resolution, dtype/profile checks, exceptions, and canonical NumPy fallback are tested. |
-| LC-028 | P0 | Add ABI/release guard | LC-006, LC-017, LC-024, LC-029 | ABI-0/1 policy, SONAME, symbols, capabilities, headers, archives, and `liblecore-v*` triggers are CI-gated. |
-| LC-029 | P0 | Add `lecore_cosine_many_f64_f32` | LC-005, LC-008, LC-014, LC-022 | Independent reference and NoSQLite fixtures match ordered f64 scores; host-owned ID tie ordering remains unchanged. |
-| LC-038 | P0 | Add public API fuzz targets | LC-002, LC-016, LC-017, LC-022, LC-029 | Descriptor, config, sizes/strides, and every operation complete the configured ASan/UBSan CI budget without findings. |
-| LC-039 | P0 | Publish ABI-0 optimized beta | LC-006, LC-019, LC-023–LC-026, LC-028, LC-029, LC-038 | Pinned archive/digest includes optimized profiles, amalgamation, C/C++/Rust examples, Emscripten self-test, and instability notice. |
+| ID | Pri | State | Work | Depends on | Acceptance |
+|---|---:|---|---|---|---|
+| LC-020 | P0 | Implemented · locally verified | Implement portable f64 radix-2 backend | LC-013, LC-015 | Power-of-two values meet tolerance; decision corpus agrees; unsupported forced use fails loudly. |
+| LC-021 | P0 | Implemented · locally verified | Implement f64 batch and fixed-role APIs | LC-014, LC-020 | Declared layouts, strides, aliases, and tails are tested locally; scalar/batch values and decisions conform. Downstream adapter proof remains separate. |
+| LC-022 | P0 | Implemented · locally verified preview | Define and implement `HRR_F32_V1` | LC-014, LC-020, LC-021 | The ABI-0 f32 profile, domain, fixtures, and preview bounds are recorded and exact fixture decisions agree. Stable bounds remain gated on Signal replay evidence. |
+| LC-023 | P0 | Partial · adopter evidence pending | Establish benchmark and static AUTO policy | LC-005, LC-020–LC-022 | Reports real dimensions, setup, memory, code size, wins/losses; AUTO only chooses an earned regime. |
+| LC-024 | P0 | Implemented · locally verified | Generate amalgamation | LC-017, LC-021, LC-022, LC-029 | Generated source has no drift and passes the complete supported native fixture subset. |
+| LC-025 | P0 | Partial · export/runtime smoke; CI pending | Add Emscripten lane | LC-024 | Amalgamation retains every enabled ABI-0 export and passes the feature-on/off runtime smoke without OS services or dynamic loading; full fixture-corpus replay and hosted CI remain open. |
+| LC-026 | P0 | Implemented · locally verified; CI pending | Add `lecore-sys` Rust wrapper | LC-017, LC-024, LC-029 | Safe ownership wrapper, mixed scoring declaration, and vendored/installed Cargo consumer tests pass. |
+| LC-027 | P1 | Partial · strict adapter only | Add optional Python runtime wrapper | LC-015, LC-017 | Explicit artifact resolution, dtype/profile checks, exceptions, and canonical NumPy fallback are tested. The delivered conformance adapter never silently dispatches or falls back; a production dispatcher remains a separate decision. |
+| LC-028 | P0 | Partial · CI/release pending | Add ABI/release guard | LC-006, LC-017, LC-024, LC-029 | ABI-0/1 policy, SONAME, symbols, capabilities, headers, archives, and `liblecore-v*` triggers are CI-gated. |
+| LC-029 | P0 | Implemented · locally verified | Add `lecore_cosine_many_f64_f32` | LC-005, LC-008, LC-014, LC-022 | Independent reference fixtures match ordered f64 scores; host-owned ID tie ordering remains unchanged. A real NoSQLite fixture remains adopter work. |
+| LC-038 | P0 | Implemented · bounded local fuzz only | Add public API fuzz targets | LC-002, LC-016, LC-017, LC-022, LC-029 | Descriptor, config, sizes/strides, and every operation complete the configured ASan/UBSan CI budget without findings. |
+| LC-039 | P0 | Blocked · CI and publication | Publish ABI-0 optimized beta | LC-006, LC-019, LC-023–LC-026, LC-028, LC-029, LC-038 | Pinned archive/digest includes optimized profiles, amalgamation, C/C++/Rust examples, Emscripten self-test, and instability notice. |
 
 **M2 gate:** `LC-039` publishes a beta that clean C, C++, Rust, and WASM consumers plus the Python conformance
 adapter can use without repository-layout assumptions. The optional production Python wrapper (`LC-027`) is not a
@@ -826,31 +876,31 @@ beta blocker.
 
 ### 16.5 M3 — Consumer proving
 
-| ID | Pri | Work | Depends on | Acceptance |
-|---|---:|---|---|---|
-| LC-030 | P0 | Build Signal legacy/lecore/shadow adapter | LC-005, LC-022, LC-025, LC-039 | Native and WASM consume the pinned beta; explicit normalization/scoring preserves current contract; rollback is one flag. |
-| LC-031 | P0 | Run and publish Signal shadow replay | LC-005, LC-023, LC-030 | Zero unexplained action/route flips; score/margin/vector deltas and performance are recorded. |
-| LC-032 | P0 | Prove NoSQLite packaging and mixed scoring | LC-005, LC-026, LC-029, LC-039 | A real score path uses the unmodified pinned beta; encoder/storage bytes stay unchanged and Rust-owned exact IDs/order match. |
-| LC-033 | P1 | Add CosyWorld advisory adapter | LC-022, LC-026 | Legal set remains kernel-owned; disabled mode journal is identical; illegal actions cannot be selected. |
-| LC-034 | P1 | Add Zero LM WASM adapter | LC-022, LC-025 | Native/WASM choices agree with legacy and recorded size budget passes. |
-| LC-035 | P1 | Replace crlplrimes sibling-source coupling | LC-030 or LC-032 | Build consumes pinned liblecore; exact verifier authority and experimental status remain explicit. |
-| LC-036 | P1 | Retire one duplicate generic implementation | LC-037 plus sustained adopter release | Removal follows replay parity and rollback window, not initial compilation. |
-| LC-037 | P0 | Release stable ABI v1 | LC-006, LC-028, LC-031, LC-032, LC-038, LC-039 | Signal and NoSQLite pass their gates; ABI/profile/format contracts freeze with migration guide. |
+| ID | Pri | State | Work | Depends on | Acceptance |
+|---|---:|---|---|---|---|
+| LC-030 | P0 | Blocked · Signal adopter | Build Signal legacy/lecore/shadow adapter | LC-005, LC-022, LC-025, LC-039 | Native and WASM consume the pinned beta; explicit normalization/scoring preserves current contract; rollback is one flag. |
+| LC-031 | P0 | Blocked · Signal adopter | Run and publish Signal shadow replay | LC-005, LC-023, LC-030 | Zero unexplained action/route flips; score/margin/vector deltas and performance are recorded. |
+| LC-032 | P0 | Blocked · NoSQLite adopter | Prove NoSQLite packaging and mixed scoring | LC-005, LC-026, LC-029, LC-039 | A real score path uses the unmodified pinned beta; encoder/storage bytes stay unchanged and Rust-owned exact IDs/order match. |
+| LC-033 | P1 | Proposed · external adopter | Add CosyWorld advisory adapter | LC-022, LC-026 | Legal set remains kernel-owned; disabled mode journal is identical; illegal actions cannot be selected. |
+| LC-034 | P1 | Proposed · external adopter | Add Zero LM WASM adapter | LC-022, LC-025 | Native/WASM choices agree with legacy and recorded size budget passes. |
+| LC-035 | P1 | Proposed · external adopter | Replace crlplrimes sibling-source coupling | LC-030 or LC-032 | Build consumes pinned liblecore; exact verifier authority and experimental status remain explicit. |
+| LC-036 | P1 | Blocked · sustained adopter release | Retire one duplicate generic implementation | LC-037 plus sustained adopter release | Removal follows replay parity and rollback window, not initial compilation. |
+| LC-037 | P0 | Blocked · release and adopters | Release stable ABI v1 | LC-006, LC-028, LC-031, LC-032, LC-038, LC-039 | Signal and NoSQLite pass their gates; ABI/profile/format contracts freeze with migration guide. |
 
 **M3 gate:** C and Rust adopters use the same pinned artifact with replay evidence, and a duplicate-retirement plan
 has an owner and rollback window. Actual deletion follows sustained use rather than blocking stable v1.
 
 ### 16.6 M4 — Earned extensions
 
-| ID | Pri | Work | Depends on | Acceptance |
-|---|---:|---|---|---|
-| LC-040 | P2 | Specify `PORTABLE_ATOM_V1` | LC-037 | Python, C, Rust, and WASM generate identical checked-in atom bits from the same seed/name bytes. |
-| LC-041 | P1 | Specify optional associative-trace API | LC-031, LC-033, LC-037 | Caller-owned trace and separately versioned update policy pass capacity, store, query, and top-k tests. |
-| LC-042 | P2 | Evaluate platform FFT/SIMD backends | LC-037 | Named target workload wins; conformance and decision corpus pass; unsupported platforms retain baseline. |
-| LC-043 | P2 | Evaluate exact-index profile | LC-032, LC-037 | NoSQLite or Zero proves reuse without changing result authority or persisted semantics. |
-| LC-044 | P2 | Evaluate MAP profile | LC-037 | Separate ID/API and Holonet evidence; no function or payload can be mistaken for HRR. |
-| LC-045 | P2 | Evaluate integer/freestanding profile | LC-037 | NSRL/asix supplies a real consumer, exact arithmetic contract, build target, and profile fixtures. |
-| LC-046 | P2 | Design generated-kernel plugin ABI | LC-037 | Versioned descriptor/IR, target/compiler cache identity, and trusted-input boundary remain separate from vector ABI. |
+| ID | Pri | State | Work | Depends on | Acceptance |
+|---|---:|---|---|---|---|
+| LC-040 | P2 | Proposed | Specify `PORTABLE_ATOM_V1` | LC-037 | Python, C, Rust, and WASM generate identical checked-in atom bits from the same seed/name bytes. |
+| LC-041 | P1 | Proposed | Specify optional associative-trace API | LC-031, LC-033, LC-037 | Caller-owned trace and separately versioned update policy pass capacity, store, query, and top-k tests. |
+| LC-042 | P2 | Proposed | Evaluate platform FFT/SIMD backends | LC-037 | Named target workload wins; conformance and decision corpus pass; unsupported platforms retain baseline. |
+| LC-043 | P2 | Proposed | Evaluate exact-index profile | LC-032, LC-037 | NoSQLite or Zero proves reuse without changing result authority or persisted semantics. |
+| LC-044 | P2 | Proposed | Evaluate MAP profile | LC-037 | Separate ID/API and Holonet evidence; no function or payload can be mistaken for HRR. |
+| LC-045 | P2 | Proposed | Evaluate integer/freestanding profile | LC-037 | NSRL/asix supplies a real consumer, exact arithmetic contract, build target, and profile fixtures. |
+| LC-046 | P2 | Proposed | Design generated-kernel plugin ABI | LC-037 | Versioned descriptor/IR, target/compiler cache identity, and trusted-input boundary remain separate from vector ABI. |
 
 M4 items are not promises. A negative evaluation is a completed result when it records why the extension should not
 ship.

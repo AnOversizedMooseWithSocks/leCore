@@ -171,8 +171,10 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 
 ## Learning more
 
+- **[`native/liblecore/README.md`](native/liblecore/README.md)** — build and use the ABI-0 `liblecore` C11 preview,
+  including its API contract, CMake/`pkg-config` consumption, current capabilities, and limitations.
 - **[`PRD.md`](PRD.md) and [`ENG.md`](ENG.md)** — the product vision, native ABI strategy, adoption gates, and
-  dependency-ordered backlog for the proposed `liblecore` portable C kernel.
+  dependency-ordered backlog for the `liblecore` portable C kernel.
 - **[`FEATURE_GUIDE.md`](FEATURE_GUIDE.md)** — a **hands-on how-to** for the most recently added features: composable
   materials/textures, the describe-a-scene authoring flow (naming, texturing, external files), external-asset
   relocation and the queryable file map, the message-bus + optional-agent harness, and the opt-in language layer. Every
