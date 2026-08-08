@@ -44,6 +44,7 @@ uses testnet USDC, and does not accept production payments.
 ```bash
 export LECORE_X402_PAY_TO="0xYourReceivingWallet"
 export LECORE_X402_PRICE="$0.0011"
+export LECORE_X402_PUBLIC_URL="http://127.0.0.1:4021"
 export LECORE_X402_ADMIN_TOKEN="local-admin-secret"
 export LECORE_X402_TENANT_SECRET="local-tenant-secret"
 export LECORE_X402_TENANT_STATE_DIR="./tenant-state"
@@ -156,7 +157,10 @@ until that maintenance window is scheduled.
 ## Production Notes
 
 - Use a real receiving wallet and a production facilitator.
-- Put the API behind HTTPS.
+- Put the API behind HTTPS and set `LECORE_X402_PUBLIC_URL` to its canonical
+  public base URL, for example `https://lecore.rati.foundation`. Each payment
+  challenge advertises that configured URL rather than trusting forwarded
+  request headers.
 - Keep route prices explicit; avoid wildcard paid route configs for this first
   product surface.
 - Keep writes admin-only. Use `LECORE_X402_TENANT_SECRET` and

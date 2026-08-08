@@ -30,8 +30,8 @@ or pay upstream APIs as a buyer.
   facilitator credentials.
   Store `LECORE_X402_TENANT_SECRET` there too when private tenants are enabled.
 - **SSM Parameter Store or plain task env** stores non-secret config like
-  `LECORE_X402_PAY_TO`, `LECORE_X402_PRICE`, `LECORE_X402_NETWORK`, and
-  `LECORE_X402_TENANT_STATE_DIR`.
+  `LECORE_X402_PAY_TO`, `LECORE_X402_PRICE`, `LECORE_X402_NETWORK`,
+  `LECORE_X402_PUBLIC_URL`, and `LECORE_X402_TENANT_STATE_DIR`.
 - **CloudWatch Logs** captures service logs.
 - **AWS WAF** can rate-limit and block bad traffic at the ALB.
 
@@ -53,19 +53,41 @@ Seller-only route:
 
 ## Build And Push
 
-```bash
-aws ecr create-repository --repository-name lecore-x402
+The deployed preview runs in `us-east-1` from the existing
+`lecore-x402-api` ECR repository. Build a unique ARM64 image, then pin the
+deployment to its digest. Never deploy `latest`.
 
+```bash
 ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-REGION="${AWS_REGION:-us-west-2}"
-IMAGE="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/lecore-x402:latest"
+REGION="us-east-1"
+REPOSITORY="lecore-x402-api"
+REGISTRY="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
+REVISION="$(git rev-parse HEAD)"
+IMAGE_TAG="${REVISION:0:12}-$(date -u +%Y%m%dT%H%M%SZ)"
+IMAGE="$REGISTRY/$REPOSITORY:$IMAGE_TAG"
 
 aws ecr get-login-password --region "$REGION" \
-  | docker login --username AWS --password-stdin "$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com"
+  | docker login --username AWS --password-stdin "$REGISTRY"
 
-docker build -f Dockerfile.x402 -t "$IMAGE" .
+docker build --platform linux/arm64 \
+  --label "org.opencontainers.image.revision=$REVISION" \
+  -f Dockerfile.x402 -t "$IMAGE" .
 docker push "$IMAGE"
+
+DIGEST="$(aws ecr describe-images --region "$REGION" \
+  --repository-name "$REPOSITORY" --image-ids imageTag="$IMAGE_TAG" \
+  --query 'imageDetails[0].imageDigest' --output text)"
+PINNED_IMAGE="$REGISTRY/$REPOSITORY@$DIGEST"
+
+aws ecr wait image-scan-complete --region "$REGION" \
+  --repository-name "$REPOSITORY" --image-id imageDigest="$DIGEST"
+aws ecr describe-image-scan-findings --region "$REGION" \
+  --repository-name "$REPOSITORY" --image-id imageDigest="$DIGEST" \
+  --query 'imageScanFindings.findingSeverityCounts'
 ```
+
+Review the scan before registration. Do not deploy if the new image regresses
+against the active image or violates the release vulnerability policy.
 
 ## Runtime Environment
 
@@ -76,6 +98,7 @@ LECORE_X402_PAY_TO=0xYourReceivingWallet
 LECORE_X402_PRICE=$0.0011
 LECORE_X402_NETWORK=eip155:8453
 LECORE_X402_FACILITATOR_URL=https://api.cdp.coinbase.com/platform/v2/x402
+LECORE_X402_PUBLIC_URL=https://lecore.rati.foundation
 LECORE_X402_TENANT_STATE_DIR=/data/tenants
 LECORE_X402_MEMORY_BACKEND=core
 ```
@@ -91,6 +114,108 @@ CDP_API_KEY_SECRET=<if required by facilitator setup>
 
 Use ECS task definition `secrets` entries for secrets, not literal environment
 variables in the task definition.
+
+## ECS Rollout
+
+The live service is `lonely-forest-cluster/lecore-x402-api`. Treat its current
+task definition as the rollback target and change only the `app` container
+image. This preserves the task roles, ARM64 runtime, CPU and memory, logging,
+EFS volume, environment, and secret references.
+
+The commands below assume `REGION`, `PINNED_IMAGE`, and `DIGEST` are still set
+from the build step and that `jq` is installed.
+
+```bash
+CLUSTER="lonely-forest-cluster"
+SERVICE="lecore-x402-api"
+umask 077
+DEPLOY_DIR="$(mktemp -d /tmp/lecore-x402-deploy.XXXXXX)"
+trap 'rm -rf -- "$DEPLOY_DIR"' EXIT
+ROLLBACK_TASK_DEF="$(aws ecs describe-services --region "$REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].taskDefinition' --output text)"
+
+aws ecs describe-task-definition --region "$REGION" \
+  --task-definition "$ROLLBACK_TASK_DEF" --include TAGS \
+  --output json > "$DEPLOY_DIR/described-task.json"
+jq '.taskDefinition' "$DEPLOY_DIR/described-task.json" \
+  > "$DEPLOY_DIR/base-task.json"
+TASK_TAGS="$(jq -c '.tags // []' "$DEPLOY_DIR/described-task.json")"
+
+jq --arg image "$PINNED_IMAGE" '
+  if ([.containerDefinitions[] | select(.name == "app")] | length) != 1
+  then error("expected exactly one app container") else . end
+  |
+  del(
+    .taskDefinitionArn, .revision, .status, .requiresAttributes,
+    .compatibilities, .registeredAt, .registeredBy, .deregisteredAt
+  )
+  | (.containerDefinitions[] | select(.name == "app").image) = $image
+' "$DEPLOY_DIR/base-task.json" > "$DEPLOY_DIR/next-task.json"
+
+jq -S '
+  del(
+    .taskDefinitionArn, .revision, .status, .requiresAttributes,
+    .compatibilities, .registeredAt, .registeredBy, .deregisteredAt
+  )
+  | (.containerDefinitions[] | select(.name == "app").image) = "__IMAGE__"
+' "$DEPLOY_DIR/base-task.json" > "$DEPLOY_DIR/base.normalized.json"
+jq -S '
+  (.containerDefinitions[] | select(.name == "app").image) = "__IMAGE__"
+' "$DEPLOY_DIR/next-task.json" > "$DEPLOY_DIR/next.normalized.json"
+cmp "$DEPLOY_DIR/base.normalized.json" "$DEPLOY_DIR/next.normalized.json"
+
+CURRENT_TASK_DEF="$(aws ecs describe-services --region "$REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE" \
+  --query 'services[0].taskDefinition' --output text)"
+test "$CURRENT_TASK_DEF" = "$ROLLBACK_TASK_DEF"
+
+NEW_TASK_DEF="$(aws ecs register-task-definition --region "$REGION" \
+  --cli-input-json "file://$DEPLOY_DIR/next-task.json" --tags "$TASK_TAGS" \
+  --query 'taskDefinition.taskDefinitionArn' --output text)"
+
+aws ecs update-service --region "$REGION" --cluster "$CLUSTER" \
+  --service "$SERVICE" --task-definition "$NEW_TASK_DEF"
+aws ecs wait services-stable --region "$REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE"
+```
+
+If the equality check fails, another operator changed the service after this
+rollout began. Stop, inspect that task definition, and rebuild the candidate
+from the new base rather than overwriting it.
+
+Normal rolling deployment is safe while `LECORE_X402_MEMORY_BACKEND=core`.
+Do not turn on the single-writer NoSQLite backend in the same rollout.
+
+## Verify And Roll Back
+
+Verify all of the following before considering the rollout complete:
+
+- ECS reports one running task, none pending, and the service references
+  `NEW_TASK_DEF`.
+- The running `app` container's `imageDigest` equals `DIGEST`.
+- The ALB target is healthy.
+- `GET /health` and `GET /pricing` return `200`.
+- `GET /v1/dashboard` returns `402`, and its decoded `payment-required` header
+  advertises exactly
+  `https://lecore.rati.foundation/v1/dashboard`.
+- `/health` still reports private tenancy and durable transactions, and the
+  EFS-backed memory state is present.
+- CloudWatch logs since the rollout contain no new errors, tracebacks, or
+  exceptions.
+
+Roll back on a stability wait failure, an unhealthy target, a wrong image
+digest, any `5xx`, missing durable state, or an incorrect payment resource URL:
+
+```bash
+aws ecs update-service --region "$REGION" --cluster "$CLUSTER" \
+  --service "$SERVICE" --task-definition "$ROLLBACK_TASK_DEF"
+aws ecs wait services-stable --region "$REGION" \
+  --cluster "$CLUSTER" --services "$SERVICE"
+```
+
+Re-run the endpoint and digest checks after rollback. Do not deregister the
+rollback task definition or delete its ECR digest.
 
 ## Optional NoSQLite Cutover
 
@@ -171,6 +296,8 @@ plans, spend limits, CloudTrail alarms, and a tiny blast radius.
 
 - Use mainnet network id and production facilitator URL.
 - Put the ALB behind HTTPS only.
+- Set `LECORE_X402_PUBLIC_URL` to the canonical HTTPS endpoint so payment
+  challenges never depend on forwarded request headers.
 - Keep `/admin/remember` private or blocked from the public ALB path.
 - Keep `/admin/tenant-token` private or blocked from the public ALB path.
 - Keep paid route configs explicit; avoid wildcard paid routes at first.

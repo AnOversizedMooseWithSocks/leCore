@@ -38,17 +38,40 @@
 - `optional_dependency_help()` -- Install hint for the optional paid API dependencies.
 - `normalize_tenant_id(value)` -- Return a path-safe tenant id for private memory routing.
 - `tenant_access_token(tenant_id, secret)` -- Deterministic tenant bearer token derived from a server-side secret.
+- `normalize_idempotency_key(value)` -- Validate an optional caller-provided retry key without persisting the raw value.
 - **class `TenantCoreStore`** -- Thread-safe LocalAgentCore registry with optional per-tenant persistence.
     - `loaded_tenants(self)` -- Return tenant ids currently loaded in memory.
     - `summary(self, tenant_id)` -- Return a cheap cached status summary without probing capabilities.
     - `read(self, tenant_id, fn)` -- Run a read-style operation while holding the tenant lock.
     - `write(self, tenant_id, fn)` -- Run a mutating operation, then persist that tenant if configured.
-- `pricing_summary(config)` -- Return the customer-facing request and per-1,000-request price plus preview/production status.
+- **class `NoSQLiteError`** -- Raised when the optional NoSQLite command process cannot serve a request.
+- **class `NoSQLiteProcess`** -- Serialize JSON-line requests to one long-lived NoSQLite CLI process.
+    - `generation(self)` -- Return the number of successful NoSQLite process starts.
+    - `running(self)` -- Return whether the managed NoSQLite process is currently alive.
+    - `ensure_started(self)` -- Start the child lazily and return its generation number.
+    - `command(self, payload)` -- Send one command and return the object response from NoSQLite.
+    - `close(self)` -- Release the child process and its filesystem writer lock.
+- **class `NoSQLiteMemoryStore`** -- Tenant-isolated semantic memory backed by the pinned NoSQLite CLI.
+    - `running(self)` -- Return whether the underlying NoSQLite process is currently alive.
+    - `remember(self, tenant_id, memory)` -- Persist one LocalAgentCore-compatible memory entry in its tenant collection.
+    - `sync(self, tenant_id, memories)` -- Backfill the durable core mirror once per tenant and CLI generation.
+    - `recall(self, tenant_id, query, k, abstain=None)` -- Return NoSQLite semantic hits in the LocalAgentCore response shape.
+    - `close(self)` -- Release the underlying NoSQLite process and writer lock.
+- **class `MemoryTransactionError`** -- The durable memory write journal could not be read or completed safely.
+- **class `MemoryTransactionConflict`** -- One idempotency key was reused for a different memory write.
+- **class `MemoryMirrorPending`** -- A durable core commit needs the same transaction projected to NoSQLite.
+- **class `TenantMemoryTransactions`** -- Durable, idempotent memory writes spanning LocalAgentCore and NoSQLite.
+    - `remember(self, tenant_id, text, label, metadata, idempotency_key, mirror)` -- Commit one memory and return its stable transaction status.
+    - `resume(self, tenant_id, transaction_id, mirror)` -- Resume a known journal record without minting a second transaction.
+    - `recover_pending(self, mirror)` -- Replay incomplete durable writes, leaving unavailable mirrors pending.
+- `pricing_summary(config)` -- Describe the customer-facing price and whether it is a production charge.
+- `normalize_memory_backend(value)` -- Validate the memory backend selector without accepting silent fallbacks.
+- `env_flag(value)` -- Parse the small explicit boolean surface used by deployment settings.
 - `landing_page_html(config)` -- Render the buyer-facing landing page served from `/`.
 - `payment_manifest(config)` -- Plain JSON route manifest, useful for docs, `/pricing`, and tests.
 - `x402_route_configs(config)` -- Build x402 SDK RouteConfig objects for the protected routes.
 - `x402_resource_server(config)` -- Create an x402 resource server wired to the configured facilitator.
-- `create_app(core=None, config=None, paid=True, admin_token=None, tenant_secret=None, tenant_state_dir=None)` -- Create the FastAPI application for paid or local serving.
+- `create_app(core=None, config=None, paid=True, admin_token=None, tenant_secret=None, tenant_state_dir=None, memory_backend=None, nosqlite_binary=None, nosqlite_data_dir=None, nosqlite_durability=None, nosqlite_shadow=None)` -- Create the FastAPI application for paid or local serving.
 - `load_core(path)` -- Load a persisted core if present, otherwise return the demo core.
 - `main(argv=None)` -- CLI entry point for local x402 API serving.
 

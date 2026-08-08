@@ -35,13 +35,16 @@ import subprocess
 import threading
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from holographic_product import LocalAgentCore, demo
+from lecore import __version__ as LECORE_VERSION
 
 
 DEFAULT_FACILITATOR_URL = "https://x402.org/facilitator"
 DEFAULT_NETWORK = "eip155:84532"  # Base Sepolia, safe default for testnet publishing.
 DEFAULT_PRICE = "$0.0011"
+DEFAULT_PUBLIC_URL = "https://lecore.rati.foundation"
 DEFAULT_TENANT_ID = "public"
 TENANT_HEADER = "X-leCore-Tenant"
 TENANT_TOKEN_HEADER = "X-leCore-Tenant-Token"
@@ -99,6 +102,33 @@ def _price_amount(price: str) -> Decimal:
     return amount
 
 
+def _normalize_public_url(value: str) -> str:
+    """Return a canonical public base URL safe to advertise in x402 challenges."""
+    if not isinstance(value, str):
+        raise ValueError("public_url must be a string")
+    value = value.strip().rstrip("/")
+    if not value or any(char.isspace() or char == "\\" or ord(char) == 127 for char in value):
+        raise ValueError("public_url must be an absolute http(s) URL")
+    try:
+        parts = urlsplit(value)
+        _ = parts.port
+    except ValueError as exc:
+        raise ValueError("public_url must be an absolute http(s) URL") from exc
+    if (
+        parts.scheme not in {"http", "https"}
+        or not parts.netloc
+        or parts.netloc.endswith(":")
+        or parts.hostname is None
+        or not parts.hostname.strip(".")
+    ):
+        raise ValueError("public_url must be an absolute http(s) URL")
+    if parts.username is not None or parts.password is not None:
+        raise ValueError("public_url must not contain credentials")
+    if parts.query or parts.fragment or "?" in value or "#" in value:
+        raise ValueError("public_url must not contain a query or fragment")
+    return value
+
+
 LANDING_PAGE_TEMPLATE = Template("""<!doctype html>
 <html lang="en">
 <head>
@@ -144,7 +174,7 @@ GET /v1/dashboard
 network: $network
 asset: $payment_asset</pre></aside>
 </section>
-<section class="strip" aria-label="Live deployment details"><div><strong>Endpoint</strong><span>https://lecore.rati.foundation</span></div><div><strong>Stage</strong><span>$environment_label</span></div><div><strong>Buyer shape</strong><span>inspect, pay, call</span></div></section>
+<section class="strip" aria-label="Live deployment details"><div><strong>Endpoint</strong><span>$public_url</span></div><div><strong>Stage</strong><span>$environment_label</span></div><div><strong>Buyer shape</strong><span>inspect, pay, call</span></div></section>
 <section id="why" class="section split"><div><p class="eyebrow">Why try it</p><h2>Most agents do not need a platform. They need a few reliable cognitive calls.</h2></div><div class="reason-list"><p>Test the x402 payment flow against one answerable primitive at a time.</p><p>The API is narrow enough to trust: read/compute routes are paid, memory writes stay admin-gated.</p><p>It exposes the useful part of leCore first: local agent memory plus capability routing.</p><p>$payment_notice</p></div></section>
 <section id="routes" class="section"><div class="heading"><p class="eyebrow">What the payment unlocks</p><h2>Three paid routes, each small enough to understand.</h2></div><div class="routes"><article class="card"><p class="method">POST</p><h3>Recall</h3><code>/v1/recall</code><p>Pull nearest memories from a compact local agent core without shipping a whole application stack.</p></article><article class="card"><p class="method">POST</p><h3>Route</h3><code>/v1/route</code><p>Send a plain-language task and get the leCore capability it should use, with evidence attached.</p></article><article class="card"><p class="method">GET</p><h3>Dashboard</h3><code>/v1/dashboard</code><p>Read the readiness surface: memory counts, capability map, abstention behavior, and route coverage.</p></article></div></section>
 <section class="section use"><div class="heading"><p class="eyebrow">Good first buyers</p><h2>Teams who want the leCore idea without adopting the whole repo.</h2></div><div class="cases"><article class="case"><span aria-hidden="true">+</span><p>Agent memory for prototypes that should remember without a database rollout.</p></article><article class="case"><span aria-hidden="true">+</span><p>Capability routing for tools that need to pick the right leCore subsystem before doing work.</p></article><article class="case"><span aria-hidden="true">+</span><p>Evidence dashboards for teams deciding whether a local vector system is ready to productize.</p></article><article class="case"><span aria-hidden="true">+</span><p>A working x402 seller endpoint to copy when you want pay-per-call APIs instead of subscriptions.</p></article></div></section>
@@ -165,6 +195,7 @@ class X402Config:
     facilitator_url: str = DEFAULT_FACILITATOR_URL
     scheme: str = "exact"
     routes: Tuple[PaidRoute, ...] = DEFAULT_PAID_ROUTES
+    public_url: str = DEFAULT_PUBLIC_URL
 
     def __post_init__(self) -> None:
         if not self.pay_to:
@@ -176,6 +207,7 @@ class X402Config:
             raise ValueError("network is required")
         if not self.facilitator_url:
             raise ValueError("facilitator_url is required")
+        object.__setattr__(self, "public_url", _normalize_public_url(self.public_url))
 
     @classmethod
     def from_env(cls, require_pay_to: bool = True) -> "X402Config":
@@ -188,6 +220,7 @@ class X402Config:
             price=os.environ.get("LECORE_X402_PRICE", DEFAULT_PRICE),
             network=os.environ.get("LECORE_X402_NETWORK", DEFAULT_NETWORK),
             facilitator_url=os.environ.get("LECORE_X402_FACILITATOR_URL", DEFAULT_FACILITATOR_URL),
+            public_url=os.environ.get("LECORE_X402_PUBLIC_URL", DEFAULT_PUBLIC_URL),
         )
 
     def to_public_dict(self) -> Dict[str, Any]:
@@ -198,6 +231,7 @@ class X402Config:
             "network": self.network,
             "facilitator_url": self.facilitator_url,
             "scheme": self.scheme,
+            "public_url": self.public_url,
         }
 
 
@@ -455,11 +489,13 @@ class NoSQLiteProcess:
 
     @property
     def generation(self) -> int:
+        """Return the number of successful NoSQLite process starts."""
         with self._lock:
             return self._generation
 
     @property
     def running(self) -> bool:
+        """Return whether the managed NoSQLite process is currently alive."""
         with self._lock:
             return self._process is not None and self._process.poll() is None
 
@@ -624,6 +660,7 @@ class NoSQLiteMemoryStore:
 
     @property
     def running(self) -> bool:
+        """Return whether the underlying NoSQLite process is currently alive."""
         return self._process.running
 
     def remember(self, tenant_id: str, memory: Dict[str, Any]) -> None:
@@ -687,6 +724,7 @@ class NoSQLiteMemoryStore:
         return hits
 
     def close(self) -> None:
+        """Release the underlying NoSQLite process and writer lock."""
         self._process.close()
 
     def _ensure_collection(self, tenant_id: str) -> str:
@@ -1062,6 +1100,7 @@ def landing_page_html(config: X402Config) -> str:
     return LANDING_PAGE_TEMPLATE.substitute(
         nodes=_landing_nodes(),
         network=escape(config.network),
+        public_url=escape(config.public_url),
         network_label=escape("%s x402" % network_name),
         network_name=escape(network_name),
         pay_to_short=escape(_short_address(config.pay_to)),
@@ -1111,6 +1150,7 @@ def x402_route_configs(config: X402Config) -> Dict[str, Any]:
                     network=config.network,
                 )
             ],
+            resource=config.public_url + route.path,
             mime_type=route.mime_type,
             description=route.description,
         )
@@ -1159,6 +1199,11 @@ def create_app(
     except ImportError as exc:
         raise RuntimeError(optional_dependency_help()) from exc
 
+    config = config or (X402Config.from_env(require_pay_to=paid) if paid else X402Config.from_env(require_pay_to=False))
+    public = urlsplit(config.public_url)
+    if paid and public.scheme != "https" and public.hostname not in {"127.0.0.1", "::1", "localhost"}:
+        raise ValueError("paid mode public_url must use https outside localhost")
+
     core = core or demo()
     store = TenantCoreStore(core, state_dir=tenant_state_dir)
     memory_backend = normalize_memory_backend(
@@ -1195,12 +1240,11 @@ def create_app(
             if nosqlite_store is not None:
                 nosqlite_store.close()
 
-    app = FastAPI(title="leCore x402 API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="leCore x402 API", version=LECORE_VERSION, lifespan=lifespan)
     app.state.memory_backend = memory_backend
     app.state.nosqlite_shadow = nosqlite_shadow
     app.state.nosqlite_store = nosqlite_store
     app.state.memory_transactions = memory_transactions
-    config = config or (X402Config.from_env(require_pay_to=paid) if paid else X402Config.from_env(require_pay_to=False))
     tenant_secret = tenant_secret or os.environ.get("LECORE_X402_TENANT_SECRET")
 
     if paid:
@@ -1496,6 +1540,7 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
     p.add_argument("--price", default=os.environ.get("LECORE_X402_PRICE", DEFAULT_PRICE))
     p.add_argument("--network", default=os.environ.get("LECORE_X402_NETWORK", DEFAULT_NETWORK))
     p.add_argument("--facilitator-url", default=os.environ.get("LECORE_X402_FACILITATOR_URL", DEFAULT_FACILITATOR_URL))
+    p.add_argument("--public-url", default=os.environ.get("LECORE_X402_PUBLIC_URL", DEFAULT_PUBLIC_URL))
     p.add_argument("--admin-token", default=os.environ.get("LECORE_X402_ADMIN_TOKEN"))
     p.add_argument("--tenant-secret", default=os.environ.get("LECORE_X402_TENANT_SECRET"))
     p.add_argument("--tenant-state-dir", default=os.environ.get("LECORE_X402_TENANT_STATE_DIR"))
@@ -1521,6 +1566,7 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
         price=args.price,
         network=args.network,
         facilitator_url=args.facilitator_url,
+        public_url=args.public_url,
     )
     app = create_app(
         load_core(args.state),

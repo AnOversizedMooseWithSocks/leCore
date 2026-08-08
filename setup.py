@@ -96,6 +96,6 @@ setup(
         #    note above); wgpu is INCLUDED, because it ships prebuilt wheels for every platform and needs no
         #    system toolchain -- the reason to leave CuPy out simply does not apply to it. --
         "all":      ["numba", "pyfftw", "sympy", "flask", "pillow", "pytest", "matplotlib", "ziglang", "nltk",
-                     "wgpu"],
+                     "wgpu", "x402[fastapi,evm]>=2.15,<3", "uvicorn>=0.51,<1"],
     },
 )

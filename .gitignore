@@ -11,6 +11,7 @@ holographic_vsa_complete.zip
 /dist
 /build
 /build_pkg
+vendor/nosqlite/target/
 *.egg-info
 repo.zip
 /temp

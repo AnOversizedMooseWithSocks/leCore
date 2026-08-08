@@ -8,6 +8,7 @@ import pytest
 from holographic_x402_api import (
     DEFAULT_NETWORK,
     DEFAULT_PRICE,
+    DEFAULT_PUBLIC_URL,
     DEFAULT_TENANT_ID,
     IDEMPOTENCY_HEADER,
     MEMORY_BACKEND_NOSQLITE,
@@ -29,6 +30,7 @@ from holographic_x402_api import (
     x402_route_configs,
 )
 from holographic_product import LocalAgentCore, demo
+from lecore import __version__ as LECORE_VERSION
 
 
 def test_default_x402_config_uses_testnet_price_shape():
@@ -37,6 +39,7 @@ def test_default_x402_config_uses_testnet_price_shape():
     assert cfg.network == DEFAULT_NETWORK
     assert cfg.price == DEFAULT_PRICE and cfg.price.startswith("$")
     assert cfg.facilitator_url == "https://x402.org/facilitator"
+    assert cfg.public_url == DEFAULT_PUBLIC_URL
 
 
 def test_payment_manifest_protects_specific_read_routes_only():
@@ -65,13 +68,18 @@ def test_price_validation_keeps_x402_format_honest():
 def test_x402_route_configs_build_against_optional_sdk():
     pytest.importorskip("x402")
 
-    routes = x402_route_configs(X402Config(pay_to="0xabc"))
+    routes = x402_route_configs(
+        X402Config(pay_to="0xabc", public_url="https://api.example.test/")
+    )
 
     assert sorted(routes) == [
         "GET /v1/dashboard",
         "POST /v1/recall",
         "POST /v1/route",
     ]
+    assert routes["GET /v1/dashboard"].resource == "https://api.example.test/v1/dashboard"
+    assert routes["POST /v1/recall"].resource == "https://api.example.test/v1/recall"
+    assert routes["POST /v1/route"].resource == "https://api.example.test/v1/route"
 
 
 def test_env_config_requires_pay_to_for_paid_mode(monkeypatch):
@@ -80,7 +88,49 @@ def test_env_config_requires_pay_to_for_paid_mode(monkeypatch):
     with pytest.raises(ValueError, match="LECORE_X402_PAY_TO"):
         X402Config.from_env(require_pay_to=True)
 
-    assert X402Config.from_env(require_pay_to=False).pay_to == "0xYourAddress"
+    monkeypatch.setenv("LECORE_X402_PUBLIC_URL", "https://api.example.test/")
+    config = X402Config.from_env(require_pay_to=False)
+
+    assert config.pay_to == "0xYourAddress"
+    assert config.public_url == "https://api.example.test"
+
+
+@pytest.mark.parametrize(
+    "public_url, message",
+    [
+        ("api.example.test", "absolute http"),
+        ("ftp://api.example.test", "absolute http"),
+        ("https://", "absolute http"),
+        ("https://user:secret@api.example.test", "credentials"),
+        ("https://api.example.test?tenant=public", "query or fragment"),
+        ("https://api.example.test#pricing", "query or fragment"),
+        ("https://api.example.test:bad", "absolute http"),
+        ("https://api.example.test:", "absolute http"),
+        ("https://.", "absolute http"),
+        ("https://api.example.test /base", "absolute http"),
+        ("https://api.example.test\\base", "absolute http"),
+    ],
+)
+def test_public_url_rejects_unsafe_or_ambiguous_values(public_url, message):
+    with pytest.raises(ValueError, match=message):
+        X402Config(pay_to="0xabc", public_url=public_url)
+
+
+def test_paid_mode_requires_https_outside_localhost():
+    pytest.importorskip("fastapi")
+    pytest.importorskip("x402")
+
+    with pytest.raises(ValueError, match="must use https"):
+        create_app(
+            config=X402Config(pay_to="0xabc", public_url="http://api.example.test"),
+            paid=True,
+        )
+
+    local = create_app(
+        config=X402Config(pay_to="0xabc", public_url="http://127.0.0.1:4021"),
+        paid=True,
+    )
+    assert local is not None
 
 
 def test_optional_dependency_help_points_to_extra():
@@ -131,7 +181,54 @@ def test_landing_page_marks_the_testnet_api_as_a_preview():
     assert "/pricing" in html
     assert "/v1/dashboard" in html
     assert "0x96e1...BB84" in html
+    assert DEFAULT_PUBLIC_URL in html
     assert "leOS" not in html
+
+
+def test_landing_page_uses_the_configured_public_url():
+    html = landing_page_html(
+        X402Config(pay_to="0xabc", public_url="https://api.example.test/base/")
+    )
+
+    assert "https://api.example.test/base" in html
+
+
+def test_paid_challenge_uses_canonical_resource_not_request_headers(monkeypatch):
+    pytest.importorskip("x402")
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    from x402 import SupportedKind, SupportedResponse
+    from x402.http import HTTPFacilitatorClient, decode_payment_required_header
+
+    monkeypatch.setattr(
+        HTTPFacilitatorClient,
+        "get_supported",
+        lambda _client: SupportedResponse(
+            kinds=[
+                SupportedKind(
+                    x402_version=2,
+                    scheme="exact",
+                    network=DEFAULT_NETWORK,
+                )
+            ]
+        ),
+    )
+    client = fastapi_testclient.TestClient(
+        create_app(
+            config=X402Config(
+                pay_to="0x96e1604E92A8A1edD0701be3E67Bd4366e87BB84",
+                public_url=DEFAULT_PUBLIC_URL,
+            ),
+            paid=True,
+        )
+    )
+
+    response = client.get(
+        "/v1/dashboard",
+        headers={"host": "attacker.invalid", "x-forwarded-proto": "http"},
+    )
+    assert response.status_code == 402
+    challenge = decode_payment_required_header(response.headers["payment-required"])
+    assert challenge.resource.url == DEFAULT_PUBLIC_URL + "/v1/dashboard"
 
 
 def test_pricing_summary_distinguishes_testnet_preview_from_production():
@@ -156,6 +253,7 @@ def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
     fastapi_testclient = pytest.importorskip("fastapi.testclient")
     client = fastapi_testclient.TestClient(create_app(config=X402Config(pay_to="0xabc"), paid=False))
 
+    assert client.app.version == LECORE_VERSION
     landing = client.get("/")
     assert landing.status_code == 200
     assert landing.headers["content-type"].startswith("text/html")
