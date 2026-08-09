@@ -34,6 +34,13 @@
     - `key(self)` -- The route key shape expected by x402 middleware, e.g.
 - `x402_payment_required_responses()` -- OpenAPI response metadata shared by every x402-protected operation.
 - `paid_request_openapi(required, properties, example, example_summary)` -- Return an accurate OpenAPI request body while runtime validation stays compatible.
+- `paid_operation_responses(success, invalid_detail, backend_unavailable=False)` -- Document paid success, payment, tenant, and validation responses.
+- `health_success_openapi(paid, private_tenants_enabled, memory_backend, nosqlite_shadow, nosqlite_configured, durable_transactions)` -- Document the free health and deployment-state response.
+- `pricing_success_openapi(config, private_tenants_enabled, memory_backend, nosqlite_shadow, nosqlite_configured, durable_transactions)` -- Document the free x402 discovery manifest.
+- `recall_success_openapi()` -- Document the successful memory-recall response.
+- `route_success_openapi()` -- Document the successful capability-routing response.
+- `dashboard_success_openapi()` -- Document the successful service-readiness response.
+- `public_response_headers(path, status_code, public_url, content_type='', network=DEFAULT_NETWORK)` -- Return browser and cache policy headers for one public response.
 - **class `X402Config`** -- Seller configuration for the x402-paid API.
     - `from_env(cls, require_pay_to=True)` -- Build config from LECORE_X402_* environment variables.
     - `to_public_dict(self)` -- Public, JSON-safe view of the payment configuration.

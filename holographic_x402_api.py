@@ -66,6 +66,8 @@ NOSQLITE_DIMENSIONS = 384
 LOG = logging.getLogger(__name__)
 
 SERVICE_NAME = "leCore Agent Memory & Routing API"
+HERO_TITLE = "Agent memory and routing, paid per call."
+X402_BUYER_GUIDE_URL = "https://docs.x402.org/getting-started/quickstart-for-buyers"
 API_DESCRIPTION = """Hosted, tenant-scoped agent memory, capability routing, and
 readiness data over HTTPS, with x402 payment on each protected request.
 
@@ -75,8 +77,11 @@ readiness data over HTTPS, with x402 payment on each protected request.
 2. Call a protected `/v1/*` route. An unsigned request returns `402 Payment Required`.
 3. Decode the `Payment-Required` response header with an x402 v2 client.
 4. Sign the selected payment option and retry with the resulting `Payment-Signature` header.
+5. Decode the successful `Payment-Response` header for settlement details.
 
-The interactive reference describes the contract but does not sign payments.
+The interactive reference describes the contract but does not sign payments. See the
+[x402 buyer quickstart](https://docs.x402.org/getting-started/quickstart-for-buyers)
+for wallet and client setup.
 `GET /health`, `GET /pricing`, `/docs`, `/redoc`, and `/openapi.json`
 are free. Private tenant calls additionally require `X-leCore-Tenant` and
 `X-leCore-Tenant-Token`; payment proves payment, not tenant authorization.
@@ -162,13 +167,23 @@ def x402_payment_required_responses() -> Dict[int, Dict[str, Any]]:
     return {
         402: {
             "description": (
-                "Payment required. Decode the Payment-Required header with an "
-                "x402 v2 client, sign one accepted option, and retry with "
-                "Payment-Signature."
+                "Payment required or settlement failed. An unsigned or invalid-payment "
+                "request includes Payment-Required; a paid request whose settlement "
+                "fails can instead include Payment-Response."
             ),
             "headers": {
                 "Payment-Required": {
-                    "description": "Base64-encoded x402 v2 PaymentRequired challenge.",
+                    "description": (
+                        "Base64-encoded x402 v2 PaymentRequired challenge, present for "
+                        "unsigned or invalid-payment requests."
+                    ),
+                    "schema": {"type": "string", "format": "byte"},
+                },
+                "Payment-Response": {
+                    "description": (
+                        "Base64-encoded x402 v2 settlement response, present when a "
+                        "paid request reaches the handler but settlement fails."
+                    ),
                     "schema": {"type": "string", "format": "byte"},
                 },
             },
@@ -176,6 +191,10 @@ def x402_payment_required_responses() -> Dict[int, Dict[str, Any]]:
                 "application/json": {
                     "schema": {"type": "object", "maxProperties": 0},
                     "example": {},
+                },
+                "text/html": {
+                    "schema": {"type": "string"},
+                    "example": "<!doctype html><title>Payment Required</title>",
                 },
             },
         },
@@ -212,6 +231,544 @@ def paid_request_openapi(
     }
 
 
+def _json_success_response(
+    description: str,
+    schema: Dict[str, Any],
+    example: Dict[str, Any],
+    *,
+    payment_receipt: bool = True,
+) -> Dict[str, Any]:
+    """Return one documented JSON success response."""
+    response = {
+        "description": description,
+        "content": {
+            "application/json": {
+                "schema": schema,
+                "example": example,
+            },
+        },
+    }
+    if payment_receipt:
+        response["headers"] = {
+            "Payment-Response": {
+                "description": "Base64-encoded x402 v2 settlement response.",
+                "schema": {"type": "string", "format": "byte"},
+            },
+        }
+    return response
+
+
+def _error_response(description: str, detail: str) -> Dict[str, Any]:
+    """Return the shared JSON error envelope used by FastAPI routes."""
+    return {
+        "description": description,
+        "content": {
+            "application/json": {
+                "schema": {
+                    "type": "object",
+                    "required": ["detail"],
+                    "properties": {"detail": {"type": "string"}},
+                    "additionalProperties": False,
+                },
+                "example": {"detail": detail},
+            },
+        },
+    }
+
+
+def paid_operation_responses(
+    success: Dict[str, Any],
+    *,
+    invalid_detail: str,
+    backend_unavailable: bool = False,
+) -> Dict[int, Dict[str, Any]]:
+    """Document paid success, payment, tenant, and validation responses."""
+    responses = {
+        200: success,
+        400: _error_response("Invalid request.", invalid_detail),
+        401: _error_response("Private-tenant authorization failed.", "invalid tenant token"),
+        403: _error_response(
+            "The deployment cannot authorize the selected private tenant.",
+            "private tenants require LECORE_X402_TENANT_SECRET",
+        ),
+        502: {
+            "description": "The x402 facilitator could not verify or settle the payment.",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["error"],
+                        "properties": {"error": {"type": "string"}},
+                        "additionalProperties": True,
+                    },
+                    "example": {"error": "Payment verification failed"},
+                },
+            },
+        },
+    }
+    responses.update(x402_payment_required_responses())
+    if backend_unavailable:
+        responses[503] = _error_response(
+            "The configured memory backend is temporarily unavailable.",
+            "NoSQLite memory backend is unavailable",
+        )
+    return responses
+
+
+def _capability_openapi_schema() -> Dict[str, Any]:
+    """Return the stable public shape of one routed capability."""
+    return {
+        "type": "object",
+        "required": ["name", "does", "call"],
+        "properties": {
+            "name": {"type": "string"},
+            "does": {"type": "string"},
+            "call": {"type": "string"},
+        },
+        "additionalProperties": False,
+    }
+
+
+def health_success_openapi(
+    *,
+    paid: bool,
+    private_tenants_enabled: bool,
+    memory_backend: str,
+    nosqlite_shadow: bool,
+    nosqlite_configured: bool,
+    durable_transactions: bool,
+) -> Dict[str, Any]:
+    """Document the free health and deployment-state response."""
+    schema = {
+        "type": "object",
+        "required": ["ok", "name", "paid", "memory", "memory_backend", "tenancy"],
+        "properties": {
+            "ok": {"type": "boolean", "const": True},
+            "name": {"type": "string"},
+            "paid": {"type": "boolean"},
+            "memory": {
+                "type": "object",
+                "required": ["entries", "dim", "index_method", "query_mutates_store"],
+                "properties": {
+                    "entries": {"type": "integer", "minimum": 0},
+                    "dim": {"type": "integer", "minimum": 1},
+                    "index_method": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    "query_mutates_store": {"type": "boolean"},
+                },
+                "additionalProperties": False,
+            },
+            "memory_backend": {
+                "type": "object",
+                "required": ["backend", "nosqlite_shadow", "nosqlite_configured", "durable_transactions"],
+                "properties": {
+                    "backend": {"type": "string", "enum": ["core", "nosqlite"]},
+                    "nosqlite_shadow": {"type": "boolean"},
+                    "nosqlite_configured": {"type": "boolean"},
+                    "durable_transactions": {"type": "boolean"},
+                },
+                "additionalProperties": False,
+            },
+            "tenancy": {
+                "type": "object",
+                "required": ["default_tenant", "loaded_tenants", "private_tenants_enabled"],
+                "properties": {
+                    "default_tenant": {"type": "string"},
+                    "loaded_tenants": {"type": "integer", "minimum": 1},
+                    "private_tenants_enabled": {"type": "boolean"},
+                },
+                "additionalProperties": False,
+            },
+        },
+        "additionalProperties": False,
+    }
+    example = {
+        "ok": True,
+        "name": SERVICE_NAME,
+        "paid": paid,
+        "memory": {
+            "entries": 3,
+            "dim": 512,
+            "index_method": "exact",
+            "query_mutates_store": False,
+        },
+        "memory_backend": {
+            "backend": memory_backend,
+            "nosqlite_shadow": nosqlite_shadow,
+            "nosqlite_configured": nosqlite_configured,
+            "durable_transactions": durable_transactions,
+        },
+        "tenancy": {
+            "default_tenant": DEFAULT_TENANT_ID,
+            "loaded_tenants": 1,
+            "private_tenants_enabled": private_tenants_enabled,
+        },
+    }
+    return _json_success_response(
+        "Service health and deployment state returned.",
+        schema,
+        example,
+        payment_receipt=False,
+    )
+
+
+def pricing_success_openapi(
+    config: X402Config,
+    *,
+    private_tenants_enabled: bool,
+    memory_backend: str,
+    nosqlite_shadow: bool,
+    nosqlite_configured: bool,
+    durable_transactions: bool,
+) -> Dict[str, Any]:
+    """Document the free x402 discovery manifest."""
+    string_map = {"type": "object", "additionalProperties": {"type": "string"}}
+    schema = {
+        "type": "object",
+        "required": ["ok", "documentation", "x402", "pricing", "tenancy", "memory_backend", "routes"],
+        "properties": {
+            "ok": {"type": "boolean", "const": True},
+            "documentation": {
+                "type": "object",
+                "required": ["swagger_ui", "reference", "openapi_schema"],
+                "properties": {
+                    "swagger_ui": {"type": "string", "format": "uri"},
+                    "reference": {"type": "string", "format": "uri"},
+                    "openapi_schema": {"type": "string", "format": "uri"},
+                },
+                "additionalProperties": False,
+            },
+            "x402": {
+                "type": "object",
+                "required": ["pay_to", "price", "network", "facilitator_url", "scheme", "public_url"],
+                "properties": {
+                    "pay_to": {"type": "string"},
+                    "price": {"type": "string"},
+                    "network": {"type": "string"},
+                    "facilitator_url": {"type": "string", "format": "uri"},
+                    "scheme": {"type": "string"},
+                    "public_url": {"type": "string", "format": "uri"},
+                },
+                "additionalProperties": False,
+            },
+            "pricing": string_map,
+            "tenancy": {
+                "type": "object",
+                "required": ["default_tenant", "tenant_header", "tenant_token_header", "private_tenants_enabled"],
+                "properties": {
+                    "default_tenant": {"type": "string"},
+                    "tenant_header": {"type": "string"},
+                    "tenant_token_header": {"type": "string"},
+                    "private_tenants_enabled": {"type": "boolean"},
+                },
+                "additionalProperties": False,
+            },
+            "memory_backend": {
+                "type": "object",
+                "required": ["backend", "nosqlite_shadow", "nosqlite_configured", "durable_transactions"],
+                "properties": {
+                    "backend": {"type": "string", "enum": ["core", "nosqlite"]},
+                    "nosqlite_shadow": {"type": "boolean"},
+                    "nosqlite_configured": {"type": "boolean"},
+                    "durable_transactions": {"type": "boolean"},
+                },
+                "additionalProperties": False,
+            },
+            "routes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["route", "description", "mime_type", "accepts"],
+                    "properties": {
+                        "route": {"type": "string"},
+                        "description": {"type": "string"},
+                        "mime_type": {"type": "string"},
+                        "accepts": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["scheme", "price", "network", "pay_to"],
+                                "properties": {
+                                    "scheme": {"type": "string"},
+                                    "price": {"type": "string"},
+                                    "network": {"type": "string"},
+                                    "pay_to": {"type": "string"},
+                                },
+                                "additionalProperties": False,
+                            },
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "additionalProperties": False,
+    }
+    example = {
+        "ok": True,
+        "documentation": documentation_manifest(config),
+        "x402": config.to_public_dict(),
+        "pricing": pricing_summary(config),
+        "tenancy": {
+            "default_tenant": DEFAULT_TENANT_ID,
+            "tenant_header": TENANT_HEADER,
+            "tenant_token_header": TENANT_TOKEN_HEADER,
+            "private_tenants_enabled": private_tenants_enabled,
+        },
+        "memory_backend": {
+            "backend": memory_backend,
+            "nosqlite_shadow": nosqlite_shadow,
+            "nosqlite_configured": nosqlite_configured,
+            "durable_transactions": durable_transactions,
+        },
+        "routes": payment_manifest(config),
+    }
+    return _json_success_response(
+        "Pricing and x402 discovery manifest returned.",
+        schema,
+        example,
+        payment_receipt=False,
+    )
+
+
+def recall_success_openapi() -> Dict[str, Any]:
+    """Document the successful memory-recall response."""
+    hit_schema = {
+        "type": "object",
+        "required": ["id", "text", "label", "metadata", "score"],
+        "properties": {
+            "id": {"type": "string"},
+            "text": {"type": "string"},
+            "label": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "metadata": {"type": "object", "additionalProperties": True},
+            "score": {"type": "number"},
+        },
+        "additionalProperties": False,
+    }
+    schema = {
+        "type": "object",
+        "required": ["ok", "tenant", "query", "hits"],
+        "properties": {
+            "ok": {"type": "boolean", "const": True},
+            "tenant": {"type": "string"},
+            "query": {"type": "string"},
+            "hits": {"type": "array", "items": hit_schema},
+        },
+        "additionalProperties": False,
+    }
+    example = {
+        "ok": True,
+        "tenant": "public",
+        "query": "deterministic memory",
+        "hits": [{
+            "id": "m2",
+            "text": "Prefer explicit capability routing when confidence is low.",
+            "label": "routing",
+            "metadata": {"source": "public-preview"},
+            "score": 0.82,
+        }],
+    }
+    return _json_success_response("Memory recall completed.", schema, example)
+
+
+def route_success_openapi() -> Dict[str, Any]:
+    """Document the successful capability-routing response."""
+    capability = _capability_openapi_schema()
+    route_schema = {
+        "type": "object",
+        "required": ["task", "decision", "confidence"],
+        "properties": {
+            "task": {"type": "string"},
+            "decision": {"type": "string", "enum": ["act", "choose", "unknown"]},
+            "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+            "prompt": {"type": "string"},
+            "skill": capability,
+            "options": {"type": "array", "items": capability},
+        },
+        "additionalProperties": True,
+    }
+    schema = {
+        "type": "object",
+        "required": ["ok", "tenant", "route"],
+        "properties": {
+            "ok": {"type": "boolean", "const": True},
+            "tenant": {"type": "string"},
+            "route": route_schema,
+        },
+        "additionalProperties": False,
+    }
+    example = {
+        "ok": True,
+        "tenant": "public",
+        "route": {
+            "task": "search a large vector collection",
+            "decision": "act",
+            "confidence": 0.91,
+            "skill": {
+                "name": "Index (search)",
+                "does": "Search a vector index for nearest entries.",
+                "call": "index.nearest(query, k=5)",
+            },
+        },
+    }
+    return _json_success_response("Capability routing completed.", schema, example)
+
+
+def dashboard_success_openapi() -> Dict[str, Any]:
+    """Document the successful service-readiness response."""
+    schema = {
+        "type": "object",
+        "required": ["ok", "tenant", "dashboard"],
+        "properties": {
+            "ok": {"type": "boolean", "const": True},
+            "tenant": {"type": "string"},
+            "dashboard": {
+                "type": "object",
+                "required": ["name", "status", "memory", "routing", "c_kernel", "checks"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "status": {"type": "string", "enum": ["ready", "check"]},
+                    "memory": {
+                        "type": "object",
+                        "required": ["entries", "dim", "index_method", "query_mutates_store"],
+                        "properties": {
+                            "entries": {"type": "integer", "minimum": 0},
+                            "dim": {"type": "integer", "minimum": 1},
+                            "index_method": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                            "query_mutates_store": {"type": "boolean"},
+                        },
+                        "additionalProperties": False,
+                    },
+                    "routing": {
+                        "type": "object",
+                        "required": ["capabilities", "probe_decision", "probe_skill"],
+                        "properties": {
+                            "capabilities": {"type": "integer", "minimum": 0},
+                            "probe_decision": {"type": "string"},
+                            "probe_skill": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                        },
+                        "additionalProperties": False,
+                    },
+                    "c_kernel": {"type": "object", "additionalProperties": True},
+                    "checks": {
+                        "type": "object",
+                        "required": ["deterministic_encoding", "no_model_weights", "self_contained_engine"],
+                        "properties": {
+                            "deterministic_encoding": {"type": "boolean"},
+                            "no_model_weights": {"type": "boolean"},
+                            "self_contained_engine": {"type": "boolean"},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+                "additionalProperties": True,
+            },
+        },
+        "additionalProperties": False,
+    }
+    example = {
+        "ok": True,
+        "tenant": "public",
+        "dashboard": {
+            "name": SERVICE_NAME,
+            "status": "ready",
+            "memory": {
+                "entries": 3,
+                "dim": 512,
+                "index_method": "exact",
+                "query_mutates_store": False,
+            },
+            "routing": {
+                "capabilities": 656,
+                "probe_decision": "act",
+                "probe_skill": "Index (search)",
+            },
+            "c_kernel": {"available": False, "path": None},
+            "checks": {
+                "deterministic_encoding": True,
+                "no_model_weights": True,
+                "self_contained_engine": True,
+            },
+        },
+    }
+    return _json_success_response("Readiness dashboard returned.", schema, example)
+
+
+def public_response_headers(
+    path: str,
+    status_code: int,
+    public_url: str,
+    content_type: str = "",
+    network: str = DEFAULT_NETWORK,
+) -> Dict[str, str]:
+    """Return browser and cache policy headers for one public response."""
+    if path == "/docs":
+        content_security_policy = (
+            "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "img-src 'self' data: https://fastapi.tiangolo.com; connect-src 'self'; "
+            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+        )
+    elif path == "/redoc":
+        content_security_policy = (
+            "default-src 'none'; script-src https://cdn.jsdelivr.net; "
+            "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; "
+            "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        )
+    elif path == "/":
+        content_security_policy = (
+            "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; "
+            "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        )
+    else:
+        content_security_policy = (
+            "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        )
+
+    private_or_dynamic = (
+        status_code >= 400
+        or path == "/health"
+        or path.startswith("/v1/")
+        or path.startswith("/admin/")
+    )
+    headers = {
+        "Cache-Control": (
+            "no-store" if private_or_dynamic else "public, max-age=60, must-revalidate"
+        ),
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "X-Permitted-Cross-Domain-Policies": "none",
+    }
+    # x402's pinned browser paywall is a self-contained wallet application with
+    # inline script/style. Permit only its same-origin retry, the configured
+    # chain's public RPC, and the two optional Coinbase telemetry endpoints.
+    browser_paywall = (
+        status_code == 402
+        and path.startswith("/v1/")
+        and content_type.lower().startswith("text/html")
+    )
+    if browser_paywall:
+        rpc_source = {
+            "eip155:84532": "https://sepolia.base.org",
+            "eip155:8453": "https://mainnet.base.org",
+        }.get(network, "https:")
+        content_security_policy = (
+            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+            "connect-src 'self' %s https://rpc.wallet.coinbase.com "
+            "https://cca-lite.coinbase.com https://as.coinbase.com; "
+            "img-src 'self' data:; font-src 'none'; media-src 'none'; "
+            "object-src 'none'; frame-src 'none'; worker-src 'none'; "
+            "manifest-src 'none'; base-uri 'none'; form-action 'none'; "
+            "frame-ancestors 'none'" % rpc_source
+        )
+    headers["Content-Security-Policy"] = content_security_policy
+    if urlsplit(public_url).scheme == "https":
+        headers["Strict-Transport-Security"] = "max-age=31536000"
+    return headers
+
+
 LANDING_PAGE_TEMPLATE = Template("""<!doctype html>
 <html lang="en">
 <head>
@@ -219,52 +776,57 @@ LANDING_PAGE_TEMPLATE = Template("""<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>$service_name</title>
 <meta name="description" content="Call hosted agent memory, capability routing, and readiness endpoints over HTTPS with x402 payment per request.">
+<meta name="theme-color" content="#20201c">
+<meta property="og:title" content="$service_name">
+<meta property="og:description" content="Hosted agent memory and capability routing with x402 payment per request.">
+<link rel="canonical" href="$public_url/">
 <link rel="alternate" type="application/json" href="/openapi.json" title="OpenAPI schema">
 <style>
-:root{--paper:#fbfaf5;--ink:#171714;--muted:#6f6b61;--line:#ded8c8;--acid:#b7ff3c;--cyan:#28d6ff;--coral:#ff6b57;--gold:#f4c542;--graphite:#20201c}
-*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:inherit;text-decoration:none}
-.hero{background:var(--graphite);color:var(--paper);display:grid;grid-template-columns:minmax(0,1.08fr) minmax(320px,.92fr);min-height:88vh;overflow:hidden;padding:28px clamp(20px,5vw,72px) 54px;position:relative}
+:root{--paper:#fbfaf5;--ink:#171714;--muted:#6f6b61;--line:#ded8c8;--acid:#b7ff3c;--cyan:#28d6ff;--coral:#ff6b57;--coral-text:#b6402f;--gold:#f4c542;--graphite:#20201c}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:inherit;text-decoration:none}a:focus-visible,button:focus-visible{outline:3px solid currentColor;outline-offset:4px}.skip{background:var(--acid);color:var(--ink);font-weight:760;left:16px;padding:12px 16px;position:fixed;top:12px;transform:translateY(-180%);transition:transform 140ms ease;z-index:20}.skip:focus{transform:translateY(0)}
+.hero{background:var(--graphite);color:var(--paper);display:grid;grid-template-columns:minmax(0,1.1fr) minmax(300px,.8fr);min-height:720px;overflow:hidden;padding:24px clamp(20px,5vw,72px) 38px;position:relative}
 .field{inset:0;overflow:hidden;position:absolute}.field:before{background-image:linear-gradient(rgba(251,250,245,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(251,250,245,.08) 1px,transparent 1px);background-size:56px 56px;content:"";inset:-80px;opacity:.45;position:absolute;transform:rotate(-7deg)}.field:after{background:radial-gradient(circle at 18% 20%,rgba(183,255,60,.42),transparent 25%),radial-gradient(circle at 70% 22%,rgba(40,214,255,.35),transparent 28%),radial-gradient(circle at 78% 74%,rgba(255,107,87,.28),transparent 26%),linear-gradient(135deg,rgba(32,32,28,.12),rgba(32,32,28,.95));content:"";inset:0;position:absolute}
 .trace{border:1px solid rgba(251,250,245,.16);border-radius:999px;position:absolute}.trace.a{height:52vw;right:-14vw;top:5vw;width:52vw}.trace.b{border-color:rgba(183,255,60,.24);height:34vw;left:38vw;top:25vh;width:34vw}.trace.c{border-color:rgba(255,107,87,.2);height:42vw;left:-16vw;top:42vh;width:42vw}
 .node{animation:pulse 5s ease-in-out infinite;background:var(--acid);border-radius:999px;box-shadow:0 0 18px currentColor;color:var(--acid);height:var(--size);left:var(--x);opacity:.82;position:absolute;top:var(--y);width:var(--size);z-index:1}.node:nth-child(3n){background:var(--cyan);color:var(--cyan)}.node:nth-child(5n){background:var(--coral);color:var(--coral)}
 @keyframes pulse{0%,100%{transform:translate3d(0,0,0) scale(.84)}50%{transform:translate3d(12px,-10px,0) scale(1.18)}}
-.topbar{align-items:center;display:flex;gap:24px;grid-column:1/-1;justify-content:space-between;position:relative;z-index:2}.brand,.nav{align-items:center;display:flex}.brand{font-weight:760;gap:10px}.mark{align-items:center;background:var(--acid);color:var(--ink);display:inline-flex;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;height:34px;justify-content:center;width:34px}.nav{color:rgba(251,250,245,.78);font-size:14px;gap:18px}
-.copy{align-self:center;max-width:760px;padding:90px 0 34px;position:relative;z-index:2}.status{color:rgba(251,250,245,.78);display:flex;flex-wrap:wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;gap:10px;letter-spacing:0;margin:0 0 20px;text-transform:uppercase}.status span{border:1px solid rgba(251,250,245,.22);padding:8px 10px}
-h1,h2,h3,p{margin-top:0}h1{font-size:clamp(56px,9vw,124px);line-height:.9;margin-bottom:24px;max-width:900px}.lede{color:rgba(251,250,245,.82);font-size:clamp(19px,2.2vw,28px);line-height:1.32;max-width:720px}.actions,.close-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:34px}.button{align-items:center;border:1px solid currentColor;display:inline-flex;font-weight:720;min-height:48px;padding:14px 18px;transition:transform 160ms ease,background 160ms ease,color 160ms ease}.button:hover{transform:translateY(-2px)}.primary{background:var(--acid);border-color:var(--acid);color:var(--ink)}.secondary{color:var(--paper)}.secondary.dark{color:var(--ink)}
-.terminal{align-self:end;background:rgba(251,250,245,.94);border:1px solid rgba(251,250,245,.26);box-shadow:0 28px 90px rgba(0,0,0,.3);color:var(--ink);margin-bottom:28px;max-width:460px;position:relative;z-index:2}.terminal-top{align-items:center;border-bottom:1px solid var(--line);display:flex;gap:7px;padding:12px 14px}.terminal-top span{background:var(--coral);border-radius:999px;height:10px;width:10px}.terminal-top span:nth-child(2){background:var(--gold)}.terminal-top span:nth-child(3){background:var(--cyan)}pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(13px,1.3vw,16px);line-height:1.6;margin:0;overflow-x:auto;padding:22px;white-space:pre-wrap}
+.topbar{align-items:center;display:flex;gap:24px;grid-column:1/-1;justify-content:space-between;position:relative;z-index:2}.brand,.nav{align-items:center;display:flex}.brand{font-weight:760;gap:10px}.mark{align-items:center;background:var(--acid);color:var(--ink);display:inline-flex;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;height:34px;justify-content:center;width:34px}.nav{color:rgba(251,250,245,.78);font-size:14px;gap:8px}.nav a{align-items:center;display:inline-flex;min-height:44px;padding:0 8px}
+.copy{align-self:center;max-width:760px;padding:54px 0 24px;position:relative;z-index:2}.status{color:rgba(251,250,245,.78);display:flex;flex-wrap:wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;gap:10px;letter-spacing:0;margin:0 0 20px;text-transform:uppercase}.status span{border:1px solid rgba(251,250,245,.22);padding:8px 10px}
+h1,h2,h3,p{margin-top:0}h1{font-size:clamp(48px,7vw,96px);line-height:.94;margin-bottom:22px;max-width:820px}.lede{color:rgba(251,250,245,.82);font-size:clamp(18px,1.8vw,24px);line-height:1.38;max-width:720px}.actions,.close-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}.button{align-items:center;border:1px solid currentColor;display:inline-flex;font-weight:720;min-height:48px;padding:14px 18px;transition:transform 160ms ease,background 160ms ease,color 160ms ease}.button:hover{transform:translateY(-2px)}.primary{background:var(--acid);border-color:var(--acid);color:var(--ink)}.secondary{color:var(--paper)}.secondary.dark{color:var(--ink)}
+.terminal{align-self:center;background:rgba(251,250,245,.96);border:1px solid rgba(251,250,245,.26);box-shadow:0 28px 90px rgba(0,0,0,.3);color:var(--ink);max-width:500px;position:relative;z-index:2}.terminal-top{align-items:center;border-bottom:1px solid var(--line);display:flex;gap:7px;padding:12px 14px}.terminal-top span{background:var(--coral);border-radius:999px;height:10px;width:10px}.terminal-top span:nth-child(2){background:var(--gold)}.terminal-top span:nth-child(3){background:var(--cyan)}pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(13px,1.2vw,15px);line-height:1.6;margin:0;overflow-x:auto;padding:22px;white-space:pre-wrap}
 .strip{background:var(--acid);color:var(--ink);display:grid;grid-template-columns:repeat(3,1fr)}.strip div{border-right:1px solid rgba(23,23,20,.22);padding:18px clamp(18px,4vw,54px)}.strip div:last-child{border-right:0}.strip strong,.strip span{display:block}.strip strong{font-size:13px;text-transform:uppercase}.strip span{font-size:clamp(18px,2vw,28px);font-weight:760;margin-top:5px}
-.section{padding:clamp(68px,9vw,128px) clamp(20px,5vw,72px)}.split,.proof{display:grid;gap:clamp(32px,6vw,80px);grid-template-columns:minmax(0,.9fr) minmax(320px,1.1fr)}.eyebrow{color:var(--coral);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:720;letter-spacing:0;margin-bottom:16px;text-transform:uppercase}.section h2{color:var(--ink);font-size:clamp(34px,5vw,72px);line-height:.98;margin-bottom:0;max-width:930px}.reason-list{border-top:1px solid var(--line)}.reason-list p{border-bottom:1px solid var(--line);color:#3a372f;font-size:clamp(18px,2vw,25px);line-height:1.35;margin:0;padding:22px 0}.heading{margin-bottom:clamp(28px,5vw,56px)}
-.routes,.cases{display:grid;gap:14px}.routes{grid-template-columns:repeat(3,minmax(0,1fr))}.card,.case,.proof-panel{background:#fff;border:1px solid var(--line);border-radius:8px}.card{min-height:315px;padding:24px}.method{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;margin-bottom:42px}.card h3{font-size:30px;margin-bottom:10px}.card code{background:#f2eee3;display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin-bottom:18px;padding:7px 9px}.card p:last-child{color:var(--muted);font-size:17px;line-height:1.48}
-.use{background:#f2eee3}.cases{grid-template-columns:repeat(4,minmax(0,1fr))}.case{display:flex;gap:16px;min-height:220px;padding:22px}.case span{color:var(--coral);font-size:30px;line-height:1}.case p{color:#3b382f;font-size:18px;line-height:1.42}
+.section{padding:clamp(64px,8vw,112px) clamp(20px,5vw,72px)}.proof{display:grid;gap:clamp(32px,6vw,80px);grid-template-columns:minmax(0,.9fr) minmax(320px,1.1fr)}.eyebrow{color:var(--coral-text);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:720;letter-spacing:0;margin-bottom:16px;text-transform:uppercase}.section h2{color:var(--ink);font-size:clamp(34px,5vw,68px);line-height:1;margin-bottom:0;max-width:930px}.heading{margin-bottom:clamp(28px,5vw,52px)}
+.quickstart{background:#f2eee3}.quick-grid{display:grid;gap:clamp(28px,5vw,64px);grid-template-columns:minmax(280px,.78fr) minmax(0,1.22fr)}.flow{counter-reset:steps;display:grid;gap:0;list-style:none;margin:34px 0 0;padding:0}.flow li{border-top:1px solid var(--line);display:grid;gap:12px;grid-template-columns:36px 1fr;padding:20px 0}.flow li:before{align-items:center;background:var(--graphite);border-radius:999px;color:var(--paper);content:counter(steps);counter-increment:steps;display:flex;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;height:28px;justify-content:center;width:28px}.flow strong{display:block;font-size:18px;margin-bottom:5px}.flow p{color:var(--muted);line-height:1.5;margin:0}.flow a{text-decoration:underline;text-underline-offset:3px}.command-panel{align-self:start;background:var(--graphite);border-radius:8px;box-shadow:0 24px 70px rgba(23,23,20,.2);color:var(--paper);overflow:hidden}.command-head{align-items:center;border-bottom:1px solid rgba(251,250,245,.16);display:flex;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;justify-content:space-between;padding:14px 18px}.command-head a{color:var(--acid);min-height:32px;padding:7px 0}.command-panel pre{font-size:14px;padding:22px}.response-note{border-top:1px solid rgba(251,250,245,.16);color:rgba(251,250,245,.72);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.55;margin:0;padding:18px 22px}.response-note strong{color:var(--acid)}
+.routes{display:grid;gap:14px;grid-template-columns:repeat(3,minmax(0,1fr))}.card,.proof-panel{background:#fff;border:1px solid var(--line);border-radius:8px}.card{min-height:315px;padding:24px}.method{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;margin-bottom:42px}.card h3{font-size:30px;margin-bottom:10px}.card code{background:#f2eee3;display:inline-block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;margin-bottom:18px;padding:7px 9px}.card p:last-child{color:var(--muted);font-size:17px;line-height:1.48}
 .proof{background:var(--graphite);color:var(--paper)}.proof h2,.proof p{color:var(--paper)}.proof-copy p:last-child{color:rgba(251,250,245,.75);font-size:19px;line-height:1.55;margin-top:26px;max-width:690px}.proof-panel{background:rgba(251,250,245,.96);color:var(--ink);padding:8px}.proof-panel dl{display:grid;gap:1px;grid-template-columns:repeat(2,1fr);margin:0}.proof-panel div{background:#fbfaf5;min-height:150px;padding:22px}.proof-panel dt{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;margin-bottom:28px;text-transform:uppercase}.proof-panel dd{font-size:clamp(24px,3vw,40px);font-weight:760;margin:0;overflow-wrap:anywhere}
 .close{align-items:center;display:grid;grid-template-columns:minmax(0,1fr) auto}.close h2{max-width:980px}.close-actions{justify-content:flex-end;margin-top:0}
-@media(max-width:980px){.hero,.split,.proof,.close{grid-template-columns:1fr}.hero{min-height:auto}.terminal{align-self:start;margin-bottom:0;max-width:100%}.routes,.cases{grid-template-columns:1fr}.case,.card{min-height:0}.close-actions{justify-content:flex-start;margin-top:24px}}
-@media(max-width:680px){.hero{padding:20px 18px 36px}.topbar,.nav,.strip{align-items:flex-start;display:grid;grid-template-columns:1fr}.nav{gap:8px}.copy{padding-top:62px}.status span,.button{width:100%}.strip div{border-bottom:1px solid rgba(23,23,20,.22);border-right:0}.proof-panel dl{grid-template-columns:1fr}.section{padding-left:18px;padding-right:18px}}
+.footer{align-items:center;border-top:1px solid var(--line);color:var(--muted);display:flex;font-size:14px;gap:24px;justify-content:space-between;padding:24px clamp(20px,5vw,72px)}.footer nav{display:flex;flex-wrap:wrap;gap:18px}.footer a{align-items:center;display:inline-flex;min-height:44px;text-decoration:underline;text-underline-offset:3px}
+@media(max-width:980px){.hero,.proof,.close,.quick-grid{grid-template-columns:1fr}.hero{min-height:auto}.terminal{align-self:start;margin-bottom:0;max-width:100%}.routes{grid-template-columns:1fr}.card{min-height:0}.close-actions{justify-content:flex-start;margin-top:24px}}
+@media(max-width:680px){.hero{padding:18px 18px 34px}.topbar{align-items:flex-start;display:grid;grid-template-columns:1fr}.nav{display:grid;gap:4px;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}.nav a{min-height:44px;padding:0}.copy{padding-top:42px}.status span,.button{width:100%}.strip{align-items:flex-start;display:grid;grid-template-columns:1fr}.strip div{border-bottom:1px solid rgba(23,23,20,.22);border-right:0}.proof-panel dl{grid-template-columns:1fr}.section{padding-left:18px;padding-right:18px}.footer{align-items:flex-start;flex-direction:column}.footer nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.node{animation:none}.button,.skip{transition:none}.button:hover{transform:none}}
 </style>
 </head>
 <body>
+<a class="skip" href="#quickstart">Skip to quickstart</a>
 <main>
 <section class="hero" aria-labelledby="hero-title">
 <div class="field" aria-hidden="true"><span class="trace a"></span><span class="trace b"></span><span class="trace c"></span>$nodes</div>
-<nav class="topbar" aria-label="Primary"><a class="brand" href="#hero-title" aria-label="$service_name home"><span class="mark">lc</span><span>$service_name</span></a><div class="nav"><a href="/docs">API docs</a><a href="/redoc">Reference</a><a href="/openapi.json">OpenAPI</a><a href="/pricing">Pricing</a></div></nav>
-<div class="copy"><p class="status"><span>$environment_label</span><span>$network_label</span><span>$price_per_thousand</span></p><h1 id="hero-title">$service_name</h1><p class="lede">Call hosted, tenant-scoped agent memory, capability routing, and readiness endpoints over HTTPS. Each protected request uses x402 payment. $payment_notice</p><div class="actions"><a class="button primary" href="/docs">Explore API docs</a><a class="button secondary" href="/redoc">Read the reference</a><a class="button secondary" href="/pricing">View pricing</a></div></div>
-<aside class="terminal" aria-label="Live API snapshot"><div class="terminal-top"><span></span><span></span><span></span></div><pre>GET /health
-200 OK
-memory.entries: 3
-paid: true
+<nav class="topbar" aria-label="Primary"><a class="brand" href="#hero-title" aria-label="$service_name home"><span class="mark">lc</span><span>leCore API</span></a><div class="nav"><a href="#quickstart">Quickstart</a><a href="/docs">API docs</a><a href="/redoc">Reference</a><a href="/pricing">Pricing</a></div></nav>
+<div class="copy"><p class="status"><span>$price_per_request</span><span>$environment_label</span><span>$network_label</span></p><h1 id="hero-title">$hero_title</h1><p class="lede">A hosted HTTPS API for querying seeded preview memory, routing tasks to leCore capabilities, and reading service readiness. $payment_notice</p><div class="actions"><a class="button primary" href="#quickstart">Make the first request</a><a class="button secondary" href="/docs">Explore API docs</a><a class="button secondary" href="/pricing">View pricing</a></div></div>
+<aside class="terminal" aria-label="Unsigned x402 request example"><div class="terminal-top"><span></span><span></span><span></span></div><pre>curl -i $public_url/v1/dashboard
 
-GET /v1/dashboard
-402 Payment Required
-network: $network
-asset: $payment_asset</pre></aside>
+HTTP/2 402 Payment Required
+Payment-Required: &lt;base64 challenge&gt;
+
+# Sign, then retry with:
+Payment-Signature: &lt;base64 payment&gt;</pre></aside>
 </section>
-<section class="strip" aria-label="Live deployment details"><div><strong>Endpoint</strong><span>$public_url</span></div><div><strong>Stage</strong><span>$environment_label</span></div><div><strong>Buyer shape</strong><span>inspect, pay, call</span></div></section>
-<section id="why" class="section split"><div><p class="eyebrow">Why try it</p><h2>Most agents do not need a platform. They need a few reliable cognitive calls.</h2></div><div class="reason-list"><p>Test the x402 payment flow against one answerable primitive at a time.</p><p>The API is narrow enough to trust: read/compute routes are paid, memory writes stay admin-gated.</p><p>It exposes the useful part of leCore first: tenant-scoped agent memory plus capability routing.</p><p>$payment_notice</p></div></section>
-<section id="routes" class="section"><div class="heading"><p class="eyebrow">What the payment unlocks</p><h2>Three paid routes, each small enough to understand.</h2></div><div class="routes"><article class="card"><p class="method">POST</p><h3>Recall</h3><code>/v1/recall</code><p>Query tenant-scoped agent memory over HTTPS while leCore handles storage and retrieval behind the API.</p></article><article class="card"><p class="method">POST</p><h3>Route</h3><code>/v1/route</code><p>Send a plain-language task and get the leCore capability it should use, with evidence attached.</p></article><article class="card"><p class="method">GET</p><h3>Dashboard</h3><code>/v1/dashboard</code><p>Read the readiness surface: memory counts, capability map, abstention behavior, and route coverage.</p></article></div></section>
-<section class="section use"><div class="heading"><p class="eyebrow">Good first buyers</p><h2>Teams who want the leCore idea without adopting the whole repo.</h2></div><div class="cases"><article class="case"><span aria-hidden="true">+</span><p>Agent memory for prototypes that should remember without a database rollout.</p></article><article class="case"><span aria-hidden="true">+</span><p>Capability routing for tools that need to pick the right leCore subsystem before doing work.</p></article><article class="case"><span aria-hidden="true">+</span><p>Readiness dashboards for teams deciding whether a deterministic memory service fits their product.</p></article><article class="case"><span aria-hidden="true">+</span><p>A working x402 seller endpoint to copy when you want pay-per-call APIs instead of subscriptions.</p></article></div></section>
-<section id="proof" class="section proof"><div class="proof-copy"><p class="eyebrow">Preview status</p><h2>It is deployed, health-checked, and ready to integrate.</h2><p>The free endpoints show health and preview terms. Paid endpoints return an x402 challenge on $network_name. The receiving address is public, while admin writes stay out of the customer path.</p></div><div class="proof-panel"><dl><div><dt>Preview price</dt><dd>$price_per_thousand</dd></div><div><dt>Network</dt><dd>$network_name</dd></div><div><dt>Receiver</dt><dd>$pay_to_short</dd></div><div><dt>Status</dt><dd>Healthy</dd></div></dl></div></section>
-<section class="section close"><p class="eyebrow">Start integrating</p><h2>Use memory and routing over HTTPS without adopting the whole repo.</h2><div class="close-actions"><a class="button primary" href="/docs">Open API docs</a><a class="button secondary dark" href="/openapi.json">Download OpenAPI</a><a class="button secondary dark" href="/health">Check live health</a></div></section>
+<section class="strip" aria-label="Deployment details"><div><strong>Endpoint</strong><span><a href="$public_url">$public_url</a></span></div><div><strong>Stage</strong><span>$environment_label</span></div><div><strong>Protocol</strong><span>x402 v2</span></div></section>
+<section id="quickstart" class="section quickstart" tabindex="-1"><div class="quick-grid"><div><p class="eyebrow">Four-step quickstart</p><h2>Inspect the terms before signing anything.</h2><ol class="flow"><li><div><strong>Read the free manifest</strong><p><a href="/pricing">GET /pricing</a> returns the exact route, network, asset, receiver, and price.</p></div></li><li><div><strong>Make an unsigned request</strong><p>The protected route returns <code>402</code> with a base64 <code>Payment-Required</code> challenge.</p></div></li><li><div><strong>Sign with an x402 v2 client</strong><p>Use the <a href="$buyer_guide_url">x402 buyer guide</a> to configure a testnet wallet and payment client.</p></div></li><li><div><strong>Retry and verify settlement</strong><p>Send <code>Payment-Signature</code>; a successful response includes <code>Payment-Response</code>.</p></div></li></ol></div><div class="command-panel"><div class="command-head"><span>First request: no wallet required</span><a href="/docs#/Paid%20API/getDashboard">Open route docs</a></div><pre><code>curl -i $public_url/v1/dashboard</code></pre><p class="response-note"><strong>Expected:</strong> HTTP 402 plus <code>Payment-Required</code>. This safely exposes the payment contract without moving testnet funds.</p><div class="command-head"><span>Inspect exact preview terms</span><a href="/pricing">Open live JSON</a></div><pre><code>curl -sS $public_url/pricing</code></pre></div></div></section>
+<section id="routes" class="section"><div class="heading"><p class="eyebrow">Paid API surface</p><h2>Three explicit operations, with no account or subscription.</h2></div><div class="routes"><article class="card"><p class="method">POST</p><h3>Recall</h3><code>/v1/recall</code><p>Query the seeded public preview memory or an operator-provisioned private tenant.</p></article><article class="card"><p class="method">POST</p><h3>Route</h3><code>/v1/route</code><p>Send a plain-language task and receive an explicit act, choose, or unknown decision with evidence.</p></article><article class="card"><p class="method">GET</p><h3>Dashboard</h3><code>/v1/dashboard</code><p>Read memory, capability-routing, and deterministic-engine readiness for one tenant.</p></article></div></section>
+<section id="proof" class="section proof"><div class="proof-copy"><p class="eyebrow">Preview boundaries</p><h2>Deployed, health-checked, and ready to test.</h2><p>Base Sepolia testnet only. The public memory dataset is read-only; private tenants and memory writes are currently operator-provisioned. Operator routes require separate authorization and are absent from the public OpenAPI schema.</p></div><div class="proof-panel"><dl><div><dt>Per request</dt><dd>$price_per_request</dd></div><div><dt>Per 1,000</dt><dd>$price_per_thousand</dd></div><div><dt>Network</dt><dd>$network_name</dd></div><div><dt>API version</dt><dd>$api_version</dd></div></dl></div></section>
+<section class="section close"><p class="eyebrow">Start testing</p><h2>See the full request and response contract.</h2><div class="close-actions"><a class="button primary" href="/docs">Open API docs</a><a class="button secondary dark" href="/openapi.json">View OpenAPI schema</a><a class="button secondary dark" href="/health">Check live health</a></div></section>
 </main>
+<footer class="footer"><span>$service_name · testnet preview</span><nav aria-label="Footer"><a href="/docs">Swagger</a><a href="/redoc">ReDoc</a><a href="/pricing">Pricing</a><a href="$buyer_guide_url">x402 buyer guide</a></nav></footer>
 </body>
 </html>""")
 
@@ -334,13 +896,6 @@ def _landing_nodes() -> str:
             % ((index * 29) % 100, (index * 47 + 11) % 100, (index % 9) * -0.45, size)
         )
     return "".join(nodes)
-
-
-def _short_address(address: str) -> str:
-    """Compact public wallet display."""
-    if len(address) <= 12:
-        return address
-    return "%s...%s" % (address[:6], address[-4:])
 
 
 def _network_name(network: str) -> str:
@@ -1183,15 +1738,16 @@ def landing_page_html(config: X402Config) -> str:
     summary = pricing_summary(config)
     return LANDING_PAGE_TEMPLATE.substitute(
         service_name=escape(SERVICE_NAME),
+        hero_title=escape(HERO_TITLE),
+        api_version=escape(LECORE_VERSION),
+        buyer_guide_url=escape(X402_BUYER_GUIDE_URL),
         nodes=_landing_nodes(),
-        network=escape(config.network),
         public_url=escape(config.public_url),
         network_label=escape("%s x402" % network_name),
         network_name=escape(network_name),
-        pay_to_short=escape(_short_address(config.pay_to)),
         environment_label=escape(summary["environment_label"]),
-        payment_asset=escape(summary["payment_asset"]),
         payment_notice=escape(summary["payment_notice"]),
+        price_per_request=escape("%s per request" % summary["per_request"]),
         price_per_thousand=escape(summary["display_price"]),
     )
 
@@ -1354,6 +1910,10 @@ def create_app(
         openapi_url="/openapi.json",
         openapi_tags=OPENAPI_TAGS,
         servers=[{"url": config.public_url, "description": "Public API"}],
+        openapi_external_docs={
+            "description": "x402 buyer quickstart",
+            "url": X402_BUYER_GUIDE_URL,
+        },
         lifespan=lifespan,
     )
     app.state.memory_backend = memory_backend
@@ -1372,6 +1932,19 @@ def create_app(
             routes=x402_route_configs(config),
             server=x402_resource_server(config),
         )
+
+    @app.middleware("http")
+    async def apply_public_response_policy(request: Any, call_next: Any) -> Any:
+        response = await call_next(request)
+        for name, value in public_response_headers(
+            request.url.path,
+            response.status_code,
+            config.public_url,
+            response.headers.get("content-type", ""),
+            config.network,
+        ).items():
+            response.headers[name] = value
+        return response
 
     def require_admin(header_value: Optional[str]) -> None:
         if not admin_token:
@@ -1457,8 +2030,19 @@ def create_app(
     @app.get(
         "/health",
         tags=["Discovery"],
+        operation_id="getHealth",
         summary="Check service health",
         description="Free liveness, memory-state, backend, and tenancy summary. No x402 payment is required.",
+        responses={
+            200: health_success_openapi(
+                paid=bool(paid),
+                private_tenants_enabled=bool(tenant_secret),
+                memory_backend=memory_backend,
+                nosqlite_shadow=bool(nosqlite_shadow),
+                nosqlite_configured=nosqlite_store is not None,
+                durable_transactions=memory_transactions is not None,
+            ),
+        },
     )
     def health() -> Dict[str, Any]:
         return {
@@ -1477,11 +2061,22 @@ def create_app(
     @app.get(
         "/pricing",
         tags=["Discovery"],
+        operation_id="getPricing",
         summary="Discover pricing and protected routes",
         description=(
             "Free discovery document for the x402 network, payment asset, price, "
             "tenant headers, documentation URLs, and protected-route manifest."
         ),
+        responses={
+            200: pricing_success_openapi(
+                config,
+                private_tenants_enabled=bool(tenant_secret),
+                memory_backend=memory_backend,
+                nosqlite_shadow=bool(nosqlite_shadow),
+                nosqlite_configured=nosqlite_store is not None,
+                durable_transactions=memory_transactions is not None,
+            ),
+        },
     )
     def pricing() -> Dict[str, Any]:
         return {
@@ -1529,12 +2124,17 @@ def create_app(
     @app.post(
         "/v1/recall",
         tags=["Paid API"],
+        operation_id="recallMemory",
         summary="Recall agent memory",
         description=(
             "Recall the nearest entries from tenant-scoped agent memory. An "
             "unsigned request returns the x402 challenge documented in the 402 response."
         ),
-        responses=x402_payment_required_responses(),
+        responses=paid_operation_responses(
+            recall_success_openapi(),
+            invalid_detail="query must be a non-empty string",
+            backend_unavailable=True,
+        ),
         openapi_extra=paid_request_openapi(
             required=["query"],
             properties={
@@ -1542,6 +2142,7 @@ def create_app(
                     "type": "string",
                     "minLength": 1,
                     "maxLength": MAX_QUERY_CHARS,
+                    "pattern": r"\S",
                     "description": "Text to match against stored agent memory.",
                 },
                 "k": {
@@ -1557,8 +2158,10 @@ def create_app(
                 },
                 "tenant": {
                     "type": "string",
-                    "pattern": _TENANT_ID_RE.pattern,
-                    "description": "Tenant id; must match X-leCore-Tenant when both are supplied.",
+                    "description": (
+                        "Tenant id. Leading/trailing whitespace is removed and letters are "
+                        "lowercased; the normalized id must match X-leCore-Tenant when both are supplied."
+                    ),
                 },
             },
             example={"query": "deterministic agent memory", "k": 3},
@@ -1570,17 +2173,24 @@ def create_app(
         x_lecore_tenant: Optional[str] = Header(
             default=None,
             alias=TENANT_HEADER,
-            description="Tenant id. Omit for the public tenant.",
+            description="Tenant id, trimmed and lowercased by the service. Omit for the public tenant.",
         ),
         x_lecore_tenant_token: Optional[str] = Header(
             default=None,
             alias=TENANT_TOKEN_HEADER,
-            description="Required with X-leCore-Tenant for private tenant memory.",
+            description=(
+                "Required whenever the resolved tenant is private, whether selected "
+                "by header or JSON body."
+            ),
         ),
         _payment_signature: Optional[str] = Header(
             default=None,
             alias="Payment-Signature",
-            description="x402 v2 payment signature produced from the Payment-Required challenge.",
+            description=(
+                "Omit to receive the x402 challenge; include the base64 x402 v2 "
+                "payment payload when retrying."
+            ),
+            json_schema_extra={"format": "byte"},
         ),
     ) -> Dict[str, Any]:
         return recall_response(payload, x_lecore_tenant, x_lecore_tenant_token)
@@ -1599,12 +2209,16 @@ def create_app(
     @app.post(
         "/v1/route",
         tags=["Paid API"],
+        operation_id="routeTask",
         summary="Route a task to a capability",
         description=(
             "Route a plain-English task to the best matching leCore capability. "
             "An unsigned request returns the x402 challenge documented in the 402 response."
         ),
-        responses=x402_payment_required_responses(),
+        responses=paid_operation_responses(
+            route_success_openapi(),
+            invalid_detail="task must be a non-empty string",
+        ),
         openapi_extra=paid_request_openapi(
             required=["task"],
             properties={
@@ -1612,12 +2226,15 @@ def create_app(
                     "type": "string",
                     "minLength": 1,
                     "maxLength": MAX_TASK_CHARS,
+                    "pattern": r"\S",
                     "description": "Plain-English task to route.",
                 },
                 "tenant": {
                     "type": "string",
-                    "pattern": _TENANT_ID_RE.pattern,
-                    "description": "Tenant id; must match X-leCore-Tenant when both are supplied.",
+                    "description": (
+                        "Tenant id. Leading/trailing whitespace is removed and letters are "
+                        "lowercased; the normalized id must match X-leCore-Tenant when both are supplied."
+                    ),
                 },
             },
             example={"task": "find the best capability for semantic memory retrieval"},
@@ -1629,17 +2246,24 @@ def create_app(
         x_lecore_tenant: Optional[str] = Header(
             default=None,
             alias=TENANT_HEADER,
-            description="Tenant id. Omit for the public tenant.",
+            description="Tenant id, trimmed and lowercased by the service. Omit for the public tenant.",
         ),
         x_lecore_tenant_token: Optional[str] = Header(
             default=None,
             alias=TENANT_TOKEN_HEADER,
-            description="Required with X-leCore-Tenant for private tenant routing.",
+            description=(
+                "Required whenever the resolved tenant is private, whether selected "
+                "by header or JSON body."
+            ),
         ),
         _payment_signature: Optional[str] = Header(
             default=None,
             alias="Payment-Signature",
-            description="x402 v2 payment signature produced from the Payment-Required challenge.",
+            description=(
+                "Omit to receive the x402 challenge; include the base64 x402 v2 "
+                "payment payload when retrying."
+            ),
+            json_schema_extra={"format": "byte"},
         ),
     ) -> Dict[str, Any]:
         return route_response(payload, x_lecore_tenant, x_lecore_tenant_token)
@@ -1657,28 +2281,36 @@ def create_app(
     @app.get(
         "/v1/dashboard",
         tags=["Paid API"],
+        operation_id="getDashboard",
         summary="Read the readiness dashboard",
         description=(
             "Read memory, routing, native-kernel, and deterministic-engine readiness "
             "for one tenant. An unsigned request returns the documented x402 challenge."
         ),
-        responses=x402_payment_required_responses(),
+        responses=paid_operation_responses(
+            dashboard_success_openapi(),
+            invalid_detail="tenant id is invalid",
+        ),
     )
     def dashboard(
         x_lecore_tenant: Optional[str] = Header(
             default=None,
             alias=TENANT_HEADER,
-            description="Tenant id. Omit for the public tenant.",
+            description="Tenant id, trimmed and lowercased by the service. Omit for the public tenant.",
         ),
         x_lecore_tenant_token: Optional[str] = Header(
             default=None,
             alias=TENANT_TOKEN_HEADER,
-            description="Required with X-leCore-Tenant for a private tenant dashboard.",
+            description="Required whenever the resolved tenant is private.",
         ),
         _payment_signature: Optional[str] = Header(
             default=None,
             alias="Payment-Signature",
-            description="x402 v2 payment signature produced from the Payment-Required challenge.",
+            description=(
+                "Omit to receive the x402 challenge; include the base64 x402 v2 "
+                "payment payload when retrying."
+            ),
+            json_schema_extra={"format": "byte"},
         ),
     ) -> Dict[str, Any]:
         return dashboard_response(x_lecore_tenant, x_lecore_tenant_token)
@@ -1828,7 +2460,7 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
         import uvicorn
     except ImportError as exc:
         raise RuntimeError(optional_dependency_help()) from exc
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port, server_header=False)
 
 
 if __name__ == "__main__":

@@ -32,7 +32,34 @@ Admin route:
 This split is deliberate. Paid customers can use the memory/router/dashboard,
 but they cannot mutate memory unless they also hold the admin token. Private
 tenant memory also requires a tenant token; x402 proves payment, not tenant
-authorization.
+authorization. In the hosted testnet preview, the public memory dataset is
+read-only and private tenants are operator-provisioned. Admin routes are not
+included in the public OpenAPI schema.
+
+## Public Preview Quickstart
+
+Read the free discovery manifest before signing anything:
+
+```bash
+curl -sS https://lecore.rati.foundation/pricing
+```
+
+Make an unsigned request to see the exact x402 contract without moving testnet
+funds:
+
+```bash
+curl -i https://lecore.rati.foundation/v1/dashboard
+```
+
+The response is `402 Payment Required` with a base64 `Payment-Required` header.
+Configure an x402 v2 client using the
+[official buyer quickstart](https://docs.x402.org/getting-started/quickstart-for-buyers),
+sign one accepted option, and retry with `Payment-Signature`. A successful paid
+response includes `Payment-Response` with the settlement result.
+
+The public OpenAPI contract documents request bodies, successful response
+shapes, payment headers, tenant authorization failures, facilitator errors, and
+the recall backend's availability response.
 
 ## Install
 

@@ -12,6 +12,7 @@ from holographic_x402_api import (
     DEFAULT_PRICE,
     DEFAULT_PUBLIC_URL,
     DEFAULT_TENANT_ID,
+    HERO_TITLE,
     IDEMPOTENCY_HEADER,
     MEMORY_BACKEND_NOSQLITE,
     MemoryTransactionConflict,
@@ -22,6 +23,7 @@ from holographic_x402_api import (
     TENANT_TOKEN_HEADER,
     TenantCoreStore,
     TenantMemoryTransactions,
+    X402_BUYER_GUIDE_URL,
     X402Config,
     create_app,
     landing_page_html,
@@ -182,6 +184,8 @@ def test_landing_page_marks_the_testnet_api_as_a_preview():
 
     assert f"<title>{escape(SERVICE_NAME)}</title>" in html
     assert "Testnet developer preview" in html
+    assert f"<h1 id=\"hero-title\">{escape(HERO_TITLE)}</h1>" in html
+    assert "$0.0011 per request" in html
     assert "$1.10 per 1,000 requests" in html
     assert "does not accept production payments" in html
     assert "Base Sepolia x402" in html
@@ -190,8 +194,26 @@ def test_landing_page_marks_the_testnet_api_as_a_preview():
     assert 'href="/docs"' in html
     assert 'href="/redoc"' in html
     assert 'href="/openapi.json"' in html
-    assert "hosted, tenant-scoped agent memory" in html
-    assert "0x96e1...BB84" in html
+    assert "A hosted HTTPS API" in html
+    assert "querying seeded preview memory" in html
+    assert "The public memory dataset is read-only" in html
+    assert "operator-provisioned" in html
+    assert "ready to test" in html
+    assert "ready to integrate" not in html
+    assert "memory.entries" not in html
+    assert "curl -i %s/v1/dashboard" % DEFAULT_PUBLIC_URL in html
+    assert "Payment-Required" in html
+    assert "Payment-Signature" in html
+    assert "Payment-Response" in html
+    assert X402_BUYER_GUIDE_URL in html
+    assert ":focus-visible" in html
+    assert "prefers-reduced-motion" in html
+    assert "min-height:44px" in html
+    assert "outline:3px solid currentColor" in html
+    assert 'href="/docs#/Paid%20API/getDashboard"' in html
+    assert "dashboard_v1_dashboard_get" not in html
+    assert 'id="quickstart" class="section quickstart" tabindex="-1"' in html
+    assert "--coral-text:#b6402f" in html
     assert DEFAULT_PUBLIC_URL in html
     assert "leOS" not in html
     assert "local agent" not in html.lower()
@@ -240,10 +262,37 @@ def test_paid_challenge_uses_canonical_resource_not_request_headers(monkeypatch)
         headers={"host": "attacker.invalid", "x-forwarded-proto": "http"},
     )
     assert response.status_code == 402
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["strict-transport-security"] == "max-age=31536000"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    assert "unsafe-inline" not in response.headers["content-security-policy"]
+    assert "sepolia.base.org" not in response.headers["content-security-policy"]
     challenge = decode_payment_required_header(response.headers["payment-required"])
     assert challenge.resource.url == DEFAULT_PUBLIC_URL + "/v1/dashboard"
     assert challenge.resource.description == "Read the service readiness dashboard"
     assert "LocalAgentCore" not in challenge.resource.description
+
+    browser_response = client.get(
+        "/v1/dashboard",
+        headers={"accept": "text/html", "user-agent": "Mozilla/5.0"},
+    )
+    assert browser_response.status_code == 402
+    assert browser_response.headers["content-type"].startswith("text/html")
+    assert browser_response.headers["cache-control"] == "no-store"
+    assert browser_response.headers["x-content-type-options"] == "nosniff"
+    paywall_csp = browser_response.headers["content-security-policy"]
+    assert "script-src 'unsafe-inline'" in paywall_csp
+    assert "style-src 'unsafe-inline'" in paywall_csp
+    assert "connect-src 'self' https://sepolia.base.org" in paywall_csp
+    assert "https://rpc.wallet.coinbase.com" in paywall_csp
+    assert "object-src 'none'" in paywall_csp
+    assert "frame-src 'none'" in paywall_csp
+    assert "frame-ancestors 'none'" in paywall_csp
+    assert '<script type="module">' in browser_response.text
+    assert "window.x402" in browser_response.text
+    assert 'id="root"' in browser_response.text
 
 
 def test_pricing_summary_distinguishes_testnet_preview_from_production():
@@ -272,14 +321,23 @@ def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
     landing = client.get("/")
     assert landing.status_code == 200
     assert landing.headers["content-type"].startswith("text/html")
+    assert landing.headers["cache-control"] == "public, max-age=60, must-revalidate"
+    assert landing.headers["x-content-type-options"] == "nosniff"
+    assert landing.headers["x-frame-options"] == "DENY"
+    assert landing.headers["referrer-policy"] == "no-referrer"
+    assert landing.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
+    assert landing.headers["strict-transport-security"] == "max-age=31536000"
+    assert "style-src 'unsafe-inline'" in landing.headers["content-security-policy"]
     assert escape(SERVICE_NAME) in landing.text
 
     health = client.get("/health")
     assert health.status_code == 200
+    assert health.headers["cache-control"] == "no-store"
     assert health.json()["ok"] is True
 
     pricing = client.get("/pricing")
     assert pricing.status_code == 200
+    assert pricing.headers["cache-control"] == "public, max-age=60, must-revalidate"
     assert pricing.json()["x402"]["price"] == DEFAULT_PRICE
     assert pricing.json()["pricing"]["environment"] == "testnet_preview"
     assert pricing.json()["pricing"]["per_1000_requests"] == "$1.10"
@@ -294,13 +352,45 @@ def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
         "POST /v1/route",
         "GET /v1/dashboard",
     }
-    assert client.get("/leos/v1/dashboard").status_code == 404
+    missing = client.get("/leos/v1/dashboard")
+    assert missing.status_code == 404
+    assert missing.headers["cache-control"] == "no-store"
+
+
+def test_response_policy_covers_admin_auth_and_local_http():
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    secured = fastapi_testclient.TestClient(
+        create_app(
+            config=X402Config(pay_to="0xabc"),
+            paid=False,
+            admin_token="admin-secret",
+        )
+    )
+
+    unauthorized = secured.post(
+        "/admin/remember",
+        headers={"X-Admin-Token": "wrong"},
+        json={"text": "blocked"},
+    )
+
+    assert unauthorized.status_code == 401
+    assert unauthorized.headers["cache-control"] == "no-store"
+    assert unauthorized.headers["x-content-type-options"] == "nosniff"
+
+    local = fastapi_testclient.TestClient(
+        create_app(
+            config=X402Config(pay_to="0xabc", public_url="http://localhost:4021"),
+            paid=False,
+        )
+    )
+    assert "strict-transport-security" not in local.get("/").headers
 
 
 def test_public_docs_describe_the_x402_contract_and_hide_operator_routes():
     fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    pytest.importorskip("x402")
     config = X402Config(pay_to="0xabc", public_url="https://api.example.test")
-    client = fastapi_testclient.TestClient(create_app(config=config, paid=False))
+    client = fastapi_testclient.TestClient(create_app(config=config, paid=True))
 
     docs = client.get("/docs")
     redoc = client.get("/redoc")
@@ -311,40 +401,89 @@ def test_public_docs_describe_the_x402_contract_and_hide_operator_routes():
     assert openapi.status_code == 200
     assert "/openapi.json" in docs.text
     assert "/openapi.json" in redoc.text
+    assert "https://cdn.jsdelivr.net" in docs.headers["content-security-policy"]
+    assert "https://fonts.gstatic.com" in redoc.headers["content-security-policy"]
 
     schema = openapi.json()
     assert schema["info"]["title"] == SERVICE_NAME
     assert schema["info"]["version"] == LECORE_VERSION
     assert "Payment-Signature" in schema["info"]["description"]
     assert schema["servers"] == [{"url": "https://api.example.test", "description": "Public API"}]
+    assert schema["externalDocs"] == {
+        "description": "x402 buyer quickstart",
+        "url": X402_BUYER_GUIDE_URL,
+    }
     assert {tag["name"] for tag in schema["tags"]} == {"Discovery", "Paid API"}
     assert "/admin/remember" not in schema["paths"]
     assert "/admin/tenant-token" not in schema["paths"]
+
+    assert {
+        path: next(iter(operations.values()))["operationId"]
+        for path, operations in schema["paths"].items()
+    } == {
+        "/health": "getHealth",
+        "/pricing": "getPricing",
+        "/v1/recall": "recallMemory",
+        "/v1/route": "routeTask",
+        "/v1/dashboard": "getDashboard",
+    }
+
+    health_schema = schema["paths"]["/health"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert set(health_schema["required"]) == {"ok", "name", "paid", "memory", "memory_backend", "tenancy"}
+    pricing_schema = schema["paths"]["/pricing"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert {"documentation", "x402", "pricing", "routes"}.issubset(pricing_schema["required"])
 
     manifest = payment_manifest(config)
     for row in manifest:
         method, path = row["route"].lower().split(" ", 1)
         operation = schema["paths"][path][method]
         assert operation["tags"] == ["Paid API"]
-        assert "402" in operation["responses"]
-        assert "Payment-Required" in operation["responses"]["402"]["headers"]
-        assert any(parameter["name"] == "Payment-Signature" for parameter in operation["parameters"])
+        assert {"200", "400", "401", "402", "403", "502"}.issubset(operation["responses"])
+        assert "Payment-Response" in operation["responses"]["200"]["headers"]
+        assert {"Payment-Required", "Payment-Response"} == set(operation["responses"]["402"]["headers"])
+        assert "text/html" in operation["responses"]["402"]["content"]
+        assert operation["responses"]["502"]["content"]["application/json"]["schema"]["required"] == ["error"]
+        payment_parameter = next(
+            parameter for parameter in operation["parameters"]
+            if parameter["name"] == "Payment-Signature"
+        )
+        assert payment_parameter["schema"]["format"] == "byte"
+        assert "Omit to receive" in payment_parameter["description"]
+
+    assert "503" in schema["paths"]["/v1/recall"]["post"]["responses"]
+    assert "503" not in schema["paths"]["/v1/route"]["post"]["responses"]
 
     recall_content = schema["paths"]["/v1/recall"]["post"]["requestBody"]["content"]["application/json"]
     assert recall_content["schema"]["required"] == ["query"]
     assert recall_content["schema"]["properties"]["k"]["maximum"] == 100
+    assert recall_content["schema"]["properties"]["query"]["pattern"] == r"\S"
+    assert "pattern" not in recall_content["schema"]["properties"]["tenant"]
     assert recall_content["examples"]["public"]["value"]["query"] == "deterministic agent memory"
+    recall_success = schema["paths"]["/v1/recall"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert recall_success["required"] == ["ok", "tenant", "query", "hits"]
+    assert recall_success["properties"]["hits"]["items"]["required"] == ["id", "text", "label", "metadata", "score"]
 
     route_content = schema["paths"]["/v1/route"]["post"]["requestBody"]["content"]["application/json"]
     assert route_content["schema"]["required"] == ["task"]
+    assert route_content["schema"]["properties"]["task"]["pattern"] == r"\S"
     assert "semantic memory retrieval" in route_content["examples"]["public"]["value"]["task"]
+    route_success = schema["paths"]["/v1/route"]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert route_success["properties"]["route"]["properties"]["decision"]["enum"] == ["act", "choose", "unknown"]
+
+    dashboard_success = schema["paths"]["/v1/dashboard"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert "self_contained_engine" in dashboard_success["properties"]["dashboard"]["properties"]["checks"]["properties"]
 
     serialized = json.dumps(schema).lower()
     assert "localagentcore" not in serialized
     assert "local agent" not in serialized
 
-    assert client.post("/admin/remember", json={"text": "blocked"}).status_code == 403
-    assert client.post("/admin/tenant-token", json={"tenant": "acme"}).status_code == 403
+    remember = client.post("/admin/remember", json={"text": "blocked"})
+    tenant_token = client.post("/admin/tenant-token", json={"tenant": "acme"})
+    assert remember.status_code == 403
+    assert tenant_token.status_code == 403
+    assert remember.headers["cache-control"] == "no-store"
+    assert tenant_token.headers["cache-control"] == "no-store"
+    assert remember.headers["x-content-type-options"] == "nosniff"
 
 
 def test_dashboard_translates_embedded_sdk_terms_at_the_http_boundary():
