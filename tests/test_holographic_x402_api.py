@@ -1,6 +1,7 @@
 """Tests for the optional x402-paid API publisher."""
 
 import json
+import base64
 from html import escape
 import os
 from pathlib import Path
@@ -15,6 +16,12 @@ from holographic_x402_api import (
     HERO_TITLE,
     IDEMPOTENCY_HEADER,
     MEMORY_BACKEND_NOSQLITE,
+    MEMORY_CIPHER,
+    MEMORY_COMPRESSION,
+    MEMORY_KEY_ENV,
+    MemoryKeyring,
+    MemoryStateCodec,
+    MemoryStateError,
     MemoryTransactionConflict,
     MemoryMirrorPending,
     NoSQLiteError,
@@ -38,6 +45,16 @@ from holographic_product import LocalAgentCore, demo
 from lecore import __version__ as LECORE_VERSION
 
 
+def _memory_keys(active="v1", include_old=False):
+    def encoded(key_id):
+        return base64.urlsafe_b64encode((key_id * 32).encode("ascii")[:32]).decode("ascii")
+
+    keys = {active: encoded(active)}
+    if include_old and active != "v1":
+        keys["v1"] = encoded("v1")
+    return json.dumps({"active": active, "keys": keys})
+
+
 def test_default_x402_config_uses_testnet_price_shape():
     cfg = X402Config(pay_to="0xabc")
 
@@ -47,11 +64,12 @@ def test_default_x402_config_uses_testnet_price_shape():
     assert cfg.public_url == DEFAULT_PUBLIC_URL
 
 
-def test_payment_manifest_protects_specific_read_routes_only():
+def test_payment_manifest_protects_specific_memory_and_compute_routes_only():
     manifest = payment_manifest(X402Config(pay_to="0xabc"))
     routes = {row["route"] for row in manifest}
 
     assert routes == {
+        "POST /v1/memory",
         "POST /v1/recall",
         "POST /v1/route",
         "GET /v1/dashboard",
@@ -83,10 +101,12 @@ def test_x402_route_configs_build_against_optional_sdk():
 
     assert sorted(routes) == [
         "GET /v1/dashboard",
+        "POST /v1/memory",
         "POST /v1/recall",
         "POST /v1/route",
     ]
     assert routes["GET /v1/dashboard"].resource == "https://api.example.test/v1/dashboard"
+    assert routes["POST /v1/memory"].resource == "https://api.example.test/v1/memory"
     assert routes["POST /v1/recall"].resource == "https://api.example.test/v1/recall"
     assert routes["POST /v1/route"].resource == "https://api.example.test/v1/route"
 
@@ -125,7 +145,7 @@ def test_public_url_rejects_unsafe_or_ambiguous_values(public_url, message):
         X402Config(pay_to="0xabc", public_url=public_url)
 
 
-def test_paid_mode_requires_https_outside_localhost():
+def test_paid_mode_requires_https_outside_localhost(tmp_path):
     pytest.importorskip("fastapi")
     pytest.importorskip("x402")
 
@@ -138,6 +158,8 @@ def test_paid_mode_requires_https_outside_localhost():
     local = create_app(
         config=X402Config(pay_to="0xabc", public_url="http://127.0.0.1:4021"),
         paid=True,
+        tenant_state_dir=tmp_path,
+        memory_keys=_memory_keys(),
     )
     assert local is not None
 
@@ -151,6 +173,84 @@ def test_memory_backend_selection_is_explicit():
     assert normalize_memory_backend("NoSQLite") == MEMORY_BACKEND_NOSQLITE
     with pytest.raises(ValueError, match="'core' or 'nosqlite'"):
         normalize_memory_backend("sqlite")
+
+
+def test_memory_keyring_requires_versioned_256_bit_keys():
+    keyring = MemoryKeyring.from_json(_memory_keys())
+    assert keyring.active == "v1"
+    assert len(keyring.keys["v1"]) == 32
+
+    with pytest.raises(ValueError, match="exactly 32 bytes"):
+        MemoryKeyring.from_json(json.dumps({"active": "v1", "keys": {"v1": "c2hvcnQ="}}))
+    missing_active = json.loads(_memory_keys())
+    missing_active["active"] = "v2"
+    with pytest.raises(ValueError, match="not present"):
+        MemoryKeyring.from_json(json.dumps(missing_active))
+
+
+def test_memory_state_is_compressed_authenticated_and_context_bound(tmp_path):
+    codec = MemoryStateCodec(MemoryKeyring.from_json(_memory_keys()))
+    path = tmp_path / "acme.json"
+    value = {"entries": [{"text": "private-memory-phrase-" * 5000}], "next_id": 2}
+
+    codec.write_json(path, value, "core:acme")
+    envelope = path.read_bytes()
+
+    assert envelope.startswith(b"LECMEM01")
+    assert b"private-memory-phrase" not in envelope
+    assert len(envelope) < len(json.dumps(value).encode("utf-8"))
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert codec.read_json(path, "core:acme") == value
+
+    with pytest.raises(MemoryStateError, match="authentication failed"):
+        codec.read_json(path, "core:other-tenant")
+
+    tampered = bytearray(envelope)
+    tampered[-1] ^= 1
+    path.write_bytes(tampered)
+    with pytest.raises(MemoryStateError, match="authentication failed"):
+        codec.read_json(path, "core:acme")
+
+
+def test_memory_key_rotation_rewraps_state_under_the_active_key(tmp_path):
+    path = tmp_path / "public.json"
+    old = MemoryStateCodec(MemoryKeyring.from_json(_memory_keys("v1")))
+    old.write_json(path, {"entries": [{"text": "rotate me"}]}, "core:public")
+    old_envelope = path.read_bytes()
+
+    rotating = MemoryStateCodec(MemoryKeyring.from_json(_memory_keys("v2", include_old=True)))
+    assert rotating.read_json(path, "core:public")["entries"][0]["text"] == "rotate me"
+    assert path.read_bytes() != old_envelope
+
+    new_only = MemoryStateCodec(MemoryKeyring.from_json(_memory_keys("v2")))
+    assert new_only.read_json(path, "core:public")["entries"][0]["text"] == "rotate me"
+    with pytest.raises(MemoryStateError, match="unavailable memory key"):
+        old.read_json(path, "core:public")
+
+
+def test_plaintext_memory_requires_explicit_one_time_migration(tmp_path):
+    path = tmp_path / "public.json"
+    path.write_text('{"entries": [{"text": "legacy plaintext"}]}', encoding="utf-8")
+    keyring = MemoryKeyring.from_json(_memory_keys())
+
+    with pytest.raises(MemoryStateError, match="plaintext durable state"):
+        MemoryStateCodec(keyring).read_json(path, "core:public")
+
+    migrating = MemoryStateCodec(keyring, allow_plaintext_migration=True)
+    assert migrating.read_json(path, "core:public")["entries"][0]["text"] == "legacy plaintext"
+    assert path.read_bytes().startswith(b"LECMEM01")
+    assert b"legacy plaintext" not in path.read_bytes()
+    assert MemoryStateCodec(keyring).read_json(path, "core:public")["entries"][0]["text"] == "legacy plaintext"
+
+
+def test_paid_durable_memory_fails_closed_without_encryption_key(tmp_path):
+    pytest.importorskip("fastapi")
+    with pytest.raises(ValueError, match=MEMORY_KEY_ENV):
+        create_app(
+            config=X402Config(pay_to="0xabc"),
+            paid=True,
+            tenant_state_dir=tmp_path,
+        )
 
 
 def test_nosqlite_backend_requires_durable_state_dirs(tmp_path):
@@ -169,6 +269,15 @@ def test_nosqlite_backend_requires_durable_state_dirs(tmp_path):
             paid=False,
             memory_backend=MEMORY_BACKEND_NOSQLITE,
             tenant_state_dir=tmp_path / "core",
+        )
+
+    with pytest.raises(ValueError, match="does not permit the plaintext NoSQLite"):
+        create_app(
+            config=X402Config(pay_to="0xabc"),
+            paid=False,
+            memory_backend=MEMORY_BACKEND_NOSQLITE,
+            tenant_state_dir=tmp_path / "encrypted-core",
+            memory_keys=_memory_keys(),
         )
 
 
@@ -195,10 +304,11 @@ def test_landing_page_marks_the_testnet_api_as_a_preview():
     assert 'href="/redoc"' in html
     assert 'href="/openapi.json"' in html
     assert "A hosted HTTPS API" in html
-    assert "querying seeded preview memory" in html
-    assert "The public memory dataset is read-only" in html
-    assert "operator-provisioned" in html
-    assert "ready to test" in html
+    assert "storing and recalling encrypted private-tenant memory" in html
+    assert "/v1/memory" in html
+    assert "shared public dataset stays read-only" in html
+    assert "operator-issued" in html
+    assert "Encrypted before durable memory reaches disk" in html
     assert "ready to integrate" not in html
     assert "memory.entries" not in html
     assert "curl -i %s/v1/dashboard" % DEFAULT_PUBLIC_URL in html
@@ -228,7 +338,7 @@ def test_landing_page_uses_the_configured_public_url():
     assert "https://api.example.test/base" in html
 
 
-def test_paid_challenge_uses_canonical_resource_not_request_headers(monkeypatch):
+def test_paid_challenge_uses_canonical_resource_not_request_headers(monkeypatch, tmp_path):
     pytest.importorskip("x402")
     fastapi_testclient = pytest.importorskip("fastapi.testclient")
     from x402 import SupportedKind, SupportedResponse
@@ -254,6 +364,8 @@ def test_paid_challenge_uses_canonical_resource_not_request_headers(monkeypatch)
                 public_url=DEFAULT_PUBLIC_URL,
             ),
             paid=True,
+            tenant_state_dir=tmp_path,
+            memory_keys=_memory_keys(),
         )
     )
 
@@ -273,6 +385,17 @@ def test_paid_challenge_uses_canonical_resource_not_request_headers(monkeypatch)
     assert challenge.resource.url == DEFAULT_PUBLIC_URL + "/v1/dashboard"
     assert challenge.resource.description == "Read the service readiness dashboard"
     assert "LocalAgentCore" not in challenge.resource.description
+    memory_challenge_response = client.post(
+        "/v1/memory",
+        headers={IDEMPOTENCY_HEADER: "challenge-only"},
+        json={"tenant": "acme", "text": "not written before payment"},
+    )
+    assert memory_challenge_response.status_code == 402
+    memory_challenge = decode_payment_required_header(
+        memory_challenge_response.headers["payment-required"]
+    )
+    assert memory_challenge.resource.url == DEFAULT_PUBLIC_URL + "/v1/memory"
+    assert not (tmp_path / "acme.json").exists()
 
     browser_response = client.get(
         "/v1/dashboard",
@@ -348,6 +471,7 @@ def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
     }
     assert pricing.json()["tenancy"]["default_tenant"] == DEFAULT_TENANT_ID
     assert {row["route"] for row in pricing.json()["routes"]} == {
+        "POST /v1/memory",
         "POST /v1/recall",
         "POST /v1/route",
         "GET /v1/dashboard",
@@ -386,11 +510,13 @@ def test_response_policy_covers_admin_auth_and_local_http():
     assert "strict-transport-security" not in local.get("/").headers
 
 
-def test_public_docs_describe_the_x402_contract_and_hide_operator_routes():
+def test_public_docs_describe_the_x402_contract_and_hide_operator_routes(tmp_path):
     fastapi_testclient = pytest.importorskip("fastapi.testclient")
     pytest.importorskip("x402")
     config = X402Config(pay_to="0xabc", public_url="https://api.example.test")
-    client = fastapi_testclient.TestClient(create_app(config=config, paid=True))
+    client = fastapi_testclient.TestClient(
+        create_app(config=config, paid=True, tenant_state_dir=tmp_path, memory_keys=_memory_keys())
+    )
 
     docs = client.get("/docs")
     redoc = client.get("/redoc")
@@ -423,6 +549,7 @@ def test_public_docs_describe_the_x402_contract_and_hide_operator_routes():
     } == {
         "/health": "getHealth",
         "/pricing": "getPricing",
+        "/v1/memory": "storeMemory",
         "/v1/recall": "recallMemory",
         "/v1/route": "routeTask",
         "/v1/dashboard": "getDashboard",
@@ -452,6 +579,17 @@ def test_public_docs_describe_the_x402_contract_and_hide_operator_routes():
 
     assert "503" in schema["paths"]["/v1/recall"]["post"]["responses"]
     assert "503" not in schema["paths"]["/v1/route"]["post"]["responses"]
+
+    memory_operation = schema["paths"]["/v1/memory"]["post"]
+    assert {"409", "402"}.issubset(memory_operation["responses"])
+    assert next(
+        parameter for parameter in memory_operation["parameters"]
+        if parameter["name"] == IDEMPOTENCY_HEADER
+    )["required"] is True
+    memory_content = memory_operation["requestBody"]["content"]["application/json"]
+    assert memory_content["schema"]["required"] == ["text"]
+    assert memory_content["schema"]["properties"]["text"]["maxLength"] == 65536
+    assert "encrypted" in memory_operation["description"].lower()
 
     recall_content = schema["paths"]["/v1/recall"]["post"]["requestBody"]["content"]["application/json"]
     assert recall_content["schema"]["required"] == ["query"]
@@ -657,6 +795,142 @@ def test_tenant_memory_can_persist_to_state_dir(tmp_path):
     assert recalled.json()["hits"][0]["label"] == "persisted"
 
 
+def test_tenant_memory_and_write_journal_are_encrypted_on_disk(tmp_path):
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    kwargs = {
+        "config": X402Config(pay_to="0xabc"),
+        "paid": False,
+        "tenant_secret": "tenant-secret",
+        "tenant_state_dir": tmp_path,
+        "memory_keys": _memory_keys(),
+    }
+    with fastapi_testclient.TestClient(create_app(admin_token="admin-secret", **kwargs)) as first:
+        written = first.post(
+            "/admin/remember",
+            headers={"X-Admin-Token": "admin-secret", IDEMPOTENCY_HEADER: "encrypted-001"},
+            json={"tenant": "acme", "text": "encrypted tenant recall phrase", "label": "encrypted"},
+        )
+        assert written.status_code == 200
+        storage = first.get("/health").json()["memory_backend"]["storage"]
+        assert storage == {
+            "durable": True,
+            "encrypted": True,
+            "cipher": MEMORY_CIPHER,
+            "compression": MEMORY_COMPRESSION,
+            "plaintext_migration_enabled": False,
+        }
+
+    files = [tmp_path / "acme.json"] + list((tmp_path / ".x402-memory-transactions").glob("*/*.json"))
+    assert len(files) == 2
+    for path in files:
+        envelope = path.read_bytes()
+        assert envelope.startswith(b"LECMEM01")
+        assert b"encrypted tenant recall phrase" not in envelope
+        assert path.stat().st_mode & 0o777 == 0o600
+
+    with fastapi_testclient.TestClient(create_app(**kwargs)) as restarted:
+        recalled = restarted.post(
+            "/v1/recall",
+            headers={
+                TENANT_HEADER: "acme",
+                TENANT_TOKEN_HEADER: tenant_access_token("acme", "tenant-secret"),
+            },
+            json={"query": "encrypted tenant recall"},
+        )
+        assert recalled.status_code == 200
+        assert recalled.json()["hits"][0]["label"] == "encrypted"
+
+
+def test_one_time_migration_rewrites_legacy_core_and_journal_then_fails_closed(tmp_path):
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    token = tenant_access_token("acme", "tenant-secret")
+    common = {
+        "config": X402Config(pay_to="0xabc"),
+        "paid": False,
+        "tenant_secret": "tenant-secret",
+        "tenant_state_dir": tmp_path,
+    }
+    with fastapi_testclient.TestClient(create_app(admin_token="admin-secret", **common)) as legacy:
+        response = legacy.post(
+            "/admin/remember",
+            headers={"X-Admin-Token": "admin-secret", IDEMPOTENCY_HEADER: "legacy-001"},
+            json={"tenant": "acme", "text": "legacy state migration phrase", "label": "migrated"},
+        )
+        assert response.status_code == 200
+
+    durable_files = [tmp_path / "acme.json"] + list((tmp_path / ".x402-memory-transactions").glob("*/*.json"))
+    assert len(durable_files) == 2
+    assert all(b"legacy state migration phrase" in path.read_bytes() for path in durable_files)
+
+    with fastapi_testclient.TestClient(
+        create_app(
+            **common,
+            memory_keys=_memory_keys(),
+            allow_plaintext_migration=True,
+        )
+    ) as migrating:
+        recalled = migrating.post(
+            "/v1/recall",
+            headers={TENANT_HEADER: "acme", TENANT_TOKEN_HEADER: token},
+            json={"query": "legacy migration"},
+        )
+        assert recalled.status_code == 200
+        assert recalled.json()["hits"][0]["label"] == "migrated"
+
+    for path in durable_files:
+        assert path.read_bytes().startswith(b"LECMEM01")
+        assert b"legacy state migration phrase" not in path.read_bytes()
+
+    with fastapi_testclient.TestClient(create_app(**common, memory_keys=_memory_keys())) as strict:
+        assert strict.get("/health").json()["memory_backend"]["storage"]["plaintext_migration_enabled"] is False
+
+
+def test_private_tenant_can_store_and_recall_idempotent_memory(tmp_path):
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    token = tenant_access_token("acme", "tenant-secret")
+    client = fastapi_testclient.TestClient(
+        create_app(
+            config=X402Config(pay_to="0xabc"),
+            paid=False,
+            tenant_secret="tenant-secret",
+            tenant_state_dir=tmp_path,
+            memory_keys=_memory_keys(),
+        )
+    )
+    headers = {
+        TENANT_HEADER: "acme",
+        TENANT_TOKEN_HEADER: token,
+        IDEMPOTENCY_HEADER: "buyer-memory-001",
+    }
+    payload = {
+        "text": "buyer-owned encrypted memory phrase",
+        "label": "buyer",
+        "metadata": {"session": "s1"},
+    }
+
+    first = client.post("/v1/memory", headers=headers, json=payload)
+    retry = client.post("/v1/memory", headers=headers, json=payload)
+    conflict = client.post("/v1/memory", headers=headers, json={"text": "different"})
+    public_write = client.post(
+        "/v1/memory",
+        headers={IDEMPOTENCY_HEADER: "public-write"},
+        json={"text": "must not poison public memory"},
+    )
+    recalled = client.post(
+        "/v1/recall",
+        headers={TENANT_HEADER: "acme", TENANT_TOKEN_HEADER: token},
+        json={"query": "buyer encrypted phrase"},
+    )
+
+    assert first.status_code == 200 and retry.status_code == 200
+    assert first.json()["memory"] == retry.json()["memory"]
+    assert first.json()["transaction"]["idempotent"] is True
+    assert conflict.status_code == 409
+    assert public_write.status_code == 403
+    assert recalled.status_code == 200
+    assert recalled.json()["hits"][0]["label"] == "buyer"
+
+
 def test_public_memory_persists_across_app_restart(tmp_path):
     fastapi_testclient = pytest.importorskip("fastapi.testclient")
     first = fastapi_testclient.TestClient(
@@ -851,6 +1125,13 @@ def test_nosqlite_memory_backend_isolates_tenants_and_restarts(tmp_path):
             "nosqlite_shadow": False,
             "nosqlite_configured": True,
             "durable_transactions": True,
+            "storage": {
+                "durable": True,
+                "encrypted": False,
+                "cipher": None,
+                "compression": None,
+                "plaintext_migration_enabled": False,
+            },
         }
 
         public = first.post(

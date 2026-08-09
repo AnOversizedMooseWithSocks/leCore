@@ -192,7 +192,8 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
   facade for agent memory, capability routing, persistence, and the readiness dashboard. Start here if you want the
   five-minute "embed it in an agent" path rather than the whole research surface.
 - **[`X402_API.md`](X402_API.md)** — the **hosted leCore Agent Memory & Routing API guide**: serve tenant-scoped
-  memory and routing over FastAPI with x402 payment, per-route pricing, and admin-gated memory writes.
+  memory and routing over FastAPI with x402 payment, per-route pricing, encrypted idempotent private writes, and
+  operator provisioning.
 - **[`AWS_X402_DEPLOY.md`](AWS_X402_DEPLOY.md)** — the **AWS launch guide**: ECS/Fargate deployment, Secrets Manager
   config, and when to use KMS or Nitro Enclaves for wallet signing.
 - **[`CAPABILITIES.md`](CAPABILITIES.md)** — the **front-door menu**: a plain-language, grouped list of what leCore can

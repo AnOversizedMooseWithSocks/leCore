@@ -12,9 +12,10 @@ Public reference:
 
 The implementation lives in `holographic_x402_api.py`. It exposes
 tenant-scoped agent memory and routing through FastAPI, backed internally by
-`LocalAgentCore`, and applies x402 middleware only to the public read/compute
+`LocalAgentCore`, and applies x402 middleware only to the public memory/compute
 routes:
 
+- `POST /v1/memory` — encrypted, idempotent private-tenant writes
 - `POST /v1/recall`
 - `POST /v1/route`
 - `GET /v1/dashboard`
@@ -29,12 +30,19 @@ Admin route:
 - `POST /admin/remember`, guarded by `X-Admin-Token`
 - `POST /admin/tenant-token`, guarded by `X-Admin-Token`
 
-This split is deliberate. Paid customers can use the memory/router/dashboard,
-but they cannot mutate memory unless they also hold the admin token. Private
-tenant memory also requires a tenant token; x402 proves payment, not tenant
-authorization. In the hosted testnet preview, the public memory dataset is
-read-only and private tenants are operator-provisioned. Admin routes are not
-included in the public OpenAPI schema.
+This split is deliberate. Paid customers can store and recall their own private
+tenant memory, but cannot mutate the shared public dataset. A private write
+requires both a tenant token and a stable `Idempotency-Key`; x402 proves payment,
+not tenant authorization. Admin routes remain available for provisioning and
+are not included in the public OpenAPI schema.
+
+Durable core files and write journals are compressed before authenticated
+encryption with AES-256-GCM. HKDF-SHA256 derives a distinct data key for each
+tenant/file context from a versioned service keyring. The tenant/file identity
+is authenticated as associated data, files are replaced atomically with mode
+`0600`, altered ciphertext is rejected, and paid durable mode fails closed when
+the keyring is absent. AWS volume encryption remains a second, independent
+layer rather than the only protection.
 
 ## Public Preview Quickstart
 
@@ -84,6 +92,7 @@ export LECORE_X402_PUBLIC_URL="http://127.0.0.1:4021"
 export LECORE_X402_ADMIN_TOKEN="dev-admin-secret"
 export LECORE_X402_TENANT_SECRET="dev-tenant-secret"
 export LECORE_X402_TENANT_STATE_DIR="./tenant-state"
+export LECORE_X402_MEMORY_KEYS="$(python -c 'import base64,json,secrets; print(json.dumps({"active":"v1","keys":{"v1":base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()}}))')"
 
 python holographic_x402_api.py --host 127.0.0.1 --port 4021
 ```
@@ -127,6 +136,22 @@ curl -X POST http://127.0.0.1:4021/admin/tenant-token \
 Use that token with paid calls for private tenant memory:
 
 ```bash
+curl -X POST http://127.0.0.1:4021/v1/memory \
+  -H "Content-Type: application/json" \
+  -H "X-leCore-Tenant: acme" \
+  -H "X-leCore-Tenant-Token: <tenant token>" \
+  -H "Idempotency-Key: session-42-preference-001" \
+  -d '{"text":"the user prefers concise answers","label":"preference"}'
+```
+
+In paid mode that unsigned request first returns `402`; an x402 client signs
+and retries the same body and idempotency key. Repeating the completed request
+returns the original memory. Reusing the key for different content returns
+`409 Conflict`.
+
+Recall it:
+
+```bash
 curl -X POST http://127.0.0.1:4021/v1/recall \
   -H "Content-Type: application/json" \
   -H "X-leCore-Tenant: acme" \
@@ -151,7 +176,30 @@ Use this only for development:
 python holographic_x402_api.py --unpaid-dev --host 127.0.0.1 --port 4021
 ```
 
-## Optional NoSQLite Memory Backend
+Unpaid development may omit the keyring and use plaintext files. That fallback
+is intentionally unavailable to a paid app with durable state.
+
+## Key Rotation And Legacy Migration
+
+`LECORE_X402_MEMORY_KEYS` is a Secrets Manager JSON value with one active key
+and up to seven retained decryption keys:
+
+```json
+{"active":"v2","keys":{"v1":"<old 32-byte base64 key>","v2":"<new 32-byte base64 key>"}}
+```
+
+Deploy the expanded keyring first. Startup authenticates every tenant and
+journal file and atomically re-encrypts records not using `active`. After every
+record has been verified under `v2`, remove `v1` and launch fresh tasks.
+
+Existing plaintext state is refused by default. For a controlled one-time
+migration, deploy the keyring with
+`LECORE_X402_ALLOW_PLAINTEXT_MIGRATION=1`, drain old writers, start exactly one
+new task, and verify every durable file now begins with the `LECMEM01` envelope
+magic. Then remove the migration flag immediately; leaving it enabled would
+allow plaintext to bypass ciphertext authentication.
+
+## Optional NoSQLite Memory Backend (Unencrypted Development Only)
 
 `Dockerfile.x402` builds the vendored NoSQLite source snapshot pinned at
 `8964da2` into the service image. The default remains `core`:
@@ -168,7 +216,12 @@ export LECORE_X402_NOSQLITE_DURABILITY=sync
 export LECORE_X402_TENANT_STATE_DIR=/data/tenants
 ```
 
-The API keeps each tenant in a separate hashed collection, writes the same
+NoSQLite does not yet use the application encryption envelope. The service
+therefore refuses NoSQLite serving or shadow mode whenever memory encryption is
+configured. Do not use it for the hosted paid API until NoSQLite gains an
+equivalent authenticated-encryption boundary.
+
+In an explicitly unencrypted development deployment, the API keeps each tenant in a separate hashed collection, writes the same
 admin-created entry to `LocalAgentCore` for routing/dashboard continuity, and
 uses NoSQLite's deterministic `holographic-hash-v1` encoder plus neural
 candidate routing and cosine reranking for `/v1/recall`. Responses retain the

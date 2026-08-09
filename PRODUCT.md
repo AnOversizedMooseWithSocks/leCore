@@ -37,7 +37,8 @@ core = lecore.product.LocalAgentCore()
 - **Persistence:** `save(path)` and `LocalAgentCore.load(path)` round-trip the
   stable state as JSON. Vectors are rebuilt from seed, text context, and entries.
 - **Paid API publishing:** `holographic_x402_api.py` serves the product wedge as
-  an optional x402-paid FastAPI service. See [`X402_API.md`](X402_API.md).
+  an optional x402-paid FastAPI service with compressed authenticated storage
+  for durable private-tenant memory. See [`X402_API.md`](X402_API.md).
 
 ## Honest Scope
 

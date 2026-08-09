@@ -34,10 +34,11 @@
     - `key(self)` -- The route key shape expected by x402 middleware, e.g.
 - `x402_payment_required_responses()` -- OpenAPI response metadata shared by every x402-protected operation.
 - `paid_request_openapi(required, properties, example, example_summary)` -- Return an accurate OpenAPI request body while runtime validation stays compatible.
-- `paid_operation_responses(success, invalid_detail, backend_unavailable=False)` -- Document paid success, payment, tenant, and validation responses.
-- `health_success_openapi(paid, private_tenants_enabled, memory_backend, nosqlite_shadow, nosqlite_configured, durable_transactions)` -- Document the free health and deployment-state response.
-- `pricing_success_openapi(config, private_tenants_enabled, memory_backend, nosqlite_shadow, nosqlite_configured, durable_transactions)` -- Document the free x402 discovery manifest.
+- `paid_operation_responses(success, invalid_detail, backend_unavailable=False, idempotency_conflict=False)` -- Document paid success, payment, tenant, and validation responses.
+- `health_success_openapi(paid, private_tenants_enabled, memory_backend, nosqlite_shadow, nosqlite_configured, durable_transactions, encrypted_storage, plaintext_migration_enabled)` -- Document the free health and deployment-state response.
+- `pricing_success_openapi(config, private_tenants_enabled, memory_backend, nosqlite_shadow, nosqlite_configured, durable_transactions, encrypted_storage, plaintext_migration_enabled)` -- Document the free x402 discovery manifest.
 - `recall_success_openapi()` -- Document the successful memory-recall response.
+- `memory_write_success_openapi()` -- Document the successful private-tenant memory write response.
 - `route_success_openapi()` -- Document the successful capability-routing response.
 - `dashboard_success_openapi()` -- Document the successful service-readiness response.
 - `public_response_headers(path, status_code, public_url, content_type='', network=DEFAULT_NETWORK)` -- Return browser and cache policy headers for one public response.
@@ -48,6 +49,12 @@
 - `normalize_tenant_id(value)` -- Return a path-safe tenant id for private memory routing.
 - `tenant_access_token(tenant_id, secret)` -- Deterministic tenant bearer token derived from a server-side secret.
 - `normalize_idempotency_key(value)` -- Validate an optional caller-provided retry key without persisting the raw value.
+- **class `MemoryStateError`** -- Durable memory could not be authenticated, decoded, or migrated safely.
+- **class `MemoryKeyring`** -- A small versioned set of 256-bit application data-encryption keys.
+    - `from_json(cls, value)` -- Parse the Secrets Manager value used by ``LECORE_X402_MEMORY_KEYS``.
+- **class `MemoryStateCodec`** -- Compress and authenticate durable JSON records before they touch disk.
+    - `read_json(self, path, context)` -- Read one record, migrating plaintext or an old key while locked.
+    - `write_json(self, path, value, context)` -- Serialize, compress, encrypt, and atomically replace one record.
 - **class `TenantCoreStore`** -- Thread-safe LocalAgentCore registry with optional per-tenant persistence.
     - `loaded_tenants(self)` -- Return tenant ids currently loaded in memory.
     - `summary(self, tenant_id)` -- Return a cheap cached status summary without probing capabilities.
@@ -76,13 +83,14 @@
 - `pricing_summary(config)` -- Describe the customer-facing price and whether it is a production charge.
 - `normalize_memory_backend(value)` -- Validate the memory backend selector without accepting silent fallbacks.
 - `env_flag(value)` -- Parse the small explicit boolean surface used by deployment settings.
+- `memory_state_codec(value, allow_plaintext_migration=False)` -- Resolve optional versioned encryption material without a silent fallback.
 - `landing_page_html(config)` -- Render the buyer-facing landing page served from `/`.
 - `documentation_manifest(config)` -- Return canonical public documentation URLs for discovery responses.
 - `public_dashboard(data)` -- Translate the embedded SDK dashboard into the hosted API vocabulary.
 - `payment_manifest(config)` -- Plain JSON route manifest, useful for docs, `/pricing`, and tests.
 - `x402_route_configs(config)` -- Build x402 SDK RouteConfig objects for the protected routes.
 - `x402_resource_server(config)` -- Create an x402 resource server wired to the configured facilitator.
-- `create_app(core=None, config=None, paid=True, admin_token=None, tenant_secret=None, tenant_state_dir=None, memory_backend=None, nosqlite_binary=None, nosqlite_data_dir=None, nosqlite_durability=None, nosqlite_shadow=None)` -- Create the FastAPI application for paid or unpaid development serving.
+- `create_app(core=None, config=None, paid=True, admin_token=None, tenant_secret=None, tenant_state_dir=None, memory_keys=None, allow_plaintext_migration=None, memory_backend=None, nosqlite_binary=None, nosqlite_data_dir=None, nosqlite_durability=None, nosqlite_shadow=None)` -- Create the FastAPI application for paid or unpaid development serving.
 - `load_core(path)` -- Load a persisted core if present, otherwise return the demo core.
 - `main(argv=None)` -- CLI entry point for running the x402 API service.
 

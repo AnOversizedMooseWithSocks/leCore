@@ -21,6 +21,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+import base64
 import hashlib
 import hmac
 from html import escape
@@ -31,12 +32,14 @@ import os
 from pathlib import Path
 import queue
 import re
+import struct
 from string import Template
 import subprocess
 import threading
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlsplit
+import zlib
 
 from holographic_product import LocalAgentCore, demo
 from lecore import __version__ as LECORE_VERSION
@@ -55,12 +58,19 @@ _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
 MAX_QUERY_CHARS = 8192
 MAX_TASK_CHARS = 8192
 MAX_MEMORY_CHARS = 65536
+MAX_MEMORY_LABEL_CHARS = 256
+MAX_MEMORY_METADATA_BYTES = 16384
 MAX_RECALL_K = 100
 MEMORY_BACKEND_CORE = "core"
 MEMORY_BACKEND_NOSQLITE = "nosqlite"
 NOSQLITE_ENCODER = "lecore_text"
 NOSQLITE_INDEX = "embedding_neural"
 NOSQLITE_DIMENSIONS = 384
+MEMORY_KEY_ENV = "LECORE_X402_MEMORY_KEYS"
+MEMORY_MIGRATION_ENV = "LECORE_X402_ALLOW_PLAINTEXT_MIGRATION"
+MEMORY_CIPHER = "AES-256-GCM"
+MEMORY_COMPRESSION = "zlib"
+MEMORY_KDF = "HKDF-SHA256"
 
 
 LOG = logging.getLogger(__name__)
@@ -68,8 +78,8 @@ LOG = logging.getLogger(__name__)
 SERVICE_NAME = "leCore Agent Memory & Routing API"
 HERO_TITLE = "Agent memory and routing, paid per call."
 X402_BUYER_GUIDE_URL = "https://docs.x402.org/getting-started/quickstart-for-buyers"
-API_DESCRIPTION = """Hosted, tenant-scoped agent memory, capability routing, and
-readiness data over HTTPS, with x402 payment on each protected request.
+API_DESCRIPTION = """Hosted, encrypted tenant-scoped agent memory, capability
+routing, and readiness data over HTTPS, with x402 payment on each protected request.
 
 ## Request flow
 
@@ -85,6 +95,8 @@ for wallet and client setup.
 `GET /health`, `GET /pricing`, `/docs`, `/redoc`, and `/openapi.json`
 are free. Private tenant calls additionally require `X-leCore-Tenant` and
 `X-leCore-Tenant-Token`; payment proves payment, not tenant authorization.
+`POST /v1/memory` also requires an `Idempotency-Key`, refuses shared-public writes,
+and stores the private record through compressed authenticated encryption.
 """
 OPENAPI_TAGS = [
     {
@@ -115,6 +127,7 @@ class PaidRoute:
 
 
 REGULAR_PAID_ROUTES: Tuple[PaidRoute, ...] = (
+    PaidRoute("POST", "/v1/memory", "Store one entry in encrypted tenant-scoped agent memory"),
     PaidRoute("POST", "/v1/recall", "Recall nearest memories from tenant-scoped agent memory"),
     PaidRoute("POST", "/v1/route", "Route a plain-English task to a leCore capability"),
     PaidRoute("GET", "/v1/dashboard", "Read the service readiness dashboard"),
@@ -281,6 +294,7 @@ def paid_operation_responses(
     *,
     invalid_detail: str,
     backend_unavailable: bool = False,
+    idempotency_conflict: bool = False,
 ) -> Dict[int, Dict[str, Any]]:
     """Document paid success, payment, tenant, and validation responses."""
     responses = {
@@ -312,6 +326,11 @@ def paid_operation_responses(
             "The configured memory backend is temporarily unavailable.",
             "NoSQLite memory backend is unavailable",
         )
+    if idempotency_conflict:
+        responses[409] = _error_response(
+            "The idempotency key was already used for different memory content.",
+            "Idempotency-Key was already used for a different memory write",
+        )
     return responses
 
 
@@ -337,6 +356,8 @@ def health_success_openapi(
     nosqlite_shadow: bool,
     nosqlite_configured: bool,
     durable_transactions: bool,
+    encrypted_storage: bool,
+    plaintext_migration_enabled: bool,
 ) -> Dict[str, Any]:
     """Document the free health and deployment-state response."""
     schema = {
@@ -359,12 +380,24 @@ def health_success_openapi(
             },
             "memory_backend": {
                 "type": "object",
-                "required": ["backend", "nosqlite_shadow", "nosqlite_configured", "durable_transactions"],
+                "required": ["backend", "nosqlite_shadow", "nosqlite_configured", "durable_transactions", "storage"],
                 "properties": {
                     "backend": {"type": "string", "enum": ["core", "nosqlite"]},
                     "nosqlite_shadow": {"type": "boolean"},
                     "nosqlite_configured": {"type": "boolean"},
                     "durable_transactions": {"type": "boolean"},
+                    "storage": {
+                        "type": "object",
+                        "required": ["durable", "encrypted", "cipher", "compression", "plaintext_migration_enabled"],
+                        "properties": {
+                            "durable": {"type": "boolean"},
+                            "encrypted": {"type": "boolean"},
+                            "cipher": {"anyOf": [{"type": "string", "const": MEMORY_CIPHER}, {"type": "null"}]},
+                            "compression": {"anyOf": [{"type": "string", "const": MEMORY_COMPRESSION}, {"type": "null"}]},
+                            "plaintext_migration_enabled": {"type": "boolean"},
+                        },
+                        "additionalProperties": False,
+                    },
                 },
                 "additionalProperties": False,
             },
@@ -396,6 +429,13 @@ def health_success_openapi(
             "nosqlite_shadow": nosqlite_shadow,
             "nosqlite_configured": nosqlite_configured,
             "durable_transactions": durable_transactions,
+            "storage": {
+                "durable": durable_transactions,
+                "encrypted": encrypted_storage,
+                "cipher": MEMORY_CIPHER if encrypted_storage else None,
+                "compression": MEMORY_COMPRESSION if encrypted_storage else None,
+                "plaintext_migration_enabled": plaintext_migration_enabled,
+            },
         },
         "tenancy": {
             "default_tenant": DEFAULT_TENANT_ID,
@@ -419,6 +459,8 @@ def pricing_success_openapi(
     nosqlite_shadow: bool,
     nosqlite_configured: bool,
     durable_transactions: bool,
+    encrypted_storage: bool,
+    plaintext_migration_enabled: bool,
 ) -> Dict[str, Any]:
     """Document the free x402 discovery manifest."""
     string_map = {"type": "object", "additionalProperties": {"type": "string"}}
@@ -464,12 +506,24 @@ def pricing_success_openapi(
             },
             "memory_backend": {
                 "type": "object",
-                "required": ["backend", "nosqlite_shadow", "nosqlite_configured", "durable_transactions"],
+                "required": ["backend", "nosqlite_shadow", "nosqlite_configured", "durable_transactions", "storage"],
                 "properties": {
                     "backend": {"type": "string", "enum": ["core", "nosqlite"]},
                     "nosqlite_shadow": {"type": "boolean"},
                     "nosqlite_configured": {"type": "boolean"},
                     "durable_transactions": {"type": "boolean"},
+                    "storage": {
+                        "type": "object",
+                        "required": ["durable", "encrypted", "cipher", "compression", "plaintext_migration_enabled"],
+                        "properties": {
+                            "durable": {"type": "boolean"},
+                            "encrypted": {"type": "boolean"},
+                            "cipher": {"anyOf": [{"type": "string", "const": MEMORY_CIPHER}, {"type": "null"}]},
+                            "compression": {"anyOf": [{"type": "string", "const": MEMORY_COMPRESSION}, {"type": "null"}]},
+                            "plaintext_migration_enabled": {"type": "boolean"},
+                        },
+                        "additionalProperties": False,
+                    },
                 },
                 "additionalProperties": False,
             },
@@ -519,6 +573,13 @@ def pricing_success_openapi(
             "nosqlite_shadow": nosqlite_shadow,
             "nosqlite_configured": nosqlite_configured,
             "durable_transactions": durable_transactions,
+            "storage": {
+                "durable": durable_transactions,
+                "encrypted": encrypted_storage,
+                "cipher": MEMORY_CIPHER if encrypted_storage else None,
+                "compression": MEMORY_COMPRESSION if encrypted_storage else None,
+                "plaintext_migration_enabled": plaintext_migration_enabled,
+            },
         },
         "routes": payment_manifest(config),
     }
@@ -568,6 +629,56 @@ def recall_success_openapi() -> Dict[str, Any]:
         }],
     }
     return _json_success_response("Memory recall completed.", schema, example)
+
+
+def memory_write_success_openapi() -> Dict[str, Any]:
+    """Document the successful private-tenant memory write response."""
+    schema = {
+        "type": "object",
+        "required": ["ok", "tenant", "memory", "transaction"],
+        "properties": {
+            "ok": {"type": "boolean", "const": True},
+            "tenant": {"type": "string"},
+            "memory": {
+                "type": "object",
+                "required": ["id", "text", "label", "metadata"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "text": {"type": "string"},
+                    "label": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                    "metadata": {"type": "object", "additionalProperties": True},
+                },
+                "additionalProperties": False,
+            },
+            "transaction": {
+                "type": "object",
+                "required": ["id", "state", "idempotent"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "state": {"type": "string", "enum": ["complete", "core_committed"]},
+                    "idempotent": {"type": "boolean", "const": True},
+                },
+                "additionalProperties": False,
+            },
+        },
+        "additionalProperties": False,
+    }
+    example = {
+        "ok": True,
+        "tenant": "acme",
+        "memory": {
+            "id": "tx_8f1e6aaf6dcb44f0a8a6434f135c6338",
+            "text": "The customer prefers concise release notes.",
+            "label": "preference",
+            "metadata": {"source": "agent-session"},
+        },
+        "transaction": {
+            "id": "8f1e6aaf6dcb44f0a8a6434f135c6338f31821a279d4865476d08db1b2cecf0f",
+            "state": "complete",
+            "idempotent": True,
+        },
+    }
+    return _json_success_response("Memory was durably stored once.", schema, example)
 
 
 def route_success_openapi() -> Dict[str, Any]:
@@ -811,7 +922,7 @@ h1,h2,h3,p{margin-top:0}h1{font-size:clamp(48px,7vw,96px);line-height:.94;margin
 <section class="hero" aria-labelledby="hero-title">
 <div class="field" aria-hidden="true"><span class="trace a"></span><span class="trace b"></span><span class="trace c"></span>$nodes</div>
 <nav class="topbar" aria-label="Primary"><a class="brand" href="#hero-title" aria-label="$service_name home"><span class="mark">lc</span><span>leCore API</span></a><div class="nav"><a href="#quickstart">Quickstart</a><a href="/docs">API docs</a><a href="/redoc">Reference</a><a href="/pricing">Pricing</a></div></nav>
-<div class="copy"><p class="status"><span>$price_per_request</span><span>$environment_label</span><span>$network_label</span></p><h1 id="hero-title">$hero_title</h1><p class="lede">A hosted HTTPS API for querying seeded preview memory, routing tasks to leCore capabilities, and reading service readiness. $payment_notice</p><div class="actions"><a class="button primary" href="#quickstart">Make the first request</a><a class="button secondary" href="/docs">Explore API docs</a><a class="button secondary" href="/pricing">View pricing</a></div></div>
+<div class="copy"><p class="status"><span>$price_per_request</span><span>$environment_label</span><span>$network_label</span></p><h1 id="hero-title">$hero_title</h1><p class="lede">A hosted HTTPS API for storing and recalling encrypted private-tenant memory, routing tasks to leCore capabilities, and reading service readiness. $payment_notice</p><div class="actions"><a class="button primary" href="#quickstart">Make the first request</a><a class="button secondary" href="/docs">Explore API docs</a><a class="button secondary" href="/pricing">View pricing</a></div></div>
 <aside class="terminal" aria-label="Unsigned x402 request example"><div class="terminal-top"><span></span><span></span><span></span></div><pre>curl -i $public_url/v1/dashboard
 
 HTTP/2 402 Payment Required
@@ -822,8 +933,8 @@ Payment-Signature: &lt;base64 payment&gt;</pre></aside>
 </section>
 <section class="strip" aria-label="Deployment details"><div><strong>Endpoint</strong><span><a href="$public_url">$public_url</a></span></div><div><strong>Stage</strong><span>$environment_label</span></div><div><strong>Protocol</strong><span>x402 v2</span></div></section>
 <section id="quickstart" class="section quickstart" tabindex="-1"><div class="quick-grid"><div><p class="eyebrow">Four-step quickstart</p><h2>Inspect the terms before signing anything.</h2><ol class="flow"><li><div><strong>Read the free manifest</strong><p><a href="/pricing">GET /pricing</a> returns the exact route, network, asset, receiver, and price.</p></div></li><li><div><strong>Make an unsigned request</strong><p>The protected route returns <code>402</code> with a base64 <code>Payment-Required</code> challenge.</p></div></li><li><div><strong>Sign with an x402 v2 client</strong><p>Use the <a href="$buyer_guide_url">x402 buyer guide</a> to configure a testnet wallet and payment client.</p></div></li><li><div><strong>Retry and verify settlement</strong><p>Send <code>Payment-Signature</code>; a successful response includes <code>Payment-Response</code>.</p></div></li></ol></div><div class="command-panel"><div class="command-head"><span>First request: no wallet required</span><a href="/docs#/Paid%20API/getDashboard">Open route docs</a></div><pre><code>curl -i $public_url/v1/dashboard</code></pre><p class="response-note"><strong>Expected:</strong> HTTP 402 plus <code>Payment-Required</code>. This safely exposes the payment contract without moving testnet funds.</p><div class="command-head"><span>Inspect exact preview terms</span><a href="/pricing">Open live JSON</a></div><pre><code>curl -sS $public_url/pricing</code></pre></div></div></section>
-<section id="routes" class="section"><div class="heading"><p class="eyebrow">Paid API surface</p><h2>Three explicit operations, with no account or subscription.</h2></div><div class="routes"><article class="card"><p class="method">POST</p><h3>Recall</h3><code>/v1/recall</code><p>Query the seeded public preview memory or an operator-provisioned private tenant.</p></article><article class="card"><p class="method">POST</p><h3>Route</h3><code>/v1/route</code><p>Send a plain-language task and receive an explicit act, choose, or unknown decision with evidence.</p></article><article class="card"><p class="method">GET</p><h3>Dashboard</h3><code>/v1/dashboard</code><p>Read memory, capability-routing, and deterministic-engine readiness for one tenant.</p></article></div></section>
-<section id="proof" class="section proof"><div class="proof-copy"><p class="eyebrow">Preview boundaries</p><h2>Deployed, health-checked, and ready to test.</h2><p>Base Sepolia testnet only. The public memory dataset is read-only; private tenants and memory writes are currently operator-provisioned. Operator routes require separate authorization and are absent from the public OpenAPI schema.</p></div><div class="proof-panel"><dl><div><dt>Per request</dt><dd>$price_per_request</dd></div><div><dt>Per 1,000</dt><dd>$price_per_thousand</dd></div><div><dt>Network</dt><dd>$network_name</dd></div><div><dt>API version</dt><dd>$api_version</dd></div></dl></div></section>
+<section id="routes" class="section"><div class="heading"><p class="eyebrow">Paid API surface</p><h2>Four explicit operations, with no subscription.</h2></div><div class="routes"><article class="card"><p class="method">POST</p><h3>Store</h3><code>/v1/memory</code><p>Write one idempotent entry to encrypted, compressed private-tenant memory.</p></article><article class="card"><p class="method">POST</p><h3>Recall</h3><code>/v1/recall</code><p>Query the seeded public preview memory or your authenticated private tenant.</p></article><article class="card"><p class="method">POST</p><h3>Route</h3><code>/v1/route</code><p>Send a plain-language task and receive an explicit act, choose, or unknown decision with evidence.</p></article><article class="card"><p class="method">GET</p><h3>Dashboard</h3><code>/v1/dashboard</code><p>Read memory, capability-routing, and deterministic-engine readiness for one tenant.</p></article></div></section>
+<section id="proof" class="section proof"><div class="proof-copy"><p class="eyebrow">Storage boundaries</p><h2>Encrypted before durable memory reaches disk.</h2><p>Private-tenant memory and its retry journal are compressed, encrypted with per-record AES-256-GCM keys derived from a versioned service key, and authenticated against their tenant and file identity. The shared public dataset stays read-only. Private tenants still require operator-issued access credentials.</p></div><div class="proof-panel"><dl><div><dt>Per request</dt><dd>$price_per_request</dd></div><div><dt>Per 1,000</dt><dd>$price_per_thousand</dd></div><div><dt>Network</dt><dd>$network_name</dd></div><div><dt>API version</dt><dd>$api_version</dd></div></dl></div></section>
 <section class="section close"><p class="eyebrow">Start testing</p><h2>See the full request and response contract.</h2><div class="close-actions"><a class="button primary" href="/docs">Open API docs</a><a class="button secondary dark" href="/openapi.json">View OpenAPI schema</a><a class="button secondary dark" href="/health">Check live health</a></div></section>
 </main>
 <footer class="footer"><span>$service_name · testnet preview</span><nav aria-label="Footer"><a href="/docs">Swagger</a><a href="/redoc">ReDoc</a><a href="/pricing">Pricing</a><a href="$buyer_guide_url">x402 buyer guide</a></nav></footer>
@@ -937,6 +1048,8 @@ def _process_file_lock(path: Path) -> Any:
     """Hold an exclusive process lock for one persisted tenant state file."""
     lock_path = path.with_suffix(path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
+    if lock_path.is_symlink():
+        raise MemoryStateError("durable-state lock must not be a symbolic link")
     handle = open(lock_path, "a+b")
     try:
         if os.name == "nt":  # pragma: no cover - exercised on Windows CI/users
@@ -968,23 +1081,276 @@ def _process_file_lock(path: Path) -> Any:
             handle.close()
 
 
-def _atomic_write_json(path: Path, value: Dict[str, Any]) -> None:
-    """Durably replace a small JSON control record without exposing a partial file."""
+class MemoryStateError(RuntimeError):
+    """Durable memory could not be authenticated, decoded, or migrated safely."""
+
+
+@dataclass(frozen=True)
+class MemoryKeyring:
+    """A small versioned set of 256-bit application data-encryption keys."""
+
+    active: str
+    keys: Dict[str, bytes]
+
+    @classmethod
+    def from_json(cls, value: str) -> "MemoryKeyring":
+        """Parse the Secrets Manager value used by ``LECORE_X402_MEMORY_KEYS``."""
+        try:
+            document = json.loads(value)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError("%s must be a JSON object" % MEMORY_KEY_ENV) from exc
+        if not isinstance(document, dict) or set(document) != {"active", "keys"}:
+            raise ValueError("%s must contain exactly 'active' and 'keys'" % MEMORY_KEY_ENV)
+        active = document.get("active")
+        encoded_keys = document.get("keys")
+        if not isinstance(active, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", active):
+            raise ValueError("memory active key id must be 1-64 safe characters")
+        if not isinstance(encoded_keys, dict) or not 1 <= len(encoded_keys) <= 8:
+            raise ValueError("memory keyring must contain between 1 and 8 keys")
+        keys: Dict[str, bytes] = {}
+        for key_id, encoded in encoded_keys.items():
+            if not isinstance(key_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", key_id):
+                raise ValueError("memory key ids must be 1-64 safe characters")
+            if not isinstance(encoded, str) or not encoded:
+                raise ValueError("memory key %s must be base64" % key_id)
+            try:
+                padded = encoded + "=" * (-len(encoded) % 4)
+                key = base64.b64decode(padded, altchars=b"-_", validate=True)
+            except (ValueError, TypeError) as exc:
+                raise ValueError("memory key %s must be valid base64" % key_id) from exc
+            if len(key) != 32:
+                raise ValueError("memory key %s must decode to exactly 32 bytes" % key_id)
+            keys[key_id] = key
+        if active not in keys:
+            raise ValueError("memory active key id is not present in the keyring")
+        if len(set(keys.values())) != len(keys):
+            raise ValueError("memory key ids must not contain duplicate key material")
+        return cls(active=active, keys=keys)
+
+
+class MemoryStateCodec:
+    """Compress and authenticate durable JSON records before they touch disk.
+
+    The versioned envelope deliberately leaves only format metadata and the key
+    id visible. Tenant/file identity is authenticated as associated data, so an
+    encrypted record cannot be copied into another tenant or journal location.
+    """
+
+    _MAGIC = b"LECMEM01"
+    _VERSION = 1
+    _MAX_PLAINTEXT_BYTES = 256 * 1024 * 1024
+    _MAX_HEADER_BYTES = 4096
+
+    def __init__(self, keyring: MemoryKeyring, allow_plaintext_migration: bool = False):
+        self.keyring = keyring
+        self.allow_plaintext_migration = bool(allow_plaintext_migration)
+
+    def read_json(self, path: Path, context: str) -> Dict[str, Any]:
+        """Read one record, migrating plaintext or an old key while locked."""
+        try:
+            if path.is_symlink() or not path.is_file():
+                raise MemoryStateError("durable state %s must be a regular file" % path.name)
+            if path.stat().st_size > self._MAX_PLAINTEXT_BYTES + self._MAX_HEADER_BYTES + 64:
+                raise MemoryStateError("durable state %s exceeds the 256 MiB safety limit" % path.name)
+            payload = path.read_bytes()
+        except OSError as exc:
+            raise MemoryStateError("could not read durable memory state %s" % path.name) from exc
+        if payload.startswith(self._MAGIC):
+            value, key_id = self._decrypt_json(payload, context, path.name)
+            if key_id != self.keyring.active:
+                self.write_json(path, value, context)
+            return value
+        if not self.allow_plaintext_migration:
+            raise MemoryStateError(
+                "plaintext durable state %s is refused; enable one-time migration explicitly" % path.name
+            )
+        try:
+            value = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise MemoryStateError("invalid plaintext durable state %s" % path.name) from exc
+        if not isinstance(value, dict):
+            raise MemoryStateError("durable state %s is not a JSON object" % path.name)
+        self.write_json(path, value, context)
+        return value
+
+    def write_json(self, path: Path, value: Dict[str, Any], context: str) -> None:
+        """Serialize, compress, encrypt, and atomically replace one record."""
+        if path.is_symlink():
+            raise MemoryStateError("durable state %s must not be a symbolic link" % path.name)
+        if not isinstance(value, dict):
+            raise MemoryStateError("durable memory state must be a JSON object")
+        try:
+            plaintext = json.dumps(
+                value,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise MemoryStateError("durable memory state is not JSON serializable") from exc
+        if len(plaintext) > self._MAX_PLAINTEXT_BYTES:
+            raise MemoryStateError("durable memory state exceeds the 256 MiB safety limit")
+        compressed = zlib.compress(plaintext, level=6)
+        nonce = os.urandom(12)
+        header = {
+            "algorithm": MEMORY_CIPHER,
+            "compression": MEMORY_COMPRESSION,
+            "kdf": MEMORY_KDF,
+            "key_id": self.keyring.active,
+            "nonce": base64.urlsafe_b64encode(nonce).decode("ascii").rstrip("="),
+            "plaintext_bytes": len(plaintext),
+            "version": self._VERSION,
+        }
+        header_bytes = json.dumps(header, sort_keys=True, separators=(",", ":")).encode("ascii")
+        associated_data = self._associated_data(header_bytes, context)
+        try:
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        except ImportError as exc:  # pragma: no cover - covered by the x402 install
+            raise RuntimeError("memory encryption requires cryptography>=46,<47") from exc
+        ciphertext = AESGCM(self._data_key(self.keyring.keys[self.keyring.active], context)).encrypt(
+            nonce,
+            compressed,
+            associated_data,
+        )
+        envelope = self._MAGIC + struct.pack(">I", len(header_bytes)) + header_bytes + ciphertext
+        _atomic_write_bytes(path, envelope)
+
+    def _decrypt_json(self, payload: bytes, context: str, name: str) -> Tuple[Dict[str, Any], str]:
+        try:
+            if len(payload) < len(self._MAGIC) + 4:
+                raise ValueError("truncated header")
+            offset = len(self._MAGIC)
+            header_length = struct.unpack(">I", payload[offset:offset + 4])[0]
+            if not 1 <= header_length <= self._MAX_HEADER_BYTES:
+                raise ValueError("invalid header length")
+            header_start = offset + 4
+            header_end = header_start + header_length
+            header_bytes = payload[header_start:header_end]
+            ciphertext = payload[header_end:]
+            if len(ciphertext) < 16:
+                raise ValueError("truncated ciphertext")
+            header = json.loads(header_bytes.decode("ascii"))
+            if not isinstance(header, dict) or set(header) != {
+                "algorithm", "compression", "kdf", "key_id", "nonce", "plaintext_bytes", "version"
+            }:
+                raise ValueError("invalid header")
+            if (
+                header["version"] != self._VERSION
+                or header["algorithm"] != MEMORY_CIPHER
+                or header["compression"] != MEMORY_COMPRESSION
+                or header["kdf"] != MEMORY_KDF
+            ):
+                raise ValueError("unsupported envelope")
+            key_id = header["key_id"]
+            if key_id not in self.keyring.keys:
+                raise MemoryStateError("durable state %s needs unavailable memory key %s" % (name, key_id))
+            encoded_nonce = header["nonce"]
+            if not isinstance(encoded_nonce, str):
+                raise ValueError("invalid nonce")
+            nonce = base64.b64decode(
+                encoded_nonce + "=" * (-len(encoded_nonce) % 4),
+                altchars=b"-_",
+                validate=True,
+            )
+            if len(nonce) != 12:
+                raise ValueError("invalid nonce")
+            expected_size = header["plaintext_bytes"]
+            if not isinstance(expected_size, int) or not 0 <= expected_size <= self._MAX_PLAINTEXT_BYTES:
+                raise ValueError("invalid plaintext size")
+        except MemoryStateError:
+            raise
+        except (ValueError, TypeError, KeyError, UnicodeDecodeError, json.JSONDecodeError, struct.error) as exc:
+            raise MemoryStateError("invalid encrypted durable state %s" % name) from exc
+        try:
+            from cryptography.exceptions import InvalidTag
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+            compressed = AESGCM(self._data_key(self.keyring.keys[key_id], context)).decrypt(
+                nonce,
+                ciphertext,
+                self._associated_data(header_bytes, context),
+            )
+        except InvalidTag as exc:
+            raise MemoryStateError("durable state authentication failed for %s" % name) from exc
+        plaintext = self._decompress(compressed, name)
+        if len(plaintext) != expected_size:
+            raise MemoryStateError("durable state size check failed for %s" % name)
+        try:
+            value = json.loads(plaintext.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise MemoryStateError("invalid encrypted JSON in %s" % name) from exc
+        if not isinstance(value, dict):
+            raise MemoryStateError("durable state %s is not a JSON object" % name)
+        return value, key_id
+
+    @classmethod
+    def _decompress(cls, compressed: bytes, name: str) -> bytes:
+        try:
+            inflater = zlib.decompressobj()
+            plaintext = inflater.decompress(compressed, cls._MAX_PLAINTEXT_BYTES + 1)
+            if len(plaintext) > cls._MAX_PLAINTEXT_BYTES or inflater.unconsumed_tail:
+                raise MemoryStateError("decompressed durable state %s exceeds the safety limit" % name)
+            plaintext += inflater.flush(cls._MAX_PLAINTEXT_BYTES + 1 - len(plaintext))
+            if len(plaintext) > cls._MAX_PLAINTEXT_BYTES or not inflater.eof or inflater.unused_data:
+                raise MemoryStateError("invalid compressed durable state %s" % name)
+            return plaintext
+        except zlib.error as exc:
+            raise MemoryStateError("invalid compressed durable state %s" % name) from exc
+
+    @classmethod
+    def _associated_data(cls, header: bytes, context: str) -> bytes:
+        if not isinstance(context, str) or not context or len(context.encode("utf-8")) > 512:
+            raise MemoryStateError("invalid durable-state encryption context")
+        return cls._MAGIC + header + b"\0" + context.encode("utf-8")
+
+    @staticmethod
+    def _data_key(master_key: bytes, context: str) -> bytes:
+        """Derive a distinct AES key for each tenant/file context."""
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+        return HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=None,
+            info=b"lecore-x402-memory-v1\0" + context.encode("utf-8"),
+        ).derive(master_key)
+
+
+def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+    """Durably replace one small state record with owner-only permissions."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":"))
     temporary = path.with_name(".%s.%s.tmp" % (path.name, os.urandom(8).hex()))
+    descriptor: Optional[int] = None
     try:
-        with open(temporary, "x", encoding="utf-8") as handle:
+        descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = None
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
+        os.chmod(path, 0o600)
+        if hasattr(os, "O_DIRECTORY"):
+            directory = os.open(str(path.parent), os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
     except Exception:
+        if descriptor is not None:
+            os.close(descriptor)
         try:
             temporary.unlink()
         except FileNotFoundError:
             pass
         raise
+
+
+def _atomic_write_json(path: Path, value: Dict[str, Any]) -> None:
+    """Durably replace a small JSON control record without exposing a partial file."""
+    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    _atomic_write_bytes(path, payload)
 
 
 class TenantCoreStore:
@@ -994,6 +1360,7 @@ class TenantCoreStore:
         self,
         default_core: LocalAgentCore,
         state_dir: Optional[Any] = None,
+        codec: Optional[MemoryStateCodec] = None,
     ):
         self._default_dim = default_core.dim
         self._default_seed = default_core.seed
@@ -1003,12 +1370,15 @@ class TenantCoreStore:
         self._tenant_locks: Dict[str, threading.RLock] = {DEFAULT_TENANT_ID: threading.RLock()}
         self._registry_lock = threading.RLock()
         self._state_dir = Path(state_dir) if state_dir else None
+        self._codec = codec
         if self._state_dir is not None:
             self._state_dir.mkdir(parents=True, exist_ok=True)
+            if self._codec is not None:
+                self._migrate_and_rotate_all()
             public_path = self._path_for(DEFAULT_TENANT_ID)
             if public_path is not None and public_path.exists():
                 with _process_file_lock(public_path):
-                    self._cores[DEFAULT_TENANT_ID] = LocalAgentCore.load(public_path)
+                    self._cores[DEFAULT_TENANT_ID] = self._load_core(public_path, DEFAULT_TENANT_ID)
                     self._versions[DEFAULT_TENANT_ID] = self._version(public_path)
 
     def loaded_tenants(self) -> List[str]:
@@ -1039,12 +1409,12 @@ class TenantCoreStore:
                 return fn(core)
             with _process_file_lock(path):
                 core = (
-                    LocalAgentCore.load(path)
+                    self._load_core(path, normalized)
                     if path.exists()
                     else LocalAgentCore.from_state(self._get_cached(normalized).to_state())
                 )
                 result = fn(core)
-                core.save(path)
+                self._save_core(path, normalized, core)
                 with self._registry_lock:
                     self._cores[normalized] = core
                     self._versions[normalized] = self._version(path)
@@ -1078,7 +1448,7 @@ class TenantCoreStore:
                 cached_version = self._versions.get(tenant_id)
             if cached_version != version:
                 with _process_file_lock(path):
-                    core = LocalAgentCore.load(path)
+                    core = self._load_core(path, tenant_id)
                     version = self._version(path)
                 with self._registry_lock:
                     self._cores[tenant_id] = core
@@ -1095,6 +1465,31 @@ class TenantCoreStore:
         if self._state_dir is None:
             return None
         return self._state_dir / ("%s.json" % normalize_tenant_id(tenant_id))
+
+    def _load_core(self, path: Path, tenant_id: str) -> LocalAgentCore:
+        if self._codec is None:
+            return LocalAgentCore.load(path)
+        state = self._codec.read_json(path, "core:%s" % normalize_tenant_id(tenant_id))
+        return LocalAgentCore.from_state(state)
+
+    def _save_core(self, path: Path, tenant_id: str, core: LocalAgentCore) -> None:
+        if self._codec is None:
+            core.save(path)
+            return
+        self._codec.write_json(path, core.to_state(), "core:%s" % normalize_tenant_id(tenant_id))
+
+    def _migrate_and_rotate_all(self) -> None:
+        """Rewrite every existing tenant file under the active authenticated key."""
+        if self._state_dir is None or self._codec is None:
+            return
+        for path in sorted(self._state_dir.glob("*.json")):
+            if path.is_symlink() or not path.is_file():
+                raise MemoryStateError("durable tenant state must be a regular file: %s" % path.name)
+            tenant_id = normalize_tenant_id(path.stem)
+            if tenant_id != path.stem:
+                raise MemoryStateError("durable tenant filename is not canonical: %s" % path.name)
+            with _process_file_lock(path):
+                self._codec.read_json(path, "core:%s" % tenant_id)
 
 
 class NoSQLiteError(RuntimeError):
@@ -1456,9 +1851,15 @@ class TenantMemoryTransactions:
     _CORE_COMMITTED = "core_committed"
     _COMPLETE = "complete"
 
-    def __init__(self, core_store: TenantCoreStore, state_dir: Any):
+    def __init__(
+        self,
+        core_store: TenantCoreStore,
+        state_dir: Any,
+        codec: Optional[MemoryStateCodec] = None,
+    ):
         self._core_store = core_store
         self._root = Path(state_dir) / ".x402-memory-transactions"
+        self._codec = codec
         self._root.mkdir(parents=True, exist_ok=True)
 
     def remember(
@@ -1545,7 +1946,7 @@ class TenantMemoryTransactions:
         )
         if record["state"] == self._PLANNED:
             record["state"] = self._CORE_COMMITTED
-            _atomic_write_json(path, record)
+            self._write(path, record)
 
         if record["requires_mirror"]:
             if mirror is None:
@@ -1557,7 +1958,7 @@ class TenantMemoryTransactions:
 
         if record["state"] != self._COMPLETE:
             record["state"] = self._COMPLETE
-            _atomic_write_json(path, record)
+            self._write(path, record)
         return self._result(record, stored)
 
     @staticmethod
@@ -1605,11 +2006,12 @@ class TenantMemoryTransactions:
                 "metadata": request["metadata"],
             },
         }
-        _atomic_write_json(path, record)
+        self._write(path, record)
         return record
 
-    @staticmethod
-    def _load(path: Path) -> Dict[str, Any]:
+    def _load(self, path: Path) -> Dict[str, Any]:
+        if self._codec is not None:
+            return self._codec.read_json(path, self._encryption_context(path))
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -1617,6 +2019,21 @@ class TenantMemoryTransactions:
         if not isinstance(value, dict):
             raise MemoryTransactionError("transaction journal %s is not an object" % path.name)
         return value
+
+    def _write(self, path: Path, record: Dict[str, Any]) -> None:
+        if self._codec is None:
+            _atomic_write_json(path, record)
+            return
+        self._codec.write_json(path, record, self._encryption_context(path))
+
+    def _encryption_context(self, path: Path) -> str:
+        try:
+            relative = path.relative_to(self._root)
+        except ValueError as exc:  # pragma: no cover - paths are constructed internally
+            raise MemoryStateError("transaction journal escaped its state directory") from exc
+        if len(relative.parts) != 2:
+            raise MemoryStateError("invalid transaction journal path")
+        return "journal:%s/%s" % (relative.parts[0], relative.parts[1])
 
     def _validate_record(self, record: Dict[str, Any], path: Path) -> None:
         required = {"version", "transaction_id", "tenant", "request_fingerprint", "requires_mirror", "state", "memory"}
@@ -1732,6 +2149,25 @@ def env_flag(value: Optional[str]) -> bool:
     return (value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def memory_state_codec(
+    value: Optional[Any],
+    *,
+    allow_plaintext_migration: bool = False,
+) -> Optional[MemoryStateCodec]:
+    """Resolve optional versioned encryption material without a silent fallback."""
+    if value is None or value == "":
+        if allow_plaintext_migration:
+            raise ValueError("plaintext migration requires %s" % MEMORY_KEY_ENV)
+        return None
+    if isinstance(value, MemoryKeyring):
+        keyring = value
+    elif isinstance(value, str):
+        keyring = MemoryKeyring.from_json(value)
+    else:
+        raise ValueError("memory keys must be a MemoryKeyring or JSON string")
+    return MemoryStateCodec(keyring, allow_plaintext_migration=allow_plaintext_migration)
+
+
 def landing_page_html(config: X402Config) -> str:
     """Render the buyer-facing landing page served from `/`."""
     network_name = _network_name(config.network)
@@ -1840,6 +2276,8 @@ def create_app(
     admin_token: Optional[str] = None,
     tenant_secret: Optional[str] = None,
     tenant_state_dir: Optional[Any] = None,
+    memory_keys: Optional[Any] = None,
+    allow_plaintext_migration: Optional[bool] = None,
     memory_backend: Optional[str] = None,
     nosqlite_binary: Optional[str] = None,
     nosqlite_data_dir: Optional[Any] = None,
@@ -1865,8 +2303,23 @@ def create_app(
     if paid and public.scheme != "https" and public.hostname not in {"127.0.0.1", "::1", "localhost"}:
         raise ValueError("paid mode public_url must use https outside localhost")
 
+    allow_plaintext_migration = (
+        bool(allow_plaintext_migration)
+        if allow_plaintext_migration is not None
+        else env_flag(os.environ.get(MEMORY_MIGRATION_ENV))
+    )
+    codec = memory_state_codec(
+        memory_keys if memory_keys is not None else os.environ.get(MEMORY_KEY_ENV),
+        allow_plaintext_migration=allow_plaintext_migration,
+    )
+    durable_write_published = any(route.path == "/v1/memory" for route in config.routes)
+    if paid and durable_write_published and not tenant_state_dir:
+        raise ValueError("paid /v1/memory requires LECORE_X402_TENANT_STATE_DIR")
+    if paid and tenant_state_dir and codec is None:
+        raise ValueError("paid durable memory requires %s" % MEMORY_KEY_ENV)
+
     core = core or demo()
-    store = TenantCoreStore(core, state_dir=tenant_state_dir)
+    store = TenantCoreStore(core, state_dir=tenant_state_dir, codec=codec)
     memory_backend = normalize_memory_backend(
         memory_backend if memory_backend is not None else os.environ.get("LECORE_X402_MEMORY_BACKEND", MEMORY_BACKEND_CORE)
     )
@@ -1875,6 +2328,8 @@ def create_app(
         if nosqlite_shadow is not None
         else env_flag(os.environ.get("LECORE_X402_NOSQLITE_SHADOW"))
     )
+    if codec is not None and (memory_backend == MEMORY_BACKEND_NOSQLITE or nosqlite_shadow):
+        raise ValueError("encrypted memory does not permit the plaintext NoSQLite backend or shadow")
     nosqlite_store: Optional[NoSQLiteMemoryStore] = None
     if memory_backend == MEMORY_BACKEND_NOSQLITE or nosqlite_shadow:
         if not tenant_state_dir:
@@ -1887,7 +2342,7 @@ def create_app(
             data_dir,
             durability=nosqlite_durability or os.environ.get("LECORE_X402_NOSQLITE_DURABILITY", "sync"),
         )
-    memory_transactions = TenantMemoryTransactions(store, tenant_state_dir) if tenant_state_dir else None
+    memory_transactions = TenantMemoryTransactions(store, tenant_state_dir, codec=codec) if tenant_state_dir else None
 
     @asynccontextmanager
     async def lifespan(_: Any) -> Any:
@@ -1920,6 +2375,7 @@ def create_app(
     app.state.nosqlite_shadow = nosqlite_shadow
     app.state.nosqlite_store = nosqlite_store
     app.state.memory_transactions = memory_transactions
+    app.state.memory_state_codec = codec
     tenant_secret = tenant_secret or os.environ.get("LECORE_X402_TENANT_SECRET")
 
     if paid:
@@ -1999,6 +2455,13 @@ def create_app(
             "nosqlite_shadow": bool(nosqlite_shadow),
             "nosqlite_configured": nosqlite_store is not None,
             "durable_transactions": memory_transactions is not None,
+            "storage": {
+                "durable": bool(tenant_state_dir),
+                "encrypted": codec is not None,
+                "cipher": MEMORY_CIPHER if codec is not None else None,
+                "compression": MEMORY_COMPRESSION if codec is not None else None,
+                "plaintext_migration_enabled": bool(codec and codec.allow_plaintext_migration),
+            },
         }
 
     def nosqlite_unavailable(error: NoSQLiteError) -> HTTPException:
@@ -2041,6 +2504,8 @@ def create_app(
                 nosqlite_shadow=bool(nosqlite_shadow),
                 nosqlite_configured=nosqlite_store is not None,
                 durable_transactions=memory_transactions is not None,
+                encrypted_storage=codec is not None,
+                plaintext_migration_enabled=bool(codec and codec.allow_plaintext_migration),
             ),
         },
     )
@@ -2075,6 +2540,8 @@ def create_app(
                 nosqlite_shadow=bool(nosqlite_shadow),
                 nosqlite_configured=nosqlite_store is not None,
                 durable_transactions=memory_transactions is not None,
+                encrypted_storage=codec is not None,
+                plaintext_migration_enabled=bool(codec and codec.allow_plaintext_migration),
             ),
         },
     )
@@ -2088,6 +2555,77 @@ def create_app(
             "memory_backend": memory_public_dict(),
             "routes": payment_manifest(config),
         }
+
+    def memory_fields(payload: Dict[str, Any]) -> Tuple[str, Optional[str], Optional[Dict[str, Any]]]:
+        text = validated(_required_text, payload, "text", MAX_MEMORY_CHARS)
+        label = payload.get("label")
+        metadata = payload.get("metadata")
+        if label is not None:
+            if not isinstance(label, str):
+                raise HTTPException(status_code=400, detail="label must be a string")
+            if len(label) > MAX_MEMORY_LABEL_CHARS:
+                raise HTTPException(
+                    status_code=400,
+                    detail="label must be at most %d characters" % MAX_MEMORY_LABEL_CHARS,
+                )
+        if metadata is not None:
+            if not isinstance(metadata, dict):
+                raise HTTPException(status_code=400, detail="metadata must be an object")
+            encoded_metadata = json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            if len(encoded_metadata) > MAX_MEMORY_METADATA_BYTES:
+                raise HTTPException(
+                    status_code=400,
+                    detail="metadata must be at most %d encoded bytes" % MAX_MEMORY_METADATA_BYTES,
+                )
+        return text, label, metadata
+
+    def commit_memory(
+        tenant_id: str,
+        text: str,
+        label: Optional[str],
+        metadata: Optional[Dict[str, Any]],
+        key: Optional[str],
+    ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+        transaction = None
+        if memory_transactions is not None:
+            try:
+                committed = memory_transactions.remember(
+                    tenant_id,
+                    text,
+                    label,
+                    metadata,
+                    key,
+                    nosqlite_store,
+                )
+            except MemoryTransactionConflict as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except MemoryTransactionError as exc:
+                raise HTTPException(status_code=500, detail="memory transaction could not be completed") from exc
+            except NoSQLiteError as exc:
+                if memory_backend == MEMORY_BACKEND_NOSQLITE:
+                    raise nosqlite_unavailable(exc) from exc
+                LOG.warning("NoSQLite shadow write failed: %s", exc)
+                if not isinstance(exc, MemoryMirrorPending):  # pragma: no cover - mirror errors are wrapped above
+                    raise nosqlite_unavailable(exc) from exc
+                committed = memory_transactions.resume(exc.tenant_id, exc.transaction_id, None)
+            return committed["memory"], committed["transaction"]
+        if key is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Idempotency-Key requires LECORE_X402_TENANT_STATE_DIR for durable retries",
+            )
+        memory = store.write(
+            tenant_id,
+            lambda tenant_core: tenant_core.remember(text, label=label, metadata=metadata),
+        )
+        if nosqlite_store is not None:  # pragma: no cover - NoSQLite requires durable tenant state
+            try:
+                nosqlite_store.remember(tenant_id, memory)
+            except NoSQLiteError as exc:
+                if memory_backend == MEMORY_BACKEND_NOSQLITE:
+                    raise nosqlite_unavailable(exc) from exc
+                LOG.warning("NoSQLite shadow write failed: %s", exc)
+        return memory, transaction
 
     def recall_response(
         payload: Dict[str, Any],
@@ -2119,6 +2657,102 @@ def create_app(
             "tenant": tenant_id,
             "query": query,
             "hits": hits,
+        }
+
+    @app.post(
+        "/v1/memory",
+        tags=["Paid API"],
+        operation_id="storeMemory",
+        summary="Store private agent memory",
+        description=(
+            "Durably store one entry in an authenticated private tenant. The write is "
+            "compressed, encrypted at the application boundary, and made idempotent by "
+            "the required Idempotency-Key. Shared public memory is read-only."
+        ),
+        responses=paid_operation_responses(
+            memory_write_success_openapi(),
+            invalid_detail="text and Idempotency-Key are required",
+            idempotency_conflict=True,
+        ),
+        openapi_extra=paid_request_openapi(
+            required=["text"],
+            properties={
+                "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_MEMORY_CHARS,
+                    "pattern": r"\S",
+                    "description": "Memory content to store in the selected private tenant.",
+                },
+                "label": {
+                    "type": "string",
+                    "maxLength": MAX_MEMORY_LABEL_CHARS,
+                    "description": "Optional caller-defined category.",
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": True,
+                    "description": "Optional JSON metadata, limited to 16 KiB when encoded.",
+                },
+                "tenant": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "description": "Private tenant id; may instead be supplied in X-leCore-Tenant.",
+                },
+            },
+            example={
+                "tenant": "acme",
+                "text": "The customer prefers concise release notes.",
+                "label": "preference",
+                "metadata": {"source": "agent-session"},
+            },
+            example_summary="Store an idempotent private-tenant memory",
+        ),
+    )
+    def store_memory(
+        payload: Dict[str, Any],
+        idempotency_key: str = Header(
+            ...,
+            alias=IDEMPOTENCY_HEADER,
+            description="Required stable retry key. Reuse it only for the identical memory write.",
+        ),
+        x_lecore_tenant: Optional[str] = Header(
+            default=None,
+            alias=TENANT_HEADER,
+            description="Private tenant id, if it is not supplied in the JSON body.",
+        ),
+        x_lecore_tenant_token: Optional[str] = Header(
+            default=None,
+            alias=TENANT_TOKEN_HEADER,
+            description="Required authorization token for the resolved private tenant.",
+        ),
+        _payment_signature: Optional[str] = Header(
+            default=None,
+            alias="Payment-Signature",
+            description=(
+                "Omit to receive the x402 challenge; include the base64 x402 v2 "
+                "payment payload when retrying."
+            ),
+            json_schema_extra={"format": "byte"},
+        ),
+    ) -> Dict[str, Any]:
+        tenant_id = tenant_from_payload(payload, x_lecore_tenant)
+        if tenant_id == DEFAULT_TENANT_ID:
+            raise HTTPException(status_code=403, detail="shared public memory is read-only")
+        require_tenant_access(tenant_id, x_lecore_tenant_token)
+        if memory_transactions is None or codec is None:
+            raise HTTPException(status_code=503, detail="encrypted durable memory is not configured")
+        key = validated(normalize_idempotency_key, idempotency_key)
+        if key is None:  # pragma: no cover - FastAPI marks the header required
+            raise HTTPException(status_code=400, detail="Idempotency-Key is required")
+        text, label, metadata = memory_fields(payload)
+        memory, transaction = commit_memory(tenant_id, text, label, metadata, key)
+        return {
+            "ok": True,
+            "tenant": tenant_id,
+            "memory": memory,
+            "transaction": transaction,
         }
 
     @app.post(
@@ -2324,56 +2958,9 @@ def create_app(
     ) -> Dict[str, Any]:
         require_admin(x_admin_token)
         tenant_id = tenant_from_payload(payload, x_lecore_tenant)
-        text = validated(_required_text, payload, "text", MAX_MEMORY_CHARS)
+        text, label, metadata = memory_fields(payload)
         key = validated(normalize_idempotency_key, idempotency_key)
-        label = payload.get("label")
-        metadata = payload.get("metadata")
-        if label is not None and not isinstance(label, str):
-            raise HTTPException(status_code=400, detail="label must be a string")
-        if metadata is not None and not isinstance(metadata, dict):
-            raise HTTPException(status_code=400, detail="metadata must be an object")
-
-        transaction = None
-        if memory_transactions is not None:
-            try:
-                committed = memory_transactions.remember(
-                    tenant_id,
-                    text,
-                    label,
-                    metadata,
-                    key,
-                    nosqlite_store,
-                )
-            except MemoryTransactionConflict as exc:
-                raise HTTPException(status_code=409, detail=str(exc)) from exc
-            except MemoryTransactionError as exc:
-                raise HTTPException(status_code=500, detail="memory transaction could not be completed") from exc
-            except NoSQLiteError as exc:
-                if memory_backend == MEMORY_BACKEND_NOSQLITE:
-                    raise nosqlite_unavailable(exc) from exc
-                LOG.warning("NoSQLite shadow write failed: %s", exc)
-                if not isinstance(exc, MemoryMirrorPending):  # pragma: no cover - mirror errors are wrapped above
-                    raise nosqlite_unavailable(exc) from exc
-                committed = memory_transactions.resume(exc.tenant_id, exc.transaction_id, None)
-            memory = committed["memory"]
-            transaction = committed["transaction"]
-        else:
-            if key is not None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Idempotency-Key requires LECORE_X402_TENANT_STATE_DIR for durable retries",
-                )
-            memory = store.write(
-                tenant_id,
-                lambda tenant_core: tenant_core.remember(text, label=label, metadata=metadata),
-            )
-            if nosqlite_store is not None:  # pragma: no cover - NoSQLite requires durable tenant state
-                try:
-                    nosqlite_store.remember(tenant_id, memory)
-                except NoSQLiteError as exc:
-                    if memory_backend == MEMORY_BACKEND_NOSQLITE:
-                        raise nosqlite_unavailable(exc) from exc
-                    LOG.warning("NoSQLite shadow write failed: %s", exc)
+        memory, transaction = commit_memory(tenant_id, text, label, metadata, key)
         return {
             "ok": True,
             "tenant": tenant_id,

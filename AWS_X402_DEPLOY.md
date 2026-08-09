@@ -13,6 +13,7 @@ does **not** need a wallet private key in the container. It only needs:
 - x402/facilitator configuration
 - an admin token for seller-only memory writes
 - a tenant-token secret if private customer memory is enabled
+- a separate versioned memory-encryption keyring for durable customer memory
 
 The receiving wallet should be a cold wallet, hardware wallet, Safe/multisig,
 or a custody wallet. The API simply tells x402 where funds should go.
@@ -30,6 +31,8 @@ or pay upstream APIs as a buyer.
 - **Secrets Manager** stores `LECORE_X402_ADMIN_TOKEN` and production
   facilitator credentials.
   Store `LECORE_X402_TENANT_SECRET` there too when private tenants are enabled.
+  Store `LECORE_X402_MEMORY_KEYS` as a separate secret; never derive it from or
+  reuse an admin, tenant-token, facilitator, or wallet secret.
 - **SSM Parameter Store or plain task env** stores non-secret config like
   `LECORE_X402_PAY_TO`, `LECORE_X402_PRICE`, `LECORE_X402_NETWORK`,
   `LECORE_X402_PUBLIC_URL`, and `LECORE_X402_TENANT_STATE_DIR`.
@@ -38,6 +41,7 @@ or pay upstream APIs as a buyer.
 
 Protected paid routes:
 
+- `POST /v1/memory` (private tenant + idempotency key required)
 - `POST /v1/recall`
 - `POST /v1/route`
 - `GET /v1/dashboard`
@@ -109,12 +113,55 @@ Secrets Manager values:
 ```text
 LECORE_X402_ADMIN_TOKEN=<random admin token>
 LECORE_X402_TENANT_SECRET=<random tenant-token signing secret>
+LECORE_X402_MEMORY_KEYS={"active":"v1","keys":{"v1":"<32-byte base64 key>"}}
 CDP_API_KEY_ID=<if required by facilitator setup>
 CDP_API_KEY_SECRET=<if required by facilitator setup>
 ```
 
 Use ECS task definition `secrets` entries for secrets, not literal environment
 variables in the task definition.
+
+Generate the first keyring offline and send it directly to Secrets Manager;
+never print the deployed value in logs or commit it:
+
+```bash
+umask 077
+python -c 'import base64,json,secrets; print(json.dumps({"active":"v1","keys":{"v1":base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()}}))' \
+  | aws secretsmanager create-secret --region us-east-1 \
+      --name /lecore/x402/memory-keys --secret-string file:///dev/stdin
+```
+
+Grant the ECS execution role `secretsmanager:GetSecretValue` only on that exact
+secret ARN, and add it to the `app` container's task-definition `secrets` array
+as `LECORE_X402_MEMORY_KEYS`.
+
+## Durable Memory Security Boundary
+
+The production `core` backend compresses each tenant file and durable retry
+journal, derives a per-record key with HKDF-SHA256, and encrypts/authenticates it
+with AES-256-GCM before the atomic write. Tenant/file identity is authenticated
+as associated data, so copying ciphertext between tenants is rejected. The
+application keyring is independent from EFS encryption at rest and TLS in
+transit; all three layers remain enabled.
+
+Paid `/v1/memory` requires durable state, a valid private-tenant token, and an
+`Idempotency-Key`. The service refuses to start paid durable mode without the
+memory keyring. It also refuses NoSQLite or NoSQLite shadow mode while the
+application encryption keyring is configured, because those files do not yet
+use this envelope.
+
+For key rotation, add a new key while retaining the old one, make the new id
+`active`, and deploy. Startup rewraps every tenant and journal record under the
+active key. Verify clean startup and encrypted storage, then remove the old key
+and launch fresh tasks. A secret update alone is insufficient: ECS injects the
+value only when a task starts.
+
+For the one-time migration from legacy plaintext, do not use the normal
+overlapping 100/200 rollout: an old task cannot read the new ciphertext and can
+still write plaintext. Drain to zero or otherwise guarantee one writer, add
+`LECORE_X402_ALLOW_PLAINTEXT_MIGRATION=1`, and start one new task with the
+keyring. After it rewrites and verifies every file, remove the flag and perform
+a fresh deployment. The flag must never remain enabled during normal service.
 
 ## ECS Rollout
 
@@ -185,8 +232,10 @@ If the equality check fails, another operator changed the service after this
 rollout began. Stop, inspect that task definition, and rebuild the candidate
 from the new base rather than overwriting it.
 
-Normal rolling deployment is safe while `LECORE_X402_MEMORY_BACKEND=core`.
-Do not turn on the single-writer NoSQLite backend in the same rollout.
+Normal rolling deployment is safe for later image-only changes while
+`LECORE_X402_MEMORY_BACKEND=core` and every task already has the same keyring.
+The first plaintext-to-encrypted migration is deliberately a drain-and-replace
+operation. Do not turn on the single-writer NoSQLite backend in the same rollout.
 
 ## Verify And Roll Back
 
@@ -202,6 +251,11 @@ Verify all of the following before considering the rollout complete:
   `https://lecore.rati.foundation/v1/dashboard`.
 - `/health` still reports private tenancy and durable transactions, and the
   EFS-backed memory state is present.
+- `/health.memory_backend.storage` reports `durable=true`, `encrypted=true`,
+  `cipher=AES-256-GCM`, `compression=zlib`, and
+  `plaintext_migration_enabled=false` after migration.
+- `POST /v1/memory` without payment returns `402`; after an authorized testnet
+  payment, tenant token, and idempotency key, it stores once and can be recalled.
 - CloudWatch logs since the rollout contain no new errors, tracebacks, or
   exceptions.
 
@@ -218,7 +272,7 @@ aws ecs wait services-stable --region "$REGION" \
 Re-run the endpoint and digest checks after rollback. Do not deregister the
 rollback task definition or delete its ECR digest.
 
-## Optional NoSQLite Cutover
+## Optional NoSQLite Cutover (Not Compatible With Encrypted Production Memory)
 
 The container has `/usr/local/bin/nosqlite` built from the vendored source
 snapshot pinned at `8964da27670c752121b8e6d26d113577429b02f6`. To use it for
@@ -231,7 +285,11 @@ LECORE_X402_NOSQLITE_DATA_DIR=/data/nosqlite
 LECORE_X402_NOSQLITE_DURABILITY=sync
 ```
 
-Mount `/data/nosqlite` on durable storage. NoSQLite deliberately takes a
+NoSQLite currently sits outside the authenticated application-encryption
+boundary. The API fails closed if it is selected together with
+`LECORE_X402_MEMORY_KEYS`; do not use this mode for customer memory.
+
+For an explicitly unencrypted development deployment, mount `/data/nosqlite` on durable storage. NoSQLite deliberately takes a
 nonblocking exclusive writer lock for the whole process, so a single data path
 must have exactly one active ECS writer. Use a deliberate drain-and-replace
 maintenance deployment for the cutover; do not rely on the normal overlapping

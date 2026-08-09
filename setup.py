@@ -84,7 +84,7 @@ setup(
                                           #   `cupy-cuda12x` instead, so it is best installed by hand (and left
                                           #   out of `all`, which is why `wgsl` and `gpu` are separate extras
                                           #   rather than one).
-        "x402":     ["x402[fastapi,evm]>=2.15,<3", "uvicorn>=0.51,<1"],  # paid API publishing
+        "x402":     ["x402[fastapi,evm]>=2.15,<3", "uvicorn>=0.51,<1", "cryptography>=46,<47"],  # paid API publishing
         # -- optional tooling --
         "ui":       ["flask", "pillow"],  # the browser UI (app.py) + image load/save
         "images":   ["pillow"],           # image I/O beyond stdlib PNG (jpg/webp/... via mind.save_render) --
@@ -96,6 +96,6 @@ setup(
         #    note above); wgpu is INCLUDED, because it ships prebuilt wheels for every platform and needs no
         #    system toolchain -- the reason to leave CuPy out simply does not apply to it. --
         "all":      ["numba", "pyfftw", "sympy", "flask", "pillow", "pytest", "matplotlib", "ziglang", "nltk",
-                     "wgpu", "x402[fastapi,evm]>=2.15,<3", "uvicorn>=0.51,<1"],
+                     "wgpu", "x402[fastapi,evm]>=2.15,<3", "uvicorn>=0.51,<1", "cryptography>=46,<47"],
     },
 )
