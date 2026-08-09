@@ -28,10 +28,12 @@
 - `demo()` -- Build a tiny ready-to-query product demo.
 
 ### `holographic_x402_api`
-*holographic_x402_api.py -- publish LocalAgentCore as an x402-paid API.*
+*holographic_x402_api.py -- publish the leCore Agent Memory & Routing API.*
 
 - **class `PaidRoute`** -- One x402-protected route.
     - `key(self)` -- The route key shape expected by x402 middleware, e.g.
+- `x402_payment_required_responses()` -- OpenAPI response metadata shared by every x402-protected operation.
+- `paid_request_openapi(required, properties, example, example_summary)` -- Return an accurate OpenAPI request body while runtime validation stays compatible.
 - **class `X402Config`** -- Seller configuration for the x402-paid API.
     - `from_env(cls, require_pay_to=True)` -- Build config from LECORE_X402_* environment variables.
     - `to_public_dict(self)` -- Public, JSON-safe view of the payment configuration.
@@ -68,12 +70,14 @@
 - `normalize_memory_backend(value)` -- Validate the memory backend selector without accepting silent fallbacks.
 - `env_flag(value)` -- Parse the small explicit boolean surface used by deployment settings.
 - `landing_page_html(config)` -- Render the buyer-facing landing page served from `/`.
+- `documentation_manifest(config)` -- Return canonical public documentation URLs for discovery responses.
+- `public_dashboard(data)` -- Translate the embedded SDK dashboard into the hosted API vocabulary.
 - `payment_manifest(config)` -- Plain JSON route manifest, useful for docs, `/pricing`, and tests.
 - `x402_route_configs(config)` -- Build x402 SDK RouteConfig objects for the protected routes.
 - `x402_resource_server(config)` -- Create an x402 resource server wired to the configured facilitator.
-- `create_app(core=None, config=None, paid=True, admin_token=None, tenant_secret=None, tenant_state_dir=None, memory_backend=None, nosqlite_binary=None, nosqlite_data_dir=None, nosqlite_durability=None, nosqlite_shadow=None)` -- Create the FastAPI application for paid or local serving.
+- `create_app(core=None, config=None, paid=True, admin_token=None, tenant_secret=None, tenant_state_dir=None, memory_backend=None, nosqlite_binary=None, nosqlite_data_dir=None, nosqlite_durability=None, nosqlite_shadow=None)` -- Create the FastAPI application for paid or unpaid development serving.
 - `load_core(path)` -- Load a persisted core if present, otherwise return the demo core.
-- `main(argv=None)` -- CLI entry point for local x402 API serving.
+- `main(argv=None)` -- CLI entry point for running the x402 API service.
 
 ## Scene authoring
 

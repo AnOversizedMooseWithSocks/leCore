@@ -449,7 +449,7 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.suggest_pipeline('t
 *Find it by:* how do I get from points to a mesh, chain capabilities, build a pipeline, route between datatypes, what steps turn X into Y
 
 ### x402 paid API publisher
-publish the LocalAgentCore product wedge as a paid HTTP API: FastAPI routes for recall, task routing, and the evidence dashboard protected by x402 middleware, with free health/pricing routes and admin-token-gated memory writes..
+publish the leCore Agent Memory & Routing API as a hosted HTTP service: FastAPI routes for tenant-scoped recall, task routing, and the readiness dashboard protected by x402 middleware, with free health/pricing/docs routes and admin-token-gated memory writes..
 
 ```python
 from holographic_x402_api import create_app, X402Config; app = create_app(config=X402Config(pay_to='0x...'))

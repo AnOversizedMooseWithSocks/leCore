@@ -188,11 +188,11 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
   `find_capability` first, wire every capability to a mind faculty (so it is `/invoke`-able), register it in the
   catalog so it is discoverable, and run the reachability/gap audits — the discipline that keeps the codebase from
   growing gaps or isolating code in tests. Read this before making code changes.
-- **[`PRODUCT.md`](PRODUCT.md)** — the **narrow product wedge**: `LocalAgentCore`, a small stable facade for local
-  agent memory, capability routing, persistence, and the readiness dashboard. Start here if you want the five-minute
-  "use it in an agent" path rather than the whole research surface.
-- **[`X402_API.md`](X402_API.md)** — the **paid API publishing guide**: serve the product wedge over FastAPI with
-  optional x402 middleware, per-route pricing, and admin-gated memory writes.
+- **[`PRODUCT.md`](PRODUCT.md)** — the **narrow embedded SDK wedge**: `LocalAgentCore`, a small stable in-process
+  facade for agent memory, capability routing, persistence, and the readiness dashboard. Start here if you want the
+  five-minute "embed it in an agent" path rather than the whole research surface.
+- **[`X402_API.md`](X402_API.md)** — the **hosted leCore Agent Memory & Routing API guide**: serve tenant-scoped
+  memory and routing over FastAPI with x402 payment, per-route pricing, and admin-gated memory writes.
 - **[`AWS_X402_DEPLOY.md`](AWS_X402_DEPLOY.md)** — the **AWS launch guide**: ECS/Fargate deployment, Secrets Manager
   config, and when to use KMS or Nitro Enclaves for wallet signing.
 - **[`CAPABILITIES.md`](CAPABILITIES.md)** — the **front-door menu**: a plain-language, grouped list of what leCore can

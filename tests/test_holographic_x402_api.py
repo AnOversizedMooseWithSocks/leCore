@@ -1,5 +1,7 @@
 """Tests for the optional x402-paid API publisher."""
 
+import json
+from html import escape
 import os
 from pathlib import Path
 
@@ -15,6 +17,7 @@ from holographic_x402_api import (
     MemoryTransactionConflict,
     MemoryMirrorPending,
     NoSQLiteError,
+    SERVICE_NAME,
     TENANT_HEADER,
     TENANT_TOKEN_HEADER,
     TenantCoreStore,
@@ -56,6 +59,10 @@ def test_payment_manifest_protects_specific_read_routes_only():
     assert "POST /admin/tenant-token" not in routes
     assert "GET /health" not in routes
     assert all(row["accepts"][0]["pay_to"] == "0xabc" for row in manifest)
+    descriptions = " ".join(row["description"] for row in manifest).lower()
+    assert "tenant-scoped agent memory" in descriptions
+    assert "localagentcore" not in descriptions
+    assert "local agent" not in descriptions
 
 
 def test_price_validation_keeps_x402_format_honest():
@@ -173,16 +180,22 @@ def _nosqlite_binary() -> str:
 def test_landing_page_marks_the_testnet_api_as_a_preview():
     html = landing_page_html(X402Config(pay_to="0x96e1604E92A8A1edD0701be3E67Bd4366e87BB84"))
 
-    assert "<title>leCore x402 API</title>" in html
+    assert f"<title>{escape(SERVICE_NAME)}</title>" in html
     assert "Testnet developer preview" in html
     assert "$1.10 per 1,000 requests" in html
     assert "does not accept production payments" in html
     assert "Base Sepolia x402" in html
     assert "/pricing" in html
     assert "/v1/dashboard" in html
+    assert 'href="/docs"' in html
+    assert 'href="/redoc"' in html
+    assert 'href="/openapi.json"' in html
+    assert "hosted, tenant-scoped agent memory" in html
     assert "0x96e1...BB84" in html
     assert DEFAULT_PUBLIC_URL in html
     assert "leOS" not in html
+    assert "local agent" not in html.lower()
+    assert "local-memory" not in html.lower()
 
 
 def test_landing_page_uses_the_configured_public_url():
@@ -229,6 +242,8 @@ def test_paid_challenge_uses_canonical_resource_not_request_headers(monkeypatch)
     assert response.status_code == 402
     challenge = decode_payment_required_header(response.headers["payment-required"])
     assert challenge.resource.url == DEFAULT_PUBLIC_URL + "/v1/dashboard"
+    assert challenge.resource.description == "Read the service readiness dashboard"
+    assert "LocalAgentCore" not in challenge.resource.description
 
 
 def test_pricing_summary_distinguishes_testnet_preview_from_production():
@@ -257,7 +272,7 @@ def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
     landing = client.get("/")
     assert landing.status_code == 200
     assert landing.headers["content-type"].startswith("text/html")
-    assert "leCore x402 API" in landing.text
+    assert escape(SERVICE_NAME) in landing.text
 
     health = client.get("/health")
     assert health.status_code == 200
@@ -268,6 +283,11 @@ def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
     assert pricing.json()["x402"]["price"] == DEFAULT_PRICE
     assert pricing.json()["pricing"]["environment"] == "testnet_preview"
     assert pricing.json()["pricing"]["per_1000_requests"] == "$1.10"
+    assert pricing.json()["documentation"] == {
+        "swagger_ui": DEFAULT_PUBLIC_URL + "/docs",
+        "reference": DEFAULT_PUBLIC_URL + "/redoc",
+        "openapi_schema": DEFAULT_PUBLIC_URL + "/openapi.json",
+    }
     assert pricing.json()["tenancy"]["default_tenant"] == DEFAULT_TENANT_ID
     assert {row["route"] for row in pricing.json()["routes"]} == {
         "POST /v1/recall",
@@ -275,6 +295,70 @@ def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
         "GET /v1/dashboard",
     }
     assert client.get("/leos/v1/dashboard").status_code == 404
+
+
+def test_public_docs_describe_the_x402_contract_and_hide_operator_routes():
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    config = X402Config(pay_to="0xabc", public_url="https://api.example.test")
+    client = fastapi_testclient.TestClient(create_app(config=config, paid=False))
+
+    docs = client.get("/docs")
+    redoc = client.get("/redoc")
+    openapi = client.get("/openapi.json")
+
+    assert docs.status_code == 200
+    assert redoc.status_code == 200
+    assert openapi.status_code == 200
+    assert "/openapi.json" in docs.text
+    assert "/openapi.json" in redoc.text
+
+    schema = openapi.json()
+    assert schema["info"]["title"] == SERVICE_NAME
+    assert schema["info"]["version"] == LECORE_VERSION
+    assert "Payment-Signature" in schema["info"]["description"]
+    assert schema["servers"] == [{"url": "https://api.example.test", "description": "Public API"}]
+    assert {tag["name"] for tag in schema["tags"]} == {"Discovery", "Paid API"}
+    assert "/admin/remember" not in schema["paths"]
+    assert "/admin/tenant-token" not in schema["paths"]
+
+    manifest = payment_manifest(config)
+    for row in manifest:
+        method, path = row["route"].lower().split(" ", 1)
+        operation = schema["paths"][path][method]
+        assert operation["tags"] == ["Paid API"]
+        assert "402" in operation["responses"]
+        assert "Payment-Required" in operation["responses"]["402"]["headers"]
+        assert any(parameter["name"] == "Payment-Signature" for parameter in operation["parameters"])
+
+    recall_content = schema["paths"]["/v1/recall"]["post"]["requestBody"]["content"]["application/json"]
+    assert recall_content["schema"]["required"] == ["query"]
+    assert recall_content["schema"]["properties"]["k"]["maximum"] == 100
+    assert recall_content["examples"]["public"]["value"]["query"] == "deterministic agent memory"
+
+    route_content = schema["paths"]["/v1/route"]["post"]["requestBody"]["content"]["application/json"]
+    assert route_content["schema"]["required"] == ["task"]
+    assert "semantic memory retrieval" in route_content["examples"]["public"]["value"]["task"]
+
+    serialized = json.dumps(schema).lower()
+    assert "localagentcore" not in serialized
+    assert "local agent" not in serialized
+
+    assert client.post("/admin/remember", json={"text": "blocked"}).status_code == 403
+    assert client.post("/admin/tenant-token", json={"tenant": "acme"}).status_code == 403
+
+
+def test_dashboard_translates_embedded_sdk_terms_at_the_http_boundary():
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    client = fastapi_testclient.TestClient(create_app(config=X402Config(pay_to="0xabc"), paid=False))
+
+    response = client.get("/v1/dashboard")
+
+    assert response.status_code == 200
+    dashboard = response.json()["dashboard"]
+    assert dashboard["name"] == SERVICE_NAME
+    assert dashboard["checks"]["self_contained_engine"] is True
+    assert "local_only" not in dashboard["checks"]
+    assert "localagentcore" not in json.dumps(dashboard).lower()
 
 
 def test_health_does_not_run_expensive_evidence_probe():

@@ -1,7 +1,8 @@
 # AWS x402 Deployment
 
-This is the production shape for serving `LocalAgentCore` as an x402-paid API
-on AWS.
+This is the production shape for serving the hosted leCore Agent Memory &
+Routing API with x402 payments on AWS. The service is backed internally by
+`LocalAgentCore`.
 
 ## Short Answer
 
@@ -316,13 +317,13 @@ plans, spend limits, CloudTrail alarms, and a tiny blast radius.
   schedule a single-writer drain-and-replace cutover instead.
 - Do not put secrets or PII in x402 route descriptions or payment metadata.
 
-## Local Smoke Before AWS
+## Pre-deployment Smoke Test
 
 ```bash
 pip install ".[x402]"
 export LECORE_X402_PAY_TO="0xYourReceivingWallet"
-export LECORE_X402_ADMIN_TOKEN="local-admin-secret"
-export LECORE_X402_TENANT_SECRET="local-tenant-secret"
+export LECORE_X402_ADMIN_TOKEN="dev-admin-secret"
+export LECORE_X402_TENANT_SECRET="dev-tenant-secret"
 python holographic_x402_api.py --unpaid-dev --host 127.0.0.1 --port 4021
 ```
 
@@ -333,5 +334,5 @@ curl http://127.0.0.1:4021/health
 curl http://127.0.0.1:4021/pricing
 curl -X POST http://127.0.0.1:4021/v1/route \
   -H "Content-Type: application/json" \
-  -d '{"task":"search local agent memory"}'
+  -d '{"task":"search tenant-scoped agent memory"}'
 ```

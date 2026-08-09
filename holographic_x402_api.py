@@ -1,9 +1,10 @@
-"""holographic_x402_api.py -- publish LocalAgentCore as an x402-paid API.
+"""holographic_x402_api.py -- publish the leCore Agent Memory & Routing API.
 
 WHY THIS EXISTS
 ---------------
-`LocalAgentCore` is the narrow product wedge. This module makes it sellable as
-an HTTP API without making x402, FastAPI, or uvicorn core dependencies.
+`LocalAgentCore` remains the embedded implementation facade. This module
+translates it into a hosted HTTP API without making x402, FastAPI, or uvicorn
+core dependencies.
 
 The boundary is intentionally conservative:
 
@@ -64,6 +65,33 @@ NOSQLITE_DIMENSIONS = 384
 
 LOG = logging.getLogger(__name__)
 
+SERVICE_NAME = "leCore Agent Memory & Routing API"
+API_DESCRIPTION = """Hosted, tenant-scoped agent memory, capability routing, and
+readiness data over HTTPS, with x402 payment on each protected request.
+
+## Request flow
+
+1. Read `GET /pricing` for the network, asset, price, and protected-route manifest.
+2. Call a protected `/v1/*` route. An unsigned request returns `402 Payment Required`.
+3. Decode the `Payment-Required` response header with an x402 v2 client.
+4. Sign the selected payment option and retry with the resulting `Payment-Signature` header.
+
+The interactive reference describes the contract but does not sign payments.
+`GET /health`, `GET /pricing`, `/docs`, `/redoc`, and `/openapi.json`
+are free. Private tenant calls additionally require `X-leCore-Tenant` and
+`X-leCore-Tenant-Token`; payment proves payment, not tenant authorization.
+"""
+OPENAPI_TAGS = [
+    {
+        "name": "Discovery",
+        "description": "Free service health, pricing, network, and route discovery.",
+    },
+    {
+        "name": "Paid API",
+        "description": "Hosted read and compute operations protected by the x402 v2 payment flow.",
+    },
+]
+
 
 @dataclass(frozen=True)
 class PaidRoute:
@@ -82,9 +110,9 @@ class PaidRoute:
 
 
 REGULAR_PAID_ROUTES: Tuple[PaidRoute, ...] = (
-    PaidRoute("POST", "/v1/recall", "Recall nearest memories from a LocalAgentCore instance"),
+    PaidRoute("POST", "/v1/recall", "Recall nearest memories from tenant-scoped agent memory"),
     PaidRoute("POST", "/v1/route", "Route a plain-English task to a leCore capability"),
-    PaidRoute("GET", "/v1/dashboard", "Read the LocalAgentCore evidence dashboard"),
+    PaidRoute("GET", "/v1/dashboard", "Read the service readiness dashboard"),
 )
 
 DEFAULT_PAID_ROUTES: Tuple[PaidRoute, ...] = REGULAR_PAID_ROUTES
@@ -129,13 +157,69 @@ def _normalize_public_url(value: str) -> str:
     return value
 
 
+def x402_payment_required_responses() -> Dict[int, Dict[str, Any]]:
+    """OpenAPI response metadata shared by every x402-protected operation."""
+    return {
+        402: {
+            "description": (
+                "Payment required. Decode the Payment-Required header with an "
+                "x402 v2 client, sign one accepted option, and retry with "
+                "Payment-Signature."
+            ),
+            "headers": {
+                "Payment-Required": {
+                    "description": "Base64-encoded x402 v2 PaymentRequired challenge.",
+                    "schema": {"type": "string", "format": "byte"},
+                },
+            },
+            "content": {
+                "application/json": {
+                    "schema": {"type": "object", "maxProperties": 0},
+                    "example": {},
+                },
+            },
+        },
+    }
+
+
+def paid_request_openapi(
+    required: List[str],
+    properties: Dict[str, Dict[str, Any]],
+    example: Dict[str, Any],
+    example_summary: str,
+) -> Dict[str, Any]:
+    """Return an accurate OpenAPI request body while runtime validation stays compatible."""
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": required,
+                        "properties": properties,
+                        "additionalProperties": True,
+                    },
+                    "examples": {
+                        "public": {
+                            "summary": example_summary,
+                            "value": example,
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+
 LANDING_PAGE_TEMPLATE = Template("""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>leCore x402 API</title>
-<meta name="description" content="Try local agent memory, capability routing, and readiness dashboards as x402-paid HTTP primitives.">
+<title>$service_name</title>
+<meta name="description" content="Call hosted agent memory, capability routing, and readiness endpoints over HTTPS with x402 payment per request.">
+<link rel="alternate" type="application/json" href="/openapi.json" title="OpenAPI schema">
 <style>
 :root{--paper:#fbfaf5;--ink:#171714;--muted:#6f6b61;--line:#ded8c8;--acid:#b7ff3c;--cyan:#28d6ff;--coral:#ff6b57;--gold:#f4c542;--graphite:#20201c}
 *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:inherit;text-decoration:none}
@@ -162,8 +246,8 @@ h1,h2,h3,p{margin-top:0}h1{font-size:clamp(56px,9vw,124px);line-height:.9;margin
 <main>
 <section class="hero" aria-labelledby="hero-title">
 <div class="field" aria-hidden="true"><span class="trace a"></span><span class="trace b"></span><span class="trace c"></span>$nodes</div>
-<nav class="topbar" aria-label="Primary"><a class="brand" href="#hero-title" aria-label="leCore x402 API home"><span class="mark">lc</span><span>leCore x402 API</span></a><div class="nav"><a href="#why">Why try it</a><a href="#routes">Routes</a><a href="#proof">Preview status</a></div></nav>
-<div class="copy"><p class="status"><span>$environment_label</span><span>$network_label</span><span>$price_per_thousand</span></p><h1 id="hero-title">leCore x402 API</h1><p class="lede">Try local agent memory, capability routing, and a readiness dashboard as paid HTTP primitives. $payment_notice</p><div class="actions"><a class="button primary" href="/pricing">View preview terms</a><a class="button secondary" href="/v1/dashboard">See x402 challenge</a></div></div>
+<nav class="topbar" aria-label="Primary"><a class="brand" href="#hero-title" aria-label="$service_name home"><span class="mark">lc</span><span>$service_name</span></a><div class="nav"><a href="/docs">API docs</a><a href="/redoc">Reference</a><a href="/openapi.json">OpenAPI</a><a href="/pricing">Pricing</a></div></nav>
+<div class="copy"><p class="status"><span>$environment_label</span><span>$network_label</span><span>$price_per_thousand</span></p><h1 id="hero-title">$service_name</h1><p class="lede">Call hosted, tenant-scoped agent memory, capability routing, and readiness endpoints over HTTPS. Each protected request uses x402 payment. $payment_notice</p><div class="actions"><a class="button primary" href="/docs">Explore API docs</a><a class="button secondary" href="/redoc">Read the reference</a><a class="button secondary" href="/pricing">View pricing</a></div></div>
 <aside class="terminal" aria-label="Live API snapshot"><div class="terminal-top"><span></span><span></span><span></span></div><pre>GET /health
 200 OK
 memory.entries: 3
@@ -175,11 +259,11 @@ network: $network
 asset: $payment_asset</pre></aside>
 </section>
 <section class="strip" aria-label="Live deployment details"><div><strong>Endpoint</strong><span>$public_url</span></div><div><strong>Stage</strong><span>$environment_label</span></div><div><strong>Buyer shape</strong><span>inspect, pay, call</span></div></section>
-<section id="why" class="section split"><div><p class="eyebrow">Why try it</p><h2>Most agents do not need a platform. They need a few reliable cognitive calls.</h2></div><div class="reason-list"><p>Test the x402 payment flow against one answerable primitive at a time.</p><p>The API is narrow enough to trust: read/compute routes are paid, memory writes stay admin-gated.</p><p>It exposes the useful part of leCore first: local agent memory plus capability routing.</p><p>$payment_notice</p></div></section>
-<section id="routes" class="section"><div class="heading"><p class="eyebrow">What the payment unlocks</p><h2>Three paid routes, each small enough to understand.</h2></div><div class="routes"><article class="card"><p class="method">POST</p><h3>Recall</h3><code>/v1/recall</code><p>Pull nearest memories from a compact local agent core without shipping a whole application stack.</p></article><article class="card"><p class="method">POST</p><h3>Route</h3><code>/v1/route</code><p>Send a plain-language task and get the leCore capability it should use, with evidence attached.</p></article><article class="card"><p class="method">GET</p><h3>Dashboard</h3><code>/v1/dashboard</code><p>Read the readiness surface: memory counts, capability map, abstention behavior, and route coverage.</p></article></div></section>
-<section class="section use"><div class="heading"><p class="eyebrow">Good first buyers</p><h2>Teams who want the leCore idea without adopting the whole repo.</h2></div><div class="cases"><article class="case"><span aria-hidden="true">+</span><p>Agent memory for prototypes that should remember without a database rollout.</p></article><article class="case"><span aria-hidden="true">+</span><p>Capability routing for tools that need to pick the right leCore subsystem before doing work.</p></article><article class="case"><span aria-hidden="true">+</span><p>Evidence dashboards for teams deciding whether a local vector system is ready to productize.</p></article><article class="case"><span aria-hidden="true">+</span><p>A working x402 seller endpoint to copy when you want pay-per-call APIs instead of subscriptions.</p></article></div></section>
+<section id="why" class="section split"><div><p class="eyebrow">Why try it</p><h2>Most agents do not need a platform. They need a few reliable cognitive calls.</h2></div><div class="reason-list"><p>Test the x402 payment flow against one answerable primitive at a time.</p><p>The API is narrow enough to trust: read/compute routes are paid, memory writes stay admin-gated.</p><p>It exposes the useful part of leCore first: tenant-scoped agent memory plus capability routing.</p><p>$payment_notice</p></div></section>
+<section id="routes" class="section"><div class="heading"><p class="eyebrow">What the payment unlocks</p><h2>Three paid routes, each small enough to understand.</h2></div><div class="routes"><article class="card"><p class="method">POST</p><h3>Recall</h3><code>/v1/recall</code><p>Query tenant-scoped agent memory over HTTPS while leCore handles storage and retrieval behind the API.</p></article><article class="card"><p class="method">POST</p><h3>Route</h3><code>/v1/route</code><p>Send a plain-language task and get the leCore capability it should use, with evidence attached.</p></article><article class="card"><p class="method">GET</p><h3>Dashboard</h3><code>/v1/dashboard</code><p>Read the readiness surface: memory counts, capability map, abstention behavior, and route coverage.</p></article></div></section>
+<section class="section use"><div class="heading"><p class="eyebrow">Good first buyers</p><h2>Teams who want the leCore idea without adopting the whole repo.</h2></div><div class="cases"><article class="case"><span aria-hidden="true">+</span><p>Agent memory for prototypes that should remember without a database rollout.</p></article><article class="case"><span aria-hidden="true">+</span><p>Capability routing for tools that need to pick the right leCore subsystem before doing work.</p></article><article class="case"><span aria-hidden="true">+</span><p>Readiness dashboards for teams deciding whether a deterministic memory service fits their product.</p></article><article class="case"><span aria-hidden="true">+</span><p>A working x402 seller endpoint to copy when you want pay-per-call APIs instead of subscriptions.</p></article></div></section>
 <section id="proof" class="section proof"><div class="proof-copy"><p class="eyebrow">Preview status</p><h2>It is deployed, health-checked, and ready to integrate.</h2><p>The free endpoints show health and preview terms. Paid endpoints return an x402 challenge on $network_name. The receiving address is public, while admin writes stay out of the customer path.</p></div><div class="proof-panel"><dl><div><dt>Preview price</dt><dd>$price_per_thousand</dd></div><div><dt>Network</dt><dd>$network_name</dd></div><div><dt>Receiver</dt><dd>$pay_to_short</dd></div><div><dt>Status</dt><dd>Healthy</dd></div></dl></div></section>
-<section class="section close"><p class="eyebrow">The pitch</p><h2>Try it when you want a local-memory agent primitive without adopting the whole repo.</h2><div class="close-actions"><a class="button primary" href="/pricing">Inspect preview terms</a><a class="button secondary dark" href="/health">Check live health</a></div></section>
+<section class="section close"><p class="eyebrow">Start integrating</p><h2>Use memory and routing over HTTPS without adopting the whole repo.</h2><div class="close-actions"><a class="button primary" href="/docs">Open API docs</a><a class="button secondary dark" href="/openapi.json">Download OpenAPI</a><a class="button secondary dark" href="/health">Check live health</a></div></section>
 </main>
 </body>
 </html>""")
@@ -1098,6 +1182,7 @@ def landing_page_html(config: X402Config) -> str:
     network_name = _network_name(config.network)
     summary = pricing_summary(config)
     return LANDING_PAGE_TEMPLATE.substitute(
+        service_name=escape(SERVICE_NAME),
         nodes=_landing_nodes(),
         network=escape(config.network),
         public_url=escape(config.public_url),
@@ -1109,6 +1194,26 @@ def landing_page_html(config: X402Config) -> str:
         payment_notice=escape(summary["payment_notice"]),
         price_per_thousand=escape(summary["display_price"]),
     )
+
+
+def documentation_manifest(config: X402Config) -> Dict[str, str]:
+    """Return canonical public documentation URLs for discovery responses."""
+    return {
+        "swagger_ui": config.public_url + "/docs",
+        "reference": config.public_url + "/redoc",
+        "openapi_schema": config.public_url + "/openapi.json",
+    }
+
+
+def public_dashboard(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate the embedded SDK dashboard into the hosted API vocabulary."""
+    out = dict(data)
+    out["name"] = SERVICE_NAME
+    checks = dict(out.get("checks") or {})
+    if "local_only" in checks:
+        checks["self_contained_engine"] = bool(checks.pop("local_only"))
+    out["checks"] = checks
+    return out
 
 
 def payment_manifest(config: X402Config) -> List[Dict[str, Any]]:
@@ -1185,10 +1290,10 @@ def create_app(
     nosqlite_durability: Optional[str] = None,
     nosqlite_shadow: Optional[bool] = None,
 ) -> Any:
-    """Create the FastAPI application for paid or local serving.
+    """Create the FastAPI application for paid or unpaid development serving.
 
     With `paid=True`, the public `/v1/*` read/compute routes are protected by
-    x402 middleware. Set `paid=False` for local development smoke tests.
+    x402 middleware. Set `paid=False` only for an unpaid development smoke test.
 
     x402 proves that a request paid. Private tenant memory is intentionally a
     separate authorization layer using `X-leCore-Tenant-Token`.
@@ -1240,7 +1345,17 @@ def create_app(
             if nosqlite_store is not None:
                 nosqlite_store.close()
 
-    app = FastAPI(title="leCore x402 API", version=LECORE_VERSION, lifespan=lifespan)
+    app = FastAPI(
+        title=SERVICE_NAME,
+        description=API_DESCRIPTION,
+        version=LECORE_VERSION,
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
+        openapi_tags=OPENAPI_TAGS,
+        servers=[{"url": config.public_url, "description": "Public API"}],
+        lifespan=lifespan,
+    )
     app.state.memory_backend = memory_backend
     app.state.nosqlite_shadow = nosqlite_shadow
     app.state.nosqlite_store = nosqlite_store
@@ -1339,11 +1454,16 @@ def create_app(
     def landing() -> str:
         return landing_page_html(config)
 
-    @app.get("/health")
+    @app.get(
+        "/health",
+        tags=["Discovery"],
+        summary="Check service health",
+        description="Free liveness, memory-state, backend, and tenancy summary. No x402 payment is required.",
+    )
     def health() -> Dict[str, Any]:
         return {
             "ok": True,
-            "name": "leCore x402 API",
+            "name": SERVICE_NAME,
             "paid": bool(paid),
             "memory": store.summary(DEFAULT_TENANT_ID),
             "memory_backend": memory_public_dict(),
@@ -1354,10 +1474,19 @@ def create_app(
             },
         }
 
-    @app.get("/pricing")
+    @app.get(
+        "/pricing",
+        tags=["Discovery"],
+        summary="Discover pricing and protected routes",
+        description=(
+            "Free discovery document for the x402 network, payment asset, price, "
+            "tenant headers, documentation URLs, and protected-route manifest."
+        ),
+    )
     def pricing() -> Dict[str, Any]:
         return {
             "ok": True,
+            "documentation": documentation_manifest(config),
             "x402": config.to_public_dict(),
             "pricing": pricing_summary(config),
             "tenancy": tenancy_public_dict(),
@@ -1397,11 +1526,62 @@ def create_app(
             "hits": hits,
         }
 
-    @app.post("/v1/recall")
+    @app.post(
+        "/v1/recall",
+        tags=["Paid API"],
+        summary="Recall agent memory",
+        description=(
+            "Recall the nearest entries from tenant-scoped agent memory. An "
+            "unsigned request returns the x402 challenge documented in the 402 response."
+        ),
+        responses=x402_payment_required_responses(),
+        openapi_extra=paid_request_openapi(
+            required=["query"],
+            properties={
+                "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_QUERY_CHARS,
+                    "description": "Text to match against stored agent memory.",
+                },
+                "k": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_RECALL_K,
+                    "default": 3,
+                    "description": "Maximum number of memories to return.",
+                },
+                "abstain": {
+                    "anyOf": [{"type": "number", "minimum": 0, "maximum": 1}, {"type": "null"}],
+                    "description": "Optional minimum similarity score.",
+                },
+                "tenant": {
+                    "type": "string",
+                    "pattern": _TENANT_ID_RE.pattern,
+                    "description": "Tenant id; must match X-leCore-Tenant when both are supplied.",
+                },
+            },
+            example={"query": "deterministic agent memory", "k": 3},
+            example_summary="Recall public-tenant memory",
+        ),
+    )
     def recall(
         payload: Dict[str, Any],
-        x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
-        x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
+        x_lecore_tenant: Optional[str] = Header(
+            default=None,
+            alias=TENANT_HEADER,
+            description="Tenant id. Omit for the public tenant.",
+        ),
+        x_lecore_tenant_token: Optional[str] = Header(
+            default=None,
+            alias=TENANT_TOKEN_HEADER,
+            description="Required with X-leCore-Tenant for private tenant memory.",
+        ),
+        _payment_signature: Optional[str] = Header(
+            default=None,
+            alias="Payment-Signature",
+            description="x402 v2 payment signature produced from the Payment-Required challenge.",
+        ),
     ) -> Dict[str, Any]:
         return recall_response(payload, x_lecore_tenant, x_lecore_tenant_token)
 
@@ -1416,11 +1596,51 @@ def create_app(
         routed = store.read(tenant_id, lambda tenant_core: tenant_core.route(task))
         return {"ok": True, "tenant": tenant_id, "route": routed}
 
-    @app.post("/v1/route")
+    @app.post(
+        "/v1/route",
+        tags=["Paid API"],
+        summary="Route a task to a capability",
+        description=(
+            "Route a plain-English task to the best matching leCore capability. "
+            "An unsigned request returns the x402 challenge documented in the 402 response."
+        ),
+        responses=x402_payment_required_responses(),
+        openapi_extra=paid_request_openapi(
+            required=["task"],
+            properties={
+                "task": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_TASK_CHARS,
+                    "description": "Plain-English task to route.",
+                },
+                "tenant": {
+                    "type": "string",
+                    "pattern": _TENANT_ID_RE.pattern,
+                    "description": "Tenant id; must match X-leCore-Tenant when both are supplied.",
+                },
+            },
+            example={"task": "find the best capability for semantic memory retrieval"},
+            example_summary="Route a memory-related task",
+        ),
+    )
     def route(
         payload: Dict[str, Any],
-        x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
-        x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
+        x_lecore_tenant: Optional[str] = Header(
+            default=None,
+            alias=TENANT_HEADER,
+            description="Tenant id. Omit for the public tenant.",
+        ),
+        x_lecore_tenant_token: Optional[str] = Header(
+            default=None,
+            alias=TENANT_TOKEN_HEADER,
+            description="Required with X-leCore-Tenant for private tenant routing.",
+        ),
+        _payment_signature: Optional[str] = Header(
+            default=None,
+            alias="Payment-Signature",
+            description="x402 v2 payment signature produced from the Payment-Required challenge.",
+        ),
     ) -> Dict[str, Any]:
         return route_response(payload, x_lecore_tenant, x_lecore_tenant_token)
 
@@ -1431,16 +1651,39 @@ def create_app(
         tenant_id = tenant_from_header(x_lecore_tenant)
         require_tenant_access(tenant_id, x_lecore_tenant_token)
         data = store.read(tenant_id, lambda tenant_core: tenant_core.dashboard())
+        data = public_dashboard(data)
         return {"ok": True, "tenant": tenant_id, "dashboard": data}
 
-    @app.get("/v1/dashboard")
+    @app.get(
+        "/v1/dashboard",
+        tags=["Paid API"],
+        summary="Read the readiness dashboard",
+        description=(
+            "Read memory, routing, native-kernel, and deterministic-engine readiness "
+            "for one tenant. An unsigned request returns the documented x402 challenge."
+        ),
+        responses=x402_payment_required_responses(),
+    )
     def dashboard(
-        x_lecore_tenant: Optional[str] = Header(default=None, alias=TENANT_HEADER),
-        x_lecore_tenant_token: Optional[str] = Header(default=None, alias=TENANT_TOKEN_HEADER),
+        x_lecore_tenant: Optional[str] = Header(
+            default=None,
+            alias=TENANT_HEADER,
+            description="Tenant id. Omit for the public tenant.",
+        ),
+        x_lecore_tenant_token: Optional[str] = Header(
+            default=None,
+            alias=TENANT_TOKEN_HEADER,
+            description="Required with X-leCore-Tenant for a private tenant dashboard.",
+        ),
+        _payment_signature: Optional[str] = Header(
+            default=None,
+            alias="Payment-Signature",
+            description="x402 v2 payment signature produced from the Payment-Required challenge.",
+        ),
     ) -> Dict[str, Any]:
         return dashboard_response(x_lecore_tenant, x_lecore_tenant_token)
 
-    @app.post("/admin/remember")
+    @app.post("/admin/remember", include_in_schema=False)
     def remember(
         payload: Dict[str, Any],
         x_admin_token: Optional[str] = Header(default=None),
@@ -1506,7 +1749,7 @@ def create_app(
             "transaction": transaction,
         }
 
-    @app.post("/admin/tenant-token")
+    @app.post("/admin/tenant-token", include_in_schema=False)
     def issue_tenant_token(payload: Dict[str, Any], x_admin_token: Optional[str] = Header(default=None)) -> Dict[str, Any]:
         require_admin(x_admin_token)
         if not tenant_secret:
@@ -1531,8 +1774,8 @@ def load_core(path: Optional[str]) -> LocalAgentCore:
 
 
 def main(argv: Optional[Iterable[str]] = None) -> None:
-    """CLI entry point for local x402 API serving."""
-    p = argparse.ArgumentParser(description="Serve LocalAgentCore as an x402-paid API")
+    """CLI entry point for running the x402 API service."""
+    p = argparse.ArgumentParser(description="Serve the leCore Agent Memory & Routing API with x402 payments")
     p.add_argument("--host", default=os.environ.get("LECORE_X402_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int, default=int(os.environ.get("LECORE_X402_PORT", "4021")))
     p.add_argument("--state", default=os.environ.get("LECORE_X402_STATE"))
@@ -1557,7 +1800,7 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
         default=os.environ.get("LECORE_X402_NOSQLITE_DURABILITY", "sync"),
     )
     p.add_argument("--nosqlite-shadow", action="store_true", default=None)
-    p.add_argument("--unpaid-dev", action="store_true", help="Disable x402 middleware for local development only")
+    p.add_argument("--unpaid-dev", action="store_true", help="Disable x402 middleware for development only")
     args = p.parse_args(list(argv) if argv is not None else None)
 
     paid = not args.unpaid_dev

@@ -1,10 +1,19 @@
-# x402 API Publishing
+# leCore Agent Memory & Routing API
 
-Yes: leCore can be published as a paid API with x402.
+leCore is available as a hosted memory and capability-routing API with x402
+payment on the protected routes.
 
-The implementation lives in `holographic_x402_api.py`. It wraps
-`LocalAgentCore` with a small FastAPI app and applies x402 middleware only to
-the public read/compute routes:
+Public reference:
+
+- [Swagger UI](https://lecore.rati.foundation/docs)
+- [ReDoc reference](https://lecore.rati.foundation/redoc)
+- [OpenAPI 3.1 schema](https://lecore.rati.foundation/openapi.json)
+- [Pricing and route manifest](https://lecore.rati.foundation/pricing)
+
+The implementation lives in `holographic_x402_api.py`. It exposes
+tenant-scoped agent memory and routing through FastAPI, backed internally by
+`LocalAgentCore`, and applies x402 middleware only to the public read/compute
+routes:
 
 - `POST /v1/recall`
 - `POST /v1/route`
@@ -45,8 +54,8 @@ uses testnet USDC, and does not accept production payments.
 export LECORE_X402_PAY_TO="0xYourReceivingWallet"
 export LECORE_X402_PRICE="$0.0011"
 export LECORE_X402_PUBLIC_URL="http://127.0.0.1:4021"
-export LECORE_X402_ADMIN_TOKEN="local-admin-secret"
-export LECORE_X402_TENANT_SECRET="local-tenant-secret"
+export LECORE_X402_ADMIN_TOKEN="dev-admin-secret"
+export LECORE_X402_TENANT_SECRET="dev-tenant-secret"
 export LECORE_X402_TENANT_STATE_DIR="./tenant-state"
 
 python holographic_x402_api.py --host 127.0.0.1 --port 4021
@@ -58,14 +67,14 @@ Inspect pricing:
 curl http://127.0.0.1:4021/pricing
 ```
 
-Add memories locally as the seller:
+Add memories through the operator endpoint:
 
 ```bash
 curl -X POST http://127.0.0.1:4021/admin/remember \
   -H "Content-Type: application/json" \
-  -H "X-Admin-Token: local-admin-secret" \
+  -H "X-Admin-Token: dev-admin-secret" \
   -H "Idempotency-Key: initial-memory-001" \
-  -d '{"text":"local agents need deterministic durable memory","label":"memory"}'
+  -d '{"text":"agents need deterministic durable memory","label":"memory"}'
 ```
 
 When `LECORE_X402_TENANT_STATE_DIR` is configured, admin writes use a small
@@ -84,7 +93,7 @@ Issue a private tenant token:
 ```bash
 curl -X POST http://127.0.0.1:4021/admin/tenant-token \
   -H "Content-Type: application/json" \
-  -H "X-Admin-Token: local-admin-secret" \
+  -H "X-Admin-Token: dev-admin-secret" \
   -d '{"tenant":"acme"}'
 ```
 
@@ -95,7 +104,7 @@ curl -X POST http://127.0.0.1:4021/v1/recall \
   -H "Content-Type: application/json" \
   -H "X-leCore-Tenant: acme" \
   -H "X-leCore-Tenant-Token: <tenant token>" \
-  -d '{"query":"deterministic local memory"}'
+  -d '{"query":"deterministic agent memory"}'
 ```
 
 Requests to paid routes return `402 Payment Required` unless the client retries
@@ -104,10 +113,10 @@ with a valid x402 payment payload:
 ```bash
 curl -X POST http://127.0.0.1:4021/v1/recall \
   -H "Content-Type: application/json" \
-  -d '{"query":"deterministic local memory"}'
+  -d '{"query":"deterministic agent memory"}'
 ```
 
-## Local Unpaid Smoke Test
+## Unpaid Development Smoke Test
 
 Use this only for development:
 
