@@ -55,6 +55,7 @@ TENANT_TOKEN_HEADER = "X-leCore-Tenant-Token"
 IDEMPOTENCY_HEADER = "Idempotency-Key"
 _TENANT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,63}$")
 _IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
+_MEMORY_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 MAX_QUERY_CHARS = 8192
 MAX_TASK_CHARS = 8192
 MAX_MEMORY_CHARS = 65536
@@ -97,6 +98,9 @@ are free. Private tenant calls additionally require `X-leCore-Tenant` and
 `X-leCore-Tenant-Token`; payment proves payment, not tenant authorization.
 `POST /v1/memory` also requires an `Idempotency-Key`, refuses shared-public writes,
 and stores the private record through compressed authenticated encryption.
+`GET /v1/memory` provides bounded cursor pagination or exact-id retrieval, and
+`PATCH /v1/memory` atomically replaces selected fields without rewriting a no-op, while
+`DELETE /v1/memory` removes one private record idempotently without resurrection.
 """
 OPENAPI_TAGS = [
     {
@@ -128,6 +132,9 @@ class PaidRoute:
 
 REGULAR_PAID_ROUTES: Tuple[PaidRoute, ...] = (
     PaidRoute("POST", "/v1/memory", "Store one entry in encrypted tenant-scoped agent memory"),
+    PaidRoute("GET", "/v1/memory", "List or retrieve encrypted tenant-scoped agent memory"),
+    PaidRoute("PATCH", "/v1/memory", "Update one entry in encrypted tenant-scoped agent memory"),
+    PaidRoute("DELETE", "/v1/memory", "Delete one entry from encrypted tenant-scoped agent memory"),
     PaidRoute("POST", "/v1/recall", "Recall nearest memories from tenant-scoped agent memory"),
     PaidRoute("POST", "/v1/route", "Route a plain-English task to a leCore capability"),
     PaidRoute("GET", "/v1/dashboard", "Read the service readiness dashboard"),
@@ -681,6 +688,128 @@ def memory_write_success_openapi() -> Dict[str, Any]:
     return _json_success_response("Memory was durably stored once.", schema, example)
 
 
+def memory_list_success_openapi() -> Dict[str, Any]:
+    """Document private-tenant memory listing and direct lookup."""
+    item = {
+        "type": "object",
+        "required": ["id", "text", "label", "metadata"],
+        "properties": {
+            "id": {"type": "string"},
+            "text": {"type": "string"},
+            "label": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "metadata": {"type": "object", "additionalProperties": True},
+        },
+        "additionalProperties": False,
+    }
+    schema = {
+        "type": "object",
+        "required": ["ok", "tenant", "items", "next_cursor"],
+        "properties": {
+            "ok": {"type": "boolean", "const": True},
+            "tenant": {"type": "string"},
+            "items": {"type": "array", "items": item, "maxItems": 100},
+            "next_cursor": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        },
+        "additionalProperties": False,
+    }
+    example = {
+        "ok": True,
+        "tenant": "acme",
+        "items": [{
+            "id": "tx_8f1e6aaf6dcb44f0a8a6434f135c6338",
+            "text": "The customer prefers concise release notes.",
+            "label": "preference",
+            "metadata": {"source": "agent-session"},
+        }],
+        "next_cursor": None,
+    }
+    return _json_success_response("Private-tenant memory page returned.", schema, example)
+
+
+def memory_delete_success_openapi() -> Dict[str, Any]:
+    """Document idempotent private-tenant memory deletion."""
+    schema = {
+        "type": "object",
+        "required": ["ok", "tenant", "memory_id", "deleted"],
+        "properties": {
+            "ok": {"type": "boolean", "const": True},
+            "tenant": {"type": "string"},
+            "memory_id": {"type": "string"},
+            "deleted": {"type": "boolean"},
+        },
+        "additionalProperties": False,
+    }
+    example = {
+        "ok": True,
+        "tenant": "acme",
+        "memory_id": "tx_8f1e6aaf6dcb44f0a8a6434f135c6338",
+        "deleted": True,
+    }
+    return _json_success_response("Memory deletion completed idempotently.", schema, example)
+
+
+def memory_update_success_openapi() -> Dict[str, Any]:
+    """Document a successful private-tenant memory update."""
+    response = memory_write_success_openapi()
+    schema = response["content"]["application/json"]["schema"]
+    schema["required"].remove("transaction")
+    schema["properties"].pop("transaction")
+    response["description"] = "Memory fields were updated atomically."
+    response["content"]["application/json"]["example"] = {
+        "ok": True,
+        "tenant": "acme",
+        "memory": {
+            "id": "tx_8f1e6aaf6dcb44f0a8a6434f135c6338",
+            "text": "The customer prefers concise release notes and changelogs.",
+            "label": "preference",
+            "metadata": {"source": "agent-session", "confirmed": True},
+        },
+    }
+    return response
+
+
+def memory_update_request_openapi() -> Dict[str, Any]:
+    """Document a partial update that requires at least one mutable field."""
+    request = paid_request_openapi(
+        required=[],
+        properties={
+            "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": MAX_MEMORY_CHARS,
+                "pattern": r"\S",
+                "description": "Replacement memory content; omit to preserve it.",
+            },
+            "label": {
+                "anyOf": [
+                    {"type": "string", "maxLength": MAX_MEMORY_LABEL_CHARS},
+                    {"type": "null"},
+                ],
+                "description": "Replacement category; null clears it.",
+            },
+            "metadata": {
+                "type": "object",
+                "additionalProperties": True,
+                "description": "Replacement JSON metadata; an empty object clears it.",
+            },
+        },
+        example={
+            "text": "The customer prefers concise release notes and changelogs.",
+            "metadata": {"source": "agent-session", "confirmed": True},
+        },
+        example_summary="Update selected fields of one private memory",
+    )
+    schema = request["requestBody"]["content"]["application/json"]["schema"]
+    schema.pop("required")
+    schema["anyOf"] = [
+        {"required": ["text"]},
+        {"required": ["label"]},
+        {"required": ["metadata"]},
+    ]
+    schema["additionalProperties"] = False
+    return request
+
+
 def route_success_openapi() -> Dict[str, Any]:
     """Document the successful capability-routing response."""
     capability = _capability_openapi_schema()
@@ -933,7 +1062,7 @@ Payment-Signature: &lt;base64 payment&gt;</pre></aside>
 </section>
 <section class="strip" aria-label="Deployment details"><div><strong>Endpoint</strong><span><a href="$public_url">$public_url</a></span></div><div><strong>Stage</strong><span>$environment_label</span></div><div><strong>Protocol</strong><span>x402 v2</span></div></section>
 <section id="quickstart" class="section quickstart" tabindex="-1"><div class="quick-grid"><div><p class="eyebrow">Four-step quickstart</p><h2>Inspect the terms before signing anything.</h2><ol class="flow"><li><div><strong>Read the free manifest</strong><p><a href="/pricing">GET /pricing</a> returns the exact route, network, asset, receiver, and price.</p></div></li><li><div><strong>Make an unsigned request</strong><p>The protected route returns <code>402</code> with a base64 <code>Payment-Required</code> challenge.</p></div></li><li><div><strong>Sign with an x402 v2 client</strong><p>Use the <a href="$buyer_guide_url">x402 buyer guide</a> to configure a testnet wallet and payment client.</p></div></li><li><div><strong>Retry and verify settlement</strong><p>Send <code>Payment-Signature</code>; a successful response includes <code>Payment-Response</code>.</p></div></li></ol></div><div class="command-panel"><div class="command-head"><span>First request: no wallet required</span><a href="/docs#/Paid%20API/getDashboard">Open route docs</a></div><pre><code>curl -i $public_url/v1/dashboard</code></pre><p class="response-note"><strong>Expected:</strong> HTTP 402 plus <code>Payment-Required</code>. This safely exposes the payment contract without moving testnet funds.</p><div class="command-head"><span>Inspect exact preview terms</span><a href="/pricing">Open live JSON</a></div><pre><code>curl -sS $public_url/pricing</code></pre></div></div></section>
-<section id="routes" class="section"><div class="heading"><p class="eyebrow">Paid API surface</p><h2>Four explicit operations, with no subscription.</h2></div><div class="routes"><article class="card"><p class="method">POST</p><h3>Store</h3><code>/v1/memory</code><p>Write one idempotent entry to encrypted, compressed private-tenant memory.</p></article><article class="card"><p class="method">POST</p><h3>Recall</h3><code>/v1/recall</code><p>Query the seeded public preview memory or your authenticated private tenant.</p></article><article class="card"><p class="method">POST</p><h3>Route</h3><code>/v1/route</code><p>Send a plain-language task and receive an explicit act, choose, or unknown decision with evidence.</p></article><article class="card"><p class="method">GET</p><h3>Dashboard</h3><code>/v1/dashboard</code><p>Read memory, capability-routing, and deterministic-engine readiness for one tenant.</p></article></div></section>
+<section id="routes" class="section"><div class="heading"><p class="eyebrow">Paid API surface</p><h2>A complete private-memory lifecycle, with no subscription.</h2></div><div class="routes"><article class="card"><p class="method">POST · GET · PATCH · DELETE</p><h3>Manage memory</h3><code>/v1/memory</code><p>Store, page, retrieve, update, and idempotently delete encrypted private-tenant memories.</p></article><article class="card"><p class="method">POST</p><h3>Recall</h3><code>/v1/recall</code><p>Query the seeded public preview memory or your authenticated private tenant.</p></article><article class="card"><p class="method">POST</p><h3>Route</h3><code>/v1/route</code><p>Send a plain-language task and receive an explicit act, choose, or unknown decision with evidence.</p></article><article class="card"><p class="method">GET</p><h3>Dashboard</h3><code>/v1/dashboard</code><p>Read memory, capability-routing, and deterministic-engine readiness for one tenant.</p></article></div></section>
 <section id="proof" class="section proof"><div class="proof-copy"><p class="eyebrow">Storage boundaries</p><h2>Encrypted before durable memory reaches disk.</h2><p>Private-tenant memory and its retry journal are compressed, encrypted with per-record AES-256-GCM keys derived from a versioned service key, and authenticated against their tenant and file identity. The shared public dataset stays read-only. Private tenants still require operator-issued access credentials.</p></div><div class="proof-panel"><dl><div><dt>Per request</dt><dd>$price_per_request</dd></div><div><dt>Per 1,000</dt><dd>$price_per_thousand</dd></div><div><dt>Network</dt><dd>$network_name</dd></div><div><dt>API version</dt><dd>$api_version</dd></div></dl></div></section>
 <section class="section close"><p class="eyebrow">Start testing</p><h2>See the full request and response contract.</h2><div class="close-actions"><a class="button primary" href="/docs">Open API docs</a><a class="button secondary dark" href="/openapi.json">View OpenAPI schema</a><a class="button secondary dark" href="/health">Check live health</a></div></section>
 </main>
@@ -1040,6 +1169,13 @@ def normalize_idempotency_key(value: Optional[Any]) -> Optional[str]:
         return None
     if not isinstance(value, str) or not _IDEMPOTENCY_KEY_RE.match(value):
         raise ValueError("Idempotency-Key must be 1-256 letters, numbers, '.', '_', ':', or '-'")
+    return value
+
+
+def normalize_memory_id(value: Any) -> str:
+    """Validate a memory id before lookup or deletion."""
+    if not isinstance(value, str) or not _MEMORY_ID_RE.fullmatch(value):
+        raise ValueError("memory_id must be 1-128 letters, numbers, '.', '_', ':', or '-'")
     return value
 
 
@@ -1401,23 +1537,51 @@ class TenantCoreStore:
 
     def write(self, tenant_id: str, fn: Any) -> Any:
         """Run a mutating operation, then persist that tenant if configured."""
+        return self.mutate(tenant_id, lambda core: (fn(core), True))
+
+    def mutate(self, tenant_id: str, fn: Any) -> Any:
+        """Persist a callback result only when it reports that state changed.
+
+        When the cached file version is current, mutate it in place and keep a
+        rollback snapshot. This avoids decrypting and rebuilding the same
+        tenant index before every single-process write while remaining safe if
+        another task changed the file or persistence fails.
+        """
         normalized = normalize_tenant_id(tenant_id)
         with self._lock_for(normalized):
             path = self._path_for(normalized)
             if path is None:
                 core = self._get_cached(normalized)
-                return fn(core)
+                result, _changed = fn(core)
+                return result
             with _process_file_lock(path):
-                core = (
-                    self._load_core(path, normalized)
-                    if path.exists()
-                    else LocalAgentCore.from_state(self._get_cached(normalized).to_state())
-                )
-                result = fn(core)
-                self._save_core(path, normalized, core)
+                borrowed_cached = False
+                original_state: Optional[Dict[str, Any]] = None
+                current_version = self._version(path) if path.exists() else None
+                with self._registry_lock:
+                    cached = self._cores.get(normalized)
+                    cached_version = self._versions.get(normalized)
+                if cached is not None and current_version is not None and cached_version == current_version:
+                    core = cached
+                    borrowed_cached = True
+                    original_state = core.to_state()
+                elif path.exists():
+                    core = self._load_core(path, normalized)
+                else:
+                    core = LocalAgentCore.from_state(self._get_cached(normalized).to_state())
+                try:
+                    result, changed = fn(core)
+                    if changed:
+                        self._save_core(path, normalized, core)
+                except Exception:
+                    if borrowed_cached and original_state is not None:
+                        with self._registry_lock:
+                            self._cores[normalized] = LocalAgentCore.from_state(original_state)
+                    raise
                 with self._registry_lock:
                     self._cores[normalized] = core
-                    self._versions[normalized] = self._version(path)
+                    if path.exists():
+                        self._versions[normalized] = self._version(path)
                 return result
 
     def _lock_for(self, tenant_id: str) -> threading.RLock:
@@ -1704,17 +1868,46 @@ class NoSQLiteMemoryStore:
             collection = self._ensure_collection(normalized)
             self._insert_memory(collection, normalized, memory)
 
+    def replace(self, tenant_id: str, memory: Dict[str, Any]) -> None:
+        """Idempotently replace one projected memory, including its embedding."""
+        normalized = normalize_tenant_id(tenant_id)
+        with self._lock:
+            collection = self._ensure_collection(normalized)
+            try:
+                self._delete_memory(collection, memory["id"])
+                self._insert_memory(collection, normalized, memory)
+            except NoSQLiteError:
+                self._synced_collections.discard((self._process.generation, collection))
+                raise
+
+    def delete(self, tenant_id: str, memory_id: str) -> None:
+        """Idempotently delete one projected memory."""
+        normalized = normalize_tenant_id(tenant_id)
+        with self._lock:
+            collection = self._ensure_collection(normalized)
+            try:
+                self._delete_memory(collection, memory_id)
+            except NoSQLiteError:
+                self._synced_collections.discard((self._process.generation, collection))
+                raise
+
     def sync(self, tenant_id: str, memories: Iterable[Dict[str, Any]]) -> None:
-        """Backfill the durable core mirror once per tenant and CLI generation."""
+        """Reconcile a tenant projection from its authoritative encrypted snapshot."""
         normalized = normalize_tenant_id(tenant_id)
         with self._lock:
             collection = self._ensure_collection(normalized)
             key = (self._process.generation, collection)
             if key in self._synced_collections:
                 return
-            for memory in memories:
-                self._insert_memory(collection, normalized, memory)
-            self._synced_collections.add(key)
+            try:
+                self._process.command({"delete": collection})
+                for memory in memories:
+                    self._insert_memory(collection, normalized, memory)
+            except NoSQLiteError:
+                self._synced_collections.discard(key)
+                raise
+            else:
+                self._synced_collections.add(key)
 
     def recall(
         self,
@@ -1813,6 +2006,12 @@ class NoSQLiteMemoryStore:
             if "duplicate value for `_id`" not in str(exc):
                 raise
 
+    def _delete_memory(self, collection: str, memory_id: Any) -> None:
+        self._process.command({
+            "delete": collection,
+            "filter": {"_id": str(memory_id)},
+        })
+
     @staticmethod
     def _collection_name(tenant_id: str) -> str:
         digest = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:24]
@@ -1850,6 +2049,7 @@ class TenantMemoryTransactions:
     _PLANNED = "planned"
     _CORE_COMMITTED = "core_committed"
     _COMPLETE = "complete"
+    _DELETED = "deleted"
 
     def __init__(
         self,
@@ -1917,7 +2117,7 @@ class TenantMemoryTransactions:
             with _process_file_lock(path):
                 try:
                     record = self._load(path)
-                    if record.get("state") == self._COMPLETE:
+                    if record.get("state") in {self._COMPLETE, self._DELETED}:
                         continue
                     result = self._apply_locked(path, record, mirror)
                     if result["transaction"]["state"] == self._COMPLETE:
@@ -1940,6 +2140,8 @@ class TenantMemoryTransactions:
     ) -> Dict[str, Any]:
         self._validate_record(record, path)
         memory = dict(record["memory"])
+        if record["state"] == self._DELETED:
+            return self._result(record, memory)
         stored = self._core_store.write(
             record["tenant"],
             lambda core: self._ensure_core_memory(core, memory),
@@ -1960,6 +2162,26 @@ class TenantMemoryTransactions:
             record["state"] = self._COMPLETE
             self._write(path, record)
         return self._result(record, stored)
+
+    def mark_deleted(self, tenant_id: str, memory_id: str) -> bool:
+        """Tombstone the originating idempotency record before deleting memory."""
+        tenant = normalize_tenant_id(tenant_id)
+        wanted = normalize_memory_id(memory_id)
+        if not wanted.startswith("tx_"):
+            return False
+        prefix = wanted[3:]
+        directory = self._root / self._hash(tenant)[:24]
+        for path in sorted(directory.glob(prefix + "*.json")):
+            with _process_file_lock(path):
+                record = self._load(path)
+                self._validate_record(record, path)
+                if record["tenant"] != tenant or record["memory"].get("id") != wanted:
+                    continue
+                if record["state"] != self._DELETED:
+                    record["state"] = self._DELETED
+                    self._write(path, record)
+                return True
+        return False
 
     @staticmethod
     def _ensure_core_memory(core: LocalAgentCore, memory: Dict[str, Any]) -> Dict[str, Any]:
@@ -2039,7 +2261,7 @@ class TenantMemoryTransactions:
         required = {"version", "transaction_id", "tenant", "request_fingerprint", "requires_mirror", "state", "memory"}
         if not required.issubset(record) or record.get("version") != self._VERSION:
             raise MemoryTransactionError("unsupported transaction journal %s" % path.name)
-        if record["state"] not in {self._PLANNED, self._CORE_COMMITTED, self._COMPLETE}:
+        if record["state"] not in {self._PLANNED, self._CORE_COMMITTED, self._COMPLETE, self._DELETED}:
             raise MemoryTransactionError("unknown transaction state in %s" % path.name)
         memory = record["memory"]
         if not isinstance(memory, dict) or set(memory) != {"id", "text", "label", "metadata"}:
@@ -2293,7 +2515,7 @@ def create_app(
     separate authorization layer using `X-leCore-Tenant-Token`.
     """
     try:
-        from fastapi import FastAPI, Header, HTTPException
+        from fastapi import FastAPI, Header, HTTPException, Query
         from fastapi.responses import HTMLResponse
     except ImportError as exc:
         raise RuntimeError(optional_dependency_help()) from exc
@@ -2579,6 +2801,37 @@ def create_app(
                 )
         return text, label, metadata
 
+    def memory_update_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+        allowed = {"text", "label", "metadata"}
+        unknown = sorted(set(payload) - allowed)
+        if unknown:
+            raise HTTPException(status_code=400, detail="unknown memory update field: %s" % unknown[0])
+        updates = {key: payload[key] for key in allowed if key in payload}
+        if not updates:
+            raise HTTPException(status_code=400, detail="at least one of text, label, or metadata is required")
+        if "text" in updates:
+            updates["text"] = validated(_required_text, updates, "text", MAX_MEMORY_CHARS)
+        if "label" in updates:
+            label = updates["label"]
+            if label is not None and not isinstance(label, str):
+                raise HTTPException(status_code=400, detail="label must be a string or null")
+            if isinstance(label, str) and len(label) > MAX_MEMORY_LABEL_CHARS:
+                raise HTTPException(
+                    status_code=400,
+                    detail="label must be at most %d characters" % MAX_MEMORY_LABEL_CHARS,
+                )
+        if "metadata" in updates:
+            metadata = updates["metadata"]
+            if not isinstance(metadata, dict):
+                raise HTTPException(status_code=400, detail="metadata must be an object")
+            encoded_metadata = json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            if len(encoded_metadata) > MAX_MEMORY_METADATA_BYTES:
+                raise HTTPException(
+                    status_code=400,
+                    detail="metadata must be at most %d encoded bytes" % MAX_MEMORY_METADATA_BYTES,
+                )
+        return updates
+
     def commit_memory(
         tenant_id: str,
         text: str,
@@ -2608,6 +2861,11 @@ def create_app(
                 if not isinstance(exc, MemoryMirrorPending):  # pragma: no cover - mirror errors are wrapped above
                     raise nosqlite_unavailable(exc) from exc
                 committed = memory_transactions.resume(exc.tenant_id, exc.transaction_id, None)
+            if committed["transaction"]["state"] == "deleted":
+                raise HTTPException(
+                    status_code=409,
+                    detail="this idempotent memory was deleted; use a new Idempotency-Key",
+                )
             return committed["memory"], committed["transaction"]
         if key is not None:
             raise HTTPException(
@@ -2753,6 +3011,217 @@ def create_app(
             "tenant": tenant_id,
             "memory": memory,
             "transaction": transaction,
+        }
+
+    @app.get(
+        "/v1/memory",
+        tags=["Paid API"],
+        operation_id="getMemory",
+        summary="List or retrieve private agent memory",
+        description=(
+            "Return a bounded insertion-ordered page for an authenticated private tenant. "
+            "Pass memory_id for one exact record, or cursor and limit for pagination."
+        ),
+        responses={
+            **paid_operation_responses(
+                memory_list_success_openapi(),
+                invalid_detail="memory_id, cursor, or limit is invalid",
+            ),
+            404: _error_response("The requested memory does not exist in this tenant.", "memory not found"),
+        },
+    )
+    def get_memory(
+        memory_id: Optional[str] = Query(
+            default=None,
+            description="Return this exact memory id instead of a page.",
+        ),
+        limit: int = Query(
+            default=50,
+            ge=1,
+            le=100,
+            description="Maximum memories in a page.",
+        ),
+        cursor: Optional[str] = Query(
+            default=None,
+            description="Last memory id from the previous page.",
+        ),
+        x_lecore_tenant: str = Header(
+            ...,
+            alias=TENANT_HEADER,
+            description="Required private tenant id.",
+        ),
+        x_lecore_tenant_token: str = Header(
+            ...,
+            alias=TENANT_TOKEN_HEADER,
+            description="Required authorization token for the private tenant.",
+        ),
+        _payment_signature: Optional[str] = Header(
+            default=None,
+            alias="Payment-Signature",
+            description=(
+                "Omit to receive the x402 challenge; include the base64 x402 v2 "
+                "payment payload when retrying."
+            ),
+            json_schema_extra={"format": "byte"},
+        ),
+    ) -> Dict[str, Any]:
+        tenant_id = tenant_from_header(x_lecore_tenant)
+        if tenant_id == DEFAULT_TENANT_ID:
+            raise HTTPException(status_code=403, detail="consumer memory access requires a private tenant")
+        require_tenant_access(tenant_id, x_lecore_tenant_token)
+        if codec is None or memory_transactions is None:
+            raise HTTPException(status_code=503, detail="encrypted durable memory is not configured")
+        if memory_id is not None:
+            if cursor is not None:
+                raise HTTPException(status_code=400, detail="memory_id and cursor cannot be combined")
+            wanted = validated(normalize_memory_id, memory_id)
+            item = store.read(tenant_id, lambda tenant_core: tenant_core.get_memory(wanted))
+            if item is None:
+                raise HTTPException(status_code=404, detail="memory not found")
+            page = {"items": [item], "next_cursor": None}
+        else:
+            normalized_cursor = validated(normalize_memory_id, cursor) if cursor is not None else None
+            page = validated(
+                lambda: store.read(
+                    tenant_id,
+                    lambda tenant_core: tenant_core.list_memories(limit=limit, cursor=normalized_cursor),
+                )
+            )
+        return {"ok": True, "tenant": tenant_id, **page}
+
+    @app.patch(
+        "/v1/memory",
+        tags=["Paid API"],
+        operation_id="updateMemory",
+        summary="Update private agent memory",
+        description=(
+            "Atomically replace selected fields of one authenticated private-tenant memory. "
+            "Omitted fields are preserved; label may be null and an empty metadata object clears metadata."
+        ),
+        responses={
+            **paid_operation_responses(
+                memory_update_success_openapi(),
+                invalid_detail="memory_id or update fields are invalid",
+            ),
+            404: _error_response("The requested memory does not exist in this tenant.", "memory not found"),
+        },
+        openapi_extra=memory_update_request_openapi(),
+    )
+    def update_memory(
+        payload: Dict[str, Any],
+        memory_id: str = Query(..., description="Memory id to update atomically."),
+        x_lecore_tenant: str = Header(
+            ...,
+            alias=TENANT_HEADER,
+            description="Required private tenant id.",
+        ),
+        x_lecore_tenant_token: str = Header(
+            ...,
+            alias=TENANT_TOKEN_HEADER,
+            description="Required authorization token for the private tenant.",
+        ),
+        _payment_signature: Optional[str] = Header(
+            default=None,
+            alias="Payment-Signature",
+            description=(
+                "Omit to receive the x402 challenge; include the base64 x402 v2 "
+                "payment payload when retrying."
+            ),
+            json_schema_extra={"format": "byte"},
+        ),
+    ) -> Dict[str, Any]:
+        tenant_id = tenant_from_header(x_lecore_tenant)
+        if tenant_id == DEFAULT_TENANT_ID:
+            raise HTTPException(status_code=403, detail="consumer memory updates require a private tenant")
+        require_tenant_access(tenant_id, x_lecore_tenant_token)
+        if codec is None or memory_transactions is None:
+            raise HTTPException(status_code=503, detail="encrypted durable memory is not configured")
+        wanted = validated(normalize_memory_id, memory_id)
+        updates = memory_update_fields(payload)
+
+        def replace(tenant_core: LocalAgentCore) -> Tuple[Dict[str, Any], bool]:
+            before = tenant_core.get_memory(wanted)
+            if before is None:
+                return {"memory": None, "changed": False}, False
+            updated = tenant_core.update_memory(wanted, **updates)
+            changed = updated != before
+            return {"memory": updated, "changed": changed}, changed
+
+        mutation = store.mutate(tenant_id, replace)
+        memory = mutation["memory"]
+        if memory is None:
+            raise HTTPException(status_code=404, detail="memory not found")
+        if mutation["changed"] and nosqlite_store is not None:
+            try:
+                nosqlite_store.replace(tenant_id, memory)
+            except NoSQLiteError as exc:
+                if memory_backend == MEMORY_BACKEND_NOSQLITE:
+                    raise nosqlite_unavailable(exc) from exc
+                LOG.warning("NoSQLite shadow memory update failed: %s", exc)
+        return {"ok": True, "tenant": tenant_id, "memory": memory}
+
+    @app.delete(
+        "/v1/memory",
+        tags=["Paid API"],
+        operation_id="deleteMemory",
+        summary="Delete private agent memory",
+        description=(
+            "Idempotently delete one memory from an authenticated private tenant. "
+            "Deleting an already-absent id returns deleted=false and does not rewrite storage."
+        ),
+        responses=paid_operation_responses(
+            memory_delete_success_openapi(),
+            invalid_detail="memory_id is invalid",
+        ),
+    )
+    def delete_memory(
+        memory_id: str = Query(..., description="Memory id to delete idempotently."),
+        x_lecore_tenant: str = Header(
+            ...,
+            alias=TENANT_HEADER,
+            description="Required private tenant id.",
+        ),
+        x_lecore_tenant_token: str = Header(
+            ...,
+            alias=TENANT_TOKEN_HEADER,
+            description="Required authorization token for the private tenant.",
+        ),
+        _payment_signature: Optional[str] = Header(
+            default=None,
+            alias="Payment-Signature",
+            description=(
+                "Omit to receive the x402 challenge; include the base64 x402 v2 "
+                "payment payload when retrying."
+            ),
+            json_schema_extra={"format": "byte"},
+        ),
+    ) -> Dict[str, Any]:
+        tenant_id = tenant_from_header(x_lecore_tenant)
+        if tenant_id == DEFAULT_TENANT_ID:
+            raise HTTPException(status_code=403, detail="consumer memory deletion requires a private tenant")
+        require_tenant_access(tenant_id, x_lecore_tenant_token)
+        if codec is None or memory_transactions is None:
+            raise HTTPException(status_code=503, detail="encrypted durable memory is not configured")
+        wanted = validated(normalize_memory_id, memory_id)
+        memory_transactions.mark_deleted(tenant_id, wanted)
+
+        def remove(tenant_core: LocalAgentCore) -> Tuple[Optional[Dict[str, Any]], bool]:
+            removed = tenant_core.forget(wanted)
+            return removed, removed is not None
+
+        removed = store.mutate(tenant_id, remove)
+        if nosqlite_store is not None:
+            try:
+                nosqlite_store.delete(tenant_id, wanted)
+            except NoSQLiteError as exc:
+                if memory_backend == MEMORY_BACKEND_NOSQLITE:
+                    raise nosqlite_unavailable(exc) from exc
+                LOG.warning("NoSQLite shadow memory deletion failed: %s", exc)
+        return {
+            "ok": True,
+            "tenant": tenant_id,
+            "memory_id": wanted,
+            "deleted": removed is not None,
         }
 
     @app.post(

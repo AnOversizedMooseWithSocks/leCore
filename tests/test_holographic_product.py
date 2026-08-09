@@ -36,6 +36,42 @@ def test_recall_rejects_invalid_k_and_abstains_on_empty_queries():
     assert core.recall("") == []
 
 
+def test_memory_crud_is_ordered_paginated_and_idempotent():
+    core = LocalAgentCore(dim=128, seed=0)
+    first = core.remember("first memory", label="first")
+    second = core.remember("second memory", label="second")
+    third = core.remember("third memory", label="third")
+
+    page_one = core.list_memories(limit=2)
+    page_two = core.list_memories(limit=2, cursor=page_one["next_cursor"])
+
+    assert [row["id"] for row in page_one["items"]] == [first["id"], second["id"]]
+    assert page_one["next_cursor"] == second["id"]
+    assert [row["id"] for row in page_two["items"]] == [third["id"]]
+    assert page_two["next_cursor"] is None
+    assert core.get_memory(second["id"]) == second
+    assert core.get_memory("missing") is None
+    updated = core.update_memory(
+        second["id"],
+        text="updated second memory",
+        label=None,
+        metadata={"revision": 2},
+    )
+    assert updated == {
+        "id": second["id"],
+        "text": "updated second memory",
+        "label": None,
+        "metadata": {"revision": 2},
+    }
+    assert core.update_memory("missing", text="ignored") is None
+    assert core.recall("updated second", k=1)[0]["id"] == second["id"]
+    assert core.forget(second["id"]) == updated
+    assert core.forget(second["id"]) is None
+    assert [entry.id for entry in core.entries] == [first["id"], third["id"]]
+    with pytest.raises(ValueError, match="cursor"):
+        core.list_memories(cursor="missing")
+
+
 def test_route_uses_existing_skill_catalog():
     core = LocalAgentCore(dim=128, seed=0)
     routed = core.route("start pause resume cancel a job")

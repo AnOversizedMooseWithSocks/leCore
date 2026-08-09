@@ -16,6 +16,9 @@ tenant-scoped agent memory and routing through FastAPI, backed internally by
 routes:
 
 - `POST /v1/memory` — encrypted, idempotent private-tenant writes
+- `GET /v1/memory` — bounded listing or exact-id retrieval
+- `PATCH /v1/memory` — atomic selected-field updates
+- `DELETE /v1/memory` — idempotent deletion with durable tombstones
 - `POST /v1/recall`
 - `POST /v1/route`
 - `GET /v1/dashboard`
@@ -159,6 +162,49 @@ curl -X POST http://127.0.0.1:4021/v1/recall \
   -d '{"query":"deterministic agent memory"}'
 ```
 
+List the tenant's memories in insertion order, at most 100 per page:
+
+```bash
+curl "http://127.0.0.1:4021/v1/memory?limit=50" \
+  -H "X-leCore-Tenant: acme" \
+  -H "X-leCore-Tenant-Token: <tenant token>"
+```
+
+Pass the returned `next_cursor` to continue, or retrieve one exact record:
+
+```bash
+curl "http://127.0.0.1:4021/v1/memory?memory_id=<memory id>" \
+  -H "X-leCore-Tenant: acme" \
+  -H "X-leCore-Tenant-Token: <tenant token>"
+```
+
+Update any combination of text, label, and metadata. Omitted fields are
+preserved, `label: null` clears the label, and `{}` clears metadata:
+
+```bash
+curl -X PATCH "http://127.0.0.1:4021/v1/memory?memory_id=<memory id>" \
+  -H "Content-Type: application/json" \
+  -H "X-leCore-Tenant: acme" \
+  -H "X-leCore-Tenant-Token: <tenant token>" \
+  -d '{"text":"the user prefers concise release notes","metadata":{"confirmed":true}}'
+```
+
+An update is atomic with the encrypted tenant snapshot. A no-op update does
+not rewrite the file. Retrying the original create request after changing the
+record returns `409` instead of silently overwriting the newer value.
+
+Delete one record idempotently:
+
+```bash
+curl -X DELETE "http://127.0.0.1:4021/v1/memory?memory_id=<memory id>" \
+  -H "X-leCore-Tenant: acme" \
+  -H "X-leCore-Tenant-Token: <tenant token>"
+```
+
+Deletion writes an encrypted tombstone into the originating retry journal
+before removing the core entry. Retrying the old store request cannot resurrect
+the deleted memory; it returns `409` and requires a new idempotency key.
+
 Requests to paid routes return `402 Payment Required` unless the client retries
 with a valid x402 payment payload:
 
@@ -178,6 +224,29 @@ python holographic_x402_api.py --unpaid-dev --host 127.0.0.1 --port 4021
 
 Unpaid development may omit the keyring and use plaintext files. That fallback
 is intentionally unavailable to a paid app with durable state.
+
+## Storage Performance
+
+The current v1 envelope is tuned for small and medium tenant snapshots:
+
+- zlib level 6 balances compression ratio and CPU time;
+- current in-process tenants are not decrypted and rebuilt before every write;
+- cross-task file-version changes still force a safe reload under the lock;
+- no-op updates and missing/idempotent deletes do not rewrite the tenant file;
+- listing is bounded to 100 records per response and uses stable cursors.
+
+When NoSQLite semantic indexing is enabled in an unpaid deployment, updates
+replace the document and embedding and deletes remove the projection. The
+durable core snapshot remains authoritative; a fresh process or an interrupted
+projection reconciles the tenant collection from that snapshot before serving
+semantic recall. Application-encrypted paid memory continues to reject the
+plaintext NoSQLite backend and shadow instead of silently weakening storage.
+
+An actual mutation still atomically rewrites one compressed tenant snapshot.
+That is simple and crash-safe, but it is `O(tenant memory size)`. Before very
+large tenants, introduce a version-2 encrypted append log or fixed-size
+encrypted segments with background compaction. Keep v1 as the migration and
+recovery format rather than adding an unauthenticated side index.
 
 ## Key Rotation And Legacy Migration
 

@@ -37,6 +37,7 @@ from holographic.agents_and_reasoning.holographic_mind import UniversalEncoder
 
 
 _WORD_RE = re.compile(r"[a-z0-9_]+")
+_UNSET = object()
 
 
 def _tokens(text: Any) -> List[str]:
@@ -146,6 +147,72 @@ class LocalAgentCore:
             else:
                 stored.append(self.remember(item))
         return stored
+
+    def get_memory(self, memory_id: Any) -> Optional[Dict[str, Any]]:
+        """Return one stored memory by id, or ``None`` when it is absent."""
+        wanted = str(memory_id)
+        for entry in self._entries:
+            if entry.id == wanted:
+                return entry.to_dict()
+        return None
+
+    def list_memories(
+        self,
+        limit: int = 50,
+        cursor: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return an insertion-ordered page with an opaque-enough stable id cursor."""
+        if isinstance(limit, bool) or not isinstance(limit, (int, np.integer)) or not 1 <= int(limit) <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        start = 0
+        if cursor is not None:
+            cursor = str(cursor)
+            for index, entry in enumerate(self._entries):
+                if entry.id == cursor:
+                    start = index + 1
+                    break
+            else:
+                raise ValueError("cursor does not identify a stored memory")
+        stop = min(start + int(limit), len(self._entries))
+        items = [entry.to_dict() for entry in self._entries[start:stop]]
+        next_cursor = items[-1]["id"] if stop < len(self._entries) and items else None
+        return {"items": items, "next_cursor": next_cursor}
+
+    def forget(self, memory_id: Any) -> Optional[Dict[str, Any]]:
+        """Delete one memory by id and return it; missing ids are idempotent."""
+        wanted = str(memory_id)
+        for index, entry in enumerate(self._entries):
+            if entry.id != wanted:
+                continue
+            removed = self._entries.pop(index)
+            self._rebuild_index()
+            return removed.to_dict()
+        return None
+
+    def update_memory(
+        self,
+        memory_id: Any,
+        *,
+        text: Any = _UNSET,
+        label: Any = _UNSET,
+        metadata: Any = _UNSET,
+    ) -> Optional[Dict[str, Any]]:
+        """Replace selected fields of one memory and return it, or ``None``."""
+        wanted = str(memory_id)
+        for entry in self._entries:
+            if entry.id != wanted:
+                continue
+            text_changed = text is not _UNSET and str(text) != entry.text
+            if text is not _UNSET:
+                entry.text = str(text)
+            if label is not _UNSET:
+                entry.label = label
+            if metadata is not _UNSET:
+                entry.metadata = dict(metadata or {})
+            if text_changed:
+                self._rebuild_index()
+            return entry.to_dict()
+        return None
 
     def recall(self, query: Any, k: int = 3, abstain: Optional[float] = None) -> List[Dict[str, Any]]:
         """Return the nearest stored memories for `query`, best first.

@@ -5,6 +5,7 @@ import base64
 from html import escape
 import os
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -25,6 +26,7 @@ from holographic_x402_api import (
     MemoryTransactionConflict,
     MemoryMirrorPending,
     NoSQLiteError,
+    NoSQLiteMemoryStore,
     SERVICE_NAME,
     TENANT_HEADER,
     TENANT_TOKEN_HEADER,
@@ -69,6 +71,9 @@ def test_payment_manifest_protects_specific_memory_and_compute_routes_only():
     routes = {row["route"] for row in manifest}
 
     assert routes == {
+        "DELETE /v1/memory",
+        "GET /v1/memory",
+        "PATCH /v1/memory",
         "POST /v1/memory",
         "POST /v1/recall",
         "POST /v1/route",
@@ -100,12 +105,18 @@ def test_x402_route_configs_build_against_optional_sdk():
     )
 
     assert sorted(routes) == [
+        "DELETE /v1/memory",
         "GET /v1/dashboard",
+        "GET /v1/memory",
+        "PATCH /v1/memory",
         "POST /v1/memory",
         "POST /v1/recall",
         "POST /v1/route",
     ]
     assert routes["GET /v1/dashboard"].resource == "https://api.example.test/v1/dashboard"
+    assert routes["GET /v1/memory"].resource == "https://api.example.test/v1/memory"
+    assert routes["PATCH /v1/memory"].resource == "https://api.example.test/v1/memory"
+    assert routes["DELETE /v1/memory"].resource == "https://api.example.test/v1/memory"
     assert routes["POST /v1/memory"].resource == "https://api.example.test/v1/memory"
     assert routes["POST /v1/recall"].resource == "https://api.example.test/v1/recall"
     assert routes["POST /v1/route"].resource == "https://api.example.test/v1/route"
@@ -471,6 +482,9 @@ def test_unpaid_dev_app_serves_landing_page_and_keeps_api_routes_free():
     }
     assert pricing.json()["tenancy"]["default_tenant"] == DEFAULT_TENANT_ID
     assert {row["route"] for row in pricing.json()["routes"]} == {
+        "DELETE /v1/memory",
+        "GET /v1/memory",
+        "PATCH /v1/memory",
         "POST /v1/memory",
         "POST /v1/recall",
         "POST /v1/route",
@@ -544,15 +558,19 @@ def test_public_docs_describe_the_x402_contract_and_hide_operator_routes(tmp_pat
     assert "/admin/tenant-token" not in schema["paths"]
 
     assert {
-        path: next(iter(operations.values()))["operationId"]
+        (path, method): operation["operationId"]
         for path, operations in schema["paths"].items()
+        for method, operation in operations.items()
     } == {
-        "/health": "getHealth",
-        "/pricing": "getPricing",
-        "/v1/memory": "storeMemory",
-        "/v1/recall": "recallMemory",
-        "/v1/route": "routeTask",
-        "/v1/dashboard": "getDashboard",
+        ("/health", "get"): "getHealth",
+        ("/pricing", "get"): "getPricing",
+        ("/v1/memory", "post"): "storeMemory",
+        ("/v1/memory", "get"): "getMemory",
+        ("/v1/memory", "patch"): "updateMemory",
+        ("/v1/memory", "delete"): "deleteMemory",
+        ("/v1/recall", "post"): "recallMemory",
+        ("/v1/route", "post"): "routeTask",
+        ("/v1/dashboard", "get"): "getDashboard",
     }
 
     health_schema = schema["paths"]["/health"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
@@ -590,6 +608,31 @@ def test_public_docs_describe_the_x402_contract_and_hide_operator_routes(tmp_pat
     assert memory_content["schema"]["required"] == ["text"]
     assert memory_content["schema"]["properties"]["text"]["maxLength"] == 65536
     assert "encrypted" in memory_operation["description"].lower()
+    get_memory_operation = schema["paths"]["/v1/memory"]["get"]
+    assert {parameter["name"] for parameter in get_memory_operation["parameters"]} >= {
+        "memory_id", "limit", "cursor", TENANT_HEADER, TENANT_TOKEN_HEADER, "Payment-Signature"
+    }
+    assert get_memory_operation["responses"]["200"]["content"]["application/json"]["schema"]["properties"]["items"]["maxItems"] == 100
+    assert "404" in get_memory_operation["responses"]
+    update_memory_operation = schema["paths"]["/v1/memory"]["patch"]
+    update_content = update_memory_operation["requestBody"]["content"]["application/json"]
+    assert update_content["schema"]["anyOf"] == [
+        {"required": ["text"]},
+        {"required": ["label"]},
+        {"required": ["metadata"]},
+    ]
+    assert update_content["schema"]["additionalProperties"] is False
+    assert next(
+        parameter for parameter in update_memory_operation["parameters"]
+        if parameter["name"] == "memory_id"
+    )["required"] is True
+    assert "404" in update_memory_operation["responses"]
+    delete_memory_operation = schema["paths"]["/v1/memory"]["delete"]
+    assert next(
+        parameter for parameter in delete_memory_operation["parameters"]
+        if parameter["name"] == "memory_id"
+    )["required"] is True
+    assert "idempotently" in delete_memory_operation["description"].lower()
 
     recall_content = schema["paths"]["/v1/recall"]["post"]["requestBody"]["content"]["application/json"]
     assert recall_content["schema"]["required"] == ["query"]
@@ -885,7 +928,7 @@ def test_one_time_migration_rewrites_legacy_core_and_journal_then_fails_closed(t
         assert strict.get("/health").json()["memory_backend"]["storage"]["plaintext_migration_enabled"] is False
 
 
-def test_private_tenant_can_store_and_recall_idempotent_memory(tmp_path):
+def test_private_tenant_can_store_list_get_update_delete_and_recall_memory(tmp_path):
     fastapi_testclient = pytest.importorskip("fastapi.testclient")
     token = tenant_access_token("acme", "tenant-secret")
     client = fastapi_testclient.TestClient(
@@ -902,6 +945,7 @@ def test_private_tenant_can_store_and_recall_idempotent_memory(tmp_path):
         TENANT_TOKEN_HEADER: token,
         IDEMPOTENCY_HEADER: "buyer-memory-001",
     }
+    auth = {TENANT_HEADER: "acme", TENANT_TOKEN_HEADER: token}
     payload = {
         "text": "buyer-owned encrypted memory phrase",
         "label": "buyer",
@@ -911,24 +955,126 @@ def test_private_tenant_can_store_and_recall_idempotent_memory(tmp_path):
     first = client.post("/v1/memory", headers=headers, json=payload)
     retry = client.post("/v1/memory", headers=headers, json=payload)
     conflict = client.post("/v1/memory", headers=headers, json={"text": "different"})
+    second = client.post(
+        "/v1/memory",
+        headers={**auth, IDEMPOTENCY_HEADER: "buyer-memory-002"},
+        json={"text": "second paginated memory", "label": "second"},
+    )
     public_write = client.post(
         "/v1/memory",
         headers={IDEMPOTENCY_HEADER: "public-write"},
         json={"text": "must not poison public memory"},
     )
+    first_id = first.json()["memory"]["id"]
+    second_id = second.json()["memory"]["id"]
+    page_one = client.get("/v1/memory", headers=auth, params={"limit": 1})
+    page_two = client.get(
+        "/v1/memory",
+        headers=auth,
+        params={"limit": 1, "cursor": page_one.json()["next_cursor"]},
+    )
+    exact = client.get("/v1/memory", headers=auth, params={"memory_id": second_id})
+    public_list = client.get("/v1/memory")
+
+    before_noop_update = (tmp_path / "acme.json").read_bytes()
+    noop_update = client.patch(
+        "/v1/memory",
+        headers=auth,
+        params={"memory_id": second_id},
+        json={"text": "second paginated memory", "label": "second"},
+    )
+    assert (tmp_path / "acme.json").read_bytes() == before_noop_update
+    updated = client.patch(
+        "/v1/memory",
+        headers=auth,
+        params={"memory_id": second_id},
+        json={
+            "text": "second memory updated for durable recall",
+            "label": None,
+            "metadata": {"revision": 2},
+        },
+    )
+    empty_update = client.patch(
+        "/v1/memory", headers=auth, params={"memory_id": second_id}, json={}
+    )
+    unknown_update = client.patch(
+        "/v1/memory", headers=auth, params={"memory_id": second_id}, json={"owner": "other"}
+    )
+    missing_update = client.patch(
+        "/v1/memory", headers=auth, params={"memory_id": "missing"}, json={"label": "lost"}
+    )
+    original_store_after_update = client.post(
+        "/v1/memory",
+        headers={**auth, IDEMPOTENCY_HEADER: "buyer-memory-002"},
+        json={"text": "second paginated memory", "label": "second"},
+    )
+    updated_exact = client.get("/v1/memory", headers=auth, params={"memory_id": second_id})
+    updated_recall = client.post(
+        "/v1/recall", headers=auth, json={"query": "updated durable recall"}
+    )
+
+    state_path = tmp_path / "acme.json"
+    before_absent_delete = state_path.read_bytes()
+    absent_delete = client.delete("/v1/memory", headers=auth, params={"memory_id": "missing"})
+    assert state_path.read_bytes() == before_absent_delete
+
+    deleted = client.delete("/v1/memory", headers=auth, params={"memory_id": first_id})
+    deleted_retry = client.delete("/v1/memory", headers=auth, params={"memory_id": first_id})
+    deleted_get = client.get("/v1/memory", headers=auth, params={"memory_id": first_id})
+    deleted_store_retry = client.post("/v1/memory", headers=headers, json=payload)
     recalled = client.post(
         "/v1/recall",
-        headers={TENANT_HEADER: "acme", TENANT_TOKEN_HEADER: token},
+        headers=auth,
         json={"query": "buyer encrypted phrase"},
     )
 
     assert first.status_code == 200 and retry.status_code == 200
     assert first.json()["memory"] == retry.json()["memory"]
     assert first.json()["transaction"]["idempotent"] is True
+    assert second.status_code == 200
     assert conflict.status_code == 409
     assert public_write.status_code == 403
+    assert public_list.status_code == 422
+    assert [item["id"] for item in page_one.json()["items"]] == [first_id]
+    assert page_one.json()["next_cursor"] == first_id
+    assert [item["id"] for item in page_two.json()["items"]] == [second_id]
+    assert page_two.json()["next_cursor"] is None
+    assert [item["id"] for item in exact.json()["items"]] == [second_id]
+    assert noop_update.status_code == 200
+    assert updated.status_code == 200
+    assert updated.json()["memory"] == {
+        "id": second_id,
+        "text": "second memory updated for durable recall",
+        "label": None,
+        "metadata": {"revision": 2},
+    }
+    assert empty_update.status_code == 400
+    assert unknown_update.status_code == 400
+    assert missing_update.status_code == 404
+    assert original_store_after_update.status_code == 409
+    assert updated_exact.json()["items"] == [updated.json()["memory"]]
+    assert updated_recall.json()["hits"][0]["id"] == second_id
+    assert absent_delete.json()["deleted"] is False
+    assert deleted.json()["deleted"] is True
+    assert deleted_retry.json()["deleted"] is False
+    assert deleted_get.status_code == 404
+    assert deleted_store_retry.status_code == 409
     assert recalled.status_code == 200
-    assert recalled.json()["hits"][0]["label"] == "buyer"
+    assert all(hit["id"] != first_id for hit in recalled.json()["hits"])
+
+    restarted = fastapi_testclient.TestClient(
+        create_app(
+            config=X402Config(pay_to="0xabc"),
+            paid=False,
+            tenant_secret="tenant-secret",
+            tenant_state_dir=tmp_path,
+            memory_keys=_memory_keys(),
+        )
+    )
+    assert restarted.get("/v1/memory", headers=auth, params={"memory_id": first_id}).status_code == 404
+    restarted_second = restarted.get("/v1/memory", headers=auth, params={"memory_id": second_id})
+    assert restarted_second.status_code == 200
+    assert restarted_second.json()["items"] == [updated.json()["memory"]]
 
 
 def test_public_memory_persists_across_app_restart(tmp_path):
@@ -1028,6 +1174,45 @@ def test_durable_memory_transaction_recovers_a_failed_mirror(tmp_path):
     retried = restarted.remember("acme", "recover this mirror write", "journal", {}, "retry-002", mirror)
     assert retried["memory"] == committed[0]
     assert len(TenantCoreStore(LocalAgentCore(), tmp_path).read("acme", lambda core: core.entries)) == 1
+
+
+def test_nosqlite_projection_replaces_deletes_and_reconciles_exact_snapshot():
+    class RecordingProcess:
+        generation = 1
+
+        def __init__(self):
+            self.commands = []
+
+        def ensure_started(self):
+            return self.generation
+
+        def command(self, command):
+            self.commands.append(command)
+            return {"ok": True}
+
+    process = RecordingProcess()
+    store = NoSQLiteMemoryStore.__new__(NoSQLiteMemoryStore)
+    store._dimensions = 128
+    store._process = process
+    store._lock = threading.RLock()
+    store._encoder_generation = 1
+    collection = store._collection_name("acme")
+    store._ready_collections = {collection}
+    store._synced_collections = {(1, collection)}
+    memory = {"id": "m1", "text": "updated", "label": None, "metadata": {"v": 2}}
+
+    store.replace("acme", memory)
+    store.delete("acme", "m1")
+    store._synced_collections.clear()
+    store.sync("acme", [memory])
+
+    assert process.commands[0] == {"delete": collection, "filter": {"_id": "m1"}}
+    assert process.commands[1]["insert"] == collection
+    assert process.commands[1]["documents"][0]["text"] == "updated"
+    assert process.commands[2] == {"delete": collection, "filter": {"_id": "m1"}}
+    assert process.commands[3] == {"delete": collection}
+    assert process.commands[4]["documents"][0]["_id"] == "m1"
+    assert store._synced_collections == {(1, collection)}
 
 
 def test_admin_remember_idempotency_header_is_durable_and_conflicts_cleanly(tmp_path):
@@ -1184,3 +1369,29 @@ def test_persisted_writes_reload_under_process_lock(tmp_path):
     reloaded = TenantCoreStore(LocalAgentCore(), tmp_path)
     labels = [entry.label for entry in reloaded.read("acme", lambda core: core.entries)]
     assert labels == ["first", "second"]
+
+
+def test_current_cached_tenant_avoids_redecrypt_but_external_changes_reload(tmp_path, monkeypatch):
+    codec = MemoryStateCodec(MemoryKeyring.from_json(_memory_keys()))
+    first = TenantCoreStore(LocalAgentCore(), tmp_path, codec=codec)
+    first.write("acme", lambda core: core.remember("first", label="first"))
+
+    original_read = codec.read_json
+    reads = []
+
+    def counted_read(path, context):
+        reads.append((path.name, context))
+        return original_read(path, context)
+
+    monkeypatch.setattr(codec, "read_json", counted_read)
+    first.write("acme", lambda core: core.remember("cached", label="cached"))
+    assert reads == []
+
+    second = TenantCoreStore(LocalAgentCore(), tmp_path, codec=codec)
+    second.write("acme", lambda core: core.remember("external", label="external"))
+    reads.clear()
+    first.write("acme", lambda core: core.remember("reloaded", label="reloaded"))
+
+    assert reads == [("acme.json", "core:acme")]
+    labels = [entry.label for entry in first.read("acme", lambda core: core.entries)]
+    assert labels == ["first", "cached", "external", "reloaded"]

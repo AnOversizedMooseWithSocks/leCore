@@ -42,6 +42,9 @@ or pay upstream APIs as a buyer.
 Protected paid routes:
 
 - `POST /v1/memory` (private tenant + idempotency key required)
+- `GET /v1/memory` (private tenant listing or exact retrieval)
+- `PATCH /v1/memory` (private tenant selected-field update)
+- `DELETE /v1/memory` (private tenant idempotent deletion)
 - `POST /v1/recall`
 - `POST /v1/route`
 - `GET /v1/dashboard`

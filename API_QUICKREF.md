@@ -15,6 +15,10 @@
     - `memory_summary(self)` -- Return constant-time memory status without running evidence probes.
     - `remember(self, text, label=None, metadata=None, id=None)` -- Store one local memory.
     - `remember_many(self, items)` -- Store several memories.
+    - `get_memory(self, memory_id)` -- Return one stored memory by id, or ``None`` when it is absent.
+    - `list_memories(self, limit=50, cursor=None)` -- Return an insertion-ordered page with an opaque-enough stable id cursor.
+    - `forget(self, memory_id)` -- Delete one memory by id and return it; missing ids are idempotent.
+    - `update_memory(self, memory_id, text=_UNSET, label=_UNSET, metadata=_UNSET)` -- Replace selected fields of one memory and return it, or ``None``.
     - `recall(self, query, k=3, abstain=None)` -- Return the nearest stored memories for `query`, best first.
     - `suggest(self, task, k=5)` -- Suggest capabilities for a plain-English task.
     - `route(self, task)` -- Route a task to one capability when confident, otherwise return options.
@@ -39,6 +43,10 @@
 - `pricing_success_openapi(config, private_tenants_enabled, memory_backend, nosqlite_shadow, nosqlite_configured, durable_transactions, encrypted_storage, plaintext_migration_enabled)` -- Document the free x402 discovery manifest.
 - `recall_success_openapi()` -- Document the successful memory-recall response.
 - `memory_write_success_openapi()` -- Document the successful private-tenant memory write response.
+- `memory_list_success_openapi()` -- Document private-tenant memory listing and direct lookup.
+- `memory_delete_success_openapi()` -- Document idempotent private-tenant memory deletion.
+- `memory_update_success_openapi()` -- Document a successful private-tenant memory update.
+- `memory_update_request_openapi()` -- Document a partial update that requires at least one mutable field.
 - `route_success_openapi()` -- Document the successful capability-routing response.
 - `dashboard_success_openapi()` -- Document the successful service-readiness response.
 - `public_response_headers(path, status_code, public_url, content_type='', network=DEFAULT_NETWORK)` -- Return browser and cache policy headers for one public response.
@@ -49,6 +57,7 @@
 - `normalize_tenant_id(value)` -- Return a path-safe tenant id for private memory routing.
 - `tenant_access_token(tenant_id, secret)` -- Deterministic tenant bearer token derived from a server-side secret.
 - `normalize_idempotency_key(value)` -- Validate an optional caller-provided retry key without persisting the raw value.
+- `normalize_memory_id(value)` -- Validate a memory id before lookup or deletion.
 - **class `MemoryStateError`** -- Durable memory could not be authenticated, decoded, or migrated safely.
 - **class `MemoryKeyring`** -- A small versioned set of 256-bit application data-encryption keys.
     - `from_json(cls, value)` -- Parse the Secrets Manager value used by ``LECORE_X402_MEMORY_KEYS``.
@@ -60,6 +69,7 @@
     - `summary(self, tenant_id)` -- Return a cheap cached status summary without probing capabilities.
     - `read(self, tenant_id, fn)` -- Run a read-style operation while holding the tenant lock.
     - `write(self, tenant_id, fn)` -- Run a mutating operation, then persist that tenant if configured.
+    - `mutate(self, tenant_id, fn)` -- Persist a callback result only when it reports that state changed.
 - **class `NoSQLiteError`** -- Raised when the optional NoSQLite command process cannot serve a request.
 - **class `NoSQLiteProcess`** -- Serialize JSON-line requests to one long-lived NoSQLite CLI process.
     - `generation(self)` -- Return the number of successful NoSQLite process starts.
@@ -70,7 +80,9 @@
 - **class `NoSQLiteMemoryStore`** -- Tenant-isolated semantic memory backed by the pinned NoSQLite CLI.
     - `running(self)` -- Return whether the underlying NoSQLite process is currently alive.
     - `remember(self, tenant_id, memory)` -- Persist one LocalAgentCore-compatible memory entry in its tenant collection.
-    - `sync(self, tenant_id, memories)` -- Backfill the durable core mirror once per tenant and CLI generation.
+    - `replace(self, tenant_id, memory)` -- Idempotently replace one projected memory, including its embedding.
+    - `delete(self, tenant_id, memory_id)` -- Idempotently delete one projected memory.
+    - `sync(self, tenant_id, memories)` -- Reconcile a tenant projection from its authoritative encrypted snapshot.
     - `recall(self, tenant_id, query, k, abstain=None)` -- Return NoSQLite semantic hits in the LocalAgentCore response shape.
     - `close(self)` -- Release the underlying NoSQLite process and writer lock.
 - **class `MemoryTransactionError`** -- The durable memory write journal could not be read or completed safely.
@@ -80,6 +92,7 @@
     - `remember(self, tenant_id, text, label, metadata, idempotency_key, mirror)` -- Commit one memory and return its stable transaction status.
     - `resume(self, tenant_id, transaction_id, mirror)` -- Resume a known journal record without minting a second transaction.
     - `recover_pending(self, mirror)` -- Replay incomplete durable writes, leaving unavailable mirrors pending.
+    - `mark_deleted(self, tenant_id, memory_id)` -- Tombstone the originating idempotency record before deleting memory.
 - `pricing_summary(config)` -- Describe the customer-facing price and whether it is a production charge.
 - `normalize_memory_backend(value)` -- Validate the memory backend selector without accepting silent fallbacks.
 - `env_flag(value)` -- Parse the small explicit boolean surface used by deployment settings.
