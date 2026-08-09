@@ -2,8 +2,10 @@
   "schema_version": 1,
   "report_schema_version": 1,
   "required_policy_effect": "none; AUTO remains unchanged",
-  "minimum_repeats": 9,
-  "minimum_optimized_iterations": 1000,
+  "required_baseline_comparison_mode": "interleaved",
+  "required_bootstrap_comparison_mode": "single",
+  "minimum_repeats": 10,
+  "minimum_optimized_iterations": 4000,
   "max_candidate_slowdown": 1.35,
   "required_library": {
     "abi": 0,

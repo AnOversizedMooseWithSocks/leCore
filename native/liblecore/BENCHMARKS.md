@@ -63,23 +63,30 @@ and direct-versus-radix numerical error.
 
 The `Linux Release performance regression` job builds the shared library with GCC in Release mode on GitHub's
 Ubuntu 24.04 runner. It pins Python 3.12 and NumPy 2.4.4, then measures both f64 and f32 bind at dimensions 256,
-512, and 1024. Each reported latency is the median of nine samples; the target work is raised to 16,000,000 so
+512, and 1024. Each reported latency is the median of ten samples; the target work is raised to 64,000,000 so
 each sample contains enough calls to reduce timer and foreign-function-interface noise. The radix-2 timing loop
-always executes at least 1,000 calls per sample, including dimension 1024.
+always executes at least 4,000 calls per sample, including dimension 1024. On the original Apple baseline this
+puts the guarded direct and radix-2 samples in roughly the 30–80 millisecond range.
 
 On pull requests, the job checks out the exact base commit into a separate directory and builds it with the same
-compiler and options as the candidate. One benchmark driver then measures both libraries with the same Python
-environment, dimensions, work target, and repeat count. The committed policy permits at most a 1.35x candidate
-slowdown against that same-run base for both direct and radix-2 latency in every guarded profile/dimension.
-Same-run comparisons reduce runner-to-runner noise; they do not pretend that hosted CPU allocation, frequency
-scaling, virtualization, or neighboring workload are perfectly controlled.
+compiler and options as the candidate. One benchmark process loads both libraries and measures each guarded cell
+as an interleaved pair: base and candidate alternate which runs first on every repeat, with identical inputs,
+iteration counts, Python environment, dimensions, and work target. The committed policy permits at most a 1.35x
+candidate slowdown against that same-run base for both direct and radix-2 latency in every guarded
+profile/dimension. Interleaving controls short-term frequency and scheduling drift far better than running two
+complete reports in sequence; it does not pretend that a hosted runner is perfectly isolated.
+
+If the first comparison fails, the workflow repeats the interleaved pair once and applies the same policy to that
+confirmation report. Only a failure that persists in the confirmation run blocks the job. This single retry
+handles a transient scheduled-runner interruption without averaging it into the score, while a repeatable
+slowdown or malformed report still fails. Both initial and confirmation reports are retained.
 
 The gate also evaluates relative invariants within the candidate report. It checks that:
 
 - every expected profile and dimension is present and finite;
 - radix-2 remains numerically close to the direct oracle within the profile-specific error limit;
 - radix-2 keeps a conservative minimum speedup over direct at the guarded dimensions;
-- report metadata confirms the expected schema, ABI, ISA, and capabilities; and
+- report metadata confirms the expected schema, ABI, ISA, capabilities, and interleaved comparison mode; and
 - an actual `LECORE_BACKEND_AUTO` context resolves to direct for every measured profile and dimension.
 
 For both profiles the minimum same-run speedups are 2.0x at dimension 256, 5.0x at 512, and 10.0x at 1024.
@@ -111,21 +118,23 @@ cmake -S native/liblecore -B build/liblecore-performance \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build build/liblecore-performance --parallel 2
 python3 benchmarks/bench_liblecore.py \
-  --library build/liblecore-performance/liblecore.so \
+  --library /path/to/candidate/liblecore.so \
+  --baseline-library /path/to/base/liblecore.so \
   --dimensions 256,512,1024 \
   --profiles both \
-  --repeats 9 \
-  --target-work 16000000 \
-  --output build/liblecore-performance/liblecore-performance.json
+  --repeats 10 \
+  --target-work 64000000 \
+  --output build/liblecore-performance/liblecore-performance.json \
+  --baseline-output build/liblecore-performance/liblecore-performance-base.json
 python3 benchmarks/check_liblecore_performance.py \
   --report build/liblecore-performance/liblecore-performance.json \
-  --baseline /path/to/base-liblecore-performance.json \
+  --baseline build/liblecore-performance/liblecore-performance-base.json \
   --policy benchmarks/liblecore_ci_policy.json
 ```
 
-Omit `--baseline` only when bootstrapping against a revision that has no liblecore benchmark. To reproduce the
-normal pull-request gate, build and measure the base revision with the identical commands and arguments in a
-separate build directory, then pass its JSON report as shown above.
+Omit both benchmark-side baseline arguments and checker-side `--baseline` only when bootstrapping against a
+revision that has no liblecore artifact. To reproduce the normal pull-request gate, build the base revision in a
+separate directory and pass both libraries to the one interleaved benchmark command shown above.
 
 This gate covers only f32/f64 circular-convolution bind using the direct and portable radix-2 backends on one
 hosted Linux configuration. It does not yet cover unbind, cleanup, batch operations, mixed f64-query/f32-corpus

@@ -236,6 +236,14 @@ def _index_results(
     return indexed
 
 
+def _comparison_mode(report: Mapping[str, Any], label: str) -> str:
+    benchmark = _mapping(report.get("benchmark"), f"{label}.benchmark")
+    mode = benchmark.get("comparison_mode")
+    if not isinstance(mode, str) or not mode:
+        raise GateInputError(f"{label}.benchmark.comparison_mode must be a non-empty string")
+    return mode
+
+
 def _read_result(
     result: Mapping[str, Any],
     label: str,
@@ -290,6 +298,30 @@ def evaluate(
     if baseline is not None:
         _validate_metadata(baseline, policy, required_library, "baseline")
         baseline_indexed = _index_results(baseline, "baseline")
+        expected_mode = policy.get("required_baseline_comparison_mode")
+        if not isinstance(expected_mode, str) or not expected_mode:
+            raise GateInputError(
+                "policy.required_baseline_comparison_mode must be a non-empty string"
+            )
+        for compared_report, label in ((report, "report"), (baseline, "baseline")):
+            actual_mode = _comparison_mode(compared_report, label)
+            if actual_mode != expected_mode:
+                raise GateInputError(
+                    f"{label}.benchmark.comparison_mode is {actual_mode!r}, "
+                    f"expected {expected_mode!r}"
+                )
+    else:
+        expected_mode = policy.get("required_bootstrap_comparison_mode")
+        if not isinstance(expected_mode, str) or not expected_mode:
+            raise GateInputError(
+                "policy.required_bootstrap_comparison_mode must be a non-empty string"
+            )
+        actual_mode = _comparison_mode(report, "report")
+        if actual_mode != expected_mode:
+            raise GateInputError(
+                f"report.benchmark.comparison_mode is {actual_mode!r}, "
+                f"expected {expected_mode!r}"
+            )
 
     required_auto_backend = _integer(
         required_library.get("auto_backend"), "policy.required_library.auto_backend"
@@ -396,7 +428,7 @@ def render_markdown(
     library = report.get("library") if isinstance(report.get("library"), dict) else {}
     status = "PASS" if not failures else "FAIL"
     comparison = (
-        f"Candidate latency is compared with the base commit on this runner; at most "
+        f"Candidate and base latency are interleaved on this runner; at most "
         f"{max_candidate_slowdown:.2f}x slowdown is allowed per backend."
         if baseline_compared
         else "Bootstrap mode: the base commit has no benchmarkable liblecore, so only same-build invariants apply."

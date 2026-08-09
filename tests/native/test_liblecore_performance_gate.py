@@ -25,8 +25,10 @@ def policy():
         "schema_version": 1,
         "report_schema_version": 1,
         "required_policy_effect": "none; AUTO remains unchanged",
-        "minimum_repeats": 9,
-        "minimum_optimized_iterations": 1000,
+        "required_baseline_comparison_mode": "interleaved",
+        "required_bootstrap_comparison_mode": "single",
+        "minimum_repeats": 10,
+        "minimum_optimized_iterations": 4000,
         "max_candidate_slowdown": 1.35,
         "required_library": {
             "abi": 0,
@@ -41,7 +43,7 @@ def policy():
     }
 
 
-def report():
+def report(comparison_mode="single"):
     results = []
     for profile, delta in (("f64", 1e-15), ("f32", 1e-7)):
         results.append(
@@ -50,7 +52,7 @@ def report():
                 "dimension": 256,
                 "auto_backend": 1,
                 "direct_iterations": 244,
-                "optimized_iterations": 1000,
+                "optimized_iterations": 4000,
                 "direct_ns": 40_000.0,
                 "radix2_ns": 8_000.0,
                 "radix2_speedup": 5.0,
@@ -61,9 +63,10 @@ def report():
         "schema_version": 1,
         "policy_effect": "none; AUTO remains unchanged",
         "benchmark": {
-            "repeats": 9,
-            "target_work": 16_000_000,
-            "minimum_optimized_iterations": 1000,
+            "comparison_mode": comparison_mode,
+            "repeats": 10,
+            "target_work": 64_000_000,
+            "minimum_optimized_iterations": 4000,
         },
         "library": {"version": "0.1.0", "abi": 0, "isa": 1, "capabilities": 255},
         "host": {"platform": "test", "machine": "test", "python": "3.9", "numpy": "test"},
@@ -81,8 +84,8 @@ class PerformanceGateTests(unittest.TestCase):
         self.assertFalse(result.baseline_compared)
 
     def test_same_runner_baseline_passes_and_is_rendered(self):
-        candidate = report()
-        baseline = report()
+        candidate = report("interleaved")
+        baseline = report("interleaved")
         candidate["results"][0]["direct_ns"] = 42_000.0
         candidate["results"][0]["radix2_ns"] = 8_400.0
         result = evaluate(candidate, policy(), baseline)
@@ -91,8 +94,8 @@ class PerformanceGateTests(unittest.TestCase):
         self.assertIn("1.05x", result.markdown)
 
     def test_proportional_candidate_slowdown_fails_against_base(self):
-        candidate = report()
-        baseline = report()
+        candidate = report("interleaved")
+        baseline = report("interleaved")
         for entry in candidate["results"]:
             entry["direct_ns"] *= 1.5
             entry["radix2_ns"] *= 1.5
@@ -125,13 +128,22 @@ class PerformanceGateTests(unittest.TestCase):
         self.assertIn("missing result for f32 dimension 256", result.failures)
 
     def test_missing_baseline_regime_fails_the_rendered_row(self):
-        baseline = report()
+        candidate = report("interleaved")
+        baseline = report("interleaved")
         baseline["results"].pop(0)
-        result = evaluate(report(), policy(), baseline)
+        result = evaluate(candidate, policy(), baseline)
         self.assertFalse(result.passed)
         self.assertIn("missing baseline result for f64 dimension 256", result.failures)
         f64 = next(item for item in result.measurements if item.profile == "f64")
         self.assertFalse(f64.passed)
+
+    def test_sequential_reports_cannot_claim_a_baseline_comparison(self):
+        with self.assertRaisesRegex(GateInputError, "comparison_mode"):
+            evaluate(report(), policy(), report())
+
+    def test_interleaved_report_cannot_claim_bootstrap_mode(self):
+        with self.assertRaisesRegex(GateInputError, "comparison_mode"):
+            evaluate(report("interleaved"), policy())
 
     def test_duplicate_regime_is_rejected(self):
         candidate = report()
