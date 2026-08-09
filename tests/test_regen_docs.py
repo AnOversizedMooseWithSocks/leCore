@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 
 import regen_docs  # noqa: E402
+import docgen  # noqa: E402
 
 
 def _ci_gated_files():
@@ -88,6 +89,26 @@ def test_gated_generators_are_deterministic():
                                               "so that is a guaranteed red build -- and docs.yml would commit "
                                               "the churn." % (gen, o))
                 first[o] = data
+
+
+def test_reference_generation_is_stable_for_duplicate_basenames(tmp_path):
+    """Two families can legitimately contain the same module basename. Their
+    order must come from the full path, not os.walk or input order, or the docs
+    bot and a developer on another filesystem will commit an endless reorder."""
+    paths = []
+    for family, summary in (("misc", "Misc implementation."), ("mesh_and_geometry", "Mesh implementation.")):
+        path = tmp_path / "holographic" / family / "holographic_duplicate.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('"""%s"""\n' % summary, encoding="utf-8")
+        paths.append(path)
+
+    modules = [docgen.read_module(path) for path in paths]
+    forward = tmp_path / "forward.md"
+    reverse = tmp_path / "reverse.md"
+    docgen.write_reference(modules, forward)
+    docgen.write_reference(list(reversed(modules)), reverse)
+
+    assert forward.read_bytes() == reverse.read_bytes()
 
 
 def test_no_date_stamp_in_gated_outputs():
@@ -171,4 +192,3 @@ def test_ci_gates_run_once_and_every_shard_is_covered():
         assert used == {declared}, \
             "job %r has %d shards in the matrix but passes --num-shards %s -- part of the suite would " \
             "never run" % (name, declared, sorted(used))
-

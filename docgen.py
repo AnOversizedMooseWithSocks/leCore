@@ -37,7 +37,9 @@ def find_modules(root):
         for name in sorted(filenames):
             if name.startswith("holographic_") and name.endswith(".py") and not name.startswith("test_"):
                 mods.append(Path(dirpath) / name)
-    return sorted(mods, key=lambda p: p.name)
+    # Basenames are not unique across capability families. Tie-break by the
+    # full path so os.walk/filesystem order cannot churn the generated file.
+    return sorted(mods, key=lambda p: (p.name, p.as_posix()))
 
 
 # ------------------------------------------------------------------------------------------------------------
@@ -72,7 +74,7 @@ def read_module(path):
     try:
         tree = ast.parse(source)
     except SyntaxError:
-        return dict(name=path.name, summary="(could not parse)", doc="", api=[], loc=loc)
+        return dict(name=path.name, path=path.as_posix(), summary="(could not parse)", doc="", api=[], loc=loc)
 
     mod_doc = ast.get_docstring(tree) or ""
     api = []
@@ -83,7 +85,12 @@ def read_module(path):
             kind = "class" if isinstance(node, ast.ClassDef) else "def"
             sig = node.name if kind == "class" else signature(node)
             api.append((kind, sig, first_line(ast.get_docstring(node))))
-    return dict(name=path.name, summary=first_line(mod_doc), doc=mod_doc, api=api, loc=loc)
+    return dict(name=path.name, path=path.as_posix(), summary=first_line(mod_doc), doc=mod_doc, api=api, loc=loc)
+
+
+def _module_sort_key(module):
+    """Stable order for modules whose basenames are duplicated across families."""
+    return module["name"], module.get("path", "")
 
 
 # ------------------------------------------------------------------------------------------------------------
@@ -117,11 +124,11 @@ def group_modules(mods):
     standalone = []
     for family, members in by_family.items():
         if len(members) >= 3:
-            grouped[family] = sorted(members, key=lambda m: m["name"])
+            grouped[family] = sorted(members, key=_module_sort_key)
         else:
             standalone.extend(members)                       # singletons and pairs go together
     if standalone:
-        grouped["Core & standalone"] = sorted(standalone, key=lambda m: m["name"])
+        grouped["Core & standalone"] = sorted(standalone, key=_module_sort_key)
     return grouped
 
 
@@ -163,7 +170,7 @@ def write_reference(mods, out_path):
     w("## Module map")
     w("")
     for fam in sorted(grouped, key=lambda f: (f == "Core & standalone", f)):   # families first, "Core" last
-        members = sorted(grouped[fam], key=lambda m: m["name"])
+        members = sorted(grouped[fam], key=_module_sort_key)
         title = "`%s*` family" % fam if fam != "Core & standalone" else fam
         w("### %s (%d)" % (title, len(members)))
         w("")
@@ -180,7 +187,7 @@ def write_reference(mods, out_path):
     w("")
     w("## Modules in detail")
     w("")
-    for m in sorted(mods, key=lambda m: m["name"]):
+    for m in sorted(mods, key=_module_sort_key):
         w("### %s" % m["name"])
         w("")
         if m["doc"]:
