@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "report_schema_version": 1,
+  "required_policy_effect": "none; AUTO remains unchanged",
+  "minimum_repeats": 9,
+  "minimum_optimized_iterations": 1000,
+  "max_candidate_slowdown": 1.35,
+  "required_library": {
+    "abi": 0,
+    "isa": 1,
+    "capabilities_mask": 15,
+    "auto_backend": 1
+  },
+  "profiles": {
+    "f64": {
+      "max_abs_delta": 1e-12,
+      "minimum_speedup": {
+        "256": 2.0,
+        "512": 5.0,
+        "1024": 10.0
+      }
+    },
+    "f32": {
+      "max_abs_delta": 1e-4,
+      "minimum_speedup": {
+        "256": 2.0,
+        "512": 5.0,
+        "1024": 10.0
+      }
+    }
+  }
+}

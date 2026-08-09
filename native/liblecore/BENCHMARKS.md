@@ -57,5 +57,82 @@ python3 benchmarks/bench_liblecore.py \
 ```
 
 The JSON report captures host and library metadata, setup cost, scratch requirements, iteration counts, timings,
-and direct-versus-radix numerical error. Benchmark output is observational; changing `AUTO` requires a separate,
-reviewed policy change with results from supported platforms and real adopters.
+and direct-versus-radix numerical error.
+
+## CI regression gate
+
+The `Linux Release performance regression` job builds the shared library with GCC in Release mode on GitHub's
+Ubuntu 24.04 runner. It pins Python 3.12 and NumPy 2.4.4, then measures both f64 and f32 bind at dimensions 256,
+512, and 1024. Each reported latency is the median of nine samples; the target work is raised to 16,000,000 so
+each sample contains enough calls to reduce timer and foreign-function-interface noise. The radix-2 timing loop
+always executes at least 1,000 calls per sample, including dimension 1024.
+
+On pull requests, the job checks out the exact base commit into a separate directory and builds it with the same
+compiler and options as the candidate. One benchmark driver then measures both libraries with the same Python
+environment, dimensions, work target, and repeat count. The committed policy permits at most a 1.35x candidate
+slowdown against that same-run base for both direct and radix-2 latency in every guarded profile/dimension.
+Same-run comparisons reduce runner-to-runner noise; they do not pretend that hosted CPU allocation, frequency
+scaling, virtualization, or neighboring workload are perfectly controlled.
+
+The gate also evaluates relative invariants within the candidate report. It checks that:
+
+- every expected profile and dimension is present and finite;
+- radix-2 remains numerically close to the direct oracle within the profile-specific error limit;
+- radix-2 keeps a conservative minimum speedup over direct at the guarded dimensions;
+- report metadata confirms the expected schema, ABI, ISA, and capabilities; and
+- an actual `LECORE_BACKEND_AUTO` context resolves to direct for every measured profile and dimension.
+
+For both profiles the minimum same-run speedups are 2.0x at dimension 256, 5.0x at 512, and 10.0x at 1024.
+The maximum direct-versus-radix absolute delta is `1e-12` for f64 and `1e-4` for f32. These floors sit well below
+the recorded baseline ratios, but still fail if radix-2 falls back to quadratic work or suffers a major relative
+regression. The conformance jobs retain the tighter, operation-wide numerical contract.
+
+This pull request introduces liblecore to a base branch that does not yet contain `native/liblecore`. In that one
+bootstrap case, no valid base artifact can be built, so CI deliberately runs the
+candidate invariant checks without `--baseline`. Once liblecore is present on the base branch, pull requests
+automatically take the candidate-versus-base path. Pushes and manual runs also use the invariant-only path because
+they have no pull-request base SHA.
+
+The checker writes the measured score table and every applicable policy result to the GitHub job summary. The raw
+candidate and, when available, base JSON reports are uploaded together as a 30-day artifact even when the policy
+step fails, so a regression can be inspected without rerunning CI. The workflow uses repository read permission
+only and does not post or update pull-request comments.
+
+To reproduce the CI measurement and gate locally from the repository root:
+
+```console
+cmake -S native/liblecore -B build/liblecore-performance \
+  -DLECORE_BUILD_SHARED=ON \
+  -DLECORE_BUILD_TESTS=OFF \
+  -DLECORE_BUILD_EXAMPLES=OFF \
+  -DLECORE_ENABLE_FORMAT=ON \
+  -DLECORE_ENABLE_RADIX2=ON \
+  -DLECORE_WARNINGS_AS_ERRORS=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build/liblecore-performance --parallel 2
+python3 benchmarks/bench_liblecore.py \
+  --library build/liblecore-performance/liblecore.so \
+  --dimensions 256,512,1024 \
+  --profiles both \
+  --repeats 9 \
+  --target-work 16000000 \
+  --output build/liblecore-performance/liblecore-performance.json
+python3 benchmarks/check_liblecore_performance.py \
+  --report build/liblecore-performance/liblecore-performance.json \
+  --baseline /path/to/base-liblecore-performance.json \
+  --policy benchmarks/liblecore_ci_policy.json
+```
+
+Omit `--baseline` only when bootstrapping against a revision that has no liblecore benchmark. To reproduce the
+normal pull-request gate, build and measure the base revision with the identical commands and arguments in a
+separate build directory, then pass its JSON report as shown above.
+
+This gate covers only f32/f64 circular-convolution bind using the direct and portable radix-2 backends on one
+hosted Linux configuration. It does not yet cover unbind, cleanup, batch operations, mixed f64-query/f32-corpus
+cosine, allocation/setup throughput, concurrency, WebAssembly, other compilers or operating systems, or adopter
+workloads. Those require their own stable workloads and policies rather than inferred thresholds from this
+microbenchmark.
+
+Passing the gate is evidence that the two explicit backends retained their expected relationship; it is not a
+dispatch decision. `LECORE_BACKEND_AUTO` remains mapped to the direct reference backend. Changing `AUTO` requires
+a separate, reviewed policy change supported by measurements from supported platforms and real adopters.

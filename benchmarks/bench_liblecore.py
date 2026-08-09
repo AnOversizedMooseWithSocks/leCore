@@ -28,6 +28,9 @@ from bindings.python.lecore_native import Library  # noqa: E402
 from holographic.agents_and_reasoning.holographic_ai import bind as numpy_bind  # noqa: E402
 
 
+MINIMUM_OPTIMIZED_ITERATIONS = 1000
+
+
 def timed_ns(operation: Callable[[], None], iterations: int, repeats: int) -> float:
     samples = []
     operation()
@@ -70,7 +73,7 @@ def benchmark_dimension(
     right /= np.linalg.norm(right)
 
     direct_iterations = max(1, min(2000, target_work // (dimension * dimension)))
-    optimized_iterations = max(50, direct_iterations)
+    optimized_iterations = max(MINIMUM_OPTIMIZED_ITERATIONS, direct_iterations)
     outputs: dict[str, np.ndarray] = {}
     timings: dict[str, float] = {}
     scratch: dict[str, int] = {}
@@ -86,9 +89,13 @@ def benchmark_dimension(
             outputs[backend] = output.copy()
             scratch[backend] = context.scratch_bytes
 
+    with library.context(dimension, profile=profile, backend="auto") as context:
+        auto_backend = context.backend
+
     entry: dict[str, object] = {
         "dimension": dimension,
         "profile": profile,
+        "auto_backend": auto_backend,
         "direct_iterations": direct_iterations,
         "optimized_iterations": optimized_iterations,
         "direct_ns": timings["direct"],
@@ -163,6 +170,11 @@ def main() -> int:
     report = {
         "schema_version": 1,
         "policy_effect": "none; AUTO remains unchanged",
+        "benchmark": {
+            "repeats": arguments.repeats,
+            "target_work": arguments.target_work,
+            "minimum_optimized_iterations": MINIMUM_OPTIMIZED_ITERATIONS,
+        },
         "library": {
             "path": library.path,
             "bytes": Path(library.path).stat().st_size,

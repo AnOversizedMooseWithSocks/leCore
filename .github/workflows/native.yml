@@ -241,6 +241,133 @@ jobs:
           --backend radix2
           --quiet
 
+  performance-regression:
+    name: Linux Release performance regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CC: gcc
+      CXX: g++
+      PYTHONHASHSEED: "0"
+      CANDIDATE_BUILD: ${{ github.workspace }}/build/liblecore-performance
+      PERFORMANCE_REPORT: ${{ github.workspace }}/build/liblecore-performance/liblecore-performance.json
+      BASELINE_BUILD: ${{ github.workspace }}/build/liblecore-performance-base
+      BASELINE_REPORT: ${{ github.workspace }}/build/liblecore-performance-base/liblecore-performance-base.json
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check out the pull-request base
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: liblecore-base
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install the pinned numeric reference
+        run: >-
+          python -m pip install --disable-pip-version-check
+          --only-binary=:all: numpy==2.4.4
+
+      - name: Test the performance policy checker
+        run: python3 tests/native/test_liblecore_performance_gate.py
+
+      - name: Detect a benchmarkable pull-request base
+        id: baseline
+        shell: bash
+        run: |
+          if [[ -d liblecore-base/native/liblecore && \
+                -f liblecore-base/native/liblecore/CMakeLists.txt ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "A comparable liblecore base is available."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "No comparable liblecore base is available; running the bootstrap invariant gate."
+          fi
+
+      - name: Configure the shared Release library
+        run: >-
+          cmake -S native/liblecore -B "$CANDIDATE_BUILD"
+          -DLECORE_BUILD_SHARED=ON
+          -DLECORE_BUILD_TESTS=OFF
+          -DLECORE_BUILD_EXAMPLES=OFF
+          -DLECORE_ENABLE_FORMAT=ON
+          -DLECORE_ENABLE_RADIX2=ON
+          -DLECORE_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build the shared Release library
+        run: cmake --build "$CANDIDATE_BUILD" --parallel 2
+
+      - name: Configure the pull-request base with identical Release settings
+        if: steps.baseline.outputs.available == 'true'
+        run: >-
+          cmake -S liblecore-base/native/liblecore -B "$BASELINE_BUILD"
+          -DLECORE_BUILD_SHARED=ON
+          -DLECORE_BUILD_TESTS=OFF
+          -DLECORE_BUILD_EXAMPLES=OFF
+          -DLECORE_ENABLE_FORMAT=ON
+          -DLECORE_ENABLE_RADIX2=ON
+          -DLECORE_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build the pull-request base
+        if: steps.baseline.outputs.available == 'true'
+        run: cmake --build "$BASELINE_BUILD" --parallel 2
+
+      - name: Measure the pull-request base
+        if: steps.baseline.outputs.available == 'true'
+        run: >-
+          python3 benchmarks/bench_liblecore.py
+          --library "$BASELINE_BUILD/liblecore.so"
+          --dimensions 256,512,1024
+          --profiles both
+          --repeats 9
+          --target-work 16000000
+          --output "$BASELINE_REPORT"
+
+      - name: Measure the guarded bind regimes
+        run: >-
+          python3 benchmarks/bench_liblecore.py
+          --library "$CANDIDATE_BUILD/liblecore.so"
+          --dimensions 256,512,1024
+          --profiles both
+          --repeats 9
+          --target-work 16000000
+          --output "$PERFORMANCE_REPORT"
+
+      - name: Enforce the same-run candidate-versus-base policy
+        if: steps.baseline.outputs.available == 'true'
+        run: >-
+          python3 benchmarks/check_liblecore_performance.py
+          --report "$PERFORMANCE_REPORT"
+          --baseline "$BASELINE_REPORT"
+          --policy benchmarks/liblecore_ci_policy.json
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce the bootstrap invariant policy
+        if: steps.baseline.outputs.available != 'true'
+        run: >-
+          python3 benchmarks/check_liblecore_performance.py
+          --report "$PERFORMANCE_REPORT"
+          --policy benchmarks/liblecore_ci_policy.json
+          --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the raw performance reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: liblecore-performance-${{ github.sha }}
+          path: |
+            ${{ env.PERFORMANCE_REPORT }}
+            ${{ env.BASELINE_REPORT }}
+          if-no-files-found: warn
+          retention-days: 30
+
   amalgamation:
     name: Amalgamation drift and standalone consumers
     runs-on: ubuntu-latest
