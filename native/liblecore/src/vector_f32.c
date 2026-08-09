@@ -71,6 +71,29 @@ static float lecore_f32_cosine_raw(
     return dot / (norm_a * norm_b);
 }
 
+static float lecore_f32_cosine_with_query_norm_squared(
+    const float *query,
+    float query_norm_squared,
+    float query_norm,
+    const float *row,
+    uint32_t dimension)
+{
+    float row_norm_squared = 0.0f;
+    float row_norm;
+    float dot;
+    uint32_t index;
+
+    for (index = 0; index < dimension; ++index) {
+        row_norm_squared += row[index] * row[index];
+    }
+    if (query_norm_squared == 0.0f || row_norm_squared == 0.0f) {
+        return 0.0f;
+    }
+    row_norm = sqrtf(row_norm_squared);
+    dot = lecore_f32_dot_raw(query, row, dimension);
+    return dot / (query_norm * row_norm);
+}
+
 static lecore_status lecore_f32_prepare_matrix_output(
     const lecore_context *context,
     const float *query,
@@ -272,8 +295,11 @@ lecore_status LECORE_CALL lecore_cosine_many_f32(
 {
     lecore_status status = lecore_internal_check_context(
         context, LECORE_PROFILE_HRR_F32_V1);
+    float query_norm;
+    float query_norm_squared = 0.0f;
     size_t rows_bytes;
     size_t row;
+    uint32_t index;
 
     if (status != LECORE_OK) {
         return status;
@@ -299,9 +325,17 @@ lecore_status LECORE_CALL lecore_cosine_many_f32(
         return LECORE_ENONFINITE;
     }
     (void)rows_bytes;
+    for (index = 0; index < context->dimension; ++index) {
+        query_norm_squared += query[index] * query[index];
+    }
+    query_norm = sqrtf(query_norm_squared);
     for (row = 0; row < row_count; ++row) {
-        out_scores[row] = lecore_f32_cosine_raw(
-            query, rows + row * row_stride, context->dimension);
+        out_scores[row] = lecore_f32_cosine_with_query_norm_squared(
+            query,
+            query_norm_squared,
+            query_norm,
+            rows + row * row_stride,
+            context->dimension);
     }
     return LECORE_OK;
 }

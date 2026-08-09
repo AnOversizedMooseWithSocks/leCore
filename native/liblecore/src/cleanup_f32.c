@@ -18,16 +18,17 @@ static int lecore_cleanup_f32_vector_is_finite(
 
 static float lecore_cleanup_f32_cosine(
     const float *query,
+    float query_norm_squared,
+    float query_norm,
     const float *candidate,
     uint32_t dimension)
 {
-    float query_norm_squared = 0.0f;
     float candidate_norm_squared = 0.0f;
+    float candidate_norm;
     float dot = 0.0f;
     uint32_t index;
 
     for (index = 0; index < dimension; ++index) {
-        query_norm_squared += query[index] * query[index];
         candidate_norm_squared += candidate[index] * candidate[index];
     }
     if (query_norm_squared == 0.0f || candidate_norm_squared == 0.0f) {
@@ -36,8 +37,8 @@ static float lecore_cleanup_f32_cosine(
     for (index = 0; index < dimension; ++index) {
         dot += query[index] * candidate[index];
     }
-    return dot /
-        (sqrtf(query_norm_squared) * sqrtf(candidate_norm_squared));
+    candidate_norm = sqrtf(candidate_norm_squared);
+    return dot / (query_norm * candidate_norm);
 }
 
 lecore_status LECORE_CALL lecore_cleanup_f32(
@@ -55,6 +56,9 @@ lecore_status LECORE_CALL lecore_cleanup_f32(
     size_t candidate;
     size_t best_index;
     float best_score;
+    float query_norm;
+    float query_norm_squared = 0.0f;
+    uint32_t index;
 
     if (status != LECORE_OK) {
         return status;
@@ -92,13 +96,23 @@ lecore_status LECORE_CALL lecore_cleanup_f32(
         }
     }
 
+    for (index = 0; index < context->dimension; ++index) {
+        query_norm_squared += query[index] * query[index];
+    }
+    query_norm = sqrtf(query_norm_squared);
     best_index = 0;
     best_score = lecore_cleanup_f32_cosine(
-        query, candidates, context->dimension);
+        query,
+        query_norm_squared,
+        query_norm,
+        candidates,
+        context->dimension);
     if (!isnan(best_score)) {
         for (candidate = 1; candidate < candidate_count; ++candidate) {
             float score = lecore_cleanup_f32_cosine(
                 query,
+                query_norm_squared,
+                query_norm,
                 candidates + candidate * candidate_stride,
                 context->dimension);
             if (isnan(score)) {

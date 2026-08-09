@@ -96,6 +96,22 @@ LECORE_INTERNAL_API void lecore_internal_hrr_radix2_unbind_f64(
     const double *composite,
     const double *key,
     double *output);
+LECORE_INTERNAL_API void lecore_internal_hrr_radix2_bind_fixed_f64(
+    lecore_context *context,
+    const double *role,
+    const double *rows,
+    size_t row_count,
+    size_t row_stride,
+    double *out_rows,
+    size_t out_stride);
+LECORE_INTERNAL_API void lecore_internal_hrr_radix2_unbind_all_f64(
+    lecore_context *context,
+    const double *trace,
+    const double *keys,
+    size_t key_count,
+    size_t key_stride,
+    double *out_rows,
+    size_t out_stride);
 LECORE_INTERNAL_API void lecore_internal_hrr_radix2_bind_f32(
     lecore_context *context,
     const float *a,
@@ -106,6 +122,22 @@ LECORE_INTERNAL_API void lecore_internal_hrr_radix2_unbind_f32(
     const float *composite,
     const float *key,
     float *output);
+LECORE_INTERNAL_API void lecore_internal_hrr_radix2_bind_fixed_f32(
+    lecore_context *context,
+    const float *role,
+    const float *rows,
+    size_t row_count,
+    size_t row_stride,
+    float *out_rows,
+    size_t out_stride);
+LECORE_INTERNAL_API void lecore_internal_hrr_radix2_unbind_all_f32(
+    lecore_context *context,
+    const float *trace,
+    const float *keys,
+    size_t key_count,
+    size_t key_stride,
+    float *out_rows,
+    size_t out_stride);
 #endif
 
 static inline int lecore_internal_ranges_overlap(

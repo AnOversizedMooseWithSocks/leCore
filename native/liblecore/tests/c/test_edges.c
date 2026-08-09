@@ -19,6 +19,7 @@ static int test_validation_modes(void)
         1.0, 0.0, 0.0, 0.0
     };
     double output[] = {42.0, 42.0, 42.0, 42.0};
+    double scores[] = {42.0, 42.0, 42.0};
     double score = 42.0;
     size_t index = SIZE_MAX;
 
@@ -47,6 +48,18 @@ static int test_validation_modes(void)
         shape_context, finite, candidates, 3, 4, &index, &score), LECORE_OK);
     CHECK(index == 1);
     CHECK(isnan(score));
+
+    CHECK_STATUS(lecore_cosine_many_f64(
+        shape_context, zero, candidates, 3, 4, scores), LECORE_OK);
+    CHECK(scores[0] == 0.0 && !signbit(scores[0]));
+    CHECK(scores[1] == 0.0 && !signbit(scores[1]));
+    CHECK(scores[2] == 0.0 && !signbit(scores[2]));
+    index = SIZE_MAX;
+    score = 42.0;
+    CHECK_STATUS(lecore_cleanup_f64(
+        shape_context, zero, candidates, 3, 4, &index, &score), LECORE_OK);
+    CHECK(index == 0);
+    CHECK(score == 0.0 && !signbit(score));
 
     lecore_context_destroy(finite_context);
     lecore_context_destroy(shape_context);

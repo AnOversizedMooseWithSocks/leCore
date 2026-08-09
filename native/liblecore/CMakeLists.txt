@@ -92,6 +92,16 @@ else()
 endif()
 
 set(LECORE_ABI_VERSION 0)
+if(LECORE_ABI_VERSION EQUAL 0)
+    # ABI-0 previews may break at a native-package minor boundary. Keep patch
+    # releases runtime-compatible while preventing a later 0.x minor from
+    # satisfying the dynamic loader identity of this preview line.
+    set(LECORE_SOVERSION
+        "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+else()
+    # Stable releases identify their dynamic ABI with the public ABI major.
+    set(LECORE_SOVERSION "${LECORE_ABI_VERSION}")
+endif()
 get_filename_component(LECORE_REPOSITORY_ROOT
     "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 set(LECORE_AMALGAMATION_GENERATOR
@@ -188,7 +198,7 @@ set_target_properties(lecore PROPERTIES
     EXPORT_NAME lecore
     OUTPUT_NAME lecore
     POSITION_INDEPENDENT_CODE ON
-    SOVERSION "${LECORE_ABI_VERSION}"
+    SOVERSION "${LECORE_SOVERSION}"
     VERSION "${PROJECT_VERSION}"
     VISIBILITY_INLINES_HIDDEN YES
 )

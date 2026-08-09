@@ -1,12 +1,18 @@
 {
-  "schema_version": 1,
-  "report_schema_version": 1,
+  "schema_version": 2,
+  "report_schema_version": 2,
   "required_policy_effect": "none; AUTO remains unchanged",
-  "required_baseline_comparison_mode": "interleaved",
+  "required_measurement_layer": "public-c-abi",
+  "required_measurement_mode": "pre-resolved-bind",
+  "required_metrics_scope": "gate",
+  "required_baseline_comparison_mode": "paired-interleaved",
   "required_bootstrap_comparison_mode": "single",
   "minimum_repeats": 10,
+  "minimum_calibration_pilots": 3,
   "minimum_optimized_iterations": 4000,
+  "minimum_sample_elapsed_ns": 10000000,
   "max_candidate_slowdown": 1.35,
+  "dimensions": [256, 512, 1024],
   "required_library": {
     "abi": 0,
     "isa": 1,
@@ -15,20 +21,10 @@
   },
   "profiles": {
     "f64": {
-      "max_abs_delta": 1e-12,
-      "minimum_speedup": {
-        "256": 2.0,
-        "512": 5.0,
-        "1024": 10.0
-      }
+      "max_abs_delta": 1e-12
     },
     "f32": {
-      "max_abs_delta": 1e-4,
-      "minimum_speedup": {
-        "256": 2.0,
-        "512": 5.0,
-        "1024": 10.0
-      }
+      "max_abs_delta": 1e-4
     }
   }
 }

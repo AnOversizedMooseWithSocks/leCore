@@ -22,7 +22,10 @@ The current preview provides:
 
 Native version, ABI version, the liblecore ISA subset, semantic profiles, and interchange format are separate
 contracts. The `0.x` series reports ABI `0`; its names and layouts may change before adopter replay gates justify
-freezing ABI `1`.
+freezing ABI `1`. On platforms with versioned shared-library identities, ABI-0 builds therefore use the native
+package's `major.minor`: all `0.1.x` releases use preview SONAME/install-name `0.1`, and an ABI-breaking preview must
+bump the package minor and receive a new identity. Patch releases within one preview minor remain ABI-compatible.
+Starting with ABI `1`, the public ABI major is the SONAME/install-name; every stable ABI break increments both.
 
 ## Build and test
 

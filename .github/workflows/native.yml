@@ -253,8 +253,6 @@ jobs:
       PERFORMANCE_REPORT: ${{ github.workspace }}/build/liblecore-performance/liblecore-performance.json
       BASELINE_BUILD: ${{ github.workspace }}/build/liblecore-performance-base
       BASELINE_REPORT: ${{ github.workspace }}/build/liblecore-performance-base/liblecore-performance-base.json
-      RETRY_PERFORMANCE_REPORT: ${{ github.workspace }}/build/liblecore-performance/liblecore-performance-retry.json
-      RETRY_BASELINE_REPORT: ${{ github.workspace }}/build/liblecore-performance-base/liblecore-performance-base-retry.json
     steps:
       - uses: actions/checkout@v6
 
@@ -331,6 +329,8 @@ jobs:
           --profiles both
           --repeats 10
           --target-work 64000000
+          --sample-target-ms 30
+          --gate
           --output "$PERFORMANCE_REPORT"
           --baseline-output "$BASELINE_REPORT"
 
@@ -343,94 +343,24 @@ jobs:
           --profiles both
           --repeats 10
           --target-work 64000000
+          --sample-target-ms 30
+          --gate
           --output "$PERFORMANCE_REPORT"
 
-      - name: Probe the same-run candidate-versus-base policy
-        id: initial_base_gate
+      - name: Enforce the paired candidate-versus-base policy
         if: steps.baseline.outputs.available == 'true'
-        continue-on-error: true
         run: >-
           python3 benchmarks/check_liblecore_performance.py
           --report "$PERFORMANCE_REPORT"
           --baseline "$BASELINE_REPORT"
           --policy benchmarks/liblecore_ci_policy.json
+          --summary "$GITHUB_STEP_SUMMARY"
 
-      - name: Probe the bootstrap invariant policy
-        id: initial_bootstrap_gate
+      - name: Enforce the bootstrap invariant policy
         if: steps.baseline.outputs.available != 'true'
-        continue-on-error: true
         run: >-
           python3 benchmarks/check_liblecore_performance.py
           --report "$PERFORMANCE_REPORT"
-          --policy benchmarks/liblecore_ci_policy.json
-
-      - name: Publish the passing same-run scorecard
-        if: >-
-          steps.baseline.outputs.available == 'true' &&
-          steps.initial_base_gate.outcome == 'success'
-        run: >-
-          python3 benchmarks/check_liblecore_performance.py
-          --report "$PERFORMANCE_REPORT"
-          --baseline "$BASELINE_REPORT"
-          --policy benchmarks/liblecore_ci_policy.json
-          --summary "$GITHUB_STEP_SUMMARY"
-
-      - name: Publish the passing bootstrap scorecard
-        if: >-
-          steps.baseline.outputs.available != 'true' &&
-          steps.initial_bootstrap_gate.outcome == 'success'
-        run: >-
-          python3 benchmarks/check_liblecore_performance.py
-          --report "$PERFORMANCE_REPORT"
-          --policy benchmarks/liblecore_ci_policy.json
-          --summary "$GITHUB_STEP_SUMMARY"
-
-      - name: Re-measure the interleaved pair after a failed probe
-        if: >-
-          steps.baseline.outputs.available == 'true' &&
-          steps.initial_base_gate.outcome == 'failure'
-        run: >-
-          python3 benchmarks/bench_liblecore.py
-          --library "$CANDIDATE_BUILD/liblecore.so"
-          --baseline-library "$BASELINE_BUILD/liblecore.so"
-          --dimensions 256,512,1024
-          --profiles both
-          --repeats 10
-          --target-work 64000000
-          --output "$RETRY_PERFORMANCE_REPORT"
-          --baseline-output "$RETRY_BASELINE_REPORT"
-
-      - name: Re-measure the bootstrap candidate after a failed probe
-        if: >-
-          steps.baseline.outputs.available != 'true' &&
-          steps.initial_bootstrap_gate.outcome == 'failure'
-        run: >-
-          python3 benchmarks/bench_liblecore.py
-          --library "$CANDIDATE_BUILD/liblecore.so"
-          --dimensions 256,512,1024
-          --profiles both
-          --repeats 10
-          --target-work 64000000
-          --output "$RETRY_PERFORMANCE_REPORT"
-
-      - name: Enforce the confirmed candidate-versus-base policy
-        if: >-
-          steps.baseline.outputs.available == 'true' &&
-          steps.initial_base_gate.outcome == 'failure'
-        run: >-
-          python3 benchmarks/check_liblecore_performance.py
-          --report "$RETRY_PERFORMANCE_REPORT"
-          --baseline "$RETRY_BASELINE_REPORT"
-          --policy benchmarks/liblecore_ci_policy.json
-          --summary "$GITHUB_STEP_SUMMARY"
-
-      - name: Enforce the confirmed bootstrap invariant policy
-        if: >-
-          steps.baseline.outputs.available != 'true' &&
-          steps.initial_bootstrap_gate.outcome == 'failure'
-        run: >-
-          python3 benchmarks/check_liblecore_performance.py
-          --report "$RETRY_PERFORMANCE_REPORT"
           --policy benchmarks/liblecore_ci_policy.json
           --summary "$GITHUB_STEP_SUMMARY"
 
@@ -442,8 +372,6 @@ jobs:
           path: |
             ${{ env.PERFORMANCE_REPORT }}
             ${{ env.BASELINE_REPORT }}
-            ${{ env.RETRY_PERFORMANCE_REPORT }}
-            ${{ env.RETRY_BASELINE_REPORT }}
           if-no-files-found: warn
           retention-days: 30
 

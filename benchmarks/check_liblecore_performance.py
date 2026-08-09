@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
+import statistics
 import sys
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
@@ -23,18 +24,20 @@ class Measurement:
     direct_ns: float
     radix2_ns: float
     speedup: float
-    minimum_speedup: float
+    minimum_speedup: Optional[float]
     max_abs_delta: float
     delta_limit: float
     max_candidate_slowdown: float
     baseline_required: bool = False
     baseline_direct_ns: Optional[float] = None
     baseline_radix2_ns: Optional[float] = None
+    direct_slowdown: Optional[float] = None
+    radix2_slowdown: Optional[float] = None
 
     @property
     def passed(self) -> bool:
         return (
-            self.speedup >= self.minimum_speedup
+            (self.minimum_speedup is None or self.speedup >= self.minimum_speedup)
             and self.max_abs_delta <= self.delta_limit
             and (
                 not self.baseline_required
@@ -53,17 +56,18 @@ class Measurement:
             )
         )
 
-    @property
-    def direct_slowdown(self) -> Optional[float]:
-        if self.baseline_direct_ns is None:
-            return None
-        return self.direct_ns / self.baseline_direct_ns
 
-    @property
-    def radix2_slowdown(self) -> Optional[float]:
-        if self.baseline_radix2_ns is None:
-            return None
-        return self.radix2_ns / self.baseline_radix2_ns
+
+@dataclass(frozen=True)
+class ResultTimings:
+    direct_iterations: int
+    radix2_iterations: int
+    direct_elapsed_ns: Sequence[int]
+    radix2_elapsed_ns: Sequence[int]
+    direct_ns: float
+    radix2_ns: float
+    speedup: float
+    max_abs_delta: float
 
 
 @dataclass(frozen=True)
@@ -112,8 +116,12 @@ def _finite(value: Any, label: str, *, positive: bool = False) -> float:
 
 def _policy_regimes(
     policy: Mapping[str, Any],
-) -> Tuple[Mapping[str, Any], float, List[Tuple[str, int, float, float]]]:
-    if _integer(policy.get("schema_version"), "policy.schema_version") != 1:
+) -> Tuple[
+    Mapping[str, Any],
+    float,
+    List[Tuple[str, int, Optional[float], float]],
+]:
+    if _integer(policy.get("schema_version"), "policy.schema_version") != 2:
         raise GateInputError("unsupported performance policy schema_version")
     required_library = _mapping(policy.get("required_library"), "policy.required_library")
     max_candidate_slowdown = _finite(
@@ -123,8 +131,20 @@ def _policy_regimes(
     )
     if max_candidate_slowdown < 1.0:
         raise GateInputError("policy.max_candidate_slowdown must be >= 1")
+    raw_dimensions = policy.get("dimensions")
+    if not isinstance(raw_dimensions, list) or not raw_dimensions:
+        raise GateInputError("policy.dimensions must be a non-empty array")
+    dimensions = []
+    for index, raw_dimension in enumerate(raw_dimensions):
+        dimension = _integer(raw_dimension, f"policy.dimensions[{index}]", minimum=1)
+        if dimension & (dimension - 1):
+            raise GateInputError(f"policy dimension {dimension} must be a power of two")
+        if dimension in dimensions:
+            raise GateInputError(f"duplicate policy dimension {dimension}")
+        dimensions.append(dimension)
+
     profiles = _mapping(policy.get("profiles"), "policy.profiles")
-    regimes: List[Tuple[str, int, float, float]] = []
+    regimes: List[Tuple[str, int, Optional[float], float]] = []
     if not profiles:
         raise GateInputError("policy.profiles must not be empty")
     for profile, raw_profile_policy in profiles.items():
@@ -137,26 +157,25 @@ def _policy_regimes(
         )
         if delta_limit < 0.0:
             raise GateInputError(f"policy.profiles.{profile}.max_abs_delta must be >= 0")
+        raw_minimums = profile_policy.get("minimum_speedup", {})
         minimums = _mapping(
-            profile_policy.get("minimum_speedup"),
-            f"policy.profiles.{profile}.minimum_speedup",
+            raw_minimums, f"policy.profiles.{profile}.minimum_speedup"
         )
-        if not minimums:
-            raise GateInputError(f"policy.profiles.{profile}.minimum_speedup must not be empty")
-        for raw_dimension, raw_minimum in minimums.items():
-            try:
-                dimension = int(raw_dimension)
-            except (TypeError, ValueError) as error:
-                raise GateInputError(
-                    f"policy dimension {raw_dimension!r} for {profile} is not an integer"
-                ) from error
-            if dimension <= 0 or dimension & (dimension - 1):
-                raise GateInputError(f"policy dimension {dimension} for {profile} must be a positive power of two")
-            minimum = _finite(
-                raw_minimum,
-                f"policy.profiles.{profile}.minimum_speedup.{dimension}",
-                positive=True,
+        unknown_dimensions = set(minimums) - {str(item) for item in dimensions}
+        if unknown_dimensions:
+            unknown = sorted(unknown_dimensions)[0]
+            raise GateInputError(
+                f"policy.profiles.{profile}.minimum_speedup has unguarded dimension {unknown}"
             )
+        for dimension in dimensions:
+            raw_minimum = minimums.get(str(dimension))
+            minimum = None
+            if raw_minimum is not None:
+                minimum = _finite(
+                    raw_minimum,
+                    f"policy.profiles.{profile}.minimum_speedup.{dimension}",
+                    positive=True,
+                )
             regimes.append((profile, dimension, minimum, delta_limit))
     regimes.sort(key=lambda item: (item[0], item[1]))
     return required_library, max_candidate_slowdown, regimes
@@ -167,11 +186,14 @@ def _validate_metadata(
     policy: Mapping[str, Any],
     required_library: Mapping[str, Any],
     label: str,
-) -> None:
+) -> int:
     expected_report_schema = _integer(
         policy.get("report_schema_version"), "policy.report_schema_version"
     )
-    if _integer(report.get("schema_version"), f"{label}.schema_version") != expected_report_schema:
+    if (
+        _integer(report.get("schema_version"), f"{label}.schema_version")
+        != expected_report_schema
+    ):
         raise GateInputError(
             f"{label}.schema_version must equal policy report schema {expected_report_schema}"
         )
@@ -199,6 +221,19 @@ def _validate_metadata(
         )
 
     benchmark = _mapping(report.get("benchmark"), f"{label}.benchmark")
+    for policy_field, report_field in (
+        ("required_measurement_layer", "measurement_layer"),
+        ("required_measurement_mode", "measurement_mode"),
+        ("required_metrics_scope", "metrics_scope"),
+    ):
+        expected = policy.get(policy_field)
+        if not isinstance(expected, str) or not expected:
+            raise GateInputError(f"policy.{policy_field} must be a non-empty string")
+        actual = benchmark.get(report_field)
+        if actual != expected:
+            raise GateInputError(
+                f"{label}.benchmark.{report_field} is {actual!r}, expected {expected!r}"
+            )
     minimum_repeats = _integer(
         policy.get("minimum_repeats"), "policy.minimum_repeats", minimum=1
     )
@@ -207,6 +242,37 @@ def _validate_metadata(
         raise GateInputError(
             f"{label}.benchmark.repeats is {repeats}, below required {minimum_repeats}"
         )
+    minimum_sample_elapsed_ns = _integer(
+        policy.get("minimum_sample_elapsed_ns"),
+        "policy.minimum_sample_elapsed_ns",
+        minimum=1,
+    )
+    sample_target_ns = _integer(
+        benchmark.get("sample_target_ns"),
+        f"{label}.benchmark.sample_target_ns",
+        minimum=1,
+    )
+    if sample_target_ns < minimum_sample_elapsed_ns:
+        raise GateInputError(
+            f"{label}.benchmark.sample_target_ns is {sample_target_ns}, below "
+            f"the policy sample floor {minimum_sample_elapsed_ns}"
+        )
+    minimum_calibration_pilots = _integer(
+        policy.get("minimum_calibration_pilots"),
+        "policy.minimum_calibration_pilots",
+        minimum=1,
+    )
+    calibration_pilots = _integer(
+        benchmark.get("calibration_pilots"),
+        f"{label}.benchmark.calibration_pilots",
+        minimum=1,
+    )
+    if calibration_pilots < minimum_calibration_pilots:
+        raise GateInputError(
+            f"{label}.benchmark.calibration_pilots is {calibration_pilots}, below "
+            f"required {minimum_calibration_pilots}"
+        )
+    return repeats
 
 
 def _index_results(
@@ -244,19 +310,55 @@ def _comparison_mode(report: Mapping[str, Any], label: str) -> str:
     return mode
 
 
+def _pair_id(report: Mapping[str, Any], label: str) -> str:
+    benchmark = _mapping(report.get("benchmark"), f"{label}.benchmark")
+    pair_id = benchmark.get("pair_id")
+    if not isinstance(pair_id, str) or not pair_id:
+        raise GateInputError(f"{label}.benchmark.pair_id must be a non-empty string")
+    return pair_id
+
+
+def _elapsed_samples(
+    value: Any,
+    label: str,
+    repeats: int,
+    minimum_sample_elapsed_ns: int,
+) -> List[int]:
+    if not isinstance(value, list):
+        raise GateInputError(f"{label} must be an array")
+    if len(value) != repeats:
+        raise GateInputError(
+            f"{label} has {len(value)} samples, expected benchmark.repeats={repeats}"
+        )
+    samples = []
+    for index, raw_elapsed in enumerate(value):
+        elapsed = _integer(raw_elapsed, f"{label}[{index}]", minimum=1)
+        if elapsed < minimum_sample_elapsed_ns:
+            raise GateInputError(
+                f"{label}[{index}] is {elapsed} ns, below required sample duration "
+                f"{minimum_sample_elapsed_ns} ns"
+            )
+        samples.append(elapsed)
+    return samples
+
+
 def _read_result(
     result: Mapping[str, Any],
     label: str,
     required_auto_backend: int,
     minimum_optimized_iterations: int,
-) -> Tuple[float, float, float, float]:
+    repeats: int,
+    minimum_sample_elapsed_ns: int,
+) -> ResultTimings:
     actual_auto_backend = _integer(result.get("auto_backend"), f"{label}.auto_backend")
     if actual_auto_backend != required_auto_backend:
         raise GateInputError(
             f"{label}.auto_backend is {actual_auto_backend}, expected "
             f"{required_auto_backend}; AUTO dispatch changed"
         )
-    _integer(result.get("direct_iterations"), f"{label}.direct_iterations", minimum=1)
+    direct_iterations = _integer(
+        result.get("direct_iterations"), f"{label}.direct_iterations", minimum=1
+    )
     optimized_iterations = _integer(
         result.get("optimized_iterations"), f"{label}.optimized_iterations", minimum=1
     )
@@ -266,8 +368,38 @@ def _read_result(
             f"{minimum_optimized_iterations}"
         )
 
-    direct_ns = _finite(result.get("direct_ns"), f"{label}.direct_ns", positive=True)
-    radix2_ns = _finite(result.get("radix2_ns"), f"{label}.radix2_ns", positive=True)
+    direct_elapsed_ns = _elapsed_samples(
+        result.get("direct_elapsed_ns"),
+        f"{label}.direct_elapsed_ns",
+        repeats,
+        minimum_sample_elapsed_ns,
+    )
+    radix2_elapsed_ns = _elapsed_samples(
+        result.get("radix2_elapsed_ns"),
+        f"{label}.radix2_elapsed_ns",
+        repeats,
+        minimum_sample_elapsed_ns,
+    )
+    direct_ns = float(
+        statistics.median(elapsed / direct_iterations for elapsed in direct_elapsed_ns)
+    )
+    radix2_ns = float(
+        statistics.median(elapsed / optimized_iterations for elapsed in radix2_elapsed_ns)
+    )
+    reported_direct_ns = _finite(
+        result.get("direct_ns"), f"{label}.direct_ns", positive=True
+    )
+    reported_radix2_ns = _finite(
+        result.get("radix2_ns"), f"{label}.radix2_ns", positive=True
+    )
+    for field, reported, calculated in (
+        ("direct_ns", reported_direct_ns, direct_ns),
+        ("radix2_ns", reported_radix2_ns, radix2_ns),
+    ):
+        if not math.isclose(reported, calculated, rel_tol=1e-9, abs_tol=1e-6):
+            raise GateInputError(
+                f"{label}.{field} is inconsistent with its elapsed samples"
+            )
     reported_speedup = _finite(
         result.get("radix2_speedup"), f"{label}.radix2_speedup", positive=True
     )
@@ -282,7 +414,16 @@ def _read_result(
     )
     if delta < 0.0:
         raise GateInputError(f"{label}.radix2_max_abs_vs_direct must be >= 0")
-    return direct_ns, radix2_ns, speedup, delta
+    return ResultTimings(
+        direct_iterations=direct_iterations,
+        radix2_iterations=optimized_iterations,
+        direct_elapsed_ns=direct_elapsed_ns,
+        radix2_elapsed_ns=radix2_elapsed_ns,
+        direct_ns=direct_ns,
+        radix2_ns=radix2_ns,
+        speedup=speedup,
+        max_abs_delta=delta,
+    )
 
 
 def evaluate(
@@ -291,12 +432,18 @@ def evaluate(
     baseline: Optional[Mapping[str, Any]] = None,
 ) -> Evaluation:
     required_library, max_candidate_slowdown, regimes = _policy_regimes(policy)
-    _validate_metadata(report, policy, required_library, "report")
+    repeats = _validate_metadata(report, policy, required_library, "report")
     indexed = _index_results(report, "report")
 
     baseline_indexed: Optional[Dict[Tuple[str, int], Mapping[str, Any]]] = None
     if baseline is not None:
-        _validate_metadata(baseline, policy, required_library, "baseline")
+        baseline_repeats = _validate_metadata(
+            baseline, policy, required_library, "baseline"
+        )
+        if baseline_repeats != repeats:
+            raise GateInputError(
+                "report and baseline benchmark.repeats must match for paired samples"
+            )
         baseline_indexed = _index_results(baseline, "baseline")
         expected_mode = policy.get("required_baseline_comparison_mode")
         if not isinstance(expected_mode, str) or not expected_mode:
@@ -310,6 +457,12 @@ def evaluate(
                     f"{label}.benchmark.comparison_mode is {actual_mode!r}, "
                     f"expected {expected_mode!r}"
                 )
+        report_pair_id = _pair_id(report, "report")
+        baseline_pair_id = _pair_id(baseline, "baseline")
+        if report_pair_id != baseline_pair_id:
+            raise GateInputError(
+                "report and baseline benchmark.pair_id must identify the same paired run"
+            )
     else:
         expected_mode = policy.get("required_bootstrap_comparison_mode")
         if not isinstance(expected_mode, str) or not expected_mode:
@@ -331,6 +484,11 @@ def evaluate(
         "policy.minimum_optimized_iterations",
         minimum=1,
     )
+    minimum_sample_elapsed_ns = _integer(
+        policy.get("minimum_sample_elapsed_ns"),
+        "policy.minimum_sample_elapsed_ns",
+        minimum=1,
+    )
 
     measurements: List[Measurement] = []
     failures: List[str] = []
@@ -341,48 +499,90 @@ def evaluate(
             continue
         result = indexed[key]
         label = f"report result {profile}/{dimension}"
-        direct_ns, radix2_ns, speedup, delta = _read_result(
+        candidate_timing = _read_result(
             result,
             label,
             required_auto_backend,
             minimum_optimized_iterations,
+            repeats,
+            minimum_sample_elapsed_ns,
         )
 
         baseline_direct_ns: Optional[float] = None
         baseline_radix2_ns: Optional[float] = None
+        direct_slowdown: Optional[float] = None
+        radix2_slowdown: Optional[float] = None
         if baseline_indexed is not None:
             if key not in baseline_indexed:
-                failures.append(f"missing baseline result for {profile} dimension {dimension}")
+                failures.append(
+                    f"missing baseline result for {profile} dimension {dimension}"
+                )
             else:
-                baseline_direct_ns, baseline_radix2_ns, _, _ = _read_result(
+                baseline_timing = _read_result(
                     baseline_indexed[key],
                     f"baseline result {profile}/{dimension}",
                     required_auto_backend,
                     minimum_optimized_iterations,
+                    repeats,
+                    minimum_sample_elapsed_ns,
+                )
+                if (
+                    candidate_timing.direct_iterations
+                    != baseline_timing.direct_iterations
+                    or candidate_timing.radix2_iterations
+                    != baseline_timing.radix2_iterations
+                ):
+                    raise GateInputError(
+                        f"{profile}/{dimension} candidate and baseline iteration "
+                        "counts must match for paired samples"
+                    )
+                baseline_direct_ns = baseline_timing.direct_ns
+                baseline_radix2_ns = baseline_timing.radix2_ns
+                direct_slowdown = float(
+                    statistics.median(
+                        candidate_elapsed / baseline_elapsed
+                        for candidate_elapsed, baseline_elapsed in zip(
+                            candidate_timing.direct_elapsed_ns,
+                            baseline_timing.direct_elapsed_ns,
+                        )
+                    )
+                )
+                radix2_slowdown = float(
+                    statistics.median(
+                        candidate_elapsed / baseline_elapsed
+                        for candidate_elapsed, baseline_elapsed in zip(
+                            candidate_timing.radix2_elapsed_ns,
+                            baseline_timing.radix2_elapsed_ns,
+                        )
+                    )
                 )
 
         measurement = Measurement(
             profile=profile,
             dimension=dimension,
-            direct_ns=direct_ns,
-            radix2_ns=radix2_ns,
-            speedup=speedup,
+            direct_ns=candidate_timing.direct_ns,
+            radix2_ns=candidate_timing.radix2_ns,
+            speedup=candidate_timing.speedup,
             minimum_speedup=minimum,
-            max_abs_delta=delta,
+            max_abs_delta=candidate_timing.max_abs_delta,
             delta_limit=delta_limit,
             max_candidate_slowdown=max_candidate_slowdown,
             baseline_required=baseline is not None,
             baseline_direct_ns=baseline_direct_ns,
             baseline_radix2_ns=baseline_radix2_ns,
+            direct_slowdown=direct_slowdown,
+            radix2_slowdown=radix2_slowdown,
         )
         measurements.append(measurement)
-        if speedup < minimum:
+        if minimum is not None and candidate_timing.speedup < minimum:
             failures.append(
-                f"{profile}/{dimension} radix-2 speedup {speedup:.2f}x is below {minimum:.2f}x"
+                f"{profile}/{dimension} radix-2 speedup "
+                f"{candidate_timing.speedup:.2f}x is below {minimum:.2f}x"
             )
-        if delta > delta_limit:
+        if candidate_timing.max_abs_delta > delta_limit:
             failures.append(
-                f"{profile}/{dimension} max delta {delta:.3e} exceeds {delta_limit:.3e}"
+                f"{profile}/{dimension} max delta "
+                f"{candidate_timing.max_abs_delta:.3e} exceeds {delta_limit:.3e}"
             )
         if (
             measurement.direct_slowdown is not None
@@ -428,10 +628,12 @@ def render_markdown(
     library = report.get("library") if isinstance(report.get("library"), dict) else {}
     status = "PASS" if not failures else "FAIL"
     comparison = (
-        f"Candidate and base latency are interleaved on this runner; at most "
-        f"{max_candidate_slowdown:.2f}x slowdown is allowed per backend."
+        f"Candidate and base samples are paired and interleaved on this runner; "
+        f"the median paired slowdown may be at most {max_candidate_slowdown:.2f}x "
+        "per backend."
         if baseline_compared
-        else "Bootstrap mode: the base commit has no benchmarkable liblecore, so only same-build invariants apply."
+        else "Bootstrap mode: the base commit has no benchmarkable liblecore, so "
+        "only same-build invariants apply."
     )
     lines = [
         "## liblecore performance regression",
@@ -443,16 +645,26 @@ def render_markdown(
         f"liblecore `{library.get('version', 'unknown')}` (ABI `{library.get('abi', 'unknown')}`, "
         f"ISA `{library.get('isa', 'unknown')}`).",
         "",
-        "| Profile | Dimension | Direct (us) | Radix-2 (us) | Speedup | Required | Direct/base | Radix/base | Max delta | Limit | Result |",
+        "Layer: public C ABI through a fixed pre-resolved ctypes transition, with the "
+        "bind function, context, and array pointers resolved before timing. "
+        "Every latency cell contains raw per-repeat elapsed times that satisfy the "
+        "policy duration floor.",
+        "",
+        "| Profile | Dimension | Direct (us) | Radix-2 (us) | Speedup | Floor | Median paired direct/base | Median paired radix/base | Max delta | Limit | Result |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: |",
     ]
     for item in measurements:
         direct_base = "--" if item.direct_slowdown is None else f"{item.direct_slowdown:.2f}x"
         radix_base = "--" if item.radix2_slowdown is None else f"{item.radix2_slowdown:.2f}x"
+        speedup_floor = (
+            "--"
+            if item.minimum_speedup is None
+            else f"{item.minimum_speedup:.2f}x"
+        )
         lines.append(
             f"| {item.profile} | {item.dimension} | {item.direct_ns / 1000.0:.2f} | "
             f"{item.radix2_ns / 1000.0:.2f} | {item.speedup:.2f}x | "
-            f"{item.minimum_speedup:.2f}x | {direct_base} | {radix_base} | "
+            f"{speedup_floor} | {direct_base} | {radix_base} | "
             f"{item.max_abs_delta:.3e} | "
             f"{item.delta_limit:.3e} | {'PASS' if item.passed else 'FAIL'} |"
         )

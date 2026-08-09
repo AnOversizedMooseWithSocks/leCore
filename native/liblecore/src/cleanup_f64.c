@@ -18,16 +18,17 @@ static int lecore_cleanup_f64_vector_is_finite(
 
 static double lecore_cleanup_f64_cosine(
     const double *query,
+    double query_norm_squared,
+    double query_norm,
     const double *candidate,
     uint32_t dimension)
 {
-    double query_norm_squared = 0.0;
     double candidate_norm_squared = 0.0;
+    double candidate_norm;
     double dot = 0.0;
     uint32_t index;
 
     for (index = 0; index < dimension; ++index) {
-        query_norm_squared += query[index] * query[index];
         candidate_norm_squared += candidate[index] * candidate[index];
     }
     if (query_norm_squared == 0.0 || candidate_norm_squared == 0.0) {
@@ -36,8 +37,8 @@ static double lecore_cleanup_f64_cosine(
     for (index = 0; index < dimension; ++index) {
         dot += query[index] * candidate[index];
     }
-    return dot /
-        (sqrt(query_norm_squared) * sqrt(candidate_norm_squared));
+    candidate_norm = sqrt(candidate_norm_squared);
+    return dot / (query_norm * candidate_norm);
 }
 
 lecore_status LECORE_CALL lecore_cleanup_f64(
@@ -55,6 +56,9 @@ lecore_status LECORE_CALL lecore_cleanup_f64(
     size_t candidate;
     size_t best_index;
     double best_score;
+    double query_norm;
+    double query_norm_squared = 0.0;
+    uint32_t index;
 
     if (status != LECORE_OK) {
         return status;
@@ -92,15 +96,25 @@ lecore_status LECORE_CALL lecore_cleanup_f64(
         }
     }
 
+    for (index = 0; index < context->dimension; ++index) {
+        query_norm_squared += query[index] * query[index];
+    }
+    query_norm = sqrt(query_norm_squared);
     best_index = 0;
     best_score = lecore_cleanup_f64_cosine(
-        query, candidates, context->dimension);
+        query,
+        query_norm_squared,
+        query_norm,
+        candidates,
+        context->dimension);
 
     /* NumPy argmax treats the first NaN as the winning stable index. */
     if (!isnan(best_score)) {
         for (candidate = 1; candidate < candidate_count; ++candidate) {
             double score = lecore_cleanup_f64_cosine(
                 query,
+                query_norm_squared,
+                query_norm,
                 candidates + candidate * candidate_stride,
                 context->dimension);
             if (isnan(score)) {

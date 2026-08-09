@@ -43,6 +43,29 @@ static void lecore_hrr_bind_f32_raw(
     uint32_t output_index;
     uint32_t left_index;
 
+    if (dimension >= UINT32_C(32)) {
+        /*
+         * Preserve the definitional ascending reduction order per output,
+         * while exposing contiguous independent updates to the compiler.
+         */
+        memset(output, 0, (size_t)dimension * sizeof(*output));
+        for (left_index = 0; left_index < dimension; ++left_index) {
+            const float left = a[left_index];
+            uint32_t right_index = 0;
+            const uint32_t first_count = dimension - left_index;
+
+            for (; right_index < first_count; ++right_index) {
+                output[left_index + right_index] +=
+                    left * b[right_index];
+            }
+            for (; right_index < dimension; ++right_index) {
+                output[right_index - first_count] +=
+                    left * b[right_index];
+            }
+        }
+        return;
+    }
+
     for (output_index = 0; output_index < dimension; ++output_index) {
         float sum = 0.0f;
 
@@ -64,6 +87,27 @@ static void lecore_hrr_unbind_f32_raw(
 {
     uint32_t output_index;
     uint32_t composite_index;
+
+    if (dimension >= UINT32_C(32)) {
+        memset(output, 0, (size_t)dimension * sizeof(*output));
+        for (composite_index = 0;
+             composite_index < dimension;
+             ++composite_index) {
+            const float value = composite[composite_index];
+
+            for (output_index = 0;
+                 output_index <= composite_index;
+                 ++output_index) {
+                output[output_index] +=
+                    value * key[composite_index - output_index];
+            }
+            for (; output_index < dimension; ++output_index) {
+                output[output_index] += value *
+                    key[dimension + composite_index - output_index];
+            }
+        }
+        return;
+    }
 
     for (output_index = 0; output_index < dimension; ++output_index) {
         float sum = 0.0f;
@@ -324,12 +368,25 @@ lecore_status LECORE_CALL lecore_hrr_bind_fixed_f32(
         return LECORE_ENONFINITE;
     }
 
-    for (row = 0; row < row_count; ++row) {
-        lecore_hrr_bind_f32_selected(
+#if LECORE_ENABLE_RADIX2
+    if (context->backend == LECORE_BACKEND_RADIX2) {
+        lecore_internal_hrr_radix2_bind_fixed_f32(
             context,
             role,
+            rows,
+            row_count,
+            row_stride,
+            out_rows,
+            out_stride);
+        return LECORE_OK;
+    }
+#endif
+    for (row = 0; row < row_count; ++row) {
+        lecore_hrr_bind_f32_raw(
+            role,
             rows + row * row_stride,
-            out_rows + row * out_stride);
+            out_rows + row * out_stride,
+            context->dimension);
     }
     return LECORE_OK;
 }
@@ -388,12 +445,25 @@ lecore_status LECORE_CALL lecore_hrr_unbind_all_f32(
         return LECORE_ENONFINITE;
     }
 
-    for (key = 0; key < key_count; ++key) {
-        lecore_hrr_unbind_f32_selected(
+#if LECORE_ENABLE_RADIX2
+    if (context->backend == LECORE_BACKEND_RADIX2) {
+        lecore_internal_hrr_radix2_unbind_all_f32(
             context,
             trace,
+            keys,
+            key_count,
+            key_stride,
+            out_rows,
+            out_stride);
+        return LECORE_OK;
+    }
+#endif
+    for (key = 0; key < key_count; ++key) {
+        lecore_hrr_unbind_f32_raw(
+            trace,
             keys + key * key_stride,
-            out_rows + key * out_stride);
+            out_rows + key * out_stride,
+            context->dimension);
     }
     return LECORE_OK;
 }

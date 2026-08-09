@@ -4,13 +4,13 @@ These measurements characterize the ABI-0 preview; they do not define the API or
 particular, `LECORE_BACKEND_AUTO` remains mapped to the direct reference backend until representative adopters
 provide replayable workloads and a cross-platform threshold policy is approved.
 
-## First portable-backend baseline
+## First adapter-backed baseline (historical)
 
 The table below records bind latency from a release build on an Apple M-series arm64 host running macOS 26.3.1,
 Apple Clang 17, Python 3.14.5, and NumPy 2.4.4. Values are medians of five samples, in microseconds per call. The
-benchmark reuses contexts and output buffers; as a Python `ctypes` driver, it includes foreign-function call
-overhead. Inputs are deterministic unit vectors. Direct-backend iteration counts are reduced at large dimensions
-to keep the run bounded.
+original benchmark reused contexts and output buffers but timed the checked Python `Context.bind` adapter as well
+as the foreign-function call. These values remain useful historical evidence, but the CI gate described below
+times the public C ABI directly and must not be compared with this table. Inputs are deterministic unit vectors.
 
 ### f64 bind
 
@@ -46,6 +46,26 @@ The portable radix-2 implementation clearly improves on the quadratic oracle at 
 host. Optimized NumPy FFT was still faster at dimensions 512 and 1024, so this is evidence for a portable native
 backend—not a claim that it replaces platform-tuned FFT libraries.
 
+## Ordered-kernel optimization review
+
+The optimization review compared this implementation with pre-optimization commit `bd8da06`. Both Apple Clang 17
+Release libraries were loaded by one process, given identical deterministic inputs and iteration counts, and timed
+as ten alternating candidate/base pairs. Values below are median microseconds per pre-resolved public-ABI call;
+improvement is the reciprocal of the median paired candidate/base ratio.
+
+| Profile | Dimension | Direct before | Direct now | Direct improvement | Radix-2 before | Radix-2 now | Radix-2 improvement |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| f64 | 256 | 34.05 | 6.86 | 4.97x | 3.26 | 3.18 | 1.02x |
+| f64 | 512 | 161.57 | 28.96 | 5.60x | 6.83 | 6.61 | 1.03x |
+| f64 | 1024 | 712.05 | 113.73 | 6.26x | 14.76 | 14.18 | 1.04x |
+| f32 | 256 | 34.66 | 4.18 | 8.29x | 3.33 | 3.13 | 1.06x |
+| f32 | 512 | 161.48 | 14.01 | 11.50x | 6.97 | 6.46 | 1.08x |
+| f32 | 1024 | 708.79 | 62.52 | 11.36x | 14.31 | 13.43 | 1.07x |
+
+The direct result retains the ISA's ascending reduction order; direct conformance remained bit-for-bit exact.
+Radix-2 maximum absolute disagreement with direct was `1.665e-16` for f64 and `1.192e-7` for f32 in this run.
+These measurements do not change AUTO dispatch.
+
 ## Reproducing
 
 Build a shared release library, then run:
@@ -56,52 +76,68 @@ python3 benchmarks/bench_liblecore.py \
   --output /tmp/liblecore-benchmark.json
 ```
 
-The JSON report captures host and library metadata, setup cost, scratch requirements, iteration counts, timings,
-and direct-versus-radix numerical error.
+The default descriptive report captures host and library metadata, setup cost, scratch requirements, iteration
+counts, timings, a NumPy reference for f64, and direct-versus-radix numerical error. Its bind timing uses a
+pre-resolved public C ABI call; it includes the fixed Python-to-C `ctypes` transition but not `Context.bind`
+validation and lock overhead. Pass `--gate` to omit the setup and NumPy metrics and emit the stricter CI-gate
+metadata.
 
 ## CI regression gate
 
 The `Linux Release performance regression` job builds the shared library with GCC in Release mode on GitHub's
-Ubuntu 24.04 runner. It pins Python 3.12 and NumPy 2.4.4, then measures both f64 and f32 bind at dimensions 256,
-512, and 1024. Each reported latency is the median of ten samples; the target work is raised to 64,000,000 so
-each sample contains enough calls to reduce timer and foreign-function-interface noise. The radix-2 timing loop
-always executes at least 4,000 calls per sample, including dimension 1024. On the original Apple baseline this
-puts the guarded direct and radix-2 samples in roughly the 30–80 millisecond range.
+Ubuntu 24.04 runner. It pins Python 3.12 and NumPy 2.4.4, then measures f64 and f32 bind at dimensions 256, 512,
+and 1024. The timed callable is resolved once per cell to the exported `lecore_hrr_bind_f64` or
+`lecore_hrr_bind_f32` symbol, native context handle, and input/output pointers. Context setup, Python adapter
+validation, status formatting, scratch queries, and NumPy are outside the timed region. CI passes `--gate`, so
+ungated setup and application-level NumPy metrics are not collected.
+
+Before collecting samples, the harness runs three equal-count pilots per operation and calibrates from the fastest
+observed per-call result toward a 30 millisecond sample target with 25% headroom. A paired run considers both
+candidate and base pilots and selects one shared iteration count. If any collected candidate or base sample is
+still shorter than the target, the entire batch is discarded, the shared count is increased from the shortest
+sample, and both sides are measured again. Acquisition is limited to three attempts and 1,000,000 calls per
+sample; failure to reach the target aborts without writing an undersized final report. This is a symmetric
+measurement-integrity retry, not a second chance for a candidate that failed the regression policy.
+
+The final report stores the raw elapsed nanoseconds for every repeat and the iteration count used. The checker
+independently recomputes each median latency and rejects a report if any of the ten direct or radix-2 samples is
+shorter than 10 milliseconds. This protects the gate when an implementation gets substantially faster or a pilot
+runs under transient contention; fixed iteration counts or a single slow pilot would silently turn faster final
+cells back into timer-noise measurements.
 
 On pull requests, the job checks out the exact base commit into a separate directory and builds it with the same
-compiler and options as the candidate. One benchmark process loads both libraries and measures each guarded cell
-as an interleaved pair: base and candidate alternate which runs first on every repeat, with identical inputs,
-iteration counts, Python environment, dimensions, and work target. The committed policy permits at most a 1.35x
-candidate slowdown against that same-run base for both direct and radix-2 latency in every guarded
-profile/dimension. Interleaving controls short-term frequency and scheduling drift far better than running two
-complete reports in sequence; it does not pretend that a hosted runner is perfectly isolated.
+compiler and options as the candidate. One benchmark process loads both libraries. Each candidate sample and its
+base sample share an index and pair identifier, use the same inputs and iteration count, and alternate which runs
+first. The checker computes candidate/base slowdown for every aligned repeat and gates the median of those paired
+ratios—not the ratio of two independently aggregated medians. The committed policy permits at most a 1.35x
+median paired slowdown for both direct and radix-2 in every guarded profile/dimension. The workflow performs one
+reported measurement and one enforcement pass; it does not give a failing candidate an asymmetric policy retry.
 
-If the first comparison fails, the workflow repeats the interleaved pair once and applies the same policy to that
-confirmation report. Only a failure that persists in the confirmation run blocks the job. This single retry
-handles a transient scheduled-runner interruption without averaging it into the score, while a repeatable
-slowdown or malformed report still fails. Both initial and confirmation reports are retained.
-
-The gate also evaluates relative invariants within the candidate report. It checks that:
+The report schema marks the measurement layer as `public-c-abi`, the mode as `pre-resolved-bind`, the metrics
+scope as `gate`, and the comparison as either `paired-interleaved` or bootstrap `single`. The checker requires
+those values and also verifies that:
 
 - every expected profile and dimension is present and finite;
-- radix-2 remains numerically close to the direct oracle within the profile-specific error limit;
-- radix-2 keeps a conservative minimum speedup over direct at the guarded dimensions;
-- report metadata confirms the expected schema, ABI, ISA, capabilities, and interleaved comparison mode; and
-- an actual `LECORE_BACKEND_AUTO` context resolves to direct for every measured profile and dimension.
+- every candidate and base timing summary agrees with its raw repeat data;
+- paired reports have the same pair identifier, repeat count, and per-backend iteration counts;
+- radix-2 remains numerically close to the direct oracle within `1e-12` for f64 and `1e-4` for f32;
+- the report has the expected schema, ABI, ISA, and capabilities; and
+- a real `LECORE_BACKEND_AUTO` context resolves to direct for every measured profile and dimension.
 
-For both profiles the minimum same-run speedups are 2.0x at dimension 256, 5.0x at 512, and 10.0x at 1024.
-The maximum direct-versus-radix absolute delta is `1e-12` for f64 and `1e-4` for f32. These floors sit well below
-the recorded baseline ratios, but still fail if radix-2 falls back to quadratic work or suffers a major relative
-regression. The conformance jobs retain the tighter, operation-wide numerical contract.
+The policy intentionally does not require a fixed radix-2/direct speedup. Improving the direct backend can reduce
+that ratio even when both backends improve, so candidate/base paired ratios are the regression signal. The
+checker supports optional per-dimension speedup floors if a future backend contract needs them.
 
 This pull request introduces liblecore to a base branch that does not yet contain `native/liblecore`. In that one
-bootstrap case, no valid base artifact can be built, so CI deliberately runs the
-candidate invariant checks without `--baseline`. Once liblecore is present on the base branch, pull requests
+bootstrap case, no valid base artifact can be built, so CI deliberately runs the candidate integrity, numerical,
+AUTO, and measurement-duration checks without `--baseline`; it makes no candidate/base performance claim. Once
+liblecore is present on the base branch, pull requests
 automatically take the candidate-versus-base path. Pushes and manual runs also use the invariant-only path because
 they have no pull-request base SHA.
 
-The checker writes the measured score table and every applicable policy result to the GitHub job summary. The raw
-candidate and, when available, base JSON reports are uploaded together as a 30-day artifact even when the policy
+The checker writes median public-ABI latency, optional within-candidate speedup, numerical error, and median paired
+slowdown to the GitHub job summary. The raw candidate and, when available, base JSON reports are uploaded together
+as a 30-day artifact even when the policy
 step fails, so a regression can be inspected without rerunning CI. The workflow uses repository read permission
 only and does not post or update pull-request comments.
 
@@ -124,6 +160,8 @@ python3 benchmarks/bench_liblecore.py \
   --profiles both \
   --repeats 10 \
   --target-work 64000000 \
+  --sample-target-ms 30 \
+  --gate \
   --output build/liblecore-performance/liblecore-performance.json \
   --baseline-output build/liblecore-performance/liblecore-performance-base.json
 python3 benchmarks/check_liblecore_performance.py \
