@@ -1,0 +1,7 @@
+NoSQLite source snapshot
+
+Repository: https://github.com/atimics/nosqlite
+Commit: 8964da27670c752121b8e6d26d113577429b02f6
+
+This source is vendored so Docker builds do not require access to the private
+repository. Update it only by replacing the snapshot with a reviewed commit.

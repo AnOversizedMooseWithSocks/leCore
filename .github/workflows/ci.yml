@@ -81,7 +81,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt -r requirements-x402.txt
 
       - name: Run the test suite
         # Two speed levers work together here:
@@ -309,7 +309,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt -r requirements-x402.txt
 
       - name: Sanity-check the partition (exact cover, disjoint, deterministic)
         run: python tools/shard_tests.py --selfcheck --num-shards 4

@@ -132,6 +132,7 @@ The core requires **only NumPy**. Everything else is declared as a named "extra"
 | `zig` | `ziglang` | native batch kernels + raymarcher (`holographic_zigrun`, `zigmarch`); ships the whole Zig toolchain, no system compiler needed |
 | `wgsl` | `wgpu` | **the vendor-neutral GPU path** (`holographic_wgpurun`): compute on Vulkan / Metal / DX12 / WebGPU, so it works on Apple silicon, AMD and Intel Arc as well as NVIDIA. Prebuilt wheels, no system toolchain |
 | `gpu` | `cupy` | the CuPy backend (`holographic_backend`) — **NVIDIA/CUDA only**; see the CuPy note |
+| `x402` | `x402[fastapi,evm]`, `uvicorn` | paid API publishing (`holographic_x402_api`) |
 | `ui` | `flask`, `pillow` | the browser UI (`app.py`) and image load/save |
 | `images` | `pillow` | image I/O beyond stdlib PNG (jpg/webp/…) without pulling in Flask — a headless subset of `ui` |
 | `dev` | `pytest`, `matplotlib`, `nltk` | running the test suite, generating plots, and loading the text corpora the benchmarks/ablations use |

@@ -40,7 +40,7 @@ setup(
     long_description_content_type="text/markdown",
     author="AnOversizedMooseWithSocks",
     url="https://github.com/AnOversizedMooseWithSocks/leCore",
-    py_modules=["lecore", "holographic_service"],   # <- top-level: the import-lecore shim + the standalone HTTP service (from holographic_service import serve)
+    py_modules=["lecore", "holographic_service", "holographic_product", "holographic_x402_api"],
     packages=engine_packages + ["lecore_data"],   # <- the real holographic/ package tree + the runtime data package
     # The runtime data (the WordNet dictionary, material property JSON) ships as the small `lecore_data` PACKAGE, so
     # it is carried into the wheel and resolves the same from a clone or an install (see lecore_data/__init__.py).
@@ -84,6 +84,7 @@ setup(
                                           #   `cupy-cuda12x` instead, so it is best installed by hand (and left
                                           #   out of `all`, which is why `wgsl` and `gpu` are separate extras
                                           #   rather than one).
+        "x402":     ["x402[fastapi,evm]>=2.15,<3", "uvicorn>=0.51,<1", "cryptography>=46,<47"],  # paid API publishing
         # -- optional tooling --
         "ui":       ["flask", "pillow"],  # the browser UI (app.py) + image load/save
         "images":   ["pillow"],           # image I/O beyond stdlib PNG (jpg/webp/... via mind.save_render) --
@@ -95,6 +96,6 @@ setup(
         #    note above); wgpu is INCLUDED, because it ships prebuilt wheels for every platform and needs no
         #    system toolchain -- the reason to leave CuPy out simply does not apply to it. --
         "all":      ["numba", "pyfftw", "sympy", "flask", "pillow", "pytest", "matplotlib", "ziglang", "nltk",
-                     "wgpu"],
+                     "wgpu", "x402[fastapi,evm]>=2.15,<3", "uvicorn>=0.51,<1", "cryptography>=46,<47"],
     },
 )
