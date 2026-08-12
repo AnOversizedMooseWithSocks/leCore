@@ -1,0 +1,49 @@
+{
+  "schema": "lecore.qwen35-arweave-publication-receipt.v1",
+  "published_at": "2026-08-12T22:07:00Z",
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+  "resolved_outcome": "execution_failure",
+  "publisher": {
+    "service": "ArDrive Turbo signed free upload",
+    "sdk": "@ardrive/turbo-sdk@1.42.0",
+    "ownership": "The uploads used one-use in-memory Arweave identities. Their private keys were never persisted."
+  },
+  "publication_manifest": {
+    "path": "publication-manifest.json",
+    "bytes": 13597,
+    "sha256": "80ebc69fc40c4bbab9e3692a1713217fba007d1005adf2f23be79be739d1b836",
+    "transaction_id": "6TJSYOfCDas0zFLEsBs38CsiAwrWTCp5ui2V_tki1YM"
+  },
+  "arweave_path_manifest": {
+    "transaction_id": "jguWIRC2oP5gNWNmGNNeLIGD9t155X6orv9FREZmHBk",
+    "bytes": 7248,
+    "sha256": "7aef3e9daa7738a7d697a7706c4e6453b4a03f1d63e4523ca673dfadb472cfe3",
+    "item_count": 61,
+    "gateway_url": "https://arweave.net/jguWIRC2oP5gNWNmGNNeLIGD9t155X6orv9FREZmHBk/",
+    "index_url": "https://arweave.net/jguWIRC2oP5gNWNmGNNeLIGD9t155X6orv9FREZmHBk/publication-manifest.json",
+    "owner": "I5Z-EnOhkasZjtaMu9IbSVK3duWSecQpZ0lnKFEjjRg"
+  },
+  "selected_items": {
+    "native_evidence": {
+      "transaction_id": "1BmD-TzyDMTmuh5GIkYTPYlGj12GEmbez1k5sWqThIc",
+      "sha256": "101590b922f3877f88971073171fa622d29af62cad52dca1990e3100d122c204"
+    },
+    "ledger_events": {
+      "transaction_id": "JZTmlxINH2Aq5ionGFCna400Uu605syGK2MUdydXzLU",
+      "sha256": "0254b4dc60bf2903cf308104bf3f8c34d64fb050fb1e4e014590fe0c1847dc35"
+    },
+    "ledger_verification": {
+      "transaction_id": "aMGzn_CFX4v3gXo-Ib243PK6GnvF5Crv5WlgEl4_k-o",
+      "sha256": "5e03d79a86e57f015be7b79666349b5813a1a702421883e8b58f3ed3a6a73663"
+    }
+  },
+  "confirmation": {
+    "status_service": "https://upload.ardrive.io/v1/tx/{transaction_id}/status",
+    "transactions_confirmed": 63,
+    "total_winc_charged": 0
+  },
+  "superseded_path_manifest": {
+    "transaction_id": "lPXKEJON5Xa4wXswwRwFv2GWqrTPo7yuOhMtVKyOpVI",
+    "reason": "It omitted publication-manifest.json from its path table and was replaced before the receipt was committed."
+  }
+}

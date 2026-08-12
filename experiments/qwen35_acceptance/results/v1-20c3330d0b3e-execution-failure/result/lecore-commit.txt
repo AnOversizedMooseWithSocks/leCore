@@ -1,0 +1,7 @@
+commit a04ab5692be38f06120aba4b0bc5e2a284eb2c79
+Author:     atimics <atimics@ratimics.com>
+AuthorDate: Wed Aug 12 14:31:25 2026 -0700
+Commit:     atimics <atimics@ratimics.com>
+CommitDate: Wed Aug 12 14:31:25 2026 -0700
+
+    fix: enforce qwen pre-install controls

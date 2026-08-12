@@ -1,0 +1,23 @@
+{
+  "schema": "lecore.ilxyr-exporter-provenance.v1",
+  "export_mode": "read_only_isolated_snapshot",
+  "source_repository": "/Users/ratimics/develop/ilxyr",
+  "source_base_commit": "e92382ff2a5e8714466533a160f6609b4ef9cee8",
+  "source_worktree_clean": false,
+  "source_snapshot": "/private/tmp/ilxyr-exporter-snapshot",
+  "source_snapshot_note": "The exporter was compiled from an isolated copy of the user's existing dirty ilxyr worktree. The original worktree and the verified AWS ledger were not modified.",
+  "exporter_binary": {
+    "path": "/private/tmp/ilxyr-exporter-snapshot/target/debug/ilxyr",
+    "sha256": "628c153cfe64a1b916551194f7cc41fb5dbc13954a7d2b9a956641b71e97bd29"
+  },
+  "source_files": {
+    "Cargo.lock": "4d5a64a9ce286006325c912c8e3e716c427e50e01cc28d72d72d9978d1a7b42b",
+    "crates/ilxyr-core/src/interop.rs": "b3db6eb51891abecb241bc38751b78d8eb67a4245aed7d28e514c858223d9982",
+    "crates/ilxyr-cli/src/main.rs": "e3c3d8d7364fbe22af4b927f7b01c58b57f68480e242382c03ffd7854f9d71cb"
+  },
+  "exports": {
+    "evidence.native.json": "101590b922f3877f88971073171fa622d29af62cad52dca1990e3100d122c204",
+    "evidence.ro-crate.json": "7758207b7bf7407e2e3ddb526aab3f049c4f2579702700b733e740a3a44dbd9d",
+    "evidence.in-toto.json": "f9bc730a5ade64659e4e523f115cfc71f2141757cecdbb8a520f87a36a83cc52"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "checks": {
+    "complete_top_level_model_manifest": true,
+    "corpora_distinct": true,
+    "evaluation_corpus": true,
+    "installation_corpus": true,
+    "minimum_tokens": true,
+    "source_commit": true,
+    "spectral_disabled": true,
+    "timeout": true,
+    "tokenizer": true,
+    "weights": true
+  },
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance"
+}

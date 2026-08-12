@@ -1,0 +1,121 @@
+{
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+  "compiled_ref": "artifact://sha256/3d4c5b79be266085e4a3495a83cbfe3c4c8434c230bef81e7b6a19ed7eeb3ff6",
+  "forecasts": 2,
+  "total_stake": 10,
+  "funding_commitments": 1,
+  "funded_compute_credits": 100,
+  "latest_admission": {
+    "schema": "ilxyr.admission.v1",
+    "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+    "accepted": true,
+    "checks": [
+      {
+        "gate": "methodology",
+        "passed": true,
+        "detail": "4/4 required research stages resolved"
+      },
+      {
+        "gate": "outcome_contract",
+        "passed": true,
+        "detail": "3 frozen mutually evaluated outcomes declared"
+      },
+      {
+        "gate": "forecast_participation",
+        "passed": true,
+        "detail": "2/2 distinct forecasters"
+      },
+      {
+        "gate": "forecast_stake",
+        "passed": true,
+        "detail": "10/10 forecast credits staked"
+      },
+      {
+        "gate": "compute_funding",
+        "passed": true,
+        "detail": "100/100 compute credits committed"
+      },
+      {
+        "gate": "executor_available",
+        "passed": true,
+        "detail": "local-command adapter is installed"
+      },
+      {
+        "gate": "weight_protection",
+        "passed": true,
+        "detail": "local execution is limited to public-weight handles"
+      },
+      {
+        "gate": "local_execution_policy",
+        "passed": true,
+        "detail": "local execution requires network=open and an absolute executable path"
+      },
+      {
+        "gate": "code_policy",
+        "passed": true,
+        "detail": "local-command directly executes the declared program"
+      },
+      {
+        "gate": "export_policy",
+        "passed": true,
+        "detail": "local-command records stdout, stderr, and metric artifacts"
+      },
+      {
+        "gate": "reviewer_separation",
+        "passed": true,
+        "detail": "proposer and engineering reviewer use distinct handles"
+      },
+      {
+        "gate": "forecaster_separation",
+        "passed": true,
+        "detail": "proposer and forecasters use distinct handles"
+      }
+    ],
+    "decided_at_ms": 1786571246029
+  },
+  "execution_started": true,
+  "latest_run": {
+    "schema": "ilxyr.run.v1",
+    "id": "run:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance:1786571246690",
+    "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+    "started_at_ms": 1786571246690,
+    "completed_at_ms": 1786571246741,
+    "exit_code": 1,
+    "timed_out": false,
+    "stdout": "",
+    "stderr": "Traceback (most recent call last):\n  File \"/opt/qwen35-acceptance/lecore/experiments/qwen35_acceptance/run.py\", line 17, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'\n",
+    "output_truncated": false,
+    "metrics": {}
+  },
+  "latest_evidence": {
+    "schema": "ilxyr.evidence.v1",
+    "id": "evidence:run:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance:1786571246690",
+    "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+    "run_ref": "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731",
+    "resolved_outcome": "execution_failure",
+    "metrics": {},
+    "recorded_at_ms": 1786571246771,
+    "authority": {
+      "level": "corpus_proxy",
+      "scope": {
+        "seeds": [
+          0
+        ],
+        "eval_set": "dataset://lecore/qwen-evaluation/a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94",
+        "coverage": 1.0
+      },
+      "provenance": {
+        "artifact_hashes": [
+          "artifact://sha256/04bed9185d0a9647fea419ac6cb2f671a106ae60bc82c23b172aacff6dbcaf0b",
+          "artifact://sha256/3b4c72fe06906bda15e22dac5fd12f9d1b1347f687f3656bbaa6ff3c3d11cbd1",
+          "artifact://sha256/50519e75792a64ca250e673ed7b05be888419d53969be5ec4c074fb50ed8ebb7",
+          "artifact://sha256/826a9741b544257f3658ecb4014abc4bcaee45a33be7e5e467dc1cb2786fc17e",
+          "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731"
+        ],
+        "model_lineage": "model://Qwen/Qwen3.5-0.8B/20c3330d0b3e00c98b38e7813202b12952f37d6a4415a30da103c9bfe994d680",
+        "checker": "checker://lecore/qwen35-acceptance/v1"
+      }
+    },
+    "lane": "promoted"
+  }
+}
