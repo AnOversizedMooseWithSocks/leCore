@@ -135,7 +135,7 @@ def test_generator_emits_complete_ilxyr_contract(tmp_path):
     experiment = json.loads((project / "experiment.json").read_text())
     manifest = json.loads((project / "project.json").read_text())
     assert [metric["name"] for metric in experiment["metrics"]] == list(contract.METRIC_NAMES)
-    assert experiment["execution"]["program"] == str(Path(sys.executable).resolve())
+    assert experiment["execution"]["program"] == str(Path(sys.executable).absolute())
     assert "--research-spectral" not in experiment["execution"]["args"]
     assert experiment["execution"]["args"][3:5] == [
         str(installation_corpus.resolve()), str(evaluation_corpus.resolve())]
@@ -151,6 +151,30 @@ def test_generator_emits_complete_ilxyr_contract(tmp_path):
                  "experiment-design.json", "forecast-empirical.json",
                  "forecast-mechanistic.json", "funding.json"):
         assert (project / name).is_file()
+
+
+def test_generator_preserves_virtual_environment_python_path(tmp_path):
+    output, _ = build_fixture(tmp_path)
+    installation_corpus = tmp_path / "installation.txt"
+    evaluation_corpus = tmp_path / "evaluation.txt"
+    installation_corpus.write_text("Installation material. " * 400)
+    evaluation_corpus.write_text("Held-out evaluation material. " * 400)
+    venv_python = tmp_path / "venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(Path(sys.executable).resolve())
+    project = tmp_path / "project"
+
+    completed = subprocess.run(
+        [str(venv_python),
+         str(ROOT / "experiments" / "qwen35_acceptance" / "generate.py"),
+         str(output), str(installation_corpus), str(evaluation_corpus),
+         str(project), "--python", str(venv_python), "--min-tokens", "1000"],
+        cwd=tmp_path, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+
+    experiment = json.loads((project / "experiment.json").read_text())
+    assert experiment["execution"]["program"] == str(venv_python.absolute())
+    assert experiment["execution"]["program"] != str(venv_python.resolve())
 
 
 def test_generator_rejects_reused_installation_and_evaluation_corpus(tmp_path):

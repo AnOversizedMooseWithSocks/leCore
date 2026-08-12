@@ -94,7 +94,11 @@ def main(argv=None):
     out_dir = args.out_dir.expanduser().resolve()
     installed_dir = ((args.installed_dir.expanduser().resolve())
                      if args.installed_dir else out_dir / "installed-checkpoint")
-    python = args.python.expanduser().resolve()
+    # Preserve the selected executable path instead of dereferencing its final
+    # symlink.  A venv's ``python`` normally points at the system interpreter;
+    # resolving it records /usr/bin/python and silently drops the venv's site
+    # packages when ilxyr executes the absolute program.
+    python = args.python.expanduser().absolute()
     if (not model_dir.is_dir() or not installation_corpus.is_file()
             or not evaluation_corpus.is_file() or not python.is_file()):
         ap.error("model_dir, both corpora, and --python must exist")
