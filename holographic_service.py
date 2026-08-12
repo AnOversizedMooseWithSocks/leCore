@@ -796,6 +796,12 @@ def _jsonable(o, refs=None):
         return None
     if o is None or isinstance(o, (bool, int, float, str)):
         return o
+    if isinstance(o, (bytes, bytearray)):
+        # Codec blobs (C-2..C-6) must survive the wire: base64 under a sentinel key the
+        # decode faculties accept straight back. Before this, bytes fell through to the
+        # typed-summary branch -- a blob you could see but never decode remotely.
+        import base64
+        return {"__bytes_b64__": base64.b64encode(bytes(o)).decode("ascii")}
     if isinstance(o, (np.floating, np.integer)):
         v = float(o)
         return None if not math.isfinite(v) else v

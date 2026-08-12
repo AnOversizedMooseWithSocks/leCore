@@ -20,6 +20,22 @@ MEASURED (on a real (log-return, log-volume) density from the SOL market data)
 
 DESIGN NOTES
   * Isotropic splats and a small fixed scale set keep the fit a clean, deterministic matching
+    KEPT NEGATIVE -- NOT A MODEL-WEIGHT CODEC (measured, three subjects, and the reason is
+    structural rather than a tuning failure). Fitting neural-network tensors as Gaussian
+    superpositions was tested against the standing baseline (flat uniform quantization at
+    matched bytes): on a SMOOTH structured field splats are competitive (K=32, 768 B,
+    rel 0.088 vs uniform 4-bit 501 B, rel 0.103), but on trained-weight regimes they
+    return rel 0.977-0.997 -- they explain essentially NOTHING. Same for the KV cache
+    over token positions (rel 0.997 at 1536 B where uniform 4-bit gets 0.129), whose
+    measured adjacent-position correlation is 0.014.
+    WHY, and this is the general law worth carrying: a Gaussian primitive assumes SPATIAL
+    LOCALITY -- that neighbouring coordinates hold related values. A weight matrix has no
+    such geometry: permute its rows and columns and you have an equivalent network, so
+    "adjacent" is meaningless. Splats are the right tool for fields with real geometry
+    (images, volumes, scenes, SDFs) and the wrong one for permutation-invariant tensors.
+    Before proposing a field method for weights, measure the adjacency correlation first;
+    at 0.014 there is no locality to exploit and no amount of K will create it.
+
     pursuit. KEPT NEGATIVE / SCOPE: anisotropic covariances and gradient refinement (full 3DGS)
     are deliberately out of scope here -- isotropic matching pursuit is the honest baseline, and
     real images plateau in quality once the smooth structure is captured (noise is, correctly,

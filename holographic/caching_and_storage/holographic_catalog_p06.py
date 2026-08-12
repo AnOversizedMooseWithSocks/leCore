@@ -2327,6 +2327,106 @@ def register_p06(c):
                               "make more motion like this", "video texture generation",
                               "animate like my examples", "motion model from clips"))
 
+    c.register_capability(
+        "Codec atlas + honest router (which compressor, measured on YOUR data)",
+        "machine_map applied to compression: mind.codec_atlas() is the SPEC SHEET -- every codec "
+        "unit (zlib/lzma, low-rank/tucker/tt, rate-distortion, pack_images, event codec, "
+        "sequence-predictive, generator rung, cold storage) with its real module+symbol, "
+        "pays-condition, and kept negatives in one table. mind.codec_place(x, max_error=...) "
+        "MEASURES every applicable unit on x and ranks by bytes, priced against the zlib "
+        "baseline, with 'store raw' a first-class row. Lossy units run ONLY under a stated "
+        "error budget (never 99% energy; loss is never volunteered). Refusal on incompressible "
+        "data is the finding.",
+        example="r = mind.codec_place(__import__('numpy').add.outer(__import__('numpy').sin(__import__('numpy').arange(64)/7.), __import__('numpy').cos(__import__('numpy').arange(64)/9.)), max_error=1e-6); print(r['best'], r['rows'][0])",
+        native=True, aliases=("which codec should I use", "compare compressors on my data",
+                              "benchmark all compressors", "pick a compression method automatically",
+                              "codec atlas", "route data to the best compressor",
+                              "will my data compress and how", "compression spec sheet"))
+
+    c.register_capability(
+        "Predictive residual codec (model + coded error, exact or budgeted)",
+        "mind.residual_encode(y) compresses a 1-D signal as its piecewise LAWS plus the coded "
+        "error: decompose_piecewise fits per-segment formulas (stored as exact recipes), the "
+        "residual is byte-plane shuffled and entropy-coded. Exact by default -- decode is "
+        "bit-identical (float fixup + verbatim patch list). With max_error, near-lossless "
+        "within the budget (measured 8.5x vs zlib on a noisy 3-regime signal; exact mode caps "
+        "at ~1.1x -- irreducible mantissa planes). Self-refuses into mode='raw' when the model "
+        "head does not pay. mind.residual_decode(blob) inverts; codec_place routes 1-D here.",
+        example="import numpy as np; y=np.sin(2*np.pi*np.arange(600.)/23); r=mind.residual_encode(y, max_error=1e-4); out=mind.residual_decode(r['blob']); print(r['report']['mode'], r['report']['ratio_vs_zlib'], float(np.abs(out-y).max()))",
+        native=True, aliases=("pack this array smaller than zlib", "beat zlib on a float array", "quantize my weights", "quantize model weights with an error bound", "entropy code residuals after a model predicts",
+                              "predictive residual codec", "compress a signal exactly with a model plus error",
+                              "lossless model based compression", "store the law and the leftovers",
+                              "model plus residual compression", "fit then code the error"))
+
+    c.register_capability(
+        "Surprise-weighted rate allocation (code the news finely, the expected coarsely)",
+        "mind.surprise_code(batch, reference, fine_step) spends bits where the information is: "
+        "the reference corpus's drift model reads density in one dot product (z=<enc(x),mu>), "
+        "points in its VOID (the news) are quantized at fine_step, predicted points at "
+        "fine_step*coarsen -- same news fidelity as uniform-fine coding, MEASURED 1.71x fewer "
+        "bytes (coarsen sweep 16/64/128/256 -> 1.17/1.36/1.57/1.71x; the varint floor caps it). "
+        "A chance gate refuses the split when the news share sits at the quantile's own "
+        "expected level. Lossy by design on the predicted mass. mind.surprise_decode inverts.",
+        example="import numpy as np; rng=np.random.default_rng(0); ref=rng.standard_normal((100,2))*0.05+0.5; batch=np.vstack([ref[:60], rng.uniform(0,1,(25,2))]); r=mind.surprise_code(batch, ref, fine_step=1e-4); print(r['report']['mode'], round(r['report']['ratio_vs_uniform_fine'],2))",
+        native=True, aliases=("allocate bits where the information is",
+                              "spend more bits on surprising samples",
+                              "code the news finely and the expected coarsely",
+                              "surprise weighted compression", "importance weighted quantization",
+                              "variable rate coding by predictability",
+                              "bit allocation by surprise"))
+
+    c.register_capability(
+        "Distributional codec (store the distribution, not the samples)",
+        "mind.distribution_encode(points, bits=6) compresses a sample bank to its drift "
+        "model's d+1 moment hypervectors, quantized at 4/6/8 bits with per-array scales -- "
+        "MEASURED 10.5x (6-bit) / 21.5x (4-bit) vs zlib at coverage 1.0 on a 1500-point "
+        "two-cluster bank. Decode returns a DriftModel to SAMPLE from: points LIKE the "
+        "originals, never the originals (exactness wants codec_place/residual_encode). The "
+        "report prices break_even_n (below it, pays=False) and carries the post-quantization "
+        "generation audit, so a broken distribution is visible at encode time. "
+        "mind.distribution_decode inverts.",
+        example="import numpy as np; rng=np.random.default_rng(0); pts=np.vstack([c+0.05*rng.standard_normal((800,2)) for c in ([0.3,0.3],[0.7,0.7])]); r=mind.distribution_encode(pts); mdl=mind.distribution_decode(r['blob']); print(round(r['report']['ratio_vs_zlib'],1), r['report']['audit'])",
+        native=True, aliases=("compress a point cloud to distribution moments",
+                              "shrink this point cloud for storage",
+                              "store distribution not samples", "distributional codec",
+                              "summarize samples as a density model",
+                              "replace a sample bank with a model",
+                              "ship the moments not the points", "moment based compression"))
+
+    c.register_capability(
+        "Procedural storage (store the program, verify pointwise, or refuse)",
+        "mind.store_procedural(y, tol=0.02) stores a 1-D signal as its PROGRAM, two tiers "
+        "cheapest first: the generator bank + Gauss-Newton polish (blob CONSTANT in n -- "
+        "MEASURED 76x at n=4k and 310x at n=16k from the SAME bytes; regenerable at any "
+        "length, valid=False past 2x the verified window) or decompose_piecewise recipes "
+        "(11.4x, original length only -- extension on per-segment axes is refused). Every "
+        "tier is VERIFIED pointwise at tol*amplitude BEFORE commit; when both miss it "
+        "refuses with measured errors and routes to residual_encode/codec_place. "
+        "mind.regen_procedural(blob[, n]) plays it back.",
+        example="import numpy as np; y=2.5*np.sin(2*np.pi*np.arange(3000.)/333)+7; r=mind.store_procedural(y); g=mind.regen_procedural(r['blob'], n=5000); print(r['report']['mode'], round(r['report']['ratio_vs_zlib']), g['valid'])",
+        native=True, aliases=("compress by storing the program not the data",
+                              "store the generator instead of the output",
+                              "save a signal as a formula and regenerate it",
+                              "fit a generator and store only the recipe",
+                              "procedural storage round trip", "program as compression",
+                              "constant size compression for lawful signals"))
+
+    c.register_capability(
+        "Mesh codec at a budget (and the measured refs-cost-what-deltas-save negative)",
+        "mind.mesh_encode(mesh, max_error) compresses a triangle mesh: vertices quantized at "
+        "a per-coordinate |err|<=max_error contract (verified on the decoded artifact), "
+        "connectivity BIT-EXACT as varint index-deltas, all zlib'd -- MEASURED 2.5-2.7x vs "
+        "zlib(raw). It prices the classic base+displacement hypothesis (decimate + closest-"
+        "point refs + deltas) against this fair uniform coder and ships the smaller. KEPT "
+        "NEGATIVE, the headline: explicit refs carry the information the anchors subtract, "
+        "so uniform wins on every mesh measured; implicit refs are the deferred rung. "
+        "mind.mesh_decode inverts.",
+        example="import numpy as np; mesh=mind.mesh_from_sdf(lambda p: np.linalg.norm(np.atleast_2d(p),axis=1)-0.8, bounds=((-1,-1,-1),(1,1,1)), res=20); r=mind.mesh_encode(mesh, max_error=2e-3, try_base=False); V,F=mind.mesh_decode(r['blob']); print(r['report']['mode'], round(r['report']['ratio_vs_zlib'],2))",
+        native=True, aliases=("compress a mesh", "mesh codec", "store a mesh smaller",
+                              "coarse mesh plus displacement",
+                              "compress geometry with a base and details",
+                              "quantize mesh vertices at a budget", "shrink a mesh file"))
+
 
 _PART = "holographic_catalog_p06"
 

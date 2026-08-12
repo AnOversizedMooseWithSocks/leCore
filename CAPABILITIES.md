@@ -525,12 +525,12 @@ mind.set_file_root('.'); mind.file_find_definition('make_cloud'); mind.file_repl
 *Find it by:* edit file, edit code, modify file, modify code, write file, read file, replace in file, patch
 
 ### Cold storage (compress inactive data)
-shrink INACTIVE data to save memory and disk, and inflate it back on demand: store = mind.cold_store(keep_warm=8) keeps only the K most-recently-used values live and compresses the rest, warming any of them transparently on get(); mind.cool(big_table) wraps ONE value so c.cool() frees its RAM and c.get() brings it back bit-identical. Works on tables, whole databases, big arrays, any picklable structure; codec='lzma' packs smaller, spill_dir=... writes cold blobs to disk. Honest: high-entropy VSA vectors barely compress (the win there is freeing the live object / spilling to disk); redundant/text/structured data compresses a lot. The query Database can auto-cool its own idle tables: db.enable_cold_storage(keep_warm=K) then db.cool_idle() compresses tables you haven't queried lately and a query warms them back -- and a DB shipped to a distributed worker arrives warm + cooling-off, so a shared read-only cache is never mutated..
+shrink INACTIVE data to save memory and disk, and inflate it back on demand: store = mind.cold_store(keep_warm=8) keeps only the K most-recently-used values live and compresses the rest, warming any of them transparently on get(); mind.cool(big_table) wraps ONE value so c.cool() frees its RAM and c.get() brings it back bit-identical. Works on tables, whole databases, big arrays, any picklable structure; codec='lzma' packs smaller; codec='fast' is the numeric-array fast path (byte-plane shuffle + zlib-1: MEASURED 0.72 vs zlib's 0.95 ratio AND ~2x faster both ways on a structured float64 field; non-arrays fall back to pickle); spill_dir=... writes cold blobs to disk. Honest: high-entropy VSA vectors barely compress (the win there is freeing the live object / spilling to disk); redundant/text/structured data compresses a lot. The query Database can auto-cool its own idle tables: db.enable_cold_storage(keep_warm=K) then db.cool_idle() compresses tables you haven't queried lately and a query warms them back -- and a DB shipped to a distributed worker arrives warm + cooling-off, so a shared read-only cache is never mutated..
 
 ```python
 store = mind.cold_store(keep_warm=4); store.put('t1', big_table); store.get('t1')  # transparently warmed
 ```
-*Find it by:* cold storage, compress inactive, evict, spill to disk, cool, warm, fold up, shrink memory
+*Find it by:* cold storage, compress inactive, evict, spill to disk, cool, fast file compression, compress a file on disk quickly, speed up compression
 
 ### Creature readability: proportion as a SEARCH, not a rule table
 per Togelius et al.'s search-based PCG, quality comes from an evaluation function you SEARCH, so this scores specs with the metric already trusted for the field rebuild rather than hand-coding proportions. TWO TERMS, because one is degenerate: negative space alone is MONOTONE in limb thickness (0.470 -> 0.332), so maximising it yields a spider-legged wisp; mass dominance runs the other way (0.817 -> 0.516), giving an interior optimum. Webbing is a hard GATE, not a term. Also grounds a creature (A-4) so it reads as an animal..
@@ -1461,6 +1461,14 @@ import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_ge
 ```
 *Find it by:* laplacian eigenvectors of a mesh, eigenfunctions of the mesh laplacian, spectral embedding of a surface, cotan laplace beltrami spectrum, harmonic basis for a mesh, shape descriptor from the laplacian
 
+### Mesh codec at a budget (and the measured refs-cost-what-deltas-save negative)
+mind.mesh_encode(mesh, max_error) compresses a triangle mesh: vertices quantized at a per-coordinate |err|<=max_error contract (verified on the decoded artifact), connectivity BIT-EXACT as varint index-deltas, all zlib'd -- MEASURED 2.5-2.7x vs zlib(raw). It prices the classic base+displacement hypothesis (decimate + closest-point refs + deltas) against this fair uniform coder and ships the smaller. KEPT NEGATIVE, the headline: explicit refs carry the information the anchors subtract, so uniform wins on every mesh measured; implicit refs are the deferred rung. mind.mesh_decode inverts..
+
+```python
+import numpy as np; mesh=mind.mesh_from_sdf(lambda p: np.linalg.norm(np.atleast_2d(p),axis=1)-0.8, bounds=((-1,-1,-1),(1,1,1)), res=20); r=mind.mesh_encode(mesh, max_error=2e-3, try_base=False); V,F=mind.mesh_decode(r['blob']); print(r['report']['mode'], round(r['report']['ratio_vs_zlib'],2))
+```
+*Find it by:* compress a mesh, mesh codec, store a mesh smaller, coarse mesh plus displacement, compress geometry with a base and details, quantize mesh vertices at a budget, shrink a mesh file
+
 ### Mesh editing (DCC)
 modeling/DCC edits on a Mesh: extrude/inset faces (meshpoly; extrude/inset quad_walls=True emit pure-quad side/ring walls for a Catmull-Clark cage; loop_cut takes cuts=N + factor for N spaced parallel loops), subdivide + smooth (meshsubdiv, Catmull-Clark), deform/warp (deform), rig-skin-pose a skeleton (blendpose), UV unwrap (chart), decimate/QEM, booleans, and mesh<->SDF. Blender-parity polygon editing.
 
@@ -1716,6 +1724,14 @@ grow branching plants and trees from rewrite rules: expand an L-system, walk it 
 ls = mind.lsystem('F', {'F': 'F[+F]F[-F]F'}); mesh, segs, scene = mind.grow_plant(ls, 3)
 ```
 *Find it by:* branching plant generator, make a bush, vegetation generator, procedural tree, grow a tree from rules, l-system, turtle graphics, foliage generation
+
+### Procedural storage (store the program, verify pointwise, or refuse)
+mind.store_procedural(y, tol=0.02) stores a 1-D signal as its PROGRAM, two tiers cheapest first: the generator bank + Gauss-Newton polish (blob CONSTANT in n -- MEASURED 76x at n=4k and 310x at n=16k from the SAME bytes; regenerable at any length, valid=False past 2x the verified window) or decompose_piecewise recipes (11.4x, original length only -- extension on per-segment axes is refused). Every tier is VERIFIED pointwise at tol*amplitude BEFORE commit; when both miss it refuses with measured errors and routes to residual_encode/codec_place. mind.regen_procedural(blob[, n]) plays it back..
+
+```python
+import numpy as np; y=2.5*np.sin(2*np.pi*np.arange(3000.)/333)+7; r=mind.store_procedural(y); g=mind.regen_procedural(r['blob'], n=5000); print(r['report']['mode'], round(r['report']['ratio_vs_zlib']), g['valid'])
+```
+*Find it by:* compress by storing the program not the data, store the generator instead of the output, save a signal as a formula and regenerate it, fit a generator and store only the recipe, procedural storage round trip, program as compression, constant size compression for lawful signals
 
 ### Procedural texture menu (2D + 3D standard set)
 The texture menu every 3D app ships, by NAME: mind.proc_texture(name, **params) -> a field f(P (M,3)); mind.texture_image(name, size) -> a 2D image; mind.texture_volume(name, res) -> a 3D grid (cloud densities). Menu: noise, fbm, white, voronoi (f1/f2/f2f1/cell/smooth), musgrave (ridged/hybrid), wave (bands/rings), marble, wood, brick, magic, checker, stripes, gradient, dots. ONE field serves all three samplers -- 2D texturing is the 3D solid on a plane (slide z through the marble). Deterministic in seed; the direct-eval costume of texturehome's VSA fields..
@@ -3232,6 +3248,14 @@ import ast; tmpl, delta = mind.code_decompose('total = a + 7'); print(delta); pr
 ```
 *Find it by:* code structure, canonical shape and name delta, decompose code into shape and names, ast round trip, reconstruct source from a structure, statement shape, structural search, find duplicate code
 
+### Codec atlas + honest router (which compressor, measured on YOUR data)
+machine_map applied to compression: mind.codec_atlas() is the SPEC SHEET -- every codec unit (zlib/lzma, low-rank/tucker/tt, rate-distortion, pack_images, event codec, sequence-predictive, generator rung, cold storage) with its real module+symbol, pays-condition, and kept negatives in one table. mind.codec_place(x, max_error=...) MEASURES every applicable unit on x and ranks by bytes, priced against the zlib baseline, with 'store raw' a first-class row. Lossy units run ONLY under a stated error budget (never 99% energy; loss is never volunteered). Refusal on incompressible data is the finding..
+
+```python
+r = mind.codec_place(__import__('numpy').add.outer(__import__('numpy').sin(__import__('numpy').arange(64)/7.), __import__('numpy').cos(__import__('numpy').arange(64)/9.)), max_error=1e-6); print(r['best'], r['rows'][0])
+```
+*Find it by:* which codec should I use, compare compressors on my data, benchmark all compressors, pick a compression method automatically, codec atlas, route data to the best compressor, will my data compress and how, compression spec sheet
+
 ### Compression & codec
 shrink data losslessly or by rate-distortion: a sequence/entropy codec (codec), general compression (compress), rate-distortion quantization (ratedistortion), and content-addressed storage (storage). How the engine fits vectors into bytes.
 
@@ -3239,6 +3263,14 @@ shrink data losslessly or by rate-distortion: a sequence/entropy codec (codec), 
 from holographic.misc.holographic_codec import ...; from holographic.misc.holographic_ratedistortion import ...
 ```
 *Find it by:* compress, compression, codec, entropy coding, rate distortion, quantize, content addressed storage, encode data
+
+### Distributional codec (store the distribution, not the samples)
+mind.distribution_encode(points, bits=6) compresses a sample bank to its drift model's d+1 moment hypervectors, quantized at 4/6/8 bits with per-array scales -- MEASURED 10.5x (6-bit) / 21.5x (4-bit) vs zlib at coverage 1.0 on a 1500-point two-cluster bank. Decode returns a DriftModel to SAMPLE from: points LIKE the originals, never the originals (exactness wants codec_place/residual_encode). The report prices break_even_n (below it, pays=False) and carries the post-quantization generation audit, so a broken distribution is visible at encode time. mind.distribution_decode inverts..
+
+```python
+import numpy as np; rng=np.random.default_rng(0); pts=np.vstack([c+0.05*rng.standard_normal((800,2)) for c in ([0.3,0.3],[0.7,0.7])]); r=mind.distribution_encode(pts); mdl=mind.distribution_decode(r['blob']); print(round(r['report']['ratio_vs_zlib'],1), r['report']['audit'])
+```
+*Find it by:* compress a point cloud to distribution moments, shrink this point cloud for storage, store distribution not samples, distributional codec, summarize samples as a density model, replace a sample bank with a model, ship the moments not the points, moment based compression
 
 ### Frame-source protocol (temporal media seam)
 the CONTRACT for temporal media (holographic_framesource): a FrameSource is any object with get() -> (frame, seq) plus seekable/pausable flags; seq changes IFF the frame changes (cheap invalidation). The engine owns the contract, NOT decoding (cv2/ffmpeg stay host-side). mind.map_frames(source, fn, cache) pulls a host source's current frame and memoises fn(frame) by seq; mind.frame_key signs it; mind.synthetic_frame_source is a decoder-free synthetic clip. The seam for video colour transfer / temporal NCA / optical flow.
@@ -3263,6 +3295,22 @@ compress data with structure along SEVERAL axes -- a field over (x,y,t), a frame
 code = mind.compress_tensor(field, energy=0.999); X = mind.decompress_tensor(code)
 ```
 *Find it by:* tensor compression, tucker, hosvd, tensor train, low rank tensor, compress a volume, compress a frame stack, multiway svd
+
+### Predictive residual codec (model + coded error, exact or budgeted)
+mind.residual_encode(y) compresses a 1-D signal as its piecewise LAWS plus the coded error: decompose_piecewise fits per-segment formulas (stored as exact recipes), the residual is byte-plane shuffled and entropy-coded. Exact by default -- decode is bit-identical (float fixup + verbatim patch list). With max_error, near-lossless within the budget (measured 8.5x vs zlib on a noisy 3-regime signal; exact mode caps at ~1.1x -- irreducible mantissa planes). Self-refuses into mode='raw' when the model head does not pay. mind.residual_decode(blob) inverts; codec_place routes 1-D here..
+
+```python
+import numpy as np; y=np.sin(2*np.pi*np.arange(600.)/23); r=mind.residual_encode(y, max_error=1e-4); out=mind.residual_decode(r['blob']); print(r['report']['mode'], r['report']['ratio_vs_zlib'], float(np.abs(out-y).max()))
+```
+*Find it by:* pack this array smaller than zlib, beat zlib on a float array, quantize my weights, quantize model weights with an error bound, entropy code residuals after a model predicts, predictive residual codec, compress a signal exactly with a model plus error, lossless model based compression
+
+### Surprise-weighted rate allocation (code the news finely, the expected coarsely)
+mind.surprise_code(batch, reference, fine_step) spends bits where the information is: the reference corpus's drift model reads density in one dot product (z=<enc(x),mu>), points in its VOID (the news) are quantized at fine_step, predicted points at fine_step*coarsen -- same news fidelity as uniform-fine coding, MEASURED 1.71x fewer bytes (coarsen sweep 16/64/128/256 -> 1.17/1.36/1.57/1.71x; the varint floor caps it). A chance gate refuses the split when the news share sits at the quantile's own expected level. Lossy by design on the predicted mass. mind.surprise_decode inverts..
+
+```python
+import numpy as np; rng=np.random.default_rng(0); ref=rng.standard_normal((100,2))*0.05+0.5; batch=np.vstack([ref[:60], rng.uniform(0,1,(25,2))]); r=mind.surprise_code(batch, ref, fine_step=1e-4); print(r['report']['mode'], round(r['report']['ratio_vs_uniform_fine'],2))
+```
+*Find it by:* allocate bits where the information is, spend more bits on surprising samples, code the news finely and the expected coarsely, surprise weighted compression, importance weighted quantization, variable rate coding by predictability, bit allocation by surprise
 
 ### Video (temporal)
 temporal image sequences: video compression with keyframe/delta coding (video), temporal compression, motion/phase morph between frames (phasemorph), and frame interpolation. Moving pictures on the substrate.
@@ -4989,4 +5037,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*638 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*644 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
