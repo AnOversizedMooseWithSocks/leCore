@@ -17,10 +17,10 @@
     - `remove_tag(self, handle, key, _record=True)` -- Remove one tag from an object.
     - `clear_override(self, handle, prop, _record=True)` -- Remove one render override from an object, so it FALLS BACK to the scene default.
     - `select(self, handles)` -- Set the current selection (a set of handles) and fire a 'select' event.
-    - `get(self, handle)` -- 
+    - `get(self, handle)`
     - `set_parent(self, child, parent, _record=True)` -- Parent `child` under `parent` (both handles; parent=None for top level).
     - `parent_of(self, handle)` -- The parent handle of an object (None if top level).
-    - `children_of(self, handle)` -- 
+    - `children_of(self, handle)`
     - `begin_group(self, label='Edit')` -- Open a transaction: every mutation until end_group() coalesces into ONE undo step labelled `label`.
     - `end_group(self)` -- Close the current transaction; commit the accumulated changes as a single step (nothing if empty).
     - `group(self, label='Edit')` -- `with scene.group("Move wheels"): ...` -- everything inside becomes one undo step.
@@ -28,8 +28,8 @@
     - `redo(self)` -- Redo the last undone step by restoring its AFTER snapshots.
     - `history(self)` -- The undo stack's step labels, oldest first.
     - `redo_history(self)` -- The redo stack's step labels (most-recently-undone last).
-    - `can_undo(self)` -- 
-    - `can_redo(self)` -- 
+    - `can_undo(self)`
+    - `can_redo(self)`
 - `scene_info(scene, verbose=True)` -- WHAT IS IN THIS SCENE -- the first call to make, before adding to it or rendering it.
 
 ### `holographic_modifier`
@@ -37,13 +37,13 @@
 
 - **class `Modifier`** -- One entry in the stack: a named operation with parameters, applied non-destructively to the previous result.
 - **class `ModifierStack`** -- A per-object modifier stack: a base payload + an ordered list of modifiers, evaluated non-destructively, re-evaluated O(change) (only downstream of a change), with stable handles and validation.
-    - `handles(self)` -- 
-    - `names(self)` -- 
+    - `handles(self)`
+    - `names(self)`
     - `add(self, name, op, params=None, specs=None, muted=False)` -- Append a modifier to the top of the stack; returns its stable handle.
     - `insert(self, index, name, op, params=None, specs=None, muted=False)` -- Insert a modifier at `index` (everything from there down must recompute).
-    - `remove(self, handle)` -- 
+    - `remove(self, handle)`
     - `move(self, handle, to_index)` -- Reorder a modifier (a real modeling operation -- bevel-then-subdivide differs from the reverse).
-    - `set_muted(self, handle, muted)` -- 
+    - `set_muted(self, handle, muted)`
     - `set_param(self, handle, **params)` -- Change a modifier's parameters -- the common case a dependency graph optimises.
     - `evaluate(self)` -- Fold the stack over the base, non-destructively.
     - `validate(self)` -- Well-formedness (like recipeops.validate): every op callable, and every declared param within its min/max.
@@ -58,20 +58,20 @@
 - `as_eval(sdf)` -- Return a plain callable `P:(M,D) -> distances:(M,)` for ANY of the engine's three ways of naming an SDF: * a node object with `.eval(P)` -- what `sphere()`/`box()`/`parse_dsl()` build * a bare callable -- what `collide`, `emitter` and every ad-hoc lambda pass around * a DSL STRING, e.g.
 - `sdf_normal(sdf, P, eps=0.001)` -- The surface normal at points P:(M,3) = the normalised gradient of the SDF, by central differences (6 vectorised evals).
 - **class `SDF`** -- A node in a signed-distance expression tree: `kind`, scalar `params`, and child SDFs.
-    - `eval(self, P)` -- 
-    - `union(self, other)` -- 
-    - `intersect(self, other)` -- 
-    - `subtract(self, other)` -- 
-    - `smooth_union(self, other, k=0.3)` -- 
-    - `fillet_union(self, other, r=0.1)` -- 
-    - `translate(self, t)` -- 
-    - `scale(self, s)` -- 
-    - `rotate(self, axis, angle)` -- 
-    - `repeat(self, period)` -- 
-    - `rounded(self, r)` -- 
-    - `onion(self, thickness)` -- 
-    - `displace(self, amount, freq)` -- 
-    - `twist(self, k)` -- 
+    - `eval(self, P)`
+    - `union(self, other)`
+    - `intersect(self, other)`
+    - `subtract(self, other)`
+    - `smooth_union(self, other, k=0.3)`
+    - `fillet_union(self, other, r=0.1)`
+    - `translate(self, t)`
+    - `scale(self, s)`
+    - `rotate(self, axis, angle)`
+    - `repeat(self, period)`
+    - `rounded(self, r)`
+    - `onion(self, thickness)`
+    - `displace(self, amount, freq)`
+    - `twist(self, k)`
     - `elongate(self, hx=0.0, hy=0.0, hz=0.0)` -- Stretch this shape by pulling it apart along the axes by half-extents (`hx`,`hy`,`hz`) -- iq's opElongate.
     - `mirror(self, axis=0, plane=0.0)` -- Fold space across a plane on one axis (kaleidoscopic symmetry from abs()).
     - `fold(self, plane=0.0)` -- Mirror all three axes about `plane` -- map the world into one octant (an 8-fold kaleidoscope).
@@ -116,10 +116,10 @@
 *The explicit polygon mesh kernel (FWD-1): the substrate every explicit-geometry operator mutates.*
 
 - **class `Mesh`** -- An explicit polygon mesh: positions + faces, with optional per-vertex attributes.
-    - `n_vertices(self)` -- 
-    - `n_faces(self)` -- 
+    - `n_vertices(self)`
+    - `n_faces(self)`
     - `edges(self)` -- The set of UNDIRECTED edges as frozensets {vi, vj}.
-    - `n_edges(self)` -- 
+    - `n_edges(self)`
     - `half_edges(self)` -- Build (and cache) the half-edge table.
     - `vertex_faces(self, v)` -- The faces incident to vertex `v`, as a sorted list of face indices (deterministic).
     - `vertex_neighbours(self, v)` -- The 1-ring of vertex `v`: vertices sharing an edge with it, as a sorted list (deterministic).
@@ -149,7 +149,7 @@
 - `compose(*mats)` -- Matrix product M0 @ M1 @ ...
 - `decompose(M)` -- Split a 4x4 affine transform into (translate (3,), rotation quaternion (4,), scale (3,)).
 - `compose_trs(translate, quat, scale)` -- Build a 4x4 from translate (3,), a rotation quaternion (4,), and scale (3,) -- the inverse of decompose.
-- `quat_normalize(q)` -- 
+- `quat_normalize(q)`
 - `quat_mul(a, b)` -- The Hamilton product a*b: the rotation "apply b, then a".
 - `quat_from_axis_angle(axis, angle)` -- A quaternion for a rotation of `angle` radians about `axis`.
 - `quat_to_axis_angle(q)` -- Recover (axis, angle) from a quaternion.
@@ -193,7 +193,7 @@
 - `load_png(path, mode='rgb01')` -- Read a PNG file back into an array -- the exact inverse of `save_png`, so a render survives a round trip.
 - `save_image(path, rgb01, level=6, filters=True)` -- Save an (H,W,3) [0,1] image, routed by extension: .png uses the stdlib encoder (deterministic, zero-dependency, always available); anything else (.jpg, .webp, .bmp, ...) uses Pillow when installed and otherwise refuses with the install command -- the same opt-in contract as every accelerator (`pip install pillow`, or the `images` extra).
 - `load_hdr(path, exposure=1.0)` -- Read a Radiance .hdr / .pic (RGBE) file -> (H,W,3) float32 of LINEAR radiance, UNBOUNDED.
-- `save_gif(path, frames, fps=12.0, loop=0, palette='fixed', dither=False)` -- 
+- `save_gif(path, frames, fps=12.0, loop=0, palette='fixed', dither=False)`
 - `save_png(path, rgb01, level=6, filters=True)` -- Write an (H,W,3) image in [0,1] to a PNG file.
 - `frame_delta_tiles(prev, curr, tile=32, thresh=0.001)` -- The pixel-streaming primitive: split two frames into `tile`x`tile` blocks and return only the tiles that CHANGED, as a list of (row, col, tile_pixels).
 - `fit_camera(mesh, direction=(1.0, 0.75, 1.1), up=(0.0, 1.0, 0.0), fov_deg=50.0, aspect=1.0, margin=1.06)` -- Solve for the camera that FRAMES a mesh: the closest eye along `direction` that keeps every vertex inside the frustum, with the target chosen so the subject is CENTRED.
@@ -219,7 +219,7 @@
 - `build_pipeline(cfg, registry=None)` -- Config -> ordered, validated Pipeline.
 - **class `Pipeline`** -- An ordered list of stages.
     - `plan(self)` -- Dry run / EXPLAIN: every active stage, WHY it is here, and what it NEEDS and PRODUCES -- without rendering.
-    - `stage_names(self)` -- 
+    - `stage_names(self)`
     - `run(self, scene=None, seed=0, prev_frame=None, renderer=None)` -- Execute the pipeline: build the shared FrameState and thread it through every stage in order.
     - `lower_to_program(self, machine)` -- Phase 6: LOWER the pipeline to a machine PROGRAM -- one APPLY instruction per stage, in order, then HALT.
     - `run_on_vm(self, machine=None, scene=None, seed=0, prev_frame=None, renderer=None)` -- Phase 6: RUN the pipeline ON the VM instead of a Python for-loop.
@@ -243,7 +243,7 @@
 - **class `CancelToken`** -- A cooperative cancel flag.
     - `cancel(self)` -- Request cancellation.
     - `reset(self)` -- Clear the flag so the token can be reused for the next operation.
-    - `cancelled(self)` -- 
+    - `cancelled(self)`
     - `should_stop(self)` -- The cooperative check a loop calls between chunks.
 - `run_cancellable(iterable, token, on_step=None)` -- Iterate `iterable`, yielding items until `token` is cancelled -- a thin helper for wrapping any step loop (a sim advancing frames, an iterative solver) in cancellation.
 

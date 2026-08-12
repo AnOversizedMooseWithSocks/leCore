@@ -28,9 +28,14 @@ import os
 CURATED = [
     ("Scene authoring", ["holographic_scene_doc", "holographic_modifier"]),
     ("Geometry / SDF",  ["holographic_sdf", "holographic_sdfscene", "holographic_mesh"]),
-    ("Transforms",      ["holographic_transform"]),
+    # Qualify this basename because both misc/ (app transforms) and
+    # io_and_interop/ (model-weight transforms) provide holographic_transform.
+    # os.walk order differs by filesystem, so an unqualified duplicate made
+    # generated docs alternate between the two modules on clean CI checkouts.
+    ("Transforms",      ["misc/holographic_transform"]),
     ("Camera",          ["holographic_camera"]),
-    ("Rendering",       ["holographic_render", "holographic_pipeline", "holographic_session", "holographic_cancel"]),
+    ("Rendering",       ["holographic_render", "holographic_pipeline",
+                         "scene_and_pipeline/holographic_session", "holographic_cancel"]),
     ("Export / LOD",    ["holographic_lod", "holographic_gltf"]),
 ]
 
@@ -93,26 +98,43 @@ def module_entries(path):
     lines = []
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and not node.name.startswith("_"):
-            lines.append("- `%s` -- %s" % (signature(node), first_sentence(node)))
+            doc = first_sentence(node)
+            lines.append("- `%s`%s" % (signature(node), " -- " + doc if doc else ""))
         elif isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
-            lines.append("- **class `%s`** -- %s" % (node.name, first_sentence(node)))
+            doc = first_sentence(node)
+            lines.append("- **class `%s`**%s" % (node.name, " -- " + doc if doc else ""))
             for sub in node.body:
                 if isinstance(sub, ast.FunctionDef) and not sub.name.startswith("_"):
-                    lines.append("    - `%s` -- %s" % (signature(sub), first_sentence(sub)))
+                    doc = first_sentence(sub)
+                    lines.append("    - `%s`%s" % (signature(sub), " -- " + doc if doc else ""))
     return mod_doc, lines
 
 
 def _resolve_module_path(root, mod):
     """Find a curated module's actual file, whether it's flat at the repo root (old layout) or nested under
-    holographic/<family>/ (current layout)."""
-    flat = os.path.join(root, mod + ".py")
+    holographic/<family>/ (current layout). A family-qualified name resolves
+    directly; an ambiguous basename fails loudly instead of depending on
+    filesystem traversal order."""
+    parts = mod.replace("\\", "/").split("/")
+    name = parts[-1]
+    flat = os.path.join(root, name + ".py")
     if os.path.exists(flat):
         return flat
     holo_root = os.path.join(root, "holographic")
     if os.path.isdir(holo_root):
+        if len(parts) > 1:
+            return os.path.join(holo_root, *parts) + ".py"
+        matches = []
         for dirpath, _, filenames in os.walk(holo_root):
-            if mod + ".py" in filenames:
-                return os.path.join(dirpath, mod + ".py")
+            if name + ".py" in filenames:
+                matches.append(os.path.join(dirpath, name + ".py"))
+        matches.sort()
+        if len(matches) > 1:
+            raise ValueError("ambiguous curated module %r; qualify it as family/module: %s"
+                             % (name, ", ".join(os.path.relpath(p, holo_root)
+                                               for p in matches)))
+        if matches:
+            return matches[0]
     return flat  # doesn't exist either way; the not-found branch below handles it
 
 
@@ -134,12 +156,13 @@ def generate(root="."):
         out.append("")
         for mod in modules:
             path = _resolve_module_path(root, mod)
+            display_mod = mod.replace("\\", "/").rsplit("/", 1)[-1]
             if not os.path.exists(path):
-                out.append("### `%s` -- *(module not found)*" % mod)
+                out.append("### `%s` -- *(module not found)*" % display_mod)
                 out.append("")
                 continue
             mod_doc, lines = module_entries(path)
-            out.append("### `%s`" % mod)
+            out.append("### `%s`" % display_mod)
             if mod_doc:
                 out.append("*%s*" % mod_doc)
             out.append("")

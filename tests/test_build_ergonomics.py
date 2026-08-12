@@ -111,6 +111,8 @@ def test_apiquickref_signature_and_generate():
             "def do_thing(a, b=2, *args, key=None, **kw):\n"
             '    """Do the thing. Details."""\n'
             "    return a\n"
+            "def undocumented():\n"
+            "    return None\n"
             "class Widget:\n"
             '    """A widget."""\n'
             "    def poke(self, hard=True):\n"
@@ -128,3 +130,26 @@ def test_apiquickref_signature_and_generate():
     assert "Do the thing." in text and "Details." not in text.split("Do the thing.")[1][:5]  # first sentence
     assert "**class `Widget`**" in text and "poke(self, hard=True)" in text
     assert "_hidden" not in text                              # privates are excluded
+    assert "- `undocumented()`\n" in text and "undocumented() --" not in text
+
+
+def test_apiquickref_duplicate_basenames_require_family_qualification():
+    """Clean-checkout directory order must not choose which same-named module is documented."""
+    sys.path.insert(0, _REPO_ROOT)
+    import apiquickref
+
+    root = tempfile.mkdtemp()
+    for family in ("alpha", "zeta"):
+        directory = os.path.join(root, "holographic", family)
+        os.makedirs(directory)
+        with open(os.path.join(directory, "holographic_same.py"), "w") as f:
+            f.write('"""%s implementation."""\n' % family)
+
+    try:
+        apiquickref._resolve_module_path(root, "holographic_same")
+        assert False, "duplicate basename should require an explicit family"
+    except ValueError as exc:
+        assert "family/module" in str(exc)
+
+    resolved = apiquickref._resolve_module_path(root, "zeta/holographic_same")
+    assert resolved == os.path.join(root, "holographic", "zeta", "holographic_same.py")
