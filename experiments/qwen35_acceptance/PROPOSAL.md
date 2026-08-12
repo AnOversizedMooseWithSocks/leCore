@@ -117,16 +117,21 @@ separate SHA-256 identities. The installer must not ground itself on the held-
 out evaluation text. This avoids evaluating on material used to construct the
 installed checkpoint.
 
-Recommended policy:
+Frozen inputs for the authorized run:
 
-- use a repository-owned, redistributable document for installation grounding;
-- use a distinct, redistributable held-out text for evaluation;
-- freeze at least 4,097 tokenizer outputs to obtain at least 4,096 paired loss
-  positions; and
-- prefer 8,192 paired positions when the committee accepts the extra runtime.
+- installation grounding is the MIT-licensed root `REFERENCE.md` at leCore
+  commit `a04ab563ea159398a58a4cb002568cc78b9f14bb`, 2,300,089 bytes with SHA-256
+  `d6905f043e7856b93b2dd72dac5fa0dc593898c55d6c54c51f3153f4317d6b7f`;
+- held-out evaluation is the complete Project Gutenberg plain-text edition of
+  *The Federalist Papers*, ebook 18, retrieved 2026-08-12, 1,213,410 bytes with
+  SHA-256 `a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94`;
+- the run uses the first 4,097 tokenizer outputs from that held-out file to
+  obtain 4,096 paired loss positions; and
+- the complete corpus bytes and license notices are retained in temporary
+  staging and the publication bundle because both inputs permit redistribution.
 
-This separation is a blocking condition for the formal run. The current draft
-runner interface should be updated accordingly before execution.
+The runner now accepts the two roles as separate arguments and refuses equal
+content hashes. Corpus separation is therefore satisfied rather than pending.
 
 ## Procedure
 
@@ -199,6 +204,14 @@ The first formal run should use a disposable AWS instance:
   zero;
 - experiment timeout: six hours; and
 - total spending ceiling: USD 10.
+
+The prelaunch manifest freezes Amazon Linux image
+`ami-07a5b367e8dc8bd92`, Qwen revision
+`2fc06364715b967f1860aea9cf38778875588b17`, ilxyr commit `e92382f`, the
+dependency versions, critical model-file hashes, and an eight-hour instance
+lifetime guard. At the current On-Demand price of USD 1.0584/hour, eight compute
+hours cost USD 8.4672; the 100 GiB gp3 volume and public IPv4 time leave the
+bounded attempt below USD 10.
 
 The larger memory-optimized host is insurance against repeating the known
 post-emission memory failure. The ceiling buys one formal attempt, not iterative
