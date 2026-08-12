@@ -1,5 +1,9 @@
 # Qwen3.5 acceptance experiment
 
+The committee-facing design and open review questions are in
+[`PROPOSAL.md`](PROPOSAL.md). The proposal must be approved, and its corpus
+separation requirement implemented, before a formal real-model run.
+
 This directory turns the open Qwen integration questions into a frozen ilxyr
 project for a separately authorized, bounded attempt. It does not claim that a
 future full run has passed. It generates the
