@@ -40,7 +40,12 @@
   "confirmation": {
     "status_service": "https://upload.ardrive.io/v1/tx/{transaction_id}/status",
     "transactions_confirmed": 63,
-    "total_winc_charged": 0
+    "total_winc_charged": 0,
+    "public_gateway_verified_at": "2026-08-12T22:09:00Z",
+    "verified_downloads": {
+      "publication-manifest.json": "80ebc69fc40c4bbab9e3692a1713217fba007d1005adf2f23be79be739d1b836",
+      "ledger/events.jsonl": "0254b4dc60bf2903cf308104bf3f8c34d64fb050fb1e4e014590fe0c1847dc35"
+    }
   },
   "superseded_path_manifest": {
     "transaction_id": "lPXKEJON5Xa4wXswwRwFv2GWqrTPo7yuOhMtVKyOpVI",
