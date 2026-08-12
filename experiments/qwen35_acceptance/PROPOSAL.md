@@ -14,7 +14,8 @@ The committee is asked to review and either approve or revise:
 3. the paired statistical gate and minimum evaluation length;
 4. the separation and choice of installation and evaluation corpora;
 5. the AWS execution envelope and USD 10 spending ceiling; and
-6. the rule for keeping or removing the installer's experimental flag.
+6. the rule for keeping or removing the installer's experimental flag; and
+7. the permanent ilxyr/Arweave publication contract.
 
 Approval authorizes one frozen real-model execution. It does not authorize
 threshold tuning, repeated attempts under the same experiment identity, or a
@@ -221,6 +222,82 @@ Weights and non-redistributable corpus contents will not be republished. Their
 public handles and content hashes are sufficient for identity. The evidence PR
 will preserve a rejected or failed result with the same prominence as a pass.
 
+### Durable publication bundle
+
+S3 is temporary execution storage, not publication. After `ilxyr verify`
+succeeds, the result should be assembled as a content-addressed publication
+bundle with this logical layout:
+
+```text
+qwen35-acceptance-<experiment-id>/
+  publication-manifest.json
+  project/
+    project.json
+    experiment.json
+    hypothesis.json
+    foundation.json
+    engineering-review.json
+    experiment-design.json
+    forecast-empirical.json
+    forecast-mechanistic.json
+    funding.json
+  result/
+    status.json
+    environment.json
+    model-manifest.json
+    corpus-manifest.json
+    metrics.json
+    install.log
+  evidence/
+    evidence.native.json
+    evidence.ro-crate.json
+    evidence.in-toto.json
+  ledger/
+    events.jsonl
+    objects/sha256/<digest>...
+```
+
+`publication-manifest.json` is the root object. It records the experiment ID,
+resolved outcome, leCore and ilxyr commits, every included relative path,
+media type, byte length, and SHA-256 digest. Paths are sorted and the JSON is
+canonicalized before hashing. The `ledger/` directory is the verified `.ilxyr`
+workspace content, copied without credentials or unrelated experiments.
+
+The bundle is uploaded to Arweave only after the local manifest hashes have
+been checked. Publication then produces a separate
+`publication-receipt.json` containing:
+
+- the publication-manifest SHA-256;
+- the Arweave bundle transaction ID and gateway URL;
+- the upload timestamp, tool, and tool version;
+- the uploader's declared actor identity;
+- a post-upload download-and-hash verification result; and
+- optional mirror locations, such as IPFS, without making them authoritative.
+
+The receipt is committed to the ilxyr evidence PR. The Arweave transaction ID
+and receipt hash are also linked from the leCore result note. If the receipt is
+itself uploaded to Arweave, its second transaction ID is recorded in the PR;
+the receipt does not attempt a self-referential hash.
+
+Permanent publication excludes:
+
+- original or emitted model weights;
+- non-redistributable corpus contents;
+- cloud credentials, environment secrets, package caches, and temporary paths;
+- the whole mixed ilxyr workspace when it contains unrelated experiments; and
+- raw S3 URLs as evidence identities.
+
+Model/checkpoint and excluded-corpus identity remains reproducible through
+public handles, licenses where available, byte sizes, and SHA-256 manifests.
+S3 objects may be lifecycle-deleted after Arweave verification and PR review.
+
+The experiment is not considered published merely because ilxyr recorded local
+evidence. Publication is complete only when the GitHub evidence PR names a
+verified Arweave transaction for the canonical manifest and bundle. The
+current ilxyr CLI exports the native, RO-Crate, and in-toto JSON views but has
+no Arweave transport; a small side-effecting publication adapter should consume
+those exports without modifying the settled ledger.
+
 ## Promotion rule
 
 The layer-prepending installer retains `--experimental` unless ilxyr records an
@@ -260,3 +337,6 @@ are useful; that requires a later capability-effect experiment.
    documentation, or authorize a separate PR to remove it?
 7. Are any additional official Transformers operations required beyond reload,
    text generation, and image-input generation?
+8. Should Arweave be the authoritative permanent transport, with GitHub as the
+   review/index surface and S3 only as temporary staging? Is an IPFS mirror also
+   required?
