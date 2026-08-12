@@ -8,7 +8,7 @@
   },
   "source": {
     "repository": "https://github.com/atimics/holostuff.git",
-    "commit": "a04ab563ea159398a58a4cb002568cc78b9f14bb"
+    "commit": "a04ab5692be38f06120aba4b0bc5e2a284eb2c79"
   },
   "ilxyr": {
     "repository": "https://github.com/cenetex/ilXyr.git",
@@ -34,7 +34,7 @@
   },
   "corpora": {
     "installation": {
-      "handle": "git:a04ab563ea159398a58a4cb002568cc78b9f14bb:REFERENCE.md",
+      "handle": "git:a04ab5692be38f06120aba4b0bc5e2a284eb2c79:REFERENCE.md",
       "license": "MIT",
       "bytes": 2300089,
       "sha256": "d6905f043e7856b93b2dd72dac5fa0dc593898c55d6c54c51f3153f4317d6b7f"

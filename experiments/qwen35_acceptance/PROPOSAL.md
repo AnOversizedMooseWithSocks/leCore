@@ -120,7 +120,7 @@ installed checkpoint.
 Frozen inputs for the authorized run:
 
 - installation grounding is the MIT-licensed root `REFERENCE.md` at leCore
-  commit `a04ab563ea159398a58a4cb002568cc78b9f14bb`, 2,300,089 bytes with SHA-256
+  commit `a04ab5692be38f06120aba4b0bc5e2a284eb2c79`, 2,300,089 bytes with SHA-256
   `d6905f043e7856b93b2dd72dac5fa0dc593898c55d6c54c51f3153f4317d6b7f`;
 - held-out evaluation is the complete Project Gutenberg plain-text edition of
   *The Federalist Papers*, ebook 18, retrieved 2026-08-12, 1,213,410 bytes with
