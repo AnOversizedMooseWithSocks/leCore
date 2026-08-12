@@ -143,6 +143,9 @@ def test_generator_emits_complete_ilxyr_contract(tmp_path):
     assert manifest["corpora"]["installation"]["sha256"] != \
         manifest["corpora"]["evaluation"]["sha256"]
     assert "corpus_sha256" not in manifest
+    assert {item["path"] for item in manifest["model_files"]} >= {
+        "config.json", "tokenizer.json", "model.safetensors",
+    }
     assert len(manifest["commands"]) == 12
     for name in ("hypothesis.json", "foundation.json", "engineering-review.json",
                  "experiment-design.json", "forecast-empirical.json",
@@ -162,6 +165,22 @@ def test_generator_rejects_reused_installation_and_evaluation_corpus(tmp_path):
                                text=True, check=False)
     assert completed.returncode == 2
     assert "distinct contents" in completed.stderr
+
+
+def test_model_manifest_binds_processor_and_template_files(tmp_path):
+    output, _ = build_fixture(tmp_path)
+    (output / "preprocessor_config.json").write_text('{"size": 32}\n')
+    (output / "chat_template.jinja").write_text("{{ messages }}\n")
+    (output / ".cache-marker").write_text("local cache state\n")
+    generator = load_script(
+        "qwen_acceptance_generator",
+        ROOT / "experiments" / "qwen35_acceptance" / "generate.py")
+
+    _digest, files = generator.model_manifest(output)
+    names = {item["path"] for item in files}
+    assert "preprocessor_config.json" in names
+    assert "chat_template.jinja" in names
+    assert ".cache-marker" not in names
 
 
 def test_risky_entrypoints_are_explicitly_opt_in(tmp_path, capsys):

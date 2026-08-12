@@ -263,6 +263,15 @@ def main(argv=None):
     source_clean, source = source_snapshot(installation_corpus, evaluation_corpus)
     tok_pass, ref_error, ref_pass = reference_parity(
         model_dir, token_ids, args.logit_tolerance)
+    if not source_clean:
+        raise RuntimeError("refusing installation from a dirty source checkout")
+    if not tok_pass:
+        raise RuntimeError("refusing installation after tokenizer parity failed")
+    if not ref_pass:
+        raise RuntimeError(
+            "refusing installation after reference-logit parity failed "
+            "(relative error %.9g > %.9g)" %
+            (ref_error, float(args.logit_tolerance)))
 
     original, _ = load_runtime(model_dir)
     before = streamed_measure(original, token_ids, chunk_size=args.chunk_size)

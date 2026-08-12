@@ -31,9 +31,12 @@ def sha256_file(path):
 
 
 def model_manifest(model_dir):
-    names = ["config.json", "tokenizer.json", "vocab.json", "merges.txt"]
-    paths = [model_dir / name for name in names if (model_dir / name).is_file()]
-    paths += sorted(model_dir.glob("*.safetensors"))
+    # Bind every top-level file in the materialized snapshot.  The processor,
+    # chat template, and index are part of the official vision/text smoke just
+    # as surely as config.json and the weights are.  Hidden local cache state
+    # is deliberately excluded.
+    paths = sorted(path for path in model_dir.iterdir()
+                   if path.is_file() and not path.name.startswith("."))
     if not any(path.suffix == ".safetensors" for path in paths):
         raise ValueError("no safetensors checkpoint in %s" % model_dir)
     records = [{"path": path.name, "sha256": sha256_file(path),
