@@ -1,49 +1,65 @@
-# assimilation/ -- Unicron vs Qwen3.5-0.8B, start to finish
+# Qwen3.5 integration status
 
-Three commands, run from the repo root. A private venv appears at
-`assimilation/.venv` on first run; your system Python is never touched and no
-Hugging Face account or token is ever needed (the weights are public and the
-download is anonymous by construction).
+Qwen loading, tokenizer/config parsing, the text-only NumPy runtime, and
+diagnostics are supported integration work. The two checkpoint-changing paths
+remain experiments and are opt-in.
 
-Linux / macOS:
+## Safe default: download the untouched checkpoint
 
-    ./assimilation/assimilate.sh --eval    # 1. download + assimilate + MEASURE
-    ./assimilation/chat.sh --both          # 2. same prompt to both models, side by side
-    ./assimilation/chat.sh                 # 3. just talk to the assimilated one
+Linux/macOS:
 
-Windows (same flags, same behaviour):
+```bash
+./assimilation/assimilate.sh
+```
 
-    assimilation\assimilate.bat --eval
-    assimilation\chat.bat --both
-    assimilation\chat.bat
+Windows:
 
-Layout after a run:
+```bat
+assimilation\assimilate.bat
+```
 
-    assimilation/work/original/       the untouched download
-    assimilation/work/assimilated/    the Unicron output (same tensor names/shapes,
-                                      loads exactly like the original) + per-shard
-                                      *.unicron_report.json rank reports
-                                      + *.lecore.safetensors -- the FACTORED form:
-                                      each filtered layer as its thin (U,V) pair.
-                                      This is the model's true information size
-                                      (2x smaller on the rehearsal subject; the
-                                      dense file stays full-shape only because
-                                      transformers/llama.cpp demand the original
-                                      architecture). Loads via leCore's
-                                      unicron_reconstruct; a transformers shim
-                                      that RUNS the factored form is the planned
-                                      next step.
+This downloads public `Qwen/Qwen3.5-0.8B` weights into
+`assimilation/work/original` and stops. It does not edit tensors.
 
-What "assimilate" does and why: see `holographic_unicron.assimilate_model` --
-Marchenko-Pastur filtering keeps each projection's learned spectral outliers and
-drops the still-random bulk; embeddings/norms are policy-skipped; layers whose
-outliers carry <1% of energy are guarded (random != useless, measured).
+## Experimental layer-prepending installer
 
-The honesty contract: `--eval` prints perplexity before vs after. Until that (or
-your own harness) has run, the assimilated model is an UNVERIFIED claim -- the
-report says so in as many words. A bad delta is a result worth keeping, not a
-failed run.
+The newer design prepends blank layers and installs leCore facilities into the
+new layers, reserved recurrent directions, and tokenizer-unused rows. It does
+not spectrally filter the original tensors. It is gated until a complete real
+Qwen acceptance run succeeds:
 
-Nothing here touches the leCore engine's dependencies: torch/transformers live
-only in this folder's venv, as the measurement-and-runtime instrument. The
-engine that rewrites the weights remains NumPy + stdlib.
+```bash
+./assimilation/install.sh --experimental assimilation/work/original assimilation/work/installed
+```
+
+The acknowledgement is intentional. The last recorded full-model attempt
+reached checkpoint emission but exhausted memory during verification; fixture
+success is not a substitute for a real checkpoint result.
+
+Generate the preregistered ilxyr acceptance project with
+`experiments/qwen35_acceptance/generate.py`. Its runner checks reference logits,
+thousands of paired token positions with block-bootstrap confidence, peak
+memory, disk reload, official text generation, and official image-input
+execution.
+
+## Research-only spectral control
+
+The original Unicron spectral experiment is retained for reproduction and
+negative controls only:
+
+```bash
+./assimilation/assimilate.sh --research-spectral --eval --no-imbue
+```
+
+It is disabled by default because the real Qwen study did not demonstrate a
+benefit: 18 of 265 eligible tensors changed, the assimilated checkpoint
+regressed, repair reverted most changes, and the remaining apparent gain was
+inside an underpowered confidence interval. Do not describe this path as a
+proven optimization or compression result.
+
+## Scope boundary
+
+leCore's runtime executes the text stack. Vision and MTP tensors pass through
+unchanged, but that is not a vision test. Any checkpoint intended for ordinary
+use must also pass the official Transformers image-text smoke test in the ilxyr
+acceptance contract.

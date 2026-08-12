@@ -988,44 +988,57 @@ def repair_regressions(orig_dir, assim_dir, eval_tokens, out_dir=None,
     Shard-by-shard assimilation cannot evaluate anything -- a partial shard will
     not run -- so its filter is applied blind and the damage only becomes
     visible after assembly (+1.79% perplexity, measured on a real Qwen3.5-0.8B).
-    This pass fixes that after the fact: for every tensor the transform CHANGED,
-    it tries walking back toward the original (alpha=0 is a full revert) and
-    keeps whichever blend actually scores best on the probe.
-
-    The result cannot be worse than EITHER input on those tokens: the original
-    is always one of the candidates. Wherever the filtering genuinely denoised,
-    the gain is kept; wherever it damaged, it is undone.
+    This pass tests every tensor the transform CHANGED by walking back toward
+    the original (alpha=0 is a full revert). A blend is kept only when its
+    paired moving-block interval says BETTER; a lower point estimate alone is
+    not evidence. The final report calls the result acceptable relative to the
+    original only when that same paired test does not say WORSE.
     """
     from holographic.io_and_interop.holographic_gdnruntime import (
-        load_weights_dir, load_runtime, GDNRuntime)
+        load_weights_dir, config_from_json, GDNRuntime)
+    from holographic.io_and_interop.holographic_measure import measure, better_than
     orig = load_weights_dir(orig_dir)
-    rt, cfg = load_runtime(assim_dir)
     cur = load_weights_dir(assim_dir)
+    cfg = config_from_json(os.path.join(assim_dir, "config.json"), weights=cur)
     changed = [k for k, v in cur.items()
                if k in orig and getattr(v, "ndim", 0) == 2
                and np.asarray(v).shape == np.asarray(orig[k]).shape
                and not np.array_equal(np.asarray(v), np.asarray(orig[k]))]
-    ppl_assim = GDNRuntime(cur, rt.cfg).perplexity(eval_tokens)
-    ppl_orig = GDNRuntime(orig, rt.cfg).perplexity(eval_tokens)
+    measured_assim = measure(GDNRuntime(cur, cfg), eval_tokens)
+    measured_orig = measure(GDNRuntime(orig, cfg), eval_tokens)
+    ppl_assim = measured_assim["perplexity"]
+    ppl_orig = measured_orig["perplexity"]
     report = {"changed": len(changed), "reverted": 0, "kept": 0, "blended": 0,
               "perplexity_original": ppl_orig, "perplexity_assimilated": ppl_assim,
               "choices": []}
     ppl_cur = ppl_assim
+    measured_cur = measured_assim
     for i, name in enumerate(changed):
-        a_orig = np.asarray(orig[name], np.float64)
-        a_new = np.asarray(cur[name], np.float64)
+        source_dtype = np.asarray(cur[name]).dtype
+        work_dtype = np.float64 if source_dtype == np.float64 else np.float32
+        a_orig = np.asarray(orig[name], dtype=work_dtype)
+        a_new = np.asarray(cur[name], dtype=work_dtype)
         dt = np.asarray(cur[name]).dtype
         best_alpha, best_ppl, best_w = 1.0, ppl_cur, None
+        best_measure = measured_cur
         for alpha in strengths:                 # alpha=0 -> full revert
             cand = ((1.0 - alpha) * a_orig + alpha * a_new).astype(dt)
             trial = dict(cur)
             trial[name] = cand
-            p = GDNRuntime(trial, rt.cfg).perplexity(eval_tokens)
-            if p < best_ppl - 1e-12:
-                best_alpha, best_ppl, best_w = alpha, p, cand
+            trial_measure = measure(GDNRuntime(trial, cfg), eval_tokens)
+            decision = better_than(trial_measure, best_measure)
+            # Point-estimate selection manufactured gains on the original
+            # 161-token probe. Only a paired block-bootstrap BETTER verdict is
+            # allowed to change the checkpoint now.
+            if decision["verdict"] == "BETTER":
+                best_alpha = alpha
+                best_ppl = trial_measure["perplexity"]
+                best_w = cand
+                best_measure = trial_measure
         if best_w is not None:
             cur[name] = best_w
             ppl_cur = best_ppl
+            measured_cur = best_measure
             report["choices"].append((name, round(best_alpha, 3)))
             if best_alpha == 0.0:
                 report["reverted"] += 1
@@ -1036,7 +1049,9 @@ def repair_regressions(orig_dir, assim_dir, eval_tokens, out_dir=None,
         if progress:
             progress(i, name, ppl_cur)
     report["perplexity_repaired"] = ppl_cur
-    report["beats_original"] = bool(ppl_cur <= ppl_orig + 1e-9)
+    vs_original = better_than(measured_cur, measured_orig)
+    report["comparison_to_original"] = vs_original
+    report["beats_original"] = vs_original["verdict"] != "WORSE"
     report["gain_vs_assimilated"] = ppl_assim - ppl_cur
     report["gain_vs_original"] = ppl_orig - ppl_cur
     if out_dir:

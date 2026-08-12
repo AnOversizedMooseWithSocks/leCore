@@ -14,19 +14,63 @@ tower, TIED EMBEDDINGS (no lm_head tensor at all), added tokens above the plain
 vocabulary, and bf16 on disk. Structure faithful, dimensions tiny.
 """
 
+import argparse
 import json
 import os
+import sys
 
 import numpy as np
 
+# Runnable by path from any directory, including an ilxyr executor workspace.
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO not in sys.path:
+    sys.path.insert(0, _REPO)
 
-def build(out_dir, shrink=8, vocab=2048, added=26, seed=0, layers=None,
-          real_config="/mnt/user-data/uploads/config.json"):
+
+def official_shape_config():
+    """The public Qwen3.5-0.8B text shape, embedded for offline fixtures."""
+    layer_types = ["linear_attention" if i % 4 != 3 else "full_attention"
+                   for i in range(24)]
+    return {
+        "architectures": ["Qwen3_5ForConditionalGeneration"],
+        "model_type": "qwen3_5",
+        "tie_word_embeddings": True,
+        "text_config": {
+            "model_type": "qwen3_5_text",
+            "vocab_size": 248320,
+            "hidden_size": 1024,
+            "intermediate_size": 3584,
+            "num_hidden_layers": 24,
+            "num_attention_heads": 8,
+            "num_key_value_heads": 2,
+            "head_dim": 256,
+            "linear_num_value_heads": 16,
+            "linear_num_key_heads": 16,
+            "linear_key_head_dim": 128,
+            "linear_value_head_dim": 128,
+            "linear_conv_kernel_dim": 4,
+            "layer_types": layer_types,
+            "attn_output_gate": True,
+            "rms_norm_eps": 1e-6,
+            "rope_parameters": {
+                "rope_theta": 10000000.0,
+                "partial_rotary_factor": 0.25,
+            },
+        },
+        "vision_config": {"model_type": "qwen3_5_vision"},
+    }
+
+
+def build(out_dir, shrink=8, vocab=512, added=26, seed=0, layers=None,
+          real_config=None):
     """Write a miniature but structurally faithful Qwen3.5 checkpoint."""
     from holographic.io_and_interop.holographic_unicron import save_safetensors
 
-    with open(real_config) as f:
-        real = json.load(f)
+    if real_config:
+        with open(real_config) as f:
+            real = json.load(f)
+    else:
+        real = official_shape_config()
     tc = dict(real["text_config"])
     H = tc["hidden_size"] // shrink
     I = tc["intermediate_size"] // shrink
@@ -105,23 +149,45 @@ def build(out_dir, shrink=8, vocab=2048, added=26, seed=0, layers=None,
     with open(os.path.join(out_dir, "config.json"), "w") as f:
         json.dump(cfg, f, indent=2)
 
-    # a tokenizer whose ADDED TOKENS sit above the plain vocab, like the real
-    # one -- this is what made "free rows" a dangerous over-count
-    plain = vocab - added
+    # A byte-complete tokenizer makes the fixture usable on arbitrary prose.
+    # Added tokens occupy 256..281, exactly the boundary reserved_rows must see;
+    # the remaining padded rows are genuinely free installation space.
+    if int(vocab) < 256 + int(added):
+        raise ValueError("vocab must be at least %d for byte tokens + added tokens"
+                         % (256 + int(added)))
+    from holographic.io_and_interop.holographic_bpe import _byte_encoder
+    base = {_byte_encoder()[b]: b for b in range(256)}
+    added_tokens = [{"id": 256 + j, "content": "<extra%d>" % j}
+                    for j in range(int(added))]
     with open(os.path.join(out_dir, "vocab.json"), "w") as f:
-        json.dump({"tok%d" % i: i for i in range(plain - 30)}, f)
+        json.dump(base, f)
+    with open(os.path.join(out_dir, "merges.txt"), "w") as f:
+        f.write("#version: 0.2\n")
     with open(os.path.join(out_dir, "tokenizer.json"), "w") as f:
-        json.dump({"model": {"vocab": {"tok%d" % i: i
-                                       for i in range(plain - 30)}},
-                   "added_tokens": [{"id": plain - 30 + j,
-                                     "content": "<extra%d>" % j}
-                                    for j in range(30)]}, f)
+        json.dump({"model": {"type": "BPE", "vocab": base, "merges": []},
+                   "added_tokens": added_tokens}, f)
     return {"dir": out_dir, "hidden": H, "layers": len(types), "vocab": vocab,
             "tensors": len(w),
             "megabytes": round(os.path.getsize(
                 os.path.join(out_dir, "model.safetensors")) / 1e6, 2)}
 
 
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("out_dir")
+    ap.add_argument("--config", dest="real_config",
+                    help="optional real config.json; the official 0.8B shape is embedded")
+    ap.add_argument("--shrink", type=int, default=8)
+    ap.add_argument("--vocab", type=int, default=512)
+    ap.add_argument("--added", type=int, default=26)
+    ap.add_argument("--layers", type=int, default=4,
+                    help="keep the first N layers of the 3-linear/1-full pattern")
+    ap.add_argument("--seed", type=int, default=0)
+    args = ap.parse_args(argv)
+    print(json.dumps(build(args.out_dir, shrink=args.shrink, vocab=args.vocab,
+                           added=args.added, seed=args.seed, layers=args.layers,
+                           real_config=args.real_config), sort_keys=True))
+
+
 if __name__ == "__main__":
-    import sys
-    print(build(sys.argv[1] if len(sys.argv) > 1 else "/tmp/mini_qwen"))
+    main()

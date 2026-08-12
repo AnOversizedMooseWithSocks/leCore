@@ -2,9 +2,9 @@
 REM ============================================================
 REM  install.bat -- Unicron makes Galvatron. One step, no pipeline.
 REM
-REM    install.bat                          work\original  -> work\galvatron
-REM    install.bat MODEL_DIR                MODEL_DIR      -> work\galvatron
-REM    install.bat MODEL_DIR OUT_DIR        wherever you like
+REM    install.bat --experimental                          use defaults
+REM    install.bat --experimental MODEL_DIR                choose source
+REM    install.bat --experimental MODEL_DIR OUT_DIR        choose both
 REM
 REM  This REPLACES assimilate -> repair -> imbue. That path edited 18 of 265
 REM  tensors, repair reverted 12 of them as harmful, and what survived sat
@@ -30,22 +30,9 @@ set PYTHONHASHSEED=0
 set "VPY=assimilation\.venv\Scripts\python.exe"
 if not exist "%VPY%" set "VPY=python"
 
-set "SRC=%~1"
-set "DST=%~2"
-if "%SRC%"=="" set "SRC=work\original"
-if "%DST%"=="" set "DST=work\galvatron"
-REM NO EXISTENCE CHECK HERE ON PURPOSE. This script cd'd to the repo root, so
-REM testing "%SRC%" tests the WRONG directory for any relative path -- it would
-REM reject a path that is perfectly correct from where the user is standing.
-REM install.py resolves it properly (caller's cwd, then repo, then work\) and
-REM prints every place it looked if it truly cannot find one.
-echo   %SRC%  ->  %DST%
-echo.
-if "%~2"=="" (
-  "%VPY%" assimilation\install.py "%SRC%" "%DST%" %2 %3 %4 %5 %6 %7
-) else (
-  "%VPY%" assimilation\install.py %*
-)
+REM Do not pre-parse paths here. install.py owns defaults and resolves relative
+REM paths against GALVATRON_CWD before the repo root.
+"%VPY%" assimilation\install.py %*
 if errorlevel 1 (
   echo.
   echo   [!] FAILED -- the error is printed above this line.

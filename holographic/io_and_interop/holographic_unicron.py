@@ -40,6 +40,8 @@ import json
 import struct
 import hashlib
 import zipfile
+from collections import OrderedDict
+from collections.abc import Mapping
 
 import zlib
 import tempfile
@@ -68,7 +70,79 @@ def _decode_bf16(raw_u16):
     return u32.view(np.float32)
 
 
-def load_safetensors(path, return_dtypes=False):
+class SafetensorWeights(Mapping):
+    """Read-only, file-backed mapping over one or more safetensors shards.
+
+    Native NumPy dtypes remain mmap views. BF16 has no NumPy dtype, so only the
+    tensor currently requested is decoded to float32 and held in a bounded LRU.
+    This is the lazy checkpoint store the runtime needs; mapping a file and then
+    copying every tensor, as the old loader did, is still an eager load.
+    """
+
+    def __init__(self, paths, max_cached=8):
+        if isinstance(paths, (str, os.PathLike)):
+            paths = [paths]
+        self._entries = OrderedDict()
+        self._cache = OrderedDict()
+        self._max_cached = max(0, int(max_cached))
+        self.stats = {"hits": 0, "misses": 0, "decoded_bytes": 0}
+        for path in paths:
+            path = os.fspath(path)
+            with open(path, "rb") as fh:
+                raw = fh.read(8)
+                if len(raw) != 8:
+                    raise ValueError("truncated safetensors header in %s" % path)
+                (hdr_len,) = struct.unpack("<Q", raw)
+                header = json.loads(fh.read(hdr_len).decode("utf-8"))
+            data_start = 8 + hdr_len
+            for name, meta in header.items():
+                if name == "__metadata__":
+                    continue
+                if name in self._entries:
+                    raise ValueError("duplicate tensor %r across safetensors shards" % name)
+                self._entries[name] = (path, data_start, dict(meta))
+
+    @property
+    def dtypes(self):
+        return {name: entry[2]["dtype"] for name, entry in self._entries.items()}
+
+    def __iter__(self):
+        return iter(self._entries)
+
+    def __len__(self):
+        return len(self._entries)
+
+    def __getitem__(self, name):
+        if name in self._cache:
+            self.stats["hits"] += 1
+            value = self._cache.pop(name)
+            self._cache[name] = value
+            return value
+        self.stats["misses"] += 1
+        path, data_start, meta = self._entries[name]
+        a, b = map(int, meta["data_offsets"])
+        shape = tuple(int(v) for v in meta["shape"])
+        disk_dtype = meta["dtype"]
+        if disk_dtype == "BF16":
+            raw = np.memmap(path, dtype="<u2", mode="r",
+                            offset=data_start + a, shape=((b - a) // 2,))
+            value = _decode_bf16(raw).reshape(shape)
+            self.stats["decoded_bytes"] += int(value.nbytes)
+        else:
+            if disk_dtype not in _ST_DTYPES:
+                raise ValueError("unsupported safetensors dtype: %s" % disk_dtype)
+            dtype = np.dtype(_ST_DTYPES[disk_dtype]).newbyteorder("<")
+            value = np.memmap(path, dtype=dtype, mode="r",
+                              offset=data_start + a,
+                              shape=((b - a) // dtype.itemsize,)).reshape(shape)
+        if self._max_cached:
+            self._cache[name] = value
+            while len(self._cache) > self._max_cached:
+                self._cache.popitem(last=False)
+        return value
+
+
+def load_safetensors(path, return_dtypes=False, lazy=False, max_cached=8):
     """Parse a .safetensors file into {name: ndarray} with stdlib + NumPy only.
     return_dtypes=True additionally returns {name: on-disk dtype string}, so a
     caller can hand it back to save_safetensors and keep the file size honest.
@@ -77,51 +151,16 @@ def load_safetensors(path, return_dtypes=False):
     next N bytes = JSON mapping tensor name -> {dtype, shape, data_offsets};
     the rest = the concatenated raw tensor bytes the offsets index into.
     bf16 tensors are decoded losslessly to float32 (see _decode_bf16)."""
-    # MEMORY-MAP THE PAYLOAD, DO NOT READ IT. `blob = f.read()` pulls the whole
-    # checkpoint into RAM before a single tensor is touched, which is precisely
-    # the anti-pattern safetensors was designed to avoid -- the format exists so
-    # the OS can page bytes in on demand rather than duplicating the file.
-    # Field-caught on a real 2.1 GB model: the install finished, the file wrote
-    # correctly, and reading it back for VERIFICATION died with MemoryError
-    # while the installed and original copies were still held.
-    # np.memmap is numpy-only, needs no dependency, and gives the same zero-copy
-    # behaviour the safetensors library gets from mmap.
-    with open(path, "rb") as f:
-        (hdr_len,) = struct.unpack("<Q", f.read(8))
-        header = json.loads(f.read(hdr_len).decode("utf-8"))
-        data_start = 8 + hdr_len
-    try:
-        blob = np.memmap(path, dtype=np.uint8, mode="r", offset=data_start)
-    except Exception:
-        # a filesystem that cannot map (some network shares) falls back to the
-        # old behaviour rather than failing -- slower and hungrier, but correct
-        with open(path, "rb") as f:
-            f.seek(data_start)
-            blob = f.read()
-    out = {}
-    for name, meta in header.items():
-        if name == "__metadata__":
-            continue
-        a, b = meta["data_offsets"]
-        raw = blob[a:b]
-        shape = tuple(meta["shape"])
-        dt = meta["dtype"]
-        # DO NOT MATERIALISE. The previous line ended in `.copy()` on EVERY
-        # tensor, which pages in the whole mapping and defeats the memmap that
-        # was just set up -- and for a BF16 checkpoint the eager _decode_bf16
-        # DOUBLED it again, because bf16 decodes to float32. A 2.1 GB bf16 model
-        # therefore cost 4.2 GB before anything was computed.
-        # llama.cpp's streaming PR names this exact trap: enabling streaming
-        # AUTO-DISABLES mmap because "mmap prefetch would page the whole model
-        # into RAM and defeat streaming". A copy is the same defeat.
-        # A _LazyTensor holds the OFFSET, not the bytes, and decodes the one
-        # tensor a caller actually touches. Every consumer here goes through
-        # np.asarray(), which triggers __array__ -- so nothing else changes.
-        if dt not in _ST_DTYPES and dt != "BF16":
-            raise ValueError("unsupported safetensors dtype: %s" % dt)
-        out[name] = _LazyTensor(blob, a, b, shape, dt)
+    store = SafetensorWeights(path, max_cached=max_cached)
+    if lazy:
+        if return_dtypes:
+            return store, store.dtypes
+        return store
+    # The compatibility path remains a writable, eager dict for transformation
+    # callers. Runtime loading uses SafetensorWeights directly below.
+    out = {name: np.array(store[name], copy=True) for name in store}
     if return_dtypes:
-        return out, {k: header[k]["dtype"] for k in out}
+        return out, store.dtypes
     return out
 
 
@@ -825,11 +864,14 @@ def rsvd(W, k, seed=0, oversample=10, power=2):
     ~1e12 flops under exact SVD just to LOOK at it. Deterministic under the seed.
     WHY power iterations: weight spectra decay slowly through the MP bulk; without
     q>=1 the probe subspace leaks bulk energy and the top singular values bias low."""
-    W = np.asarray(W, np.float64)
+    source = np.asarray(W)
+    dtype = np.float64 if source.dtype == np.float64 else np.float32
+    W = np.asarray(source, dtype=dtype)
     m, n = W.shape
     k = min(k, min(m, n))
     rng = np.random.default_rng(seed)
-    Q = np.linalg.qr(W @ rng.standard_normal((n, min(k + oversample, n))))[0]
+    Q = np.linalg.qr(W @ rng.standard_normal(
+        (n, min(k + oversample, n)), dtype=dtype))[0]
     for _ in range(power):
         Q = np.linalg.qr(W @ (W.T @ Q))[0]
     U_s, sv, Vt = np.linalg.svd(Q.T @ W, full_matrices=False)

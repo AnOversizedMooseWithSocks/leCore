@@ -48,23 +48,39 @@ import numpy as np
 
 # ------------------------------------------------------------------- primitives
 
+def _weight_array(value):
+    """Keep checkpoint weights at their useful compute precision.
+
+    BF16 is decoded by the safetensors loader to float32. Converting every such
+    tensor to float64 doubled resident memory without adding source precision.
+    Float16 is promoted to float32 for NumPy kernels; existing float32/float64
+    arrays remain zero-copy.
+    """
+    value = np.asarray(value)
+    if value.dtype.kind == "f" and value.dtype.itemsize >= 4:
+        return value
+    return value.astype(np.float32)
+
+
 def _rmsnorm(x, w, eps):
     """Qwen3Next RMSNorm is ZERO-CENTERED: y = norm(x) * (1 + w), weight init 0.
     Field-caught: plain `* w` matched nothing (rel err 1.0) -- the norm is where
     the first full-model divergence lived, masked earlier by a standalone mixer
     test that bypassed the norm. NOTE the asymmetry: the GATED norm below keeps
     plain `* w` (its weight init is ones) -- reference has both conventions."""
-    x32 = x.astype(np.float64)
+    dtype = np.float64 if np.asarray(x).dtype == np.float64 else np.float32
+    x32 = np.asarray(x, dtype=dtype)
     v = np.mean(x32 * x32, axis=-1, keepdims=True)
     return (x32 / np.sqrt(v + eps)) * (1.0 + w)
 
 
 def _rmsnorm_gated(x, w, gate, eps):
     """Norm BEFORE gate; gate goes through SiLU (reference Qwen3NextRMSNormGated)."""
-    x32 = x.astype(np.float64)
+    dtype = np.float64 if np.asarray(x).dtype == np.float64 else np.float32
+    x32 = np.asarray(x, dtype=dtype)
     v = np.mean(x32 * x32, axis=-1, keepdims=True)
     y = (x32 / np.sqrt(v + eps)) * w
-    g = gate.astype(np.float64)
+    g = np.asarray(gate, dtype=dtype)
     return y * (g / (1.0 + np.exp(-g)))
 
 
@@ -85,10 +101,10 @@ def _causal_conv_silu(x, w):
     Left-pad K-1 zeros: output[t] sees inputs t-K+1..t only."""
     S, C = x.shape
     K = w.shape[-1]
-    xp = np.concatenate([np.zeros((K - 1, C)), x], axis=0)
+    xp = np.concatenate([np.zeros((K - 1, C), dtype=x.dtype), x], axis=0)
     # WHY spelled out: conv weight index order is w[:, 0, k] multiplying input at
     # offset t-(K-1)+k -- easy to flip silently. Verified against torch.
-    out = np.zeros((S, C))
+    out = np.zeros((S, C), dtype=x.dtype)
     for k in range(K):
         out += xp[k:k + S] * w[:, 0, k][None, :]
     return _silu(out)
@@ -111,7 +127,9 @@ def _kmeans(X, nc, iters=8, seed=0):
 
 
 def _rope_tables(dim, positions, theta):
-    inv = 1.0 / (theta ** (np.arange(0, dim, 2, dtype=np.float64) / dim))
+    dtype = np.float64 if np.asarray(positions).dtype == np.float64 else np.float32
+    inv = 1.0 / (np.asarray(theta, dtype=dtype) **
+                 (np.arange(0, dim, 2, dtype=dtype) / dim))
     ang = np.outer(positions, inv)               # (S, dim/2)
     emb = np.concatenate([ang, ang], axis=-1)    # (S, dim) -- non-interleaved
     return np.cos(emb), np.sin(emb)
@@ -191,8 +209,11 @@ class GDNRuntime:
         self.w = weights
         emb_key = next(k for k in (self.root + "embed_tokens.weight",
                                    "model.embed_tokens.weight") if k in weights)
-        self.embed = np.asarray(weights[emb_key], np.float64)
-        self.lm_head = np.asarray(weights["lm_head.weight"], np.float64) \
+        self.embed_key = emb_key
+        self.embed = _weight_array(weights[emb_key])
+        self.compute_dtype = (np.float64 if self.embed.dtype == np.float64
+                              else np.float32)
+        self.lm_head = _weight_array(weights["lm_head.weight"]) \
             if "lm_head.weight" in weights else self.embed   # tied (the 0.8B case)
 
     def _g_opt(self, layer, name):
@@ -205,10 +226,10 @@ class GDNRuntime:
         key = self.root + "layers.%d.%s" % (layer, name)
         if key not in self.w:
             return None
-        return np.asarray(self.w[key], np.float64)
+        return _weight_array(self.w[key])
 
     def _g(self, layer, name):
-        return np.asarray(self.w[self.root + "layers.%d.%s" % (layer, name)], np.float64)
+        return _weight_array(self.w[self.root + "layers.%d.%s" % (layer, name)])
 
     def load_factors(self, factors):
         """Attach low-rank factors produced by refactor.decompose so the forward
@@ -222,8 +243,7 @@ class GDNRuntime:
             rest = parts[1]
             layer = int(rest.split(".")[0])
             name = rest.split(".", 1)[1]
-            self._factors[(layer, name)] = (np.asarray(A, np.float64),
-                                            np.asarray(B, np.float64))
+            self._factors[(layer, name)] = (_weight_array(A), _weight_array(B))
         return len(self._factors)
 
     def _has(self, layer, name):
@@ -306,7 +326,8 @@ class GDNRuntime:
             # continue the causal conv with the CARRIED window as left context,
             # instead of the zero padding a fresh sequence gets -- otherwise the
             # first tokens of every chunk are computed as if the stream restarted
-            pre = np.concatenate([np.asarray(init["conv"], np.float64), mixed_pre])
+            pre = np.concatenate([np.asarray(init["conv"], dtype=mixed_pre.dtype),
+                                  mixed_pre])
             mixed = _causal_conv_silu(pre, cw)[-S:]
         else:
             mixed = _causal_conv_silu(mixed_pre, cw)
@@ -323,9 +344,10 @@ class GDNRuntime:
             k = np.repeat(k, r, axis=1)
         q = _l2norm(q) * (dk ** -0.5)
         k = _l2norm(k)
-        St = np.zeros((Vh, dk, dv)) if (init is None or "S" not in init) \
-            else np.array(init["S"], np.float64, copy=True)
-        out = np.zeros((S, Vh, dv))
+        St = np.zeros((Vh, dk, dv), dtype=x.dtype) \
+            if (init is None or "S" not in init) \
+            else np.array(init["S"], dtype=x.dtype, copy=True)
+        out = np.zeros((S, Vh, dv), dtype=x.dtype)
         for t in range(S):
             St = St * np.exp(g[t])[:, None, None]
             kv = np.einsum("hkv,hk->hv", St, k[t])
@@ -339,7 +361,8 @@ class GDNRuntime:
         if collect is not None:
             K = self._g(layer, "linear_attn.conv1d.weight").shape[-1]
             # the L1 line the step path will slide: last K-1 PRE-conv rows
-            pad = np.concatenate([np.zeros((K - 1, mixed_pre.shape[1])), mixed_pre])
+            pad = np.concatenate([np.zeros((K - 1, mixed_pre.shape[1]),
+                                           dtype=mixed_pre.dtype), mixed_pre])
             collect["conv"] = pad[-(K - 1):].copy()
             collect["S"] = St
         return y
@@ -376,8 +399,8 @@ class GDNRuntime:
         n_past = 0
         if init is not None and "k" in init:
             n_past = int(np.asarray(init["k"]).shape[0])
-            k = np.concatenate([np.asarray(init["k"], np.float64), k], axis=0)
-            v = np.concatenate([np.asarray(init["v"], np.float64), v], axis=0)
+            k = np.concatenate([np.asarray(init["k"], dtype=k.dtype), k], axis=0)
+            v = np.concatenate([np.asarray(init["v"], dtype=v.dtype), v], axis=0)
         if collect is not None:
             collect["k"], collect["v"] = k.copy(), v.copy()
         rep = H // Hkv
@@ -515,7 +538,7 @@ class GDNRuntime:
             # 0.667 -> 0.698 (r=8) at the tight setting and 0.858 -> 0.871
             # (r=4) at the loose one, for r x tiny screen-scoring cost.
             acc = max(1, int(scr.get("accumulators", 1)))
-            cent = np.zeros((nblk, acc, H, hd))
+            cent = np.zeros((nblk, acc, H, hd), dtype=k.dtype)
             for i in range(nblk):
                 seg = k[i * blk:(i + 1) * blk]
                 for j, kv in enumerate(seg):
@@ -587,13 +610,14 @@ class GDNRuntime:
             self._dev = None
             return {"device": "cpu", "resident": 0,
                     "why": "no accelerator available -- running on NumPy"}
-        moved = 0
-        for k in list(self.w):
-            try:
-                self.w[k] = _to(np.asarray(self.w[k]))
-                moved += 1
-            except Exception:
-                pass
+        # The default file-backed store is deliberately read-only.  Build a
+        # resident mapping instead of assigning into it (the old loop silently
+        # moved zero tensors once lazy loading became the default).
+        resident = {k: _to(_weight_array(self.w[k])) for k in self.w}
+        self.w = resident
+        self.embed = resident[self.embed_key]
+        self.lm_head = resident.get("lm_head.weight", self.embed)
+        moved = len(resident)
         self._dev = xp
         return {"device": "gpu", "resident": moved, "why": "weights resident"}
 
@@ -651,7 +675,7 @@ class GDNRuntime:
         ids = np.asarray(token_ids, np.int64)
         h = self.embed[ids]
         past = int(getattr(resume, "pos", 0) or 0) if resume is not None else 0
-        positions = np.arange(past, past + len(ids), dtype=np.float64)
+        positions = np.arange(past, past + len(ids), dtype=self.compute_dtype)
         st = InferenceState() if collect_state else None
         # LAYER SCHEDULE: which layers run, in what order, how many times.
         # Owning the forward pass makes depth up-scaling (SOLAR/Goliath-style
@@ -686,10 +710,10 @@ class GDNRuntime:
                 if fn is not None:
                     d = fn(h)
                     if d is not None:
-                        h = h + np.asarray(d, np.float64)
+                        h = h + np.asarray(d, dtype=self.compute_dtype)
         nk = next(k for k in (self.root + "norm.weight", "model.norm.weight")
                   if k in self.w)
-        h = _rmsnorm(h, np.asarray(self.w[nk], np.float64), c["rms_eps"])
+        h = _rmsnorm(h, _weight_array(self.w[nk]), c["rms_eps"])
         logits = h @ self.lm_head.T
         if collect_state:
             # ADVANCE FROM WHERE WE RESUMED, not from zero. A state carried out
@@ -744,7 +768,7 @@ class GDNRuntime:
         mixed = np.concatenate([q.ravel(), k.ravel(), v.ravel()])
         w = self._g(layer, "linear_attn.conv1d.weight")
         K = w.shape[-1]
-        win = st.setdefault("conv", np.zeros((K - 1, mixed.size)))
+        win = st.setdefault("conv", np.zeros((K - 1, mixed.size), dtype=mixed.dtype))
         xw = np.concatenate([win, mixed[None, :]], axis=0)     # (K, C)
         conv = _silu(np.sum(xw * w[:, 0, :].T, axis=0))
         st["conv"] = xw[1:]                                    # slide the L1 line
@@ -757,7 +781,7 @@ class GDNRuntime:
         if r > 1:
             q = np.repeat(q, r, axis=0); k = np.repeat(k, r, axis=0)
         q = _l2norm(q) * (dk ** -0.5); k = _l2norm(k)
-        S = st.setdefault("S", np.zeros((Vh, dk, dv)))
+        S = st.setdefault("S", np.zeros((Vh, dk, dv), dtype=x.dtype))
         S = S * np.exp(g)[:, None, None]
         kv = np.einsum("hkv,hk->hv", S, k)
         delta = (v - kv) * beta[:, None]
@@ -791,7 +815,8 @@ class GDNRuntime:
         if _kn is not None:
             k = _rmsnorm(k, _kn, eps)
         rd = int(hd * c.get("partial_rotary_factor", 1.0))
-        cos, sin = _rope_tables(rd, np.array([float(pos)]), c["rope_theta"])
+        cos, sin = _rope_tables(rd, np.array([float(pos)], dtype=self.compute_dtype),
+                                c["rope_theta"])
         q2, k2 = _apply_rope(q[None], k[None], cos, sin)
         q, k = q2[0], k2[0]
         ks = np.concatenate([st["k"], k[None]], axis=0) if "k" in st else k[None]
@@ -825,11 +850,11 @@ class GDNRuntime:
             if fn is not None:
                 d = fn(h[None, :])
                 if d is not None:
-                    h = h + np.asarray(d, np.float64).reshape(-1)
+                    h = h + np.asarray(d, dtype=self.compute_dtype).reshape(-1)
         state.pos += 1
         nk = next(k for k in (self.root + "norm.weight", "model.norm.weight")
                   if k in self.w)
-        h = _rmsnorm(h, np.asarray(self.w[nk], np.float64), c["rms_eps"])
+        h = _rmsnorm(h, _weight_array(self.w[nk]), c["rms_eps"])
         state.logits = h @ self.lm_head.T
         return state.logits, state
 
@@ -874,7 +899,7 @@ class GDNRuntime:
         ids = np.asarray(tokens, np.int64)
         S = len(ids)
         h = self.embed[ids]
-        positions = np.arange(state.pos, state.pos + S, dtype=np.float64)
+        positions = np.arange(state.pos, state.pos + S, dtype=self.compute_dtype)
         for L in range(c["n_layers"]):
             hn = _rmsnorm(h, self._g(L, "input_layernorm.weight"), c["rms_eps"])
             if self._is_gdn(L):
@@ -890,11 +915,11 @@ class GDNRuntime:
             if fn is not None:
                 d = fn(h)
                 if d is not None:
-                    h = h + np.asarray(d, np.float64)
+                    h = h + np.asarray(d, dtype=self.compute_dtype)
         state.pos += S
         nk = next(k for k in (self.root + "norm.weight", "model.norm.weight")
                   if k in self.w)
-        h = _rmsnorm(h, np.asarray(self.w[nk], np.float64), c["rms_eps"])
+        h = _rmsnorm(h, _weight_array(self.w[nk]), c["rms_eps"])
         logits = h @ self.lm_head.T
         state.logits = logits[-1]
         return logits, state
@@ -910,8 +935,8 @@ class GDNRuntime:
         c = self.cfg
         hooks = hooks or {}
         step_hooks = step_hooks or {}
-        h = np.asarray(embeds, np.float64)
-        positions = np.arange(h.shape[0], dtype=np.float64)
+        h = np.asarray(embeds, dtype=self.compute_dtype)
+        positions = np.arange(h.shape[0], dtype=self.compute_dtype)
         sched = c.get("layer_schedule") or list(range(c["n_layers"]))
         for step_i, L in enumerate(sched):
             hn = _rmsnorm(h, self._g(L, "input_layernorm.weight"), c["rms_eps"])
@@ -926,10 +951,10 @@ class GDNRuntime:
                 if fn is not None:
                     d = fn(h)
                     if d is not None:
-                        h = h + np.asarray(d, np.float64)
+                        h = h + np.asarray(d, dtype=self.compute_dtype)
         nk = next(k for k in (self.root + "norm.weight", "model.norm.weight")
                   if k in self.w)
-        h = _rmsnorm(h, np.asarray(self.w[nk], np.float64), c["rms_eps"])
+        h = _rmsnorm(h, _weight_array(self.w[nk]), c["rms_eps"])
         return h @ self.lm_head.T
 
     def token_nll(self, token_ids, hooks=None):
@@ -1139,10 +1164,13 @@ def _validate_config(cfg, weights, declared_gate=None):
 
 
 def load_runtime(model_dir, lazy=False, max_cached=8):
-    """THE ONE-LINER: a model directory -> a running GDNRuntime. Reads every
-    shard from the safetensors index (or the single file), parses config.json,
-    validates it against the weights, and returns the runtime. lazy=True holds
-    the weights as middle-out codes and decodes per tensor on demand."""
+    """THE ONE-LINER: a model directory -> a running GDNRuntime.
+
+    Shards are file-backed and tensors decode on demand. ``lazy=True`` retains
+    the older, explicitly lossy middle-out residency experiment; it first
+    materializes the mapped store because compression itself must inspect every
+    tensor. The default path is exact and no longer eagerly copies every shard.
+    """
     from holographic.io_and_interop import holographic_unicron as U
     # A GALVATRON BUNDLE CARRIES ITS CONFIG IN galvatron.json, NOT config.json.
     # Every tool that loads a model went through here, so the fallback belongs
@@ -1159,9 +1187,8 @@ def load_runtime(model_dir, lazy=False, max_cached=8):
     files = load_weight_files(model_dir)
     if not files:
         raise ValueError("no .safetensors files in %s" % model_dir)
-    weights = {}
-    for f in files:
-        weights.update(U.load_safetensors(os.path.join(model_dir, f)))
+    paths = [os.path.join(model_dir, f) for f in files]
+    weights = U.SafetensorWeights(paths, max_cached=max_cached)
     if os.path.exists(cfg_path):
         cfg = config_from_json(cfg_path, weights=weights)
     else:
@@ -1178,7 +1205,7 @@ def load_runtime(model_dir, lazy=False, max_cached=8):
             raise ValueError("galvatron.json in %r has no usable config block"
                              % model_dir)
     if lazy:
-        weights = U.LazyWeights(weights, max_cached=max_cached)
+        weights = U.LazyWeights(dict(weights.items()), max_cached=max_cached)
     rt = GDNRuntime(weights, cfg)
     _resolve_ambiguous_layout(rt, model_dir)
     _sanity_check(rt, model_dir)
@@ -1255,12 +1282,20 @@ def load_weight_files(model_dir):
     return files
 
 
-def load_weights_dir(model_dir):
-    """All weights from a model directory, sharded or single-file."""
+def load_weights_dir(model_dir, lazy=False, max_cached=8):
+    """All weights from a model directory, sharded or single-file.
+
+    Transformation callers receive the historical writable dict. Inspection
+    and runtime callers can request the exact file-backed mapping with
+    ``lazy=True``.
+    """
     from holographic.io_and_interop import holographic_unicron as U
+    files = [os.path.join(model_dir, f) for f in load_weight_files(model_dir)]
+    if lazy:
+        return U.SafetensorWeights(files, max_cached=max_cached)
     weights = {}
-    for f in load_weight_files(model_dir):
-        weights.update(U.load_safetensors(os.path.join(model_dir, f)))
+    for f in files:
+        weights.update(U.load_safetensors(f))
     return weights
 
 

@@ -1,6 +1,6 @@
 """install.py -- put leCore into a real model, in one pass, and verify it.
 
-    python assimilation/install.py MODEL_DIR OUT_DIR [--doc FILE] [--registers N]
+    python assimilation/install.py --experimental MODEL_DIR OUT_DIR [--doc FILE]
 
 THIS REPLACES assimilate -> repair -> imbue. That pipeline changed 18 of 265
 tensors, repair reverted 12 of them as harmful, and the surviving difference sat
@@ -70,6 +70,9 @@ def _free_rows(model_dir, n_vocab, need):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--experimental", action="store_true",
+                    help="acknowledge that the layer-prepending installer has "
+                         "not yet completed the full Qwen3.5-0.8B acceptance run")
     ap.add_argument("model_dir", nargs="?", default="work/original",
                     help="the model to assimilate (default: work/original, "
                          "resolved from where you are standing)")
@@ -93,6 +96,9 @@ def main():
                          "intervention is proportionate on a 4-layer fixture "
                          "and on a 61-layer model alike)")
     a = ap.parse_args()
+    if not a.experimental:
+        ap.error("the layer-prepending installer is experimental; pass "
+                 "--experimental after reviewing assimilation/README.md")
 
     from holographic.io_and_interop.holographic_gdnruntime import (
         GDNRuntime, load_runtime, load_weights_dir)

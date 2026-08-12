@@ -1,16 +1,11 @@
 @echo off
 REM ============================================================================
-REM  assimilation\assimilate.bat -- download Qwen3.5-0.8B, run Unicron's pass,
-REM  and (optionally) measure the result, on Windows. One command.
+REM  assimilation\assimilate.bat -- download Qwen3.5-0.8B. Spectral filtering
+REM  is retained only as an explicit research control.
 REM
-REM      assimilate.bat                          download, assimilate, REPAIR,
-REM                                              and build the imbued Galvatron
-REM      assimilate.bat --ban "words to forbid"   ...with a ward baked in
-REM      assimilate.bat --doc mydata.txt          ...grounded in YOUR data
-REM      assimilate.bat --refactor 0.01           ...decomposed and rebuilt
-REM                                              smaller inside a +1% budget
-REM      assimilate.bat --eval                    ...and measure before/after
-REM      assimilate.bat --no-imbue                weights only, no Galvatron
+REM      assimilate.bat                          download untouched weights
+REM      assimilate.bat --research-spectral --eval
+REM                                              run the research control
 REM      assimilate.bat --model Qwen/Qwen3.5-2B   other sizes
 REM
 REM  Everything installs into a private virtual environment at
@@ -18,10 +13,8 @@ REM  assimilation\.venv (created on first run) -- your system Python is never
 REM  touched, and NO Hugging Face account or token is needed: the weights are
 REM  public and the download is anonymous by construction.
 REM
-REM  When it finishes:
-REM      assimilation\run_galvatron.bat            chat with the Galvatron
-REM      assimilation\galvatron.bat work\assimilated --prove --doc lecore
-REM  (chat.bat is the OLD torch harness and is no longer the way in.)
+REM  See assimilation\README.md before opting into spectral filtering or the
+REM  separate experimental layer-prepending installer.
 REM ============================================================================
 setlocal
 title Unicron assimilation
@@ -73,8 +66,8 @@ REM --- run --------------------------------------------------------------------
 "%VPY%" assimilation\run.py --workdir assimilation\work %*
 if not errorlevel 1 (
     echo.
-    echo   Next:  assimilation\run_galvatron.bat        ^(chat with it^)
-    echo          assimilation\galvatron.bat assimilation\work\assimilated --prove --doc lecore
+    echo   Untouched weights: assimilation\work\original
+    echo   See assimilation\README.md for explicitly gated experiment paths.
 )
 if errorlevel 1 (
     echo.

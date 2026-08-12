@@ -27,6 +27,27 @@ on:
   workflow_dispatch:            # a "Run workflow" button in the Actions tab -> full suite on demand
 
 jobs:
+  qwen-experiment-contract:
+    if: (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONHASHSEED: "0"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Qwen contract dependencies
+        run: pip install numpy pytest
+      - name: Run the portable Qwen and ilxyr contract gates
+        run: pytest -q tests/test_qwen_acceptance.py
+
   pytest:
     # SHARDED, because the unscoped path is the whole suite in one 20-minute box and it started timing out.
     # `timeout-minutes` is PER JOB, so four shard jobs give the fast path 4x the budget -- the same reasoning

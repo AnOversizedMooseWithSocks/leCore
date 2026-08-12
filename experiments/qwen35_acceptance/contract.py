@@ -1,0 +1,28 @@
+"""Frozen metric contract shared by the Qwen acceptance runner and generator."""
+
+METRIC_SPECS = [
+    {"name": "acceptance_pass", "unit": "boolean", "description": "All mandatory Qwen installation acceptance gates passed, encoded as 0 or 1."},
+    {"name": "source_clean", "unit": "boolean", "description": "The tracked leCore checkout was clean when the run began, encoded as 0 or 1."},
+    {"name": "spectral_filtering_enabled", "unit": "boolean", "description": "Whether research-only spectral filtering was used; the acceptance path requires 0."},
+    {"name": "experimental_installer_used", "unit": "boolean", "description": "The explicitly acknowledged layer-prepending installer ran, encoded as 0 or 1."},
+    {"name": "tokenizer_parity_pass", "unit": "boolean", "description": "leCore and the official Transformers tokenizer produced identical reference token IDs."},
+    {"name": "reference_logit_parity_pass", "unit": "boolean", "description": "Pre-install leCore logits matched the official Transformers text model within the frozen tolerance."},
+    {"name": "reference_logit_relative_error", "unit": "ratio", "description": "Maximum absolute pre-install logit error divided by the maximum absolute reference logit."},
+    {"name": "eval_tokens", "unit": "tokens", "description": "Paired token positions included in the streamed evaluation."},
+    {"name": "original_perplexity", "unit": "perplexity", "description": "Original checkpoint perplexity on the frozen corpus and chunking procedure."},
+    {"name": "installed_perplexity", "unit": "perplexity", "description": "Installed checkpoint perplexity on the same token positions."},
+    {"name": "perplexity_delta_pct", "unit": "percent", "description": "Installed minus original perplexity as a percentage of original."},
+    {"name": "paired_ci_lo_nats", "unit": "nats_per_token", "description": "Lower 95 percent paired moving-block-bootstrap bound for installed minus original NLL."},
+    {"name": "paired_ci_hi_nats", "unit": "nats_per_token", "description": "Upper 95 percent paired moving-block-bootstrap bound for installed minus original NLL."},
+    {"name": "statistical_gate_pass", "unit": "boolean", "description": "The paired upper confidence bound stayed within the preregistered maximum regression."},
+    {"name": "paired_block_length", "unit": "tokens", "description": "Moving-block length inferred from autocorrelation in paired token loss differences."},
+    {"name": "paired_effective_tokens", "unit": "tokens", "description": "Effective paired sample size after serial-correlation adjustment."},
+    {"name": "peak_rss_mb", "unit": "megabytes", "description": "Peak resident memory observed across the runner and installer child process."},
+    {"name": "peak_gpu_mb", "unit": "megabytes", "description": "Peak accelerator allocation reported by PyTorch, or 0 when no accelerator was used."},
+    {"name": "emitted_checkpoint_mb", "unit": "megabytes", "description": "Total safetensors size of the emitted installed checkpoint."},
+    {"name": "reload_pass", "unit": "boolean", "description": "The emitted checkpoint reloaded from disk and produced finite logits."},
+    {"name": "text_generation_pass", "unit": "boolean", "description": "The emitted checkpoint generated text through the official Transformers model."},
+    {"name": "vision_smoke_pass", "unit": "boolean", "description": "The emitted checkpoint accepted a synthetic image through the official Qwen vision-language processor and generated a token."},
+]
+
+METRIC_NAMES = tuple(item["name"] for item in METRIC_SPECS)
