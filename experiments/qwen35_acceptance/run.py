@@ -122,7 +122,7 @@ def reference_parity(model_dir, token_ids, tolerance):
     return float(tokenizer_pass), rel, float(rel <= float(tolerance))
 
 
-def run_installer(model_dir, installed_dir, corpus, transcript):
+def run_installer(model_dir, installed_dir, installation_corpus, transcript):
     command = [
         sys.executable,
         str(REPO / "assimilation" / "install.py"),
@@ -130,7 +130,7 @@ def run_installer(model_dir, installed_dir, corpus, transcript):
         str(model_dir),
         str(installed_dir),
         "--doc",
-        str(corpus),
+        str(installation_corpus),
         "--device",
         "cpu",
     ]
@@ -182,7 +182,7 @@ def official_output_smokes(installed_dir):
     return float(text_pass), float(vision_pass), peak_gpu
 
 
-def source_snapshot():
+def source_snapshot(installation_corpus, evaluation_corpus):
     repository = subprocess.check_output(
         ["git", "remote", "get-url", "origin"], cwd=REPO, text=True).strip()
     commit = subprocess.check_output(
@@ -200,6 +200,18 @@ def source_snapshot():
     return float(not dirty), {
         "repository": repository,
         "commit": commit,
+        "inputs": {
+            "installation_corpus": {
+                "path": str(installation_corpus),
+                "sha256": sha256_file(installation_corpus),
+                "bytes": installation_corpus.stat().st_size,
+            },
+            "evaluation_corpus": {
+                "path": str(evaluation_corpus),
+                "sha256": sha256_file(evaluation_corpus),
+                "bytes": evaluation_corpus.stat().st_size,
+            },
+        },
         "artifacts": [{"path": str(path.relative_to(REPO)),
                        "sha256": sha256_file(path)} for path in paths],
     }
@@ -209,7 +221,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("model_dir", type=Path)
     ap.add_argument("installed_dir", type=Path)
-    ap.add_argument("corpus", type=Path)
+    ap.add_argument("installation_corpus", type=Path,
+                    help="text used only to ground the experimental installation")
+    ap.add_argument("evaluation_corpus", type=Path,
+                    help="separate held-out text used only for paired evaluation")
     ap.add_argument("--min-tokens", type=int, default=4096)
     ap.add_argument("--chunk-size", type=int, default=128)
     ap.add_argument("--max-regression", type=float, default=0.01)
@@ -218,7 +233,16 @@ def main(argv=None):
 
     model_dir = args.model_dir.resolve()
     installed_dir = args.installed_dir.resolve()
-    corpus = args.corpus.resolve()
+    installation_corpus = args.installation_corpus.resolve()
+    evaluation_corpus = args.evaluation_corpus.resolve()
+    if not model_dir.is_dir():
+        raise SystemExit("model_dir does not exist: %s" % model_dir)
+    if not installation_corpus.is_file() or not evaluation_corpus.is_file():
+        raise SystemExit("both installation and evaluation corpora must exist")
+    installation_digest = sha256_file(installation_corpus)
+    evaluation_digest = sha256_file(evaluation_corpus)
+    if installation_digest == evaluation_digest:
+        raise SystemExit("installation and evaluation corpora must have distinct contents")
     if installed_dir.exists() and any(installed_dir.iterdir()):
         raise SystemExit("installed_dir must be absent or empty: %s" % installed_dir)
     if int(args.min_tokens) < 1000:
@@ -228,15 +252,15 @@ def main(argv=None):
     from holographic.io_and_interop.holographic_gdnruntime import load_runtime
     from holographic.io_and_interop.holographic_measure import better_than
 
-    text = corpus.read_text(encoding="utf-8", errors="replace")
+    text = evaluation_corpus.read_text(encoding="utf-8", errors="replace")
     token_ids = BPE.from_dir(model_dir).encode(text)
     needed = int(args.min_tokens) + 1
     if len(token_ids) < needed:
-        raise SystemExit("corpus produced %d tokens; acceptance requires at least %d"
+        raise SystemExit("evaluation corpus produced %d tokens; acceptance requires at least %d"
                          % (len(token_ids), needed))
     token_ids = token_ids[:needed]
 
-    source_clean, source = source_snapshot()
+    source_clean, source = source_snapshot(installation_corpus, evaluation_corpus)
     tok_pass, ref_error, ref_pass = reference_parity(
         model_dir, token_ids, args.logit_tolerance)
 
@@ -246,7 +270,8 @@ def main(argv=None):
     gc.collect()
 
     artifact_dir = installed_dir.parent / (installed_dir.name + ".acceptance")
-    run_installer(model_dir, installed_dir, corpus, artifact_dir / "install.log")
+    run_installer(model_dir, installed_dir, installation_corpus,
+                  artifact_dir / "install.log")
     child_peak = peak_rss_mb("RUSAGE_CHILDREN")
 
     installed, _ = load_runtime(installed_dir)

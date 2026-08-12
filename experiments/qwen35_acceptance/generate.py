@@ -69,7 +69,10 @@ def write_json(path, payload):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("model_dir", type=Path)
-    ap.add_argument("corpus", type=Path)
+    ap.add_argument("installation_corpus", type=Path,
+                    help="text used only to ground the installation")
+    ap.add_argument("evaluation_corpus", type=Path,
+                    help="separate held-out text used only for evaluation")
     ap.add_argument("out_dir", type=Path,
                     help="directory that will receive the ilxyr project JSON")
     ap.add_argument("--installed-dir", type=Path,
@@ -83,22 +86,28 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     model_dir = args.model_dir.expanduser().resolve()
-    corpus = args.corpus.expanduser().resolve()
+    installation_corpus = args.installation_corpus.expanduser().resolve()
+    evaluation_corpus = args.evaluation_corpus.expanduser().resolve()
     out_dir = args.out_dir.expanduser().resolve()
     installed_dir = ((args.installed_dir.expanduser().resolve())
                      if args.installed_dir else out_dir / "installed-checkpoint")
     python = args.python.expanduser().resolve()
-    if not model_dir.is_dir() or not corpus.is_file() or not python.is_file():
-        ap.error("model_dir, corpus, and --python must exist")
+    if (not model_dir.is_dir() or not installation_corpus.is_file()
+            or not evaluation_corpus.is_file() or not python.is_file()):
+        ap.error("model_dir, both corpora, and --python must exist")
     if int(args.min_tokens) < 1000:
         ap.error("--min-tokens must be at least 1000")
 
     model_digest, model_files = model_manifest(model_dir)
-    corpus_digest = sha256_file(corpus)
+    installation_digest = sha256_file(installation_corpus)
+    evaluation_digest = sha256_file(evaluation_corpus)
+    if installation_digest == evaluation_digest:
+        ap.error("installation and evaluation corpora must have distinct contents")
     source_commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
-    stem = "lecore.qwen35.install.%s.%s.v1" % (
-        model_digest[:12], source_commit[:12])
+    stem = "lecore.qwen35.install.%s.%s.%s.%s.v1" % (
+        model_digest[:12], installation_digest[:12], evaluation_digest[:12],
+        source_commit[:12])
     ids = {
         "hypothesis": stem + ".hypothesis",
         "foundation": stem + ".foundation",
@@ -135,7 +144,7 @@ def main(argv=None):
     design = contribution(
         ids["design"], "experiment_design", "experiment-designer",
         "One-shot Qwen3.5 installation acceptance run",
-        "Execute once against the content-bound public checkpoint and corpus. Do not tune thresholds or replace the corpus after admission. Resolve accepted only when source cleanliness, tokenizer parity, reference-logit parity, the paired statistical gate, disk reload, official text generation, and official vision smoke all pass. A cleanly executed no-go is preserved as rejected evidence.",
+        "Execute once against the content-bound public checkpoint, installation corpus, and separate held-out evaluation corpus. Do not tune thresholds or replace either corpus after admission. Resolve accepted only when source cleanliness, tokenizer parity, reference-logit parity, the paired statistical gate, disk reload, official text generation, and official vision smoke all pass. A cleanly executed no-go is preserved as rejected evidence.",
         [ids["hypothesis"], ids["foundation"], ids["engineering"]],
         ["Accepted and rejected are exhaustive for a valid metrics envelope.",
          "Runtime or dependency failure resolves separately as execution_failure."],
@@ -155,7 +164,10 @@ def main(argv=None):
             "experiment_design": ids["design"],
         },
         "baseline": "baseline://Qwen/Qwen3.5-0.8B/%s" % model_digest,
-        "datasets": ["dataset://lecore/qwen-acceptance/%s" % corpus_digest],
+        "datasets": [
+            "dataset://lecore/qwen-installation/%s" % installation_digest,
+            "dataset://lecore/qwen-evaluation/%s" % evaluation_digest,
+        ],
         "models": ["weight://Qwen/Qwen3.5-0.8B/%s" % model_digest],
         "metrics": METRIC_SPECS,
         "seeds": [0],
@@ -175,7 +187,8 @@ def main(argv=None):
             "executor": "local-command",
             "program": str(python),
             "args": [str(HERE / "run.py"), str(model_dir), str(installed_dir),
-                     str(corpus), "--min-tokens", str(int(args.min_tokens))],
+                     str(installation_corpus), str(evaluation_corpus),
+                     "--min-tokens", str(int(args.min_tokens))],
             "timeout_seconds": int(args.timeout_seconds),
             "max_cost_credits": int(args.compute_credits),
             "network": "open",
@@ -187,7 +200,7 @@ def main(argv=None):
         "evidence_authority": {
             "level": "corpus_proxy",
             "scope": {"seeds": [0],
-                      "eval_set": "dataset://lecore/qwen-acceptance/%s" % corpus_digest,
+                      "eval_set": "dataset://lecore/qwen-evaluation/%s" % evaluation_digest,
                       "coverage": 1.0},
             # ilxyr artifact refs name objects already present in its local
             # content-addressed store; raw file SHA-256 values are not object
@@ -251,7 +264,15 @@ def main(argv=None):
     write_json(out_dir / "project.json", {
         "schema": "lecore.ilxyr-project.v1", "experiment_id": ids["experiment"],
         "source_commit": source_commit, "model_digest": model_digest,
-        "model_files": model_files, "corpus_sha256": corpus_digest,
+        "model_files": model_files,
+        "corpora": {
+            "installation": {"path": str(installation_corpus),
+                             "sha256": installation_digest,
+                             "bytes": installation_corpus.stat().st_size},
+            "evaluation": {"path": str(evaluation_corpus),
+                           "sha256": evaluation_digest,
+                           "bytes": evaluation_corpus.stat().st_size},
+        },
         "installed_dir": str(installed_dir), "commands": commands,
     })
     print(json.dumps({"project_dir": str(out_dir),

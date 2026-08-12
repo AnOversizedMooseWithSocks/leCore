@@ -115,12 +115,17 @@ def test_streamed_measure_matches_whole_forward(tmp_path):
 
 def test_generator_emits_complete_ilxyr_contract(tmp_path):
     output, _ = build_fixture(tmp_path)
-    corpus = tmp_path / "corpus.txt"
-    corpus.write_text("Evidence must be paired, replayable, and recorded. " * 400)
+    installation_corpus = tmp_path / "installation.txt"
+    evaluation_corpus = tmp_path / "evaluation.txt"
+    installation_corpus.write_text(
+        "Installation grounding is separate from evaluation. " * 400)
+    evaluation_corpus.write_text(
+        "Evidence must be paired, replayable, and recorded. " * 400)
     project = tmp_path / "project"
     command = [sys.executable,
                str(ROOT / "experiments" / "qwen35_acceptance" / "generate.py"),
-               str(output), str(corpus), str(project), "--min-tokens", "1000"]
+               str(output), str(installation_corpus), str(evaluation_corpus),
+               str(project), "--min-tokens", "1000"]
     completed = subprocess.run(command, cwd=tmp_path, capture_output=True,
                                text=True, check=False)
     assert completed.returncode == 0, completed.stderr
@@ -132,11 +137,31 @@ def test_generator_emits_complete_ilxyr_contract(tmp_path):
     assert [metric["name"] for metric in experiment["metrics"]] == list(contract.METRIC_NAMES)
     assert experiment["execution"]["program"] == str(Path(sys.executable).resolve())
     assert "--research-spectral" not in experiment["execution"]["args"]
+    assert experiment["execution"]["args"][3:5] == [
+        str(installation_corpus.resolve()), str(evaluation_corpus.resolve())]
+    assert len(experiment["datasets"]) == 2
+    assert manifest["corpora"]["installation"]["sha256"] != \
+        manifest["corpora"]["evaluation"]["sha256"]
+    assert "corpus_sha256" not in manifest
     assert len(manifest["commands"]) == 12
     for name in ("hypothesis.json", "foundation.json", "engineering-review.json",
                  "experiment-design.json", "forecast-empirical.json",
                  "forecast-mechanistic.json", "funding.json"):
         assert (project / name).is_file()
+
+
+def test_generator_rejects_reused_installation_and_evaluation_corpus(tmp_path):
+    output, _ = build_fixture(tmp_path)
+    corpus = tmp_path / "corpus.txt"
+    corpus.write_text("The exact same bytes may not serve both experiment roles. " * 200)
+    command = [sys.executable,
+               str(ROOT / "experiments" / "qwen35_acceptance" / "generate.py"),
+               str(output), str(corpus), str(corpus), str(tmp_path / "project"),
+               "--min-tokens", "1000"]
+    completed = subprocess.run(command, cwd=tmp_path, capture_output=True,
+                               text=True, check=False)
+    assert completed.returncode == 2
+    assert "distinct contents" in completed.stderr
 
 
 def test_risky_entrypoints_are_explicitly_opt_in(tmp_path, capsys):
