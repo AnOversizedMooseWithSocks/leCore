@@ -49,3 +49,28 @@ def test_embedding_router_helper_exists_and_caches():
     r1 = m._embedding_router()
     r2 = m._embedding_router()                                # second call must hit the cache, not re-scan
     assert r1 is r2 or (r1 is None and r2 is None)
+
+
+def test_embedding_router_collapses_duplicate_module_vectors(tmp_path):
+    """The artifact may hold several descriptions for one basename, but callers receive module names.  Rank
+    the name once by its strongest vector and collapse workflow-bone endpoints to that same identity."""
+    import numpy as np
+    from holographic.semantic_router.holographic_router import EmbeddingRouter
+
+    docs = np.eye(3, 4, dtype=np.float64)
+    lo = docs.min(1, keepdims=True)
+    hi = docs.max(1, keepdims=True)
+    q = np.round((docs - lo) / (hi - lo + 1e-12) * 255).astype(np.uint8)
+    path = tmp_path / "duplicate-index.npz"
+    np.savez(path, names=np.array(["dup", "dup", "other"]), q=q,
+             lo=lo.astype(np.float16), hi=hi.astype(np.float16),
+             mu=np.zeros(4, dtype=np.float16), pc=np.zeros((1, 4), dtype=np.float16),
+             bone_src=np.array([0], dtype=np.int32), bone_dst=np.array([2], dtype=np.int32),
+             bone_w=np.array([1.0], dtype=np.float32))
+
+    router = EmbeddingRouter(path)
+    dense = router.route(docs[1], k=3)
+    fused = router.route(docs[1], k=3, gamma=0.5)
+    assert dense[0][0] == "dup"
+    assert [name for name, _ in dense].count("dup") == 1
+    assert len({name for name, _ in fused}) == len(fused)

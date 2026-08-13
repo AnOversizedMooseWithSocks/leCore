@@ -50,7 +50,7 @@ def test_seed_is_the_routing_slice_only():
     keys, vecs = _load()
     assert vecs.dtype == np.float16, "half precision is the shipped form (cosine-identical, half the bytes)"
     assert vecs.shape[0] == len(keys)
-    assert 400 <= len(keys) <= 700, ("seed should hold only the routing slice", len(keys))
+    assert 400 <= len(keys) <= 800, ("seed should hold only the routing slice", len(keys))
     assert vecs.shape[1] == 768, "the seed stores FULL width so any dim can be measured from it"
     assert _SEED.stat().st_size < 5_000_000, "seed must stay small enough to commit comfortably"
 

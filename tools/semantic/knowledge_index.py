@@ -364,6 +364,26 @@ def kw_rank(ask, entries):
     return sorted(range(len(entries)), key=lambda i: -len(aw & words(entries[i][2])))
 
 
+def collapse_module_order(order, entries):
+    """Collapse a document ranking to one row per logical module name, keeping the best-ranked document.
+
+    The source tree can legitimately contain the same basename in several families (for example the geometry
+    and cleanup implementations of ``holographic_snap``).  The semantic router returns basenames, so treating
+    those files as separate candidates is internally inconsistent: one module can occupy several ranks, and
+    the workflow join's old ``{stem: index}`` map silently kept only the last file.  Keep every document in the
+    embedding corpus, but fuse/rank the logical module once using its strongest description.
+    """
+    seen = set()
+    out = []
+    for j in order:
+        name = entries[int(j)][1]
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(int(j))
+    return out
+
+
 def unit(v):
     return v / (np.linalg.norm(v) + 1e-12)
 
@@ -627,7 +647,7 @@ def main():
             f"  collect_code looks for holographic_*.py; none were under that path.\n"
             f"  If running from tools/semantic, the repo root is '../..', not '..'.")
     def kw_rank_of(a, accept):
-        order = kw_rank(a, code_entries)
+        order = collapse_module_order(kw_rank(a, code_entries), code_entries)
         for r, j in enumerate(order):
             if code_entries[j][1] in accept: return r + 1
         return len(code_entries)
@@ -643,7 +663,7 @@ def main():
         Qd = ab_d(Q[:, :d])
         t1 = t5 = 0; ranks = []; detail = []
         for i, (a, acc) in enumerate(ASKS_MODULE):
-            order = np.argsort(-(Ed @ Qd[i]))
+            order = collapse_module_order(np.argsort(-(Ed @ Qd[i])), code_entries)
             names_r = [code_entries[j][1] for j in order]
             rank = next((r + 1 for r, n in enumerate(names_r) if n in acc), len(names_r))
             ranks.append(rank); t1 += rank == 1; t5 += rank <= 5
@@ -703,17 +723,24 @@ def main():
         # the bare stem 'meshsmooth' (same convention as the catalog's resolved_module).
         stem_of = [code_entries[j][1][len("holographic_"):] if code_entries[j][1].startswith("holographic_")
                    else code_entries[j][1] for j in range(len(code_entries))]
-        idx_of_stem = {s: j for j, s in enumerate(stem_of)}
+        indices_by_stem = {}
+        for j, stem in enumerate(stem_of):
+            indices_by_stem.setdefault(stem, []).append(j)
+        module_stems = list(indices_by_stem)                 # first-seen order; deterministic os.walk corpus
 
         def _structural_order(sims):
-            """Rank doc indices by workflow-propagated dense score. Seeds are CLAMPED at 0: a negative cosine
-            means 'not relevant', and spreading negative activation would actively push a module's collaborators
-            DOWN, which is not the claim -- bones carry evidence FOR, never against."""
-            seed = {stem_of[j]: max(0.0, float(sims[j])) for j in range(len(sims))}
+            """Rank logical module stems by workflow-propagated dense score.
+
+            Seeds are CLAMPED at 0: a negative cosine means 'not relevant', and spreading negative activation
+            would actively push collaborators DOWN.  Duplicate basenames use their maximum document score;
+            overwriting with the last file made a strong description disappear whenever a later family reused
+            its basename (the live ``creature`` regression that took the shipped gate from 7 to 5)."""
+            seed = {stem: max(0.0, max(float(sims[j]) for j in js))
+                    for stem, js in indices_by_stem.items()}
             ranked = propagate(wf_graph, seed, alpha=args.wf_alpha)
-            order = [idx_of_stem[m] for m, _ in ranked if m in idx_of_stem]
+            order = [m for m, _ in ranked if m in indices_by_stem]
             seen = set(order)
-            order.extend(j for j in range(len(code_entries)) if j not in seen)   # unranked tail, stable
+            order.extend(m for m in module_stems if m not in seen)       # unranked tail, stable
             return order
         # DENSE-DOMINANCE SWEEP: equal-weight RRF (beta=1) let BM25 overtake the dense HITs (measured 6->3
         # top-1). Down-weight the lexical list: fused uses weights (1.0, beta). beta=0 = pure dense (MUST equal
@@ -744,8 +771,10 @@ def main():
                 t1 = t5 = 0; ranks = []; detail = []
                 for i, (a, acc) in enumerate(ASKS_MODULE):
                     sims = Ed @ Qd[i]
-                    dense_order = list(np.argsort(-sims))                  # dense ranking (doc indices)
-                    bm_order = [j for j, _ in bm.rank(a)]                  # BM25 ranking (doc indices)
+                    dense_docs = collapse_module_order(np.argsort(-sims), code_entries)
+                    dense_order = [stem_of[j] for j in dense_docs]         # logical-module ranking
+                    bm_docs = collapse_module_order([j for j, _ in bm.rank(a)], code_entries)
+                    bm_order = [stem_of[j] for j in bm_docs]
                     lists = [dense_order, bm_order]; wts = [1.0, beta]
                     if args.structural and gamma > 0.0:
                         key = (d, i)
@@ -753,7 +782,7 @@ def main():
                             _struct_cache[key] = _structural_order(sims)
                         lists.append(_struct_cache[key]); wts.append(gamma)
                     fused = reciprocal_rank_fusion(lists, k=args.rrf_k, weights=wts)
-                    names_r = [code_entries[j][1] for j, _ in fused]
+                    names_r = ["holographic_" + stem for stem, _ in fused]
                     rank = next((r + 1 for r, n in enumerate(names_r) if n in acc), len(code_entries))
                     ranks.append(rank); t1 += rank == 1; t5 += rank <= 5
                     if (beta, gamma) == (0.0, 0.0):

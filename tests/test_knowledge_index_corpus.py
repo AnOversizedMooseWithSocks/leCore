@@ -26,7 +26,8 @@ def _collectors():
     tree = ast.parse(src)
     ns = {"os": os, "re": _re, "ast": ast, "MAX_CHARS": 280, "_alias_enrichment": lambda: {}}
     for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name in {"_has_public_api", "collect_code"}:
+        if isinstance(node, ast.FunctionDef) and node.name in {
+                "_has_public_api", "collect_code", "collapse_module_order"}:
             exec(compile(ast.Module(body=[node], type_ignores=[]), "ki", "exec"), ns)
     return ns
 
@@ -97,6 +98,20 @@ def test_the_default_is_the_full_corpus():
     assert any("unified_p" in n for n in default), \
         "the no-public-API exclusion is on by default again -- it was MEASURED and refuted (768d median " \
         "2 -> 3, gated fused top-1 unchanged at 6). Re-enable it only with a CI run that shows it pays."
+
+
+def test_duplicate_basenames_rank_as_one_logical_module():
+    """Several families reuse a basename, but the router returns basenames.  The best description must win
+    and the logical module must occupy only one rank; keeping the last duplicate silently discarded the live
+    creature brain's dense #1 score in favour of the later geometry builder."""
+    collapse = _collectors()["collapse_module_order"]
+    entries = [
+        ("code", "holographic_creature", "brain"),
+        ("code", "holographic_other", "other"),
+        ("code", "holographic_creature", "geometry"),
+    ]
+    assert collapse([0, 1, 2], entries) == [0, 1]
+    assert collapse([2, 1, 0], entries) == [2, 1]
 
 
 def test_the_exam_median_is_printed_at_the_precision_it_is_compared_at():

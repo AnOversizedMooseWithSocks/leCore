@@ -1,5 +1,5 @@
-"""Factoring a composite back into its parts -- the inverse of binding, solved by
-searching in superposition.
+"""Decomposing a composite representation into its simpler component factors -- the inverse of binding,
+solved by searching in superposition.
 
 Binding combines several vectors into one (the cat, the colour red, the position
 top-left -> one vector for "a red cat at top-left"). The hard inverse is
