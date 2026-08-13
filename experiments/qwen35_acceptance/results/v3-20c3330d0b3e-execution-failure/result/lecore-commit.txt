@@ -1,0 +1,7 @@
+commit f399cd6bc7f24383a792fdcf32c43a4e1197d4f1
+Author:     atimics <atimics@ratimics.com>
+AuthorDate: Thu Aug 13 11:44:59 2026 -0700
+Commit:     atimics <atimics@ratimics.com>
+CommitDate: Thu Aug 13 11:44:59 2026 -0700
+
+    fix(qwen): emit official-compatible installed checkpoints

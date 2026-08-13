@@ -1,19 +1,24 @@
 # Qwen3.5 acceptance experiment
 
 The committee-facing design and review questions are in
-[`PROPOSAL.md`](PROPOSAL.md). Both authorized runs are preserved as execution
-failures. V1 exposed an interpreter-path bug before scientific execution. V2
-fixed that problem and completed both 4,097-token evaluations, but the emitted
-checkpoint failed the mandatory official Transformers reload because the two
-prepended layers' tensor names and MLP shapes do not match the saved Qwen
-architecture. The terminal v2 evidence is in
-[`results/v2-20c3330d0b3e-execution-failure/`](results/v2-20c3330d0b3e-execution-failure/).
-The permanent evidence index is
-[`f35OgXu…ARZTU`](https://arweave.net/f35OgXuOoulk9EcndJBNWIgZ5tmaQ6DRzeINP7ARZTU/).
+[`PROPOSAL.md`](PROPOSAL.md). All three authorized runs are preserved as
+execution failures. V1 exposed an interpreter-path bug before scientific
+execution. V2 completed both evaluation streams but exposed an official
+Transformers checkpoint-layout incompatibility. V3 fixed that incompatibility
+and completed the full 4,096-position paired evaluation, but human-readable
+diagnostics before the metric JSON caused strict ilxyr ingestion to fail.
 
-The layer-prepending installer therefore remains experimental. No v3 run is
-authorized. The model revision, corpora, thresholds, seed, and spending ceiling
-for the completed v2 attempt remain frozen in
+The terminal v3 record is in
+[`results/v3-20c3330d0b3e-execution-failure/`](results/v3-20c3330d0b3e-execution-failure/).
+Its complete evidence bundle, excluding model weights, is permanently indexed
+at [`h96JlX…ojYSw`](https://arweave.net/h96JlX-4ttZsPZdYRBuT-_JNO2s0lS18hoFjM4ojYSw/).
+The v3 diagnostic artifact completed all required positions and measured a
+31.0% perplexity regression, but it was not admitted and is therefore neither
+`GO` nor `NO-GO`.
+
+The layer-prepending installer remains experimental. No retry is authorized
+under the v3 identity. The model revision, corpora, thresholds, seed, and
+spending ceiling for the completed v3 attempt remain frozen in
 [`launch-manifest.json`](launch-manifest.json).
 
 This directory turns the open Qwen integration questions into a frozen ilxyr
@@ -39,7 +44,7 @@ python experiments/qwen35_acceptance/generate.py \
   /absolute/path/to/installation-corpus.txt \
   /absolute/path/to/evaluation-corpus.txt \
   /absolute/path/to/ilxyr-project \
-  --experiment-version 2 \
+  --experiment-version 3 \
   --python .venv-qwen-acceptance/bin/python
 ```
 

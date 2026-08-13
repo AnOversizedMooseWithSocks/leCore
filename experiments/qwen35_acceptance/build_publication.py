@@ -27,7 +27,7 @@ def read_json(path: Path) -> Any:
         return json.load(handle)
 
 
-def evidence_ref(result_dir: Path) -> str:
+def evidence_ref(result_dir: Path) -> str | None:
     events_path = result_dir / "ledger" / "events.jsonl"
     with events_path.open("r", encoding="utf-8") as handle:
         events = [json.loads(line) for line in handle if line.strip()]
@@ -36,9 +36,9 @@ def evidence_ref(result_dir: Path) -> str:
         for event in events
         if event.get("event_type") == "EvidenceRecorded"
     ]
-    if len(recorded) != 1:
-        raise ValueError(f"expected exactly one EvidenceRecorded event, got {len(recorded)}")
-    return recorded[0]
+    if len(recorded) > 1:
+        raise ValueError(f"expected at most one EvidenceRecorded event, got {len(recorded)}")
+    return recorded[0] if recorded else None
 
 
 def build_manifest(result_dir: Path) -> dict[str, Any]:
@@ -46,6 +46,15 @@ def build_manifest(result_dir: Path) -> dict[str, Any]:
     status = read_json(result_dir / "result" / "ilxyr-status.json")
     verification = read_json(result_dir / "result" / "ilxyr-verify.json")
     latest_evidence = status["latest_evidence"]
+    if latest_evidence is None:
+        runner_status = read_json(result_dir / "result" / "runner-status.json")
+        if runner_status.get("stage") != "execution_failure":
+            raise ValueError("a run without admitted evidence must be an execution failure")
+        resolved_outcome = "execution_failure"
+        run_ref = status["latest_run"]["id"]
+    else:
+        resolved_outcome = latest_evidence["resolved_outcome"]
+        run_ref = latest_evidence["run_ref"]
 
     files = []
     for path in sorted(item for item in result_dir.rglob("*") if item.is_file()):
@@ -65,8 +74,9 @@ def build_manifest(result_dir: Path) -> dict[str, Any]:
     return {
         "schema": "lecore.qwen35-publication-manifest.v1",
         "experiment_id": project["experiment_id"],
-        "resolved_outcome": latest_evidence["resolved_outcome"],
-        "run_ref": latest_evidence["run_ref"],
+        "resolved_outcome": resolved_outcome,
+        "scientific_result_admitted": latest_evidence is not None,
+        "run_ref": run_ref,
         "evidence_ref": evidence_ref(result_dir),
         "ledger_verification": verification,
         "files": files,

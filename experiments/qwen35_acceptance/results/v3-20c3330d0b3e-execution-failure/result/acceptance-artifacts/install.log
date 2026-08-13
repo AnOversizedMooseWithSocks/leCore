@@ -1,0 +1,30 @@
+[load] /opt/qwen35-acceptance-v3/model
+      sanity: perplexity 16.2 on plain English (chance ~248320) -- looks correct
+      hidden 1024 | 24 layers | vocab 248320 | BF16, F32
+      inferred from tensors alone: 24 layers, hidden 1024, tied=True (confidence 1.00)
+      tokenizer: model tokenizer
+      corpus: /opt/qwen35-acceptance-v3/lecore/REFERENCE.md (2303 KB)
+      memory: 128 registers (of 1024 dimensions) and 200 searchable passages
+
+[install] leCore into the weights
+      hardware: cpu (disabled)
+      prepend        ok    2 layers added, drift 0.000e+00 (relative 0.000e+00, first at token 0) -- bit-identical
+      registers      ok    128 reserved slots, 896 dims left to the model
+      hrnn_channel   FAIL  ValueError: cannot reshape array of size 65536 into shape (64,20,128) [heads k=16 v=16, kdim=128 vdim=128, hidden=1024, 26 layers -- the ladder is optional, continuing without it]
+      nullspace_guard ok    994 of 1024 dims safe to write (true null space)
+      router         ok    layer 0, held-out accuracy 95%
+      memory_index   ok    200 passages in 200 unused rows, perplexity -1.776%
+      self_write     FAIL  novelty readout r=0.714, finds 36% of the top decile
+      state_track    ok    4 of 128 registers reserved as no-decay state slots
+      exit_calibration ok    layer 25 of 26 agrees >=100% -- 4% of the depth is free
+      improvement    FAIL  skipped to preserve the checkpoint's fixed intermediate_size for official reload
+      boot_record    ok    row 248319, perplexity -1.776%
+
+[wrote] /opt/qwen35-acceptance-v3/installed-checkpoint  (2112.9 MB, BF16, F32)
+
+[verify] reloading from disk
+      sanity: perplexity 16.2 on plain English (chance ~248320) -- looks correct
+      26 layers | perplexity 19.9834 (was 20.3446) | boots as 'leCore'
+      verdict BETTER (-1.776%) | repetition 0.96 -> 0.77
+
+Next:  assess.bat        (or: python assimilation/galvatron.py /opt/qwen35-acceptance-v3/installed-checkpoint --assess out.npz)

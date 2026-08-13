@@ -1,0 +1,24 @@
+{
+  "checks": {
+    "checker_version": true,
+    "complete_top_level_model_manifest": true,
+    "corpora_distinct": true,
+    "evaluation_corpus": true,
+    "experiment_version": true,
+    "installation_corpus": true,
+    "launch_attempt": true,
+    "launch_corpora": true,
+    "launch_method": true,
+    "launch_model": true,
+    "launch_source": true,
+    "minimum_tokens": true,
+    "official_reload_metric": true,
+    "source_commit": true,
+    "spectral_disabled": true,
+    "timeout": true,
+    "tokenizer": true,
+    "venv_interpreter": true,
+    "weights": true
+  },
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.59f551d452cf.a6c9d1135a04.f399cd6bc7f2.v3.acceptance"
+}
