@@ -57,7 +57,7 @@
     "transactions_confirmed": 76,
     "total_winc_charged": 0,
     "public_cache_verified_at": "2026-08-13T21:33:10Z",
-    "public_gateway_verified_at": null,
+    "public_gateway_verified_at": "2026-08-13T21:44:56Z",
     "verified_downloads": {
       "publication-manifest.json": "19ac497b7e55881422e28cc8a118085a48e685a8bd5c5e7ee8abe2839ef8f8bb",
       "ledger/events.jsonl": "ee844391a410ec83c471939d212572b94cc25168597bee3741081335c093ae0f",
