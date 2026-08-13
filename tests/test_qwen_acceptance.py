@@ -177,6 +177,29 @@ def test_generator_preserves_virtual_environment_python_path(tmp_path):
     assert experiment["execution"]["program"] != str(venv_python.resolve())
 
 
+def test_generator_can_freeze_a_second_formal_attempt(tmp_path):
+    output, _ = build_fixture(tmp_path)
+    installation_corpus = tmp_path / "installation.txt"
+    evaluation_corpus = tmp_path / "evaluation.txt"
+    installation_corpus.write_text("Installation material. " * 400)
+    evaluation_corpus.write_text("Held-out evaluation material. " * 400)
+    project = tmp_path / "project-v2"
+
+    completed = subprocess.run(
+        [sys.executable,
+         str(ROOT / "experiments" / "qwen35_acceptance" / "generate.py"),
+         str(output), str(installation_corpus), str(evaluation_corpus),
+         str(project), "--min-tokens", "1000", "--experiment-version", "2"],
+        cwd=tmp_path, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+
+    experiment = json.loads((project / "experiment.json").read_text())
+    manifest = json.loads((project / "project.json").read_text())
+    assert experiment["id"].endswith(".v2.acceptance")
+    assert experiment["evidence_authority"]["provenance"]["checker"].endswith("/v2")
+    assert manifest["experiment_version"] == 2
+
+
 def test_generator_rejects_reused_installation_and_evaluation_corpus(tmp_path):
     output, _ = build_fixture(tmp_path)
     corpus = tmp_path / "corpus.txt"

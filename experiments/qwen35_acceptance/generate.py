@@ -84,6 +84,8 @@ def main(argv=None):
     ap.add_argument("--min-tokens", type=int, default=4096)
     ap.add_argument("--timeout-seconds", type=int, default=21600)
     ap.add_argument("--compute-credits", type=int, default=100)
+    ap.add_argument("--experiment-version", type=int, default=1,
+                    help="monotonic formal-attempt identity (default: 1)")
     ap.add_argument("--ilxyr-cli", type=Path,
                     default=Path.home() / "develop" / "ilxyr" / "target" / "debug" / "ilxyr")
     args = ap.parse_args(argv)
@@ -104,6 +106,8 @@ def main(argv=None):
         ap.error("model_dir, both corpora, and --python must exist")
     if int(args.min_tokens) < 1000:
         ap.error("--min-tokens must be at least 1000")
+    if int(args.experiment_version) < 1:
+        ap.error("--experiment-version must be at least 1")
 
     model_digest, model_files = model_manifest(model_dir)
     installation_digest = sha256_file(installation_corpus)
@@ -112,9 +116,9 @@ def main(argv=None):
         ap.error("installation and evaluation corpora must have distinct contents")
     source_commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
-    stem = "lecore.qwen35.install.%s.%s.%s.%s.v1" % (
+    stem = "lecore.qwen35.install.%s.%s.%s.%s.v%d" % (
         model_digest[:12], installation_digest[:12], evaluation_digest[:12],
-        source_commit[:12])
+        source_commit[:12], int(args.experiment_version))
     ids = {
         "hypothesis": stem + ".hypothesis",
         "foundation": stem + ".foundation",
@@ -216,7 +220,8 @@ def main(argv=None):
             # frozen in their handles and the runner attests checker files.
             "provenance": {"artifact_hashes": [],
                            "model_lineage": "model://Qwen/Qwen3.5-0.8B/%s" % model_digest,
-                           "checker": "checker://lecore/qwen35-acceptance/v1"},
+                           "checker": "checker://lecore/qwen35-acceptance/v%d"
+                           % int(args.experiment_version)},
         },
         "expected_outputs": (["metrics.%s" % name for name in METRIC_NAMES]
                              + ["resolved_outcome", "forecast_settlements"]),
@@ -270,6 +275,7 @@ def main(argv=None):
                    [cli, "verify", "<workspace>"]])
     write_json(out_dir / "project.json", {
         "schema": "lecore.ilxyr-project.v1", "experiment_id": ids["experiment"],
+        "experiment_version": int(args.experiment_version),
         "source_commit": source_commit, "model_digest": model_digest,
         "model_files": model_files,
         "corpora": {
