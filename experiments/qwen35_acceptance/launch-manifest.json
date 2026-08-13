@@ -2,13 +2,21 @@
   "schema": "lecore.qwen35-launch.v1",
   "state": "authorized_prelaunch",
   "attempt": {
+    "experiment_version": 2,
     "maximum_formal_runs": 1,
     "retry_after_admission": false,
-    "seed": 0
+    "seed": 0,
+    "authorized_at": "2026-08-13T00:09:30Z",
+    "predecessor": {
+      "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+      "outcome": "execution_failure",
+      "scientific_result": false,
+      "corrective_change": "preserve the selected virtual-environment interpreter path"
+    }
   },
   "source": {
     "repository": "https://github.com/atimics/holostuff.git",
-    "commit": "a04ab5692be38f06120aba4b0bc5e2a284eb2c79"
+    "commit": "2f32151c6d44c80a7e2ff98c0696650cd1d9c6f1"
   },
   "ilxyr": {
     "repository": "https://github.com/cenetex/ilXyr.git",
@@ -89,7 +97,7 @@
     "total_ceiling_usd": 10.0
   },
   "publication": {
-    "temporary_staging": "s3://zero-training-022118847419/qwen35-acceptance/a04ab56-2fc06364-a6c9d113/",
+    "temporary_staging": "s3://zero-training-022118847419/qwen35-acceptance/2f32151-2fc06364-a6c9d113/v2-formal/",
     "review_index": "https://github.com/atimics/holostuff/pull/3",
     "permanent_transport": "Arweave",
     "publish_all_outcomes": true,

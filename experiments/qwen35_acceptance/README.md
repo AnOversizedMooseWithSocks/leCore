@@ -1,8 +1,12 @@
 # Qwen3.5 acceptance experiment
 
-The committee-facing design and open review questions are in
-[`PROPOSAL.md`](PROPOSAL.md). The proposal must be approved, and its corpus
-separation requirement implemented, before a formal real-model run.
+The committee-facing design and review questions are in
+[`PROPOSAL.md`](PROPOSAL.md). The first authorized run is preserved as an
+execution failure: ilxyr invoked the system interpreter instead of the selected
+virtual environment, so it produced no scientific result. The second and final
+currently authorized attempt is frozen in [`launch-manifest.json`](launch-manifest.json).
+It changes only the interpreter-path handling and the attempt identity; the
+model revision, corpora, thresholds, seed, and spending ceiling remain fixed.
 
 This directory turns the open Qwen integration questions into a frozen ilxyr
 project for a separately authorized, bounded attempt. It does not claim that a
@@ -27,6 +31,7 @@ python experiments/qwen35_acceptance/generate.py \
   /absolute/path/to/installation-corpus.txt \
   /absolute/path/to/evaluation-corpus.txt \
   /absolute/path/to/ilxyr-project \
+  --experiment-version 2 \
   --python .venv-qwen-acceptance/bin/python
 ```
 
