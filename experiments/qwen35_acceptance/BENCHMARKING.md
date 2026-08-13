@@ -5,6 +5,19 @@ full-vocabulary negative-log-likelihood path used by the Qwen acceptance run.
 It starts a fresh process for every chunk size, records peak RSS and throughput,
 checks per-token loss parity, and emits a checksummed JSON evidence document.
 
+Run the benchmark with the same frozen CPU environment as the formal project:
+
+```bash
+python3 -m venv .venv-qwen-acceptance
+. .venv-qwen-acceptance/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r experiments/qwen35_acceptance/requirements-cpu.txt
+```
+
+Keeping the benchmark and formal runner on the exact Torch 2.11/Torchvision
+0.26 pair prevents an environment change from masquerading as a chunk-size or
+backend speedup.
+
 Run it against the larger, emitted checkpoint when possible:
 
 ```bash
@@ -52,6 +65,10 @@ python experiments/qwen35_acceptance/generate.py \
 The report hash becomes part of the runner-policy digest and experiment ID.
 Both evaluator processes then use one parent-frozen chunk schedule; they do not
 independently reselect resume boundaries from fluctuating free-memory readings.
+Archive the report itself with the v4 project/results: its schema is
+`lecore.qwen_runtime_benchmark.v1`, while `benchmark_report_sha256` in the
+generated runner policy is the immutable link from the project to those raw
+measurements. A digest without its matching report is not sufficient evidence.
 
 This benchmark covers the evaluation runtime only. It must not be used alone to
 claim that an entire acceptance run fits a smaller machine. Pass the largest

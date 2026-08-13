@@ -18,8 +18,6 @@ alone would not protect the carried-state path used by chunked evaluation.
 """
 
 import ctypes
-import hashlib
-from pathlib import Path
 
 import numpy as np
 
@@ -109,8 +107,7 @@ class _CScan:
         # Reuse the project's compiler probe, deterministic flags and
         # source+compiler content-addressed cache.  Import is lazy so importing
         # the NumPy-only runtime never probes a toolchain or writes a cache.
-        from holographic.io_and_interop.holographic_ccrun import (
-            compile_cached, compiler_flags, compiler_identity)
+        from holographic.io_and_interop.holographic_ccrun import compile_cached_details
 
         self.dtype = np.dtype(dtype)
         if self.dtype == np.dtype(np.float32):
@@ -120,14 +117,17 @@ class _CScan:
         else:
             raise TypeError("native GDN scan supports float32/float64, got %s" % self.dtype)
         self._ctype = ctype
-        library_path = compile_cached(_C_SOURCE, opt="safe")
+        cache = compile_cached_details(_C_SOURCE, opt="safe")
+        library_path = cache["path"]
         self._lib = ctypes.CDLL(library_path)
         self.provenance = {
-            "compiler": compiler_identity(),
-            "flags": compiler_flags("safe"),
-            "library_sha256": hashlib.sha256(
-                Path(library_path).read_bytes()).hexdigest(),
-            "source_sha256": hashlib.sha256(_C_SOURCE.encode()).hexdigest(),
+            "dtype": self.dtype.name,
+            "compiler": cache["compiler"],
+            "flags": cache["flags"],
+            "optimization_policy": cache["opt"],
+            "cache_key_sha256": cache["cache_key_sha256"],
+            "cache_hit_on_load": cache["cache_hit"],
+            "library_sha256": cache["library_sha256"],
         }
         self._fn = getattr(self._lib, "lecore_gdn_scan_" + suffix)
         ptr = ctypes.POINTER(ctype)
@@ -138,8 +138,20 @@ class _CScan:
         arrays = [np.ascontiguousarray(a, dtype=self.dtype)
                   for a in (q, k, v, beta, g, initial)]
         q, k, v, beta, g, initial = arrays
+        if q.ndim != 3:
+            raise ValueError("q must have shape (tokens, heads, key_dim)")
         nt, nh, nk = q.shape
+        if k.shape != (nt, nh, nk):
+            raise ValueError("k shape %r does not match q %r" % (k.shape, q.shape))
+        if v.ndim != 3 or v.shape[:2] != (nt, nh):
+            raise ValueError("v shape %r does not match q tokens/heads %r" %
+                             (v.shape, (nt, nh)))
         nv = v.shape[-1]
+        if beta.shape != (nt, nh) or g.shape != (nt, nh):
+            raise ValueError("beta/g must both have shape %r" % ((nt, nh),))
+        if initial.shape != (nh, nk, nv):
+            raise ValueError("initial state shape %r != %r" %
+                             (initial.shape, (nh, nk, nv)))
         state = np.empty((nh, nk, nv), dtype=self.dtype)
         out = np.empty((nt, nh, nv), dtype=self.dtype)
         scratch = np.empty((nh, nv), dtype=self.dtype)
@@ -164,8 +176,14 @@ class GDNRecurrence:
         self._checks = []
         self._native_calls = 0
         self._native_tokens = 0
+        self._native_attempts = 0
+        self._native_attempt_tokens = 0
         self._numpy_calls = 0
         self._numpy_tokens = 0
+        self._direct_numpy_calls = 0
+        self._direct_numpy_tokens = 0
+        self._fallback_calls = 0
+        self._fallback_tokens = 0
 
     @staticmethod
     def _initial(q, v, initial):
@@ -180,9 +198,18 @@ class GDNRecurrence:
         return self._kernels[key]
 
     def __call__(self, q, k, v, beta, g, initial=None):
-        if self.requested == "numpy" or self.refused is not None:
+        token_count = int(np.asarray(q).shape[0])
+        if self.requested == "numpy":
             self._numpy_calls += 1
-            self._numpy_tokens += int(np.asarray(q).shape[0])
+            self._numpy_tokens += token_count
+            self._direct_numpy_calls += 1
+            self._direct_numpy_tokens += token_count
+            return gdn_recurrence_numpy(q, k, v, beta, g, initial)
+        if self.refused is not None:
+            self._numpy_calls += 1
+            self._numpy_tokens += token_count
+            self._fallback_calls += 1
+            self._fallback_tokens += token_count
             return gdn_recurrence_numpy(q, k, v, beta, g, initial)
 
         q = np.ascontiguousarray(q)
@@ -194,12 +221,16 @@ class GDNRecurrence:
         resumed = initial is not None
         signature = (q.dtype.str, q.shape[1:], v.shape[-1], bool(resumed))
         try:
+            self._native_attempts += 1
+            self._native_attempt_tokens += int(q.shape[0])
             got = self._native(q.dtype)(q, k, v, beta, g, initial_c)
         except Exception as exc:
             self.refused = "%s: %s" % (type(exc).__name__, exc)
             self.active = "numpy"
             self._numpy_calls += 1
             self._numpy_tokens += int(q.shape[0])
+            self._fallback_calls += 1
+            self._fallback_tokens += int(q.shape[0])
             return gdn_recurrence_numpy(q, k, v, beta, g, initial_c)
 
         if signature not in self._validated:
@@ -225,6 +256,8 @@ class GDNRecurrence:
                 self.active = "numpy"
                 self._numpy_calls += 1
                 self._numpy_tokens += int(q.shape[0])
+                self._fallback_calls += 1
+                self._fallback_tokens += int(q.shape[0])
                 return ref
             self._validated.add(signature)
         self.active = "c"
@@ -235,11 +268,59 @@ class GDNRecurrence:
     def report(self):
         libraries = [kernel.provenance for _dtype, kernel in
                      sorted(self._kernels.items())]
+        passed_states = {bool(row["resumed"]) for row in self._checks
+                         if row.get("passed")}
         return {"scope": "full_sequence_gdn_recurrence",
                 "requested": self.requested, "active": self.active,
                 "refused": self.refused, "validated_regimes": list(self._checks),
+                "fresh_and_resumed_parity_complete":
+                    passed_states == {False, True},
+                "native_attempts": self._native_attempts,
+                "native_attempt_tokens": self._native_attempt_tokens,
                 "native_calls": self._native_calls,
                 "native_tokens": self._native_tokens,
                 "numpy_calls": self._numpy_calls,
                 "numpy_tokens": self._numpy_tokens,
+                "direct_numpy_calls": self._direct_numpy_calls,
+                "direct_numpy_tokens": self._direct_numpy_tokens,
+                "fallback_calls": self._fallback_calls,
+                "fallback_tokens": self._fallback_tokens,
                 "native_libraries": libraries}
+
+
+def _selftest():
+    """Exercise both dispatcher regimes and carried-state parity."""
+    rng = np.random.default_rng(7)
+    q = rng.standard_normal((9, 3, 5)).astype(np.float32)
+    k = rng.standard_normal(q.shape).astype(np.float32)
+    k /= np.maximum(np.linalg.norm(k, axis=-1, keepdims=True), 1e-12)
+    v = rng.standard_normal((9, 3, 4)).astype(np.float32)
+    beta = rng.random((9, 3), dtype=np.float32)
+    g = -rng.random((9, 3), dtype=np.float32)
+    initial = rng.standard_normal((3, 5, 4)).astype(np.float32)
+
+    direct = GDNRecurrence("numpy")
+    assert all(np.array_equal(a, b) for a, b in zip(
+        direct(q, k, v, beta, g, initial),
+        gdn_recurrence_numpy(q, k, v, beta, g, initial)))
+
+    from holographic.io_and_interop.holographic_ccrun import cc_available
+    if cc_available() is None:
+        print("gdnaccel selftest OK (NumPy); native scan SKIPPED (no C compiler)")
+        return
+    native = GDNRecurrence("c")
+    fresh = native(q[:4], k[:4], v[:4], beta[:4], g[:4])
+    carried = native(q[4:], k[4:], v[4:], beta[4:], g[4:], fresh[1])
+    ref_fresh = gdn_recurrence_numpy(q[:4], k[:4], v[:4], beta[:4], g[:4])
+    ref_carried = gdn_recurrence_numpy(
+        q[4:], k[4:], v[4:], beta[4:], g[4:], ref_fresh[1])
+    for got, expected in zip(fresh + carried, ref_fresh + ref_carried):
+        assert np.allclose(got, expected, rtol=5e-5, atol=5e-6)
+    report = native.report()
+    assert report["fresh_and_resumed_parity_complete"]
+    assert report["native_calls"] == 2 and report["fallback_calls"] == 0
+    print("gdnaccel selftest OK (NumPy + native fresh/resumed parity)")
+
+
+if __name__ == "__main__":
+    _selftest()

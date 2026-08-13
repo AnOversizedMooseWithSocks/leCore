@@ -42,6 +42,7 @@ first, the five levers later), text-only (visual tower not executed), dense MLP
 
 import json
 import os
+import sys
 
 import numpy as np
 
@@ -206,6 +207,7 @@ class GDNRuntime:
         _backend = self.cfg.get("gdn_recurrence_backend",
                                 os.environ.get("LECORE_GDN_BACKEND", "numpy"))
         self._gdn_recurrence = GDNRecurrence(_backend)
+        self._gdn_step_calls = 0
         # prefix auto-detect: the field-measured real name root
         roots = ("model.language_model.", "model.", "")
         for r in roots:
@@ -369,8 +371,16 @@ class GDNRuntime:
         return y
 
     def acceleration_report(self):
-        """JSON-able status of the optional recurrent-scan substitution."""
-        return {"full_sequence_gdn_recurrence": self._gdn_recurrence.report()}
+        """JSON-able status, explicitly separating batch and cached-step paths."""
+        return {
+            "full_sequence_gdn_recurrence": self._gdn_recurrence.report(),
+            "cached_step_gdn_recurrence": {
+                "scope": "single_token_cached_step",
+                "active": "numpy",
+                "native_available": False,
+                "calls": int(self._gdn_step_calls),
+            },
+        }
 
     def _attn(self, layer, x, positions, collect=None, init=None):
         c = self.cfg
@@ -737,6 +747,7 @@ class GDNRuntime:
         SAME arithmetic as the full-sequence path -- the selftest demands token-
         for-token equality between cached and uncached generation (the
         determinism contract applies to the cache too)."""
+        self._gdn_step_calls += 1
         c = self.cfg
         Kh, Vh = c["linear_num_key_heads"], c["linear_num_value_heads"]
         dk, dv = c["linear_key_head_dim"], c["linear_value_head_dim"]
@@ -1260,17 +1271,18 @@ def _sanity_check(rt, model_dir, probe=None):
     try:
         ppl = float(rt.perplexity(ids))
     except Exception as exc:
-        print("      SANITY CHECK could not run (%s)" % exc)
+        print("      SANITY CHECK could not run (%s)" % exc, file=sys.stderr)
         return None
     vocab = int(np.asarray(rt.lm_head).shape[0])
     verdict = ("looks correct" if ppl < 0.05 * vocab else
                "SUSPICIOUS" if ppl < 0.5 * vocab else "LIKELY MISREAD")
     print("      sanity: perplexity %.1f on plain English (chance ~%d) -- %s"
-          % (ppl, vocab, verdict))
+          % (ppl, vocab, verdict), file=sys.stderr)
     if verdict != "looks correct":
         print("      ^ the weights are probably being interpreted wrongly "
               "(layout, head counts, or a transpose). Numbers measured now "
-              "would blame the MODEL for a reading error -- run --verify.")
+              "would blame the MODEL for a reading error -- run --verify.",
+              file=sys.stderr)
     return ppl
 
 
@@ -1353,11 +1365,11 @@ def _resolve_ambiguous_layout(rt, model_dir, probe=None):
     rec = {"qkv_order": best, "perplexity": scores, "margin_ratio": ratio,
            "probe_tokens": len(ids)}
     print("      qkv layout: %s (ppl %.2f vs %.2f for %s -- %.1fx better)"
-          % (best, scores[best], scores[other], other, ratio))
+          % (best, scores[best], scores[other], other, ratio), file=sys.stderr)
     if ratio < 1.2:
         print("      WARNING: the two readings score within 20%% of each other, "
               "so this probe did not really decide it. Re-run with a longer "
-              "probe, or cross-check with --verify.")
+              "probe, or cross-check with --verify.", file=sys.stderr)
     try:
         with open(cache, "w") as f:
             json.dump(rec, f, indent=1)

@@ -1,4 +1,18 @@
-"""Frozen metric contract shared by the Qwen acceptance runner and generator."""
+"""Frozen metric and dependency contract for Qwen acceptance experiments."""
+
+
+# v4 binds these exact public-interface dependencies into the admitted
+# experiment identity.  The runner independently verifies the same versions
+# before model work; keeping the declared contract here lets the generator hash
+# the dependency boundary without importing the heavyweight runtime module.
+OFFICIAL_DEPENDENCY_VERSIONS = {
+    "Pillow": "12.3.0",
+    "torch": "2.11.0",
+    "torchvision": "0.26.0",
+    "transformers": "5.14.0",
+}
+
+RUNNER_POLICY_SCHEMA = "lecore.qwen35.runner-policy.v4"
 
 METRIC_SPECS = [
     {"name": "acceptance_pass", "unit": "boolean", "description": "All mandatory Qwen installation acceptance gates passed, encoded as 0 or 1."},

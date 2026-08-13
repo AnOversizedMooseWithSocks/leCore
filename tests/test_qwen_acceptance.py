@@ -5,6 +5,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import numpy as np
@@ -106,6 +107,35 @@ def test_portable_qwen_fixture_loads_from_arbitrary_cwd(tmp_path):
     assert logits.shape[-1] == 512 and np.isfinite(logits).all()
 
 
+def test_runtime_diagnostics_never_pollute_stdout(tmp_path, capsys):
+    from holographic.io_and_interop.holographic_gdnruntime import load_runtime
+
+    output, _ = build_fixture(tmp_path)
+    load_runtime(output)
+    captured = capsys.readouterr()
+
+    assert captured.out == ""
+    assert "sanity:" in captured.err
+
+
+def test_runner_reserves_stdout_for_one_ilxyr_envelope(monkeypatch, capsys):
+    runner = load_script(
+        "qwen_acceptance_stdout_runner",
+        ROOT / "experiments" / "qwen35_acceptance" / "run.py")
+
+    def fake_main(argv=None, metric_stdout=None):
+        print("dependency diagnostic")
+        print('{"metrics":{"acceptance_pass":1.0}}', file=metric_stdout)
+        return 0
+
+    monkeypatch.setattr(runner, "_main", fake_main)
+    assert runner.main(["ignored"]) == 0
+    captured = capsys.readouterr()
+
+    assert captured.out == '{"metrics":{"acceptance_pass":1.0}}\n'
+    assert captured.err == "dependency diagnostic\n"
+
+
 def test_prepend_matches_official_qwen_tensor_schema(tmp_path):
     from holographic.io_and_interop.holographic_gdnruntime import (
         load_runtime, load_weights_dir)
@@ -130,6 +160,101 @@ def test_prepend_matches_official_qwen_tensor_schema(tmp_path):
     assert installed_config["n_layers"] == config["n_layers"] + 2
 
 
+def test_hrnn_growth_preserves_grouped_and_flat_qwen_outputs(tmp_path):
+    from holographic.io_and_interop.holographic_gdnruntime import (
+        GDNRuntime, load_runtime, load_weights_dir)
+    from holographic.io_and_interop.holographic_hrnngrow import grow_channel
+
+    output, _ = build_fixture(tmp_path)
+    grouped_runtime, grouped_config = load_runtime(output)
+    grouped_weights = load_weights_dir(output)
+    ids = list(range(32, 64))
+    grouped_logits = grouped_runtime.forward(ids)
+    grown_weights, grown_config, report = grow_channel(
+        grouped_weights, grouped_config, gain=0.0)
+
+    assert report["layers"]
+    assert np.array_equal(
+        GDNRuntime(grown_weights, grown_config).forward(ids), grouped_logits)
+
+    # Converted checkpoints can store split Q/K/V projections as flat blocks.
+    # Prove the growth transform preserves that layout as well.
+    flat_weights = {key: np.array(value, copy=True)
+                    for key, value in grouped_weights.items()}
+    flat_config = dict(grouped_config, qkv_order="flat")
+    kh = int(flat_config["linear_num_key_heads"])
+    vh = int(flat_config["linear_num_value_heads"])
+    dk = int(flat_config["linear_key_head_dim"])
+    dv = int(flat_config["linear_value_head_dim"])
+    ratio = vh // kh
+    for key in [name for name in flat_weights
+                if name.endswith("linear_attn.in_proj_qkv.weight")]:
+        value = flat_weights[key]
+        grouped = value.reshape(kh, 2 * dk + ratio * dv, value.shape[1])
+        flat_weights[key] = np.concatenate([
+            grouped[:, :dk].reshape(-1, value.shape[1]),
+            grouped[:, dk:2 * dk].reshape(-1, value.shape[1]),
+            grouped[:, 2 * dk:].reshape(-1, value.shape[1]),
+        ])
+    flat_logits = GDNRuntime(flat_weights, flat_config).forward(ids)
+    grown_weights, grown_config, _ = grow_channel(
+        flat_weights, flat_config, gain=0.0)
+
+    assert np.array_equal(
+        GDNRuntime(grown_weights, grown_config).forward(ids), flat_logits)
+
+
+def test_default_installer_is_logit_safe_and_binds_sidecar_bytes(tmp_path):
+    from holographic.io_and_interop.holographic_gdnruntime import (
+        load_runtime, load_weights_dir)
+
+    output, _ = build_fixture(tmp_path)
+    corpus = tmp_path / "installation.txt"
+    corpus.write_text("Sidecar evidence must not perturb model logits. " * 900)
+    installed = tmp_path / "installed-safe"
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "assimilation" / "install.py"),
+         "--experimental", str(output), str(installed), "--doc", str(corpus),
+         "--device", "cpu", "--passages", "8", "--prepend", "1"],
+        cwd=ROOT, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    original_weights = load_weights_dir(output)
+    installed_weights = load_weights_dir(installed)
+    original_embedding = next(
+        value for key, value in original_weights.items()
+        if key.endswith("embed_tokens.weight"))
+    installed_embedding = next(
+        value for key, value in installed_weights.items()
+        if key.endswith("embed_tokens.weight"))
+    original_runtime, _ = load_runtime(output)
+    installed_runtime, _ = load_runtime(installed)
+    heldout_ids = list(range(32, 96))
+    manifest = json.loads((installed / "lecore.json").read_text())
+    index_bytes = (installed / "lecore_index.npz").read_bytes()
+    index_digest = hashlib.sha256(index_bytes).hexdigest()
+
+    assert np.array_equal(original_embedding, installed_embedding)
+    assert np.array_equal(original_runtime.forward(heldout_ids),
+                          installed_runtime.forward(heldout_ids))
+    assert manifest["weight_resident_metadata"] is False
+    assert manifest["memory_index"]["mode"] == "sidecar"
+    assert manifest["boot_record"]["mode"] == "sidecar"
+    assert manifest["memory_index"]["sha256"] == index_digest
+    assert manifest["sidecar_index"]["sha256"] == index_digest
+    with np.load(installed / "lecore_index.npz", allow_pickle=False) as index:
+        assert len(index["vectors"]) == len(index["passages"]) == 8
+    runner = load_script(
+        "qwen_acceptance_emitted_snapshot",
+        ROOT / "experiments" / "qwen35_acceptance" / "run.py")
+    snapshot = runner.emitted_checkpoint_snapshot(installed)
+    files = {item["path"]: item for item in snapshot["files"]}
+    assert files["model.safetensors"]["model_weights"] is True
+    assert files["model.safetensors"]["sha256"] == hashlib.sha256(
+        (installed / "model.safetensors").read_bytes()).hexdigest()
+    assert files["lecore_index.npz"]["model_weights"] is False
+
+
 def test_installed_mini_qwen_reloads_and_generates_with_transformers(tmp_path):
     torch = __import__("pytest").importorskip("torch")
     safetensors = __import__("pytest").importorskip("safetensors.torch")
@@ -145,6 +270,30 @@ def test_installed_mini_qwen_reloads_and_generates_with_transformers(tmp_path):
          "--device", "cpu"],
         cwd=ROOT, capture_output=True, text=True, check=False)
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    from holographic.io_and_interop.holographic_gdnruntime import (
+        load_runtime, load_weights_dir)
+
+    original_weights = load_weights_dir(output)
+    installed_weights = load_weights_dir(installed)
+    original_embedding = next(
+        value for key, value in original_weights.items()
+        if key.endswith("embed_tokens.weight"))
+    installed_embedding = next(
+        value for key, value in installed_weights.items()
+        if key.endswith("embed_tokens.weight"))
+    original_runtime, _ = load_runtime(output)
+    installed_runtime, _ = load_runtime(installed)
+    heldout_ids = list(range(32, 96))
+    manifest = json.loads((installed / "lecore.json").read_text())
+
+    assert np.array_equal(original_embedding, installed_embedding)
+    assert np.array_equal(original_runtime.forward(heldout_ids),
+                          installed_runtime.forward(heldout_ids))
+    assert manifest["weight_resident_metadata"] is False
+    assert manifest["memory_index"]["mode"] == "sidecar"
+    assert manifest["boot_record"]["mode"] == "sidecar"
+    assert (installed / "lecore_index.npz").is_file()
 
     config_json = json.loads((installed / "config.json").read_text())
     text_config = transformers.Qwen3_5TextConfig(**config_json["text_config"])
@@ -264,6 +413,22 @@ def test_sequential_rule_can_only_reject_after_a_thousand_paired_tokens():
         runner.parse_sequential_looks("512,4096", 4096)
 
 
+def test_sequential_rule_skips_when_two_dependence_blocks_do_not_fit(monkeypatch):
+    import holographic.io_and_interop.holographic_measure as measure
+
+    runner = load_script("qwen_acceptance_dependent_runner",
+                         ROOT / "experiments" / "qwen35_acceptance" / "run.py")
+    monkeypatch.setattr(measure, "_block_shape", lambda _values: (80.0, 160))
+    original = np.full(200, 3.0)
+    installed = original + 0.2
+    verdict = runner.sequential_rejection_test(
+        installed, original, np.log1p(0.01), look_index=0, total_looks=4)
+
+    assert verdict["skipped"] is True
+    assert verdict["reject"] is False
+    assert verdict["alpha_spent"] == 0.0
+
+
 def test_parallel_paired_evaluation_preserves_order(tmp_path, monkeypatch):
     import importlib
 
@@ -323,6 +488,102 @@ def test_progress_recorder_refreshes_s3_after_each_chunk(tmp_path, monkeypatch):
     assert recorder.upload_requests == 1
 
 
+def test_official_dependency_preflight_freezes_vision_stack(monkeypatch):
+    from importlib import metadata
+
+    runner = load_script(
+        "qwen_acceptance_dependency_runner",
+        ROOT / "experiments" / "qwen35_acceptance" / "run.py")
+    versions = dict(runner.OFFICIAL_DEPENDENCY_VERSIONS)
+    monkeypatch.setattr(metadata, "version", lambda name: versions[name])
+    monkeypatch.setitem(sys.modules, "torchvision", types.ModuleType("torchvision"))
+
+    assert runner.official_dependency_preflight() == versions
+    versions["torchvision"] = "0.0.0"
+    with __import__("pytest").raises(RuntimeError, match="torchvision==0.0.0"):
+        runner.official_dependency_preflight()
+
+
+def test_official_text_smoke_is_independent_from_vision_processor(monkeypatch):
+    runner = load_script(
+        "qwen_acceptance_smoke_runner",
+        ROOT / "experiments" / "qwen35_acceptance" / "run.py")
+
+    class NoGrad:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class Cuda:
+        @staticmethod
+        def is_available():
+            return False
+
+        @staticmethod
+        def max_memory_allocated():
+            return 0
+
+    class Model:
+        def eval(self):
+            return self
+
+        def generate(self, input_ids, **_kwargs):
+            return np.zeros((1, input_ids.shape[-1] + 1), np.int64)
+
+    class ModelClass:
+        @staticmethod
+        def from_pretrained(*_args, **_kwargs):
+            return Model(), {}
+
+    class Tokenizer:
+        @staticmethod
+        def from_pretrained(*_args, **_kwargs):
+            return Tokenizer()
+
+        def __call__(self, *_args, **_kwargs):
+            return {"input_ids": np.zeros((1, 3), np.int64)}
+
+    class Processor:
+        @staticmethod
+        def from_pretrained(*_args, **_kwargs):
+            return Processor()
+
+        def apply_chat_template(self, *_args, **_kwargs):
+            return {"input_ids": np.zeros((1, 4), np.int64)}
+
+    class BrokenProcessor:
+        @staticmethod
+        def from_pretrained(*_args, **_kwargs):
+            raise RuntimeError("vision stack unavailable")
+
+    torch = types.ModuleType("torch")
+    torch.float32 = np.float32
+    torch.no_grad = NoGrad
+    torch.cuda = Cuda()
+    transformers = types.ModuleType("transformers")
+    transformers.AutoModelForImageTextToText = ModelClass
+    transformers.Qwen3_5ForConditionalGeneration = ModelClass
+    transformers.AutoTokenizer = Tokenizer
+    transformers.AutoProcessor = Processor
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "transformers", transformers)
+
+    reload_pass, text_pass, vision_pass, _peak, diagnostics = \
+        runner.official_output_smokes("fixture")
+
+    assert (reload_pass, text_pass, vision_pass) == (1.0, 1.0, 1.0)
+    assert diagnostics == []
+
+    transformers.AutoProcessor = BrokenProcessor
+    reload_pass, text_pass, vision_pass, _peak, diagnostics = \
+        runner.official_output_smokes("fixture")
+
+    assert (reload_pass, text_pass, vision_pass) == (1.0, 1.0, 0.0)
+    assert any("vision stack unavailable" in item for item in diagnostics)
+
+
 def test_generator_emits_complete_ilxyr_contract(tmp_path):
     output, _ = build_fixture(tmp_path)
     installation_corpus = tmp_path / "installation.txt"
@@ -362,6 +623,7 @@ def test_generator_emits_complete_ilxyr_contract(tmp_path):
     assert manifest["runner_policy"]["sequential_looks"] == [1000]
     assert manifest["runner_policy"]["gdn_backend"] == "c"
     assert manifest["runner_policy"]["max_chunk_size"] == 128
+    assert manifest["experiment_version"] == 4
     assert len(manifest["runner_policy_digest"]) == 64
     assert manifest["runner_policy_digest"][:12] in manifest["experiment_id"]
     gdn_index = experiment["execution"]["args"].index("--gdn-backend")
@@ -440,27 +702,27 @@ def test_generator_preserves_virtual_environment_python_path(tmp_path):
     assert experiment["execution"]["program"] != str(venv_python.resolve())
 
 
-def test_generator_can_freeze_a_third_formal_attempt(tmp_path):
+def test_generator_freezes_the_fourth_formal_attempt(tmp_path):
     output, _ = build_fixture(tmp_path)
     installation_corpus = tmp_path / "installation.txt"
     evaluation_corpus = tmp_path / "evaluation.txt"
     installation_corpus.write_text("Installation material. " * 400)
     evaluation_corpus.write_text("Held-out evaluation material. " * 400)
-    project = tmp_path / "project-v3"
+    project = tmp_path / "project-v4"
 
     completed = subprocess.run(
         [sys.executable,
          str(ROOT / "experiments" / "qwen35_acceptance" / "generate.py"),
          str(output), str(installation_corpus), str(evaluation_corpus),
-         str(project), "--min-tokens", "1000", "--experiment-version", "3"],
+         str(project), "--min-tokens", "1000", "--experiment-version", "4"],
         cwd=tmp_path, capture_output=True, text=True, check=False)
     assert completed.returncode == 0, completed.stderr
 
     experiment = json.loads((project / "experiment.json").read_text())
     manifest = json.loads((project / "project.json").read_text())
-    assert experiment["id"].endswith(".v3.acceptance")
-    assert experiment["evidence_authority"]["provenance"]["checker"].endswith("/v3")
-    assert manifest["experiment_version"] == 3
+    assert experiment["id"].endswith(".v4.acceptance")
+    assert experiment["evidence_authority"]["provenance"]["checker"].endswith("/v4")
+    assert manifest["experiment_version"] == 4
 
 
 def test_generator_rejects_reused_installation_and_evaluation_corpus(tmp_path):

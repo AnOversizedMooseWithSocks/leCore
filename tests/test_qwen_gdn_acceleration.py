@@ -1,9 +1,12 @@
 """Parity and fallback gates for the optional native Qwen GDN recurrence."""
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
+import pytest
 
 from holographic.io_and_interop.holographic_gdnaccel import (
-    GDNRecurrence, gdn_recurrence_numpy)
+    GDNRecurrence, _C_SOURCE, gdn_recurrence_numpy)
 
 
 def _inputs(tokens=37, key_dim=16, value_dim=16, seed=7):
@@ -29,6 +32,13 @@ def test_numpy_backend_is_the_unchanged_default():
     assert report["active"] == "numpy"
     assert report["scope"] == "full_sequence_gdn_recurrence"
     assert report["numpy_calls"] == 1
+    assert report["direct_numpy_calls"] == 1
+    assert report["fallback_calls"] == 0
+
+
+def test_auto_is_rejected_instead_of_silently_aliasing_c():
+    with pytest.raises(ValueError, match="numpy or c"):
+        GDNRecurrence("auto")
 
 
 def test_native_scan_parity_including_resumed_state():
@@ -55,11 +65,17 @@ def test_native_scan_parity_including_resumed_state():
     assert {row["resumed"] for row in report["validated_regimes"]} == {False, True}
     assert report["native_calls"] == 2
     assert report["native_tokens"] == 72
+    assert report["native_attempts"] == 2
+    assert report["fallback_calls"] == 0
+    assert report["fresh_and_resumed_parity_complete"] is True
     assert report["native_libraries"]
     provenance = report["native_libraries"][0]
     assert provenance["flags"] == ["-O2", "-ffp-contract=off"]
     assert len(provenance["library_sha256"]) == 64
+    assert len(provenance["cache_key_sha256"]) == 64
     assert provenance["compiler"]["host_machine"]
+    assert provenance["compiler"]["target"]
+    assert provenance["compiler"]["pointer_bits"] in (32, 64)
 
 
 def test_bad_native_result_is_refused_and_falls_back(monkeypatch):
@@ -76,7 +92,49 @@ def test_bad_native_result_is_refused_and_falls_back(monkeypatch):
     got = dispatch(*arrays)
     assert np.array_equal(got[0], expected[0])
     assert np.array_equal(got[1], expected[1])
-    assert "parity gate failed" in dispatch.report()["refused"]
+    report = dispatch.report()
+    assert "parity gate failed" in report["refused"]
+    assert report["native_attempts"] == 1
+    assert report["native_calls"] == 0
+    assert report["fallback_calls"] == 1
+    assert report["fallback_tokens"] == len(arrays[0])
+
+    # Refusal is permanent: subsequent calls do not attempt native code again,
+    # and the report distinguishes them from an explicitly selected NumPy run.
+    dispatch(*arrays)
+    report = dispatch.report()
+    assert report["native_attempts"] == 1
+    assert report["fallback_calls"] == 2
+    assert report["direct_numpy_calls"] == 0
+
+
+def test_native_abi_uses_caller_owned_scratch_not_a_vla():
+    assert "T kv[nv]" not in _C_SOURCE
+    assert "T *scratch" in _C_SOURCE
+
+
+def test_cold_compile_cache_is_race_safe_and_provenanced(tmp_path, monkeypatch):
+    from holographic.io_and_interop import holographic_ccrun as ccrun
+
+    if ccrun.cc_available() is None:
+        pytest.skip("cold-cache race test needs a C compiler")
+    monkeypatch.setattr(ccrun, "CACHE_DIR", str(tmp_path / "cc-cache"))
+    source = "void lecore_cache_probe(void) {}\n"
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        details = list(pool.map(
+            lambda _index: ccrun.compile_cached_details(source, opt="safe"),
+            range(4)))
+    assert len({row["path"] for row in details}) == 1
+    assert len({row["cache_key_sha256"] for row in details}) == 1
+    assert len({row["library_sha256"] for row in details}) == 1
+    assert all(len(row["cache_key_sha256"]) == 64 for row in details)
+    assert all(row["compiler"]["version"] for row in details)
+    assert all(row["compiler"]["target"] for row in details)
+    assert not list((tmp_path / "cc-cache").glob("*.tmp"))
+    assert not list((tmp_path / "cc-cache").glob("*.c"))
+    warm = ccrun.compile_cached_details(source, opt="safe")
+    assert warm["cache_hit"] is True
+    assert warm["library_sha256"] == details[0]["library_sha256"]
 
 
 def test_mini_qwen_runtime_and_resumed_logits_match(tmp_path):
@@ -108,8 +166,13 @@ def test_mini_qwen_runtime_and_resumed_logits_match(tmp_path):
         assert np.allclose(got_resumed.gdn[layer]["conv"],
                            ref_resumed.gdn[layer]["conv"], rtol=1e-4, atol=1e-5)
     report = native.acceleration_report()["full_sequence_gdn_recurrence"]
+    step_report = native.acceleration_report()["cached_step_gdn_recurrence"]
+    assert step_report == {"scope": "single_token_cached_step",
+                           "active": "numpy", "native_available": False,
+                           "calls": 0}
     if report["refused"] is None:
         assert report["active"] == "c"
         assert {row["resumed"] for row in report["validated_regimes"]} == {False, True}
+        assert report["fresh_and_resumed_parity_complete"] is True
     else:
         assert report["active"] == "numpy"

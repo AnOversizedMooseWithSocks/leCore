@@ -16,7 +16,8 @@ REPO = HERE.parents[1]
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from contract import METRIC_NAMES, METRIC_SPECS  # noqa: E402
+from contract import (METRIC_NAMES, METRIC_SPECS,  # noqa: E402
+                      OFFICIAL_DEPENDENCY_VERSIONS, RUNNER_POLICY_SCHEMA)
 
 
 MODEL_REF = "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design"
@@ -78,6 +79,15 @@ def frozen_sequential_looks(min_tokens):
                    if look >= 1000 or look == total} | {total})
 
 
+def canonical_policy_digest(policy):
+    """Content identity for the complete v4 runner/treatment policy."""
+    if policy.get("schema") != RUNNER_POLICY_SCHEMA:
+        raise ValueError("runner policy must use %s" % RUNNER_POLICY_SCHEMA)
+    canonical = json.dumps(
+        policy, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("model_dir", type=Path)
@@ -93,8 +103,8 @@ def main(argv=None):
     ap.add_argument("--min-tokens", type=int, default=4096)
     ap.add_argument("--timeout-seconds", type=int, default=21600)
     ap.add_argument("--compute-credits", type=int, default=100)
-    ap.add_argument("--experiment-version", type=int, default=1,
-                    help="monotonic formal-attempt identity (default: 1)")
+    ap.add_argument("--experiment-version", type=int, default=4,
+                    help="monotonic formal-attempt identity (minimum/default: 4)")
     ap.add_argument("--initial-chunk-size", type=int, default=128)
     ap.add_argument("--max-chunk-size", type=int,
                     help="requires --benchmark-report when above initial chunk")
@@ -126,8 +136,8 @@ def main(argv=None):
         ap.error("model_dir, both corpora, and --python must exist")
     if int(args.min_tokens) < 1000:
         ap.error("--min-tokens must be at least 1000")
-    if int(args.experiment_version) < 1:
-        ap.error("--experiment-version must be at least 1")
+    if int(args.experiment_version) < 4:
+        ap.error("this repaired policy is v4; --experiment-version must be at least 4")
     if args.initial_chunk_size < 1:
         ap.error("--initial-chunk-size must be positive")
     if not 0 < args.memory_budget_fraction <= 0.5:
@@ -181,24 +191,94 @@ def main(argv=None):
     if (benchmark_recommended_chunk is not None and
             args.max_chunk_size > benchmark_recommended_chunk):
         ap.error("--max-chunk-size exceeds the benchmark recommendation")
+    requirements_cpu = HERE / "requirements-cpu.txt"
+    if not requirements_cpu.is_file():
+        ap.error("missing frozen official dependency lock: %s" % requirements_cpu)
     runner_policy = {
+        "schema": RUNNER_POLICY_SCHEMA,
+        # Stable summary keys retained for simple report consumers.  They are
+        # inside the canonical object (and therefore cannot drift from the
+        # detailed sections without changing identity).
+        "accepted_requires_full_tokens": int(args.min_tokens),
         "initial_chunk_size": int(args.initial_chunk_size),
         "max_chunk_size": int(args.max_chunk_size),
-        "memory_budget_fraction": float(args.memory_budget_fraction),
-        "evaluation_mode": args.evaluation_mode,
         "gdn_backend": args.gdn_backend,
-        "progress_upload_uri": args.progress_upload_uri,
         "sequential_looks": sequential_looks,
-        "sequential_family_alpha": 0.05,
-        "sequential_resamples": 10000,
         "early_acceptance_allowed": False,
         "early_rejection_allowed": True,
-        "accepted_requires_full_tokens": int(args.min_tokens),
         "benchmark_report_sha256": benchmark_digest,
+        "evaluation": {
+            "accepted_requires_full_tokens": int(args.min_tokens),
+            "initial_chunk_size": int(args.initial_chunk_size),
+            "max_chunk_size": int(args.max_chunk_size),
+            "memory_budget_fraction": float(args.memory_budget_fraction),
+            "mode": args.evaluation_mode,
+            "worker_isolation": "one_process_per_checkpoint",
+            "paired_position_order": "frozen_corpus_prefix",
+            "common_chunk_schedule_required": True,
+            "backend": args.gdn_backend,
+            "reference_backend": "numpy",
+            "benchmark_report_sha256": benchmark_digest,
+        },
+        "statistical_decision": {
+            "maximum_perplexity_regression_ratio": 0.01,
+            "final_interval": "paired_moving_block_bootstrap_two_sided_95pct",
+            "final_resamples": 1200,
+            "final_seed": 0,
+            "summary_resamples_per_model": 800,
+            "sequential_looks": sequential_looks,
+            "sequential_family_alpha": 0.05,
+            "sequential_resamples": 10000,
+            "sequential_boundary": "one_sided_bonferroni_lower_bound",
+            "minimum_interim_paired_tokens": 1000,
+            "minimum_dependence_blocks_per_look": 2,
+            "early_acceptance_allowed": False,
+            "early_rejection_allowed": True,
+        },
+        "reference_parity": {
+            "backend": "numpy",
+            "maximum_relative_logit_error": 0.001,
+            "tokenizer_ids_must_match": True,
+            "must_pass_before_installation": True,
+        },
+        "treatment": {
+            "entrypoint": "assimilation/install.py",
+            "experimental_acknowledgement": True,
+            "device": "cpu",
+            "gdn_backend": "numpy",
+            "spectral_filtering_enabled": False,
+            "prepend_layers": "installer_default_proportional_8pct",
+            "registers": "installer_default_width_eighth",
+            "passages": "installer_default_hidden_width_1mb_sidecar_budget",
+            "weight_resident_metadata": False,
+        },
+        "sidecars": {
+            "metadata_location": "lecore.json",
+            "weight_resident_metadata_forbidden": True,
+            "index_policy": "always_sidecar_in_default_treatment",
+            "sidecar_index_in_paired_model_evaluation": False,
+            "sidecars_in_evidence_bundle": True,
+        },
+        "official_compatibility": {
+            "dependency_versions": dict(OFFICIAL_DEPENDENCY_VERSIONS),
+            "environment_lock": "experiments/qwen35_acceptance/requirements-cpu.txt",
+            "environment_lock_sha256": sha256_file(requirements_cpu),
+            "dependency_mismatch_outcome": "execution_failure_before_model_work",
+            "reload_requires_no_state_dict_incompatibilities": True,
+            "text_generation_required": True,
+            "vision_input_generation_required": True,
+        },
+        "telemetry": {
+            "progress_upload_uri": args.progress_upload_uri,
+            "local_progress_fsync_per_record": True,
+            "upload_failure_changes_scientific_outcome": False,
+        },
+        "execution_limits": {
+            "timeout_seconds": int(args.timeout_seconds),
+            "maximum_compute_credits": int(args.compute_credits),
+        },
     }
-    policy_digest = hashlib.sha256(json.dumps(
-        runner_policy, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    policy_digest = canonical_policy_digest(runner_policy)
     source_commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
     stem = "lecore.qwen35.install.%s.%s.%s.%s.%s.v%d" % (
@@ -267,6 +347,8 @@ def main(argv=None):
         "models": ["weight://Qwen/Qwen3.5-0.8B/%s" % model_digest],
         "metrics": METRIC_SPECS,
         "seeds": [0],
+        "runner_policy": runner_policy,
+        "runner_policy_digest": policy_digest,
         "outcome_contract": {
             "primary_metric": "acceptance_pass",
             "success_outcome": "accepted",
@@ -314,8 +396,8 @@ def main(argv=None):
             # frozen in their handles and the runner attests checker files.
             "provenance": {"artifact_hashes": [],
                            "model_lineage": "model://Qwen/Qwen3.5-0.8B/%s" % model_digest,
-                           "checker": "checker://lecore/qwen35-acceptance/v%d"
-                           % int(args.experiment_version)},
+                           "checker": "checker://lecore/qwen35-acceptance/%s/v%d"
+                           % (policy_digest, int(args.experiment_version))},
         },
         "expected_outputs": (["metrics.%s" % name for name in METRIC_NAMES]
                              + ["resolved_outcome", "forecast_settlements"]),

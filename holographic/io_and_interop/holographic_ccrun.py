@@ -26,7 +26,9 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 
 import numpy as np
 
@@ -61,15 +63,23 @@ def compiler_identity(cc=None):
         raise EmitError("no C compiler found")
 
     def capture(*args):
-        completed = subprocess.run(
-            [cc, *args], capture_output=True, text=True, check=False, timeout=30)
-        return (completed.stdout + completed.stderr).strip()[:4000]
+        try:
+            completed = subprocess.run(
+                [cc, *args], capture_output=True, text=True, check=False,
+                timeout=30)
+            return (completed.stdout + completed.stderr).strip()[:4000]
+        except (OSError, subprocess.SubprocessError) as exc:
+            # Identity probing must not turn an otherwise usable compiler into
+            # a hard failure.  The failure text still enters the cache key and
+            # evidence, so it cannot alias a successful probe.
+            return "%s: %s" % (type(exc).__name__, exc)
 
     resolved = os.path.realpath(cc)
     try:
         stat = os.stat(resolved)
         file_identity = {"bytes": int(stat.st_size),
-                         "mtime_ns": int(stat.st_mtime_ns)}
+                         "mtime_ns": int(stat.st_mtime_ns),
+                         "inode": int(stat.st_ino)}
     except OSError:
         file_identity = None
     return {
@@ -79,6 +89,8 @@ def compiler_identity(cc=None):
         "target": capture("-dumpmachine"),
         "host_system": platform.system(),
         "host_machine": platform.machine(),
+        "pointer_bits": ctypes.sizeof(ctypes.c_void_p) * 8,
+        "byteorder": sys.byteorder,
     }
 
 
@@ -103,12 +115,14 @@ def build_batch_source(kernel, dtype="f64"):
     return "#include <math.h>\n#include <stddef.h>\n" + body + loop, name + "_batch", n_params
 
 
-def compile_cached(source, opt="fast", timeout=300):
-    """Compile `source` to a shared library, content-addressed under CACHE_DIR. Returns the .so path.
+def compile_cached_details(source, opt="fast", timeout=300):
+    """Compile source and return its cache/toolchain provenance.
 
-    Key is sha256(source + opt + compiler path) -- hashlib, never hash(): the cache must mean the same thing
-    across processes, and a different compiler is a different artifact. Temp-then-rename so a killed compile
-    never leaves a half-written .so behind (same discipline as zigrun)."""
+    The key binds source, flags, compiler version/binary identity, target and
+    host ABI.  Private temporary paths plus atomic publication make concurrent
+    first use safe; a reader can observe either no library or a complete one,
+    never a partially linked file.
+    """
     cc = cc_available()
     if cc is None:
         raise EmitError("no C compiler found (tried $CC, cc, gcc, clang); "
@@ -118,37 +132,93 @@ def compile_cached(source, opt="fast", timeout=300):
     # the registered operation order; throughput work must pass parity first.
     flags = compiler_flags(opt)
     identity = compiler_identity(cc)
-    key = hashlib.sha256(
+    full_key = hashlib.sha256(
         json.dumps({"source": source, "opt": opt, "flags": flags,
                     "compiler": identity}, sort_keys=True,
                    separators=(",", ":")).encode()
-    ).hexdigest()[:24]
+    ).hexdigest()
+    key = full_key[:24]
     os.makedirs(CACHE_DIR, exist_ok=True)
     so = os.path.join(CACHE_DIR, "k_%s.so" % key)
     if os.path.exists(so):
-        return so
-    # Parallel evaluators may reach the same cold cache entry together.  Give
-    # each compiler invocation private source/output paths and publish only the
-    # complete shared object with an atomic replace.  Shared ``.tmp``/``.c``
-    # names let concurrent compilers truncate each other's inputs or outputs.
-    descriptor, csrc = tempfile.mkstemp(
-        prefix="k_%s." % key, suffix=".c", dir=CACHE_DIR)
-    os.close(descriptor)
-    tmp = csrc[:-2] + ".so.tmp"
-    try:
-        with open(csrc, "w") as fh:
-            fh.write(source)
-        subprocess.run(
-            [cc] + flags + ["-shared", "-fPIC", csrc, "-o", tmp, "-lm"],
-            check=True, capture_output=True, timeout=timeout, cwd=CACHE_DIR)
-        os.replace(tmp, so)
-    finally:
-        for path in (csrc, tmp):
+        return _cache_details(so, full_key, True, identity, flags, opt)
+
+    # Atomic replace protects readers from partial output, but it does not stop
+    # two cold compilers from publishing different byte-level builds (Mach-O
+    # UUIDs and embedded temporary paths can differ).  An atomic directory is a
+    # portable cross-process owner token.  Waiters reuse the one published
+    # artifact, making its reported digest stable as well as its contents valid.
+    lock = so + ".lock"
+    deadline = time.monotonic() + float(timeout) + 60.0
+    owner = False
+    while not owner:
+        try:
+            os.mkdir(lock)
+            owner = True
+        except FileExistsError:
+            if os.path.exists(so):
+                return _cache_details(so, full_key, True, identity, flags, opt)
+            # Recover a lock orphaned by a killed compiler only after longer
+            # than the compiler's own timeout.  Removal races are harmless.
             try:
-                os.unlink(path)
+                if time.time() - os.stat(lock).st_mtime > float(timeout) + 30.0:
+                    os.rmdir(lock)
+                    continue
+            except (FileNotFoundError, OSError):
+                pass
+            if time.monotonic() >= deadline:
+                raise TimeoutError("timed out waiting for C cache key %s" % key)
+            time.sleep(0.05)
+
+    try:
+        # The file may have appeared after our first check but before we won a
+        # stale lock race.  Never rebuild an already complete cache entry.
+        if os.path.exists(so):
+            return _cache_details(so, full_key, True, identity, flags, opt)
+        descriptor, csrc = tempfile.mkstemp(
+            prefix="k_%s." % key, suffix=".c", dir=CACHE_DIR)
+        os.close(descriptor)
+        tmp = csrc[:-2] + ".so.tmp"
+        try:
+            with open(csrc, "w") as fh:
+                fh.write(source)
+            subprocess.run(
+                [cc] + flags + ["-shared", "-fPIC", csrc, "-o", tmp, "-lm"],
+                check=True, capture_output=True, timeout=timeout, cwd=CACHE_DIR)
+            os.replace(tmp, so)
+        finally:
+            for path in (csrc, tmp):
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+        return _cache_details(so, full_key, False, identity, flags, opt)
+    finally:
+        if owner:
+            try:
+                os.rmdir(lock)
             except FileNotFoundError:
                 pass
-    return so
+
+
+def _cache_details(path, full_key, cache_hit, identity, flags, opt):
+    return {"path": path, "cache_key_sha256": full_key,
+            "cache_hit": bool(cache_hit), "compiler": identity,
+            "flags": list(flags), "opt": opt,
+            "library_sha256": _sha256_file(path)}
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def compile_cached(source, opt="fast", timeout=300):
+    """Backward-compatible path-only wrapper over ``compile_cached_details``."""
+    return compile_cached_details(source, opt=opt, timeout=timeout)["path"]
 
 
 class CKernel:

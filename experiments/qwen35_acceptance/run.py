@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stdout
 import gc
 import hashlib
 import json
@@ -28,7 +28,7 @@ for path in (str(HERE), str(REPO)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from contract import METRIC_NAMES  # noqa: E402
+from contract import METRIC_NAMES, OFFICIAL_DEPENDENCY_VERSIONS  # noqa: E402
 
 
 def log(message):
@@ -365,10 +365,32 @@ def sequential_rejection_test(installed_nll, original_nll, regression_limit,
     interim look: every GO still requires the complete preregistered token set
     and the unchanged final 95% paired block interval.
     """
-    from holographic.io_and_interop.holographic_measure import better_than
+    from holographic.io_and_interop.holographic_measure import (
+        _block_shape, better_than)
 
     total_looks = max(1, int(total_looks))
     alpha_each = float(family_alpha) / total_looks
+    installed_nll = np.asarray(installed_nll)
+    original_nll = np.asarray(original_nll)
+    if len(installed_nll) != len(original_nll):
+        raise ValueError("sequential look requires paired losses")
+    _tau, proposed_block = _block_shape(installed_nll - original_nll)
+    if proposed_block > len(installed_nll) // 2:
+        # With fewer than two legal dependence blocks, a moving-block
+        # bootstrap cannot estimate sampling uncertainty. Never substitute an
+        # IID interval or a one-block degenerate interval at an early boundary.
+        return {
+            "look_index": int(look_index),
+            "eval_tokens": int(len(installed_nll)),
+            "alpha_spent": 0.0,
+            "lower_bound_nats": None,
+            "regression_limit_nats": float(regression_limit),
+            "reject": False,
+            "block": int(proposed_block),
+            "effective_n": 1,
+            "skipped": True,
+            "reason": "fewer than two dependence blocks",
+        }
     # better_than returns a two-sided interval, so alpha=2*alpha_each places
     # its lower endpoint at the one-sided Bonferroni boundary alpha_each.
     interim = better_than(
@@ -387,6 +409,7 @@ def sequential_rejection_test(installed_nll, original_nll, regression_limit,
         "reject": bool(interim["ci_lo_nats"] > float(regression_limit)),
         "block": int(interim["block"]),
         "effective_n": int(interim["effective_n"]),
+        "skipped": False,
     }
 
 
@@ -653,13 +676,43 @@ def run_installer(model_dir, installed_dir, installation_corpus, transcript):
         raise RuntimeError("experimental installer exited %d" % completed.returncode)
 
 
+def official_dependency_preflight():
+    """Fail before model work when the frozen official smoke stack is absent."""
+    from importlib import metadata
+
+    found = {}
+    failures = []
+    for distribution, expected in OFFICIAL_DEPENDENCY_VERSIONS.items():
+        try:
+            version = metadata.version(distribution)
+        except metadata.PackageNotFoundError:
+            failures.append("%s is not installed" % distribution)
+            continue
+        found[distribution] = version
+        if version.split("+", 1)[0] != expected:
+            failures.append("%s==%s, expected %s" %
+                            (distribution, version, expected))
+    try:
+        import torchvision  # noqa: F401
+    except Exception as exc:
+        failures.append("torchvision import failed: %s: %s" %
+                        (type(exc).__name__, str(exc)[:300]))
+    if failures:
+        raise RuntimeError(
+            "official dependency preflight failed: %s; install %s" %
+            ("; ".join(failures),
+             HERE / "requirements-cpu.txt"))
+    return found
+
+
 def official_output_smokes(installed_dir):
     import torch
     from PIL import Image
-    from transformers import AutoProcessor
+    from transformers import AutoProcessor, AutoTokenizer
     diagnostics = []
     model = None
     processor = None
+    tokenizer = None
     text_inputs = text_out = vision_inputs = vision_out = None
     official_reload = 0
     text_pass = 0
@@ -685,7 +738,7 @@ def official_output_smokes(installed_dir):
     try:
         from transformers import AutoModelForImageTextToText
         model = checked_load(AutoModelForImageTextToText,
-                             torch_dtype=torch.float32,
+                             dtype=torch.float32,
                              trust_remote_code=True)
         official_reload = 1
     except Exception as auto_exc:
@@ -694,7 +747,7 @@ def official_output_smokes(installed_dir):
         try:
             from transformers import Qwen3_5ForConditionalGeneration
             model = checked_load(Qwen3_5ForConditionalGeneration,
-                                 torch_dtype=torch.float32)
+                                 dtype=torch.float32)
             official_reload = 1
         except Exception as qwen_exc:
             diagnostics.append("Qwen3_5ForConditionalGeneration: %s: %s" %
@@ -702,16 +755,25 @@ def official_output_smokes(installed_dir):
 
     if model is not None:
         try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                installed_dir, trust_remote_code=True)
+        except Exception as exc:
+            diagnostics.append("AutoTokenizer: %s: %s" %
+                               (type(exc).__name__, str(exc)[:1000]))
+        try:
             processor = AutoProcessor.from_pretrained(
                 installed_dir, trust_remote_code=True)
         except Exception as exc:
             diagnostics.append("AutoProcessor: %s: %s" %
                                (type(exc).__name__, str(exc)[:1000]))
 
-    if model is not None and processor is not None:
+    # Text generation is an independent official gate. V3 coupled it to
+    # AutoProcessor, so a missing vision-only dependency incorrectly prevented
+    # the text smoke from running at all.
+    if model is not None and tokenizer is not None:
         try:
-            text_inputs = processor(
-                text="Explain what a checksum protects.", return_tensors="pt")
+            text_inputs = tokenizer(
+                "Explain what a checksum protects.", return_tensors="pt")
             with torch.no_grad():
                 text_out = model.generate(**text_inputs, max_new_tokens=4)
             text_pass = int(
@@ -720,6 +782,7 @@ def official_output_smokes(installed_dir):
             diagnostics.append("text generation: %s: %s" %
                                (type(exc).__name__, str(exc)[:1000]))
 
+    if model is not None and processor is not None:
         try:
             image = Image.new("RGB", (32, 32), color=(32, 96, 160))
             messages = [{"role": "user", "content": [
@@ -739,7 +802,7 @@ def official_output_smokes(installed_dir):
 
     peak_gpu = (float(torch.cuda.max_memory_allocated()) / 1e6
                 if torch.cuda.is_available() else 0.0)
-    del model, processor, text_inputs, text_out, vision_inputs, vision_out
+    del model, processor, tokenizer, text_inputs, text_out, vision_inputs, vision_out
     gc.collect()
     return (float(official_reload), float(text_pass), float(vision_pass),
             peak_gpu, diagnostics)
@@ -758,11 +821,15 @@ def source_snapshot(installation_corpus, evaluation_corpus):
         HERE / "contract.py",
         HERE / "generate.py",
         REPO / "assimilation" / "install.py",
+        REPO / "holographic" / "io_and_interop" / "holographic_install_lecore.py",
+        REPO / "holographic" / "io_and_interop" / "holographic_hrnngrow.py",
+        REPO / "holographic" / "agents_and_reasoning" / "holographic_memsearch.py",
         REPO / "holographic" / "io_and_interop" / "holographic_measure.py",
         REPO / "holographic" / "io_and_interop" / "holographic_gdnruntime.py",
         REPO / "holographic" / "io_and_interop" / "holographic_gdnaccel.py",
         REPO / "holographic" / "io_and_interop" / "holographic_ccrun.py",
         REPO / "holographic" / "io_and_interop" / "holographic_emit.py",
+        HERE / "requirements-cpu.txt",
     ]
     return float(not dirty), {
         "repository": repository,
@@ -784,7 +851,22 @@ def source_snapshot(installation_corpus, evaluation_corpus):
     }
 
 
-def main(argv=None):
+def emitted_checkpoint_snapshot(installed_dir):
+    """Bind every emitted byte without embedding model weights in evidence."""
+    root = Path(installed_dir)
+    files = []
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        files.append({"path": str(path.relative_to(root)),
+                      "sha256": sha256_file(path),
+                      "bytes": path.stat().st_size,
+                      "model_weights": path.suffix == ".safetensors"})
+    return {"path": str(root), "files": files,
+            "total_bytes": sum(item["bytes"] for item in files)}
+
+
+def _main(argv=None, metric_stdout=None):
+    if metric_stdout is None:
+        metric_stdout = sys.stdout
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("model_dir", type=Path)
     ap.add_argument("installed_dir", type=Path)
@@ -861,6 +943,10 @@ def main(argv=None):
         sequential_family_alpha=0.05,
         allow_early_rejection=bool(args.allow_early_rejection),
         allow_early_acceptance=False)
+
+    with recorder.stage("official_dependency_preflight"):
+        dependency_versions = official_dependency_preflight()
+    recorder.emit("official_dependencies", versions=dependency_versions)
 
     from holographic.io_and_interop.holographic_bpe import BPE
     from holographic.io_and_interop.holographic_gdnruntime import load_runtime
@@ -963,6 +1049,7 @@ def main(argv=None):
     with recorder.stage("official_output_smokes"):
         official_reload, text_pass, vision_pass, peak_gpu, smoke_diagnostics = \
             official_output_smokes(installed_dir)
+    source["emitted_checkpoint"] = emitted_checkpoint_snapshot(installed_dir)
 
     worker_peaks = list(evaluation["worker_peak_rss_mb"].values())
     evaluation_aggregate_peak_upper = (
@@ -1017,6 +1104,7 @@ def main(argv=None):
         json.dumps({"metrics": metrics, "source": source,
                     "diagnostics": {
                         "official_smokes": smoke_diagnostics,
+                        "official_dependencies": dependency_versions,
                         "stage_timings_seconds": recorder.timings,
                         "progress_publication": {
                             "upload_uri": recorder.upload_uri,
@@ -1042,8 +1130,18 @@ def main(argv=None):
                         },
                     }},
                    indent=2, sort_keys=True))
-    print(json.dumps({"metrics": metrics, "source": source}, sort_keys=True))
+    print(json.dumps({"metrics": metrics, "source": source}, sort_keys=True),
+          file=metric_stdout, flush=True)
     return 0
+
+
+def main(argv=None):
+    # ilxyr accepts exactly one JSON document on stdout. Treat every diagnostic
+    # from leCore, NumPy, Torch, Transformers, or a future dependency as stderr
+    # by construction, then write only the final envelope to the saved stream.
+    metric_stdout = sys.stdout
+    with redirect_stdout(sys.stderr):
+        return _main(argv, metric_stdout=metric_stdout)
 
 
 if __name__ == "__main__":
