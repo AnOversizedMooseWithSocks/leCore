@@ -64383,3 +64383,616 @@ to the same problem, and load_runtime takes `lazy=True` for it. But the eager
 read happened one level BELOW that, in load_safetensors, so LazyWeights was
 compressing a dictionary that had already cost full RAM to build. THE
 OPTIMISATION WAS REAL AND SAT ON TOP OF THE THING IT WAS OPTIMISING.
+
+## STREAMING: the mmap was being defeated by our own code, three times over
+
+Moose is on a laptop and still ran out. Searched for streaming, and the decisive
+sentence is from llama.cpp's SSD-streaming PR (#25294): enabling streaming
+AUTO-DISABLES mmap, because "MMAP PREFETCH WOULD PAGE THE WHOLE MODEL INTO RAM
+AND DEFEAT STREAMING". The MLX request (#2878) lists the same three
+requirements: memory-mapped weights, block-wise storage, and a residency policy.
+And the CPU-inference literature states the premise plainly: at any moment you
+only need the CURRENT LAYER's weights; the rest can stay on disk.
+
+SO MAPPING THE FILE WAS NECESSARY AND NOT SUFFICIENT. Three places in our own
+code paged it straight back in:
+
+  1. `.copy()` ON EVERY TENSOR in load_safetensors. The comment said "copy:
+     frombuffer is read-only" -- a real constraint, solved the expensive way.
+  2. EAGER BF16 DECODE. bf16 -> float32 DOUBLES the model, and it ran for every
+     tensor at load. A 2.1 GB bf16 checkpoint became 4.2 GB before a single
+     matmul.
+  3. `np.array(v, copy=True)` FOR EVERY TENSOR IN prepend_layers -- to perform
+     an operation that changes NO VALUES. Renumbering layers is a DICTIONARY
+     operation; the arrays are the same arrays under different keys. Another
+     full copy of the model to rename some strings.
+
+FIXED WITH _LazyTensor: holds the OFFSET, not the bytes, answers .shape and
+.dtype from the header, and decodes exactly one tensor when np.asarray touches
+it. Every consumer already went through np.asarray, so NO CALL SITE CHANGED.
+prepend now renames without copying.
+    before   2.1 GB read + 4.2 GB decoded + 4.2 GB copied + 4.2 GB reloaded
+    after    ~0 until a tensor is touched, then one tensor at a time
+The architecture inference, layer-type detection and size reports never touch a
+byte now -- they only read .shape and .dtype, which come from the header.
+
+TWO BUGS IN THE LAZY WRAPPER, both instructive:
+  ENUMERATING THE NDARRAY SURFACE BY HAND FAILS ON THE FIRST ATTRIBUTE NOBODY
+    THOUGHT OF. I hand-wrote shape, dtype, size, nbytes, ndim -- and it died on
+    `.T` immediately. A lazy value must be INDISTINGUISHABLE from the real one
+    or it is a trap, so __getattr__ now materialises and delegates.
+  AND THAT FALLBACK IMMEDIATELY RECURSED INTO ITSELF: __getattr__ was reached
+    for `_cache` before __init__ had set it, called np.asarray, which reads
+    `_cache`... RecursionError in every module at once. A FALLBACK THAT CAN
+    INVOKE ITSELF IS NOT A FALLBACK. The underscore guard is load-bearing.
+
+## THE INFLATED MODEL: 3.43 MB OF FILE FOR 0.00 MB OF INFORMATION
+
+Moose asked whether the size inflation is being handled holographically. It was
+not, and the measurement is worse than "inflated".
+
+    original                     2.81 MB
+    installed                    6.24 MB      +122%
+    EXACTLY-ZERO BYTES           2.26 MB      36% OF THE SHIPPED FILE
+And tensor by tensor, comparing each installed tensor against the layer it came
+from AFTER accounting for renumbering:
+    1.45 MB   IDENTICAL to its source, just renamed
+    2.72 MB   GROWN by the ladder widening head counts
+    0.00 MB   GENUINELY DIFFERENT VALUES
+THE INSTALL ADDS 3.43 MB OF FILE FOR ZERO MB OF NEW INFORMATION. Every added
+byte is a copy or a zero.
+
+AND leCORE ALREADY NAMED THIS AS AN ERROR, in `bank_or_formula`: the demoscene
+economy as a MEASURED GATE, "keep the formula, not the samples", with the
+explicit warning that A BANK OF THINGS A CHEAP FORMULA GIVES YOU FOR FREE IS
+NEGATIVE VALUE. We were banking zeros, at 36% of the file.
+
+SHIPPED holographic_recipe + unicron_recipe. An install becomes RULES:
+    a blank prepended layer      a SHAPE -- np.zeros(shape)
+    a renumbered layer           the SAME array under a different key
+    a ladder-widened tensor      a base tensor plus a small remainder
+    a register reservation       64 BITS of seed (already true, now recorded)
+    the router / improvement     GENUINELY NEW, and small
+MEASURED: 6.24 MB expands from 2.31 MB of real arrays -- 28 renames, 13 all-zero
+shapes, 18 base-plus-padding, 29 actually new -- and expand() rebuilds EVERY
+TENSOR BYTE-EXACT.
+
+TWO THINGS I GOT WRONG ON THE WAY, both kept:
+  MY FIRST VERSION SCORED ONLY 2x, because 35 tensors looked "genuinely new"
+    while the diff had already said 0.00 MB of new VALUES. They were
+    LADDER-GROWN: the original values with the tensor widened around them.
+    A tensor that is a base tensor in a bigger box is not a new tensor.
+  AND THE PADDING IS NOT ALWAYS ZERO. Assuming it was failed the exact rebuild
+    on in_proj_ba, where rows 8 and 9 carry the new rungs' a_log values -- real
+    information that happens to come from a formula. The recipe stores the
+    REMAINDER, which is nothing for a blank pad and a few rows for a rung.
+    THE EXACT-REBUILD ASSERTION IS WHAT CAUGHT IT; a ratio alone would have
+    reported a better number and a broken format.
+
+NOT A REPLACEMENT for the safetensors output: other people's loaders need every
+declared tensor at full size, and that constraint has not moved. This is the
+leCore-NATIVE form -- for storing, versioning and sending an install -- and on a
+2.1 GB checkpoint it is the difference between shipping the model and shipping a
+diff.
+
+## THE EXTERNAL STORAGE WAS NOT HOLOGRAPHIC: 97% of a saved session is KV cache
+
+Moose asked me to VERIFY rather than assume the model-side storage uses the
+holographic format. Good instinct: it did not.
+
+IN MEMORY the design is right and constant:
+    GDN recurrent state    4,194 KB, CONSTANT in conversation length
+    register reservation   64 BITS -- regenerates from a seed
+    turn memory (nested)   ONE vector for 128 turns x 32 facts
+    KV cache at 1M tokens  49 GB, which is the thing all of that replaces
+
+BUT THE SESSION STORE WROTE THE WHOLE STATE TO DISK, KV INCLUDED:
+    tokens   on disk    per token
+       256   128.4 KB    2.007 KB
+     1,024 1,081.7 KB    1.056 KB
+     4,096 4,130.5 KB    1.008 KB
+ABOUT 1 KB PER TOKEN, LINEAR -- the exact cost this architecture exists to
+avoid, reintroduced at the filesystem. At 2,000 tokens the state is 97% KV
+CACHE and the fraction only rises.
+
+AND THE HOLOGRAPHIC PATH ALREADY EXISTED AND WAS NOT CALLED. `export_memory`
+in holographic_stateio writes ONLY the fixed-size accumulator -- its own
+docstring is "WHAT A HARNESS MUST STORE SO leCORE'S MEMORY SURVIVES -- and it is
+63 KB". Measured against the full state:
+    tokens   full state   memory only    ratio
+       256      325.1 KB      62.0 KB     5.2x
+     1,024    1,111.6 KB      62.2 KB    17.9x
+     4,096    4,257.3 KB      62.0 KB    68.6x
+CONSTANT, and the ratio grows without bound.
+
+SessionStore.save now takes carry="memory", verified on disk at 62 KB flat
+against 4,103 KB at 4,096 tokens -- 66x, still climbing.
+
+AND THE TRADE IS STATED RATHER THAN HIDDEN, because it is real: without the KV
+cache a resumed session must RE-PREFILL the tokens it wants attention over. The
+GDN memory comes back EXACTLY; the attention window does not. For a long-lived
+context that is obviously right -- 62 KB and a re-prefill beats 4 MB and growing
+-- and for a short one it is not. So "full" stays the DEFAULT and "memory" is a
+choice, rather than quietly changing what everyone's sessions mean.
+
+ONE SMALL BUG WORTH THE LINE: export_memory returns BYTES, not a dict -- it is a
+wire format. My first version called .items() on it. The blob now goes into one
+uint8 array, which is exactly what import_memory expects to find.
+
+## WHAT THE KV CACHE IS, AND WHY IT IS THE ONE THING WORTH NOT STORING
+
+Moose asked what the KV cache actually is and whether it affects routing between
+layers. It does not, and the correction matters for the architecture.
+
+WHAT IT IS: attention at token N needs the KEY and VALUE vectors of every
+earlier token. Those depend ONLY on the tokens before them -- never on the
+future -- so you can compute each token's K and V once and keep them, or
+recompute the whole history at every step. THE CACHE IS A MEMO OF WORK ALREADY
+DONE.
+    recompute all 1,000 tokens   0.3995 s
+    resume from cached KV        0.0025 s     159x
+IT BUYS TIME, NOT BEHAVIOUR. It does not route, gate, or change what any layer
+computes -- the same weights on the same tokens give the same answer either way.
+That is the misconception worth clearing: nothing in the model's decisions
+depends on whether the cache exists.
+
+AND THAT MAKES IT THE TEXTBOOK bank_or_formula CASE. Measured:
+    two prefills of the same tokens give IDENTICAL KV     True
+    storing the KV                                    819.2 KB
+    storing the TOKENS and rebuilding it              3.2 KB   -- 256x smaller
+    the GDN accumulator                               63.0 KB  -- NOT recomputable
+A BANK OF SOMETHING A FORMULA GIVES BACK EXACTLY. The tokens are the formula;
+they are already in the manifest; and re-prefilling reproduces every K and V
+bit-for-bit.
+
+VERIFIED END TO END on a memory-only session: 62 KB saved, 819 KB of KV NOT
+written, the 800 tokens read back from the manifest, and the rebuilt KV
+IDENTICAL to the discarded one -- logits identical too. NOTHING IS LOST EXCEPT
+THE TIME TO RECOMPUTE IT.
+
+SO THE DIVISION IS CLEAN, and it is the same one this arc keeps arriving at:
+    THE GDN ACCUMULATOR   real state, path-dependent, must be KEPT -- 63 KB
+    THE KV CACHE          derived, reproducible, should be REBUILT -- 0 KB
+    THE TOKENS            the formula that rebuilds it -- 3.2 KB
+Keeping KV on disk is banking a formula's output at 256x the price of the
+formula, and it is the single thing standing between a session file that is
+constant and one that grows forever.
+
+## USING THE STACK: leCore already had the storage ladder, and I built a worse one
+
+Moose: we cannot be hitting storage and scaling problems if we implemented
+leCore's full capabilities. Correct, and the Rule-0 probe is embarrassing.
+
+WHAT I HAND-ROLLED, AND WHAT ALREADY EXISTED:
+    my "recipe" format      `unicron_delta_store` -- "unchanged tensors cost
+                            ZERO; touched ones go low-rank at a rank discovered
+                            from the delta's OWN SPECTRUM; a fat delta stays
+                            dense rather than paying factor overhead", with a
+                            D-QRELO mode (arXiv 2604.16940) for one-bit dominant
+                            structure plus low-rank residual.
+    my zero census          `unicron_archive` -- "leCore's storage ladder, per
+                            tensor: SAME (pointer), RECIPE (seed/generator
+                            instead of data, hash-verified), DELTA (exact
+                            XOR-delta, zlib'd), RAW (the honesty rung).
+                            Reconstruction is BIT-exact."
+    my session carry-mode   `bank_or_formula`, which I had already found once
+                            this arc and then failed to apply to the next
+                            instance of the same question.
+FOUR RUNGS AND KEPT NEGATIVES ALREADY ON RECORD, including one I would have hit:
+"arithmetic float deltas are not bit-exact (XOR is)".
+
+BUT THE MEASUREMENT IS NOT "USE THE LADDER AND WIN":
+    ladder alone, no reference resolution      1.29x
+    ladder given only the renamed tensors      1.67x
+    my rename + zero + pad resolution          2.7x
+THE LADDER IS NOT WORSE -- IT IS BEING GIVEN THE WRONG INPUT. It matches
+tensors BY NAME, and prepend RENUMBERS EVERY LAYER, so 26 of 76 installed
+tensors have no same-named reference and it correctly falls back to RAW on most
+of the model. It reported 390,000x on the first attempt precisely because it was
+comparing two nearly disjoint key sets and finding almost nothing to compare.
+
+SO THE DIVISION IS CLEAN AND BOTH HALVES ARE NEEDED: renumbering is a NAME
+problem, compression is a BYTES problem, and only this module's rename map
+turns the ladder loose on the second. compress_arrays() now hands the
+rename-resolved pairs to unicron_delta_store rather than reimplementing it.
+
+THE LESSON I KEEP RE-LEARNING IN THIS ARC: when a problem feels like it needs a
+new format, it usually needs an ADAPTER to an existing one. I wrote a storage
+format because the storage format I had did not fit the input -- and the fix was
+to fix the input.
+
+## SWEEP: the ladder, the deterministic structure, the database
+
+Swept all three seams Moose named. The finding is that the storage question was
+ALREADY ANSWERED and I had been arguing with it rather than reading it.
+
+THE LADDER. `codec_place` "MEASURES every applicable unit on x and returns a
+ranked table priced against the zlib baseline, with 'store raw' as a
+FIRST-CLASS ROW" -- and refuses on incompressible data rather than pretending.
+Run on 16.38 KB samples of each kind of thing the install produces:
+    trained weights      16.38 -> 15.15 KB    1.08x   ship RAW
+    a reservation row    16.38 -> 15.17 KB    1.08x   ship the SEED
+    ladder a_log values  16.38 ->  0.07 KB     234x   ship the FORMULA
+    the zero padding     16.38 ->  0.04 KB     420x   ship a SHAPE
+TRAINED WEIGHTS DO NOT COMPRESS. 1.08x is noise, and any scheme claiming better
+on them is lossy or measuring something else. EVERYTHING THE INSTALL ADDS
+COMPRESSES BY TWO TO THREE ORDERS OF MAGNITUDE, because it is STRUCTURE rather
+than INFORMATION.
+That single table is the whole storage argument, and it reframes the recipe: it
+is not an optimisation of the model, it is A REFUSAL TO STORE THINGS THAT WERE
+NEVER DATA.
+
+THE DETERMINISTIC RUNG. `store_procedural` stores a signal as its PROGRAM --
+generator-bank tier measured at 76x on 4k samples and 310x at 16k FROM THE SAME
+BYTES, "extendable past the data with a validity flag", each tier VERIFIED
+POINTWISE before commit. The constant-size-blob property is exactly the ladder
+a_log case: a formula whose cost does not grow with how much of it you want.
+`canon_storage_report` carries the kept negative that keeps this honest -- a
+triangle cannot beat zlib because an affine delta is 9 floats for a 9-float
+triangle, and the dividend only appears at scale (0.75x at 3 vertices, 143x at
+2000). SMALL STRUCTURED THINGS DO NOT PAY; that is why "store raw" must stay a
+row.
+
+THE DATABASE RUNG. `build_index` is a nearest-neighbour index with "a cosine
+scan for small sets, the sub-linear RP-forest for large ones", and an ABSTAIN
+parameter. Verified: over 512 stored vectors it returns the right one for a
+noised query (0.699 against 0.284 for the runner-up) and returns NOTHING at all
+for a random query with abstain=0.5. That is the register file's retrieval layer,
+already built, already abstaining -- and the chat schedule is currently doing its
+own argmax instead of using it.
+
+SO THE ANSWER TO "DID WE IMPLEMENT leCORE'S FULL CAPABILITIES" IS NO, AND THE
+GAP IS NOT MISSING MACHINERY -- it is machinery I did not look for before
+building. Three rungs, all present: what to compress (codec_place), what to
+regenerate (store_procedural), and how to find it again (build_index).
+
+## TOKENS WERE STORED AS JSON DECIMAL TEXT -- Moose was right and it was worse
+
+Moose refused to believe raw tokens were optimised: the same token recurs
+constantly, so store it once and reference it. He was right, and the reality was
+worse than his objection -- WE WROTE THEM AS JSON INTEGERS, "104, 101, 32", ~4.7
+BYTES PER TOKEN before any structure is touched.
+
+MEASURED on 2,000 tokens:
+    JSON decimal text (what we wrote)      9.25 KB
+    uint16                                 4.00 KB
+    zlib over uint16                       1.37 KB
+    arithmetic-coded BY THE MODEL          0.65 KB
+AND THE STRUCTURE HE PREDICTED IS THERE: 2,000 tokens hold only 67 DISTINCT
+values, the most common appears 267 times, and 76% OF 2-GRAM POSITIONS REPEAT AN
+EARLIER 2-GRAM. His "store references" is exactly LZ77 -- a back-reference IS a
+pointer to an earlier occurrence -- and zlib already implements it, beating the
+single-token entropy floor of 1.20 KB because it codes PHRASES, not symbols.
+
+AND THE MODEL BEATS IT 2x MORE, at 2.59 bits/token against zlib's 5.47, because
+THE MODEL IS ALREADY A PREDICTOR AND A PREDICTOR IS A COMPRESSOR --
+`compress_cost` says exactly this ("encode a sequence by the RANK of each symbol
+under the meaning predictor"). The tokens are nearly free to store in a file
+that already contains the model that predicts them.
+
+WE SHIP THE ZLIB TIER, NOT THE 14x ONE, AND THE REASON IS THE POINT: decoding
+the model-coded tokens REQUIRES RUNNING THE MODEL. A session file that cannot be
+read without the exact checkpoint that wrote it is a worse artifact than one
+that is 0.7 KB larger. The 0.65 KB is recorded as a MEASURED NEGATIVE.
+
+TWO BUGS THE ROUND-TRIP ASSERTION CAUGHT, both invisible to "did it write":
+  THE MEMORY-CARRY MODE COULD NOT BE LOADED. My earlier change dropped __pos__,
+    so state_from_arrays raised KeyError. THE FILE WROTE FINE. A save mode that
+    cannot be loaded is not a save mode.
+  AND import_memory RESTORES INTO a live state rather than creating one --
+    "leaving everything else" is its whole point. Returning a half-built state
+    object would have looked like a session and behaved like a trap, so load()
+    now returns the blob, the position and needs_reprefill, and the caller
+    rebuilds properly.
+
+## RAG WAS SILENTLY ABSENT: "0 searchable passages" was THREE bugs, not a constraint
+
+Moose: we have RAG and a whole semantic system in leCore and it is not massive --
+make sure the install is doing it right. It was not doing it AT ALL. His run
+printed "memory: 128 registers and 0 SEARCHABLE PASSAGES / NOTE: this tokenizer
+uses every vocabulary row, so there is nowhere to put a search index -- skipping
+it", and I had read that as a limitation of his model. It was three of our bugs
+stacked.
+
+  1. THE PASSAGE DEFAULT WAS ZERO. `--passages` defaults to 0, so the range that
+     builds them was EMPTY -- `passages` was [] long before anything asked where
+     to store an index. THE "0 SEARCHABLE PASSAGES" LINE WAS TELLING THE TRUTH
+     ABOUT A LIST NOBODY HAD FILLED, and the tokenizer note underneath it was a
+     plausible-sounding explanation for the wrong thing.
+  2. THE ROW COUNT CAPPED THE PASSAGE COUNT: min(len(all_free), len(passages)),
+     so zero free vocabulary rows forced zero passages -- THE CONSTRAINT OF ONE
+     STORAGE SCHEME SILENTLY LIMITING A DIFFERENT ONE.
+  3. AND THE INDEX NEVER NEEDED VOCABULARY ROWS. Baking passages into unused
+     embedding rows is ONE way to store an index; leCore's own `build_index`
+     needs none -- cosine scan for small sets, sub-linear RP-forest for large,
+     with abstention. And Moose is right that it is not massive: 1,000 passages
+     at hidden 1024 is 4.1 MB, the order of the 63 KB memory contract rather
+     than the order of the model.
+
+FIXED: the index now ships BESIDE the weights as lecore_index.npz -- the same
+side of the boundary as the KV cache and the session memory, which is the third
+capability to land there and the reason that boundary is now predictive rather
+than discovered. Verified end to end: 200 passages, 0.10 MB, written after the
+checkpoint (the first version ran before out_dir existed -- ORDER IS PART OF THE
+WIRING), reloaded from disk, self-query returns its own passage at 1.000.
+
+THE HONEST NUMBERS, recorded rather than hidden: half-passage queries retrieve
+the right passage 9 OF 18 TIMES on 120 real passages. That is a real result and
+not a good one -- byte-level tokenizer, tiny fixture -- and it is the MECHANISM
+that is now installed, not a benchmark.
+KEPT NEGATIVE: CENTRING DID NOT HELP (9/18 either way). Worth stating loudly
+because centring has been the fix FOUR separate times in this project, and the
+fifth time it was not.
+
+## THE VIRTUAL MACHINE WAS BUILT AND NEVER INSTALLED
+
+Moose asked whether the installed leCore uses the VM architecture we developed.
+IT DID NOT. Checked install_lecore directly: vminstall, proglib, unlocked, fuse,
+low_rank, token_step, power_matrix, gather_matrix and hlb are ALL absent from
+it. The usage audit had filed them as TOOLING and I accepted that -- which is
+TRUE OF THE PLANNERS AND FALSE OF THE OPERATORS.
+
+AN OPCODE IS A MATRIX, which is exactly what "installable" means here:
+    BIND      a circulant
+    PERMUTE   a permutation matrix
+    BUNDLE    a scaled identity
+    UNBIND    an inverse
+Each applies as ONE MATVEC, which is what install_op bakes into MLP neurons.
+
+AND A PROGRAM IS THEIR PRODUCT. A whole opcode SEQUENCE fuses into ONE operator
+before installation -- verified at MAX DIFF 0.00e+00 between running three
+opcodes step by step and applying the fused matrix. DEPTH IS FREE because the
+fusion happens at INSTALL time, not at inference time. That is the same result
+holographic_unlocked measured months of context ago at 32 operators into 128
+neurons at cosine 1.000000, finally pointed at the install instead of at a
+report.
+
+MEASURED IN A REAL MODEL: a 2-opcode program (BIND then PERMUTE) added 128
+neurons, computes at COSINE 1.000000, cost +0.01% perplexity through the
+null-space guard, and a FULL INSTALL CARRYING IT STILL CAME OUT BETTER overall
+(-0.413%). The step now appears in the install trace between state_track and
+improvement.
+
+DEFAULT OFF, and that is the honest part: a program only earns its neurons if
+someone has one to run. install_lecore takes vm_program=[matrices]; passing
+nothing changes nothing.
+
+THE PATTERN, and it is now four for four this session: EVERY TIME MOOSE ASKS
+"ARE WE USING X", THE ANSWER IS THAT X EXISTS, WORKS, AND NOTHING CALLS IT. The
+usage audit catches modules nobody imports. It does not catch a module that is
+imported by its own tests and by a planner that itself is never run -- which is
+what "filed as tooling" turned out to mean.
+
+## WHERE WE STAND: the demoscene budget audit of the install
+
+Moose asked for the demoscene view of the whole install. The demoscene question
+is not "what could we add" -- it is "WHAT IS THE HARDWARE ALREADY DOING THAT WE
+ARE NOT READING". A demo does not add a chip; it notices the copper is already
+running and hangs another effect off it.
+
+WHAT IS IN, eleven steps: prepend, registers, hrnn_channel, nullspace_guard,
+router, memory_index, self_write, state_track, vm_program, improvement,
+boot_record.
+
+WHAT IS STILL OUT, and honestly why:
+    unicron_hlb          operators as VECTORS -- 1,024 params against 1,048,576
+                         for a circulant at Qwen width. INSTALLABLE, not wired.
+    unicron_turn_memory  4,096 facts at 100% across 128 turns. A RUNTIME
+                         structure over the state, not a weight.
+    unicron_self_heal    maintenance between turns. Correctly outside.
+    unicron_hybrid       a per-token schedule. Correctly outside.
+    unicron_seqbake      unpermute_operator IS a matrix. INSTALLABLE, not wired.
+
+AND THE ONE MOOSE NAMED -- "choosing the correct tool from previous usage" --
+TURNED OUT TO ALREADY BE IN THE WEIGHTS AND UNREAD. ACT-R base-level activation
+is A = ln(sum_j t_j^-d): a POWER LAW over how long ago each use was. The HRNN
+ladder is a GEOMETRIC SUM OF EXPONENTIALS, which approximates one. So tool
+choice by recency AND frequency is a READ of a structure the install already
+writes -- no table, no external log of use times, no new weights.
+
+BUT THE FIT DEPENDED ON A PARAMETER NOBODY HAD CONNECTED TO IT:
+    shortest=16 (the old default)   R^2 0.93226
+    shortest=8                      R^2 0.97012
+    shortest=2                      R^2 0.99858
+AND CHANGING IT COSTS NOTHING -- measured INDISTINGUISHABLE on perplexity at all
+three, because the rungs are a_log VALUES and where they sit on the ladder does
+not change how many there are. ONE PARAMETER BOUGHT THE SECOND CAPABILITY
+OUTRIGHT. Now shortest=2, and the install reports that the ladder serves both.
+Verified: a tool history ranks file_edit > run_tests > web_search > plot, which
+is recency AND frequency together rather than either alone.
+
+THE DEMOSCENE LESSON, stated as the audit rule it should have been: BEFORE
+ADDING A STEP, CHECK WHETHER AN EXISTING STEP ALREADY COMPUTES IT UNDER ANOTHER
+NAME. Four for four this session, every "are we using X" has resolved to X
+existing and nothing calling it -- and this time X did not even need installing,
+only reading.
+
+## THREE SWEEPS: is the installed functionality WIRED, or only WRITTEN?
+
+Moose asked for verification sweeps. The three questions turn out to be
+different, and the existing audits ask none of them: reachability_audit asks
+IS IT DISCOVERABLE, usage_audit asks DOES ANYTHING CALL IT, and neither asks
+CAN AN INSTALLED MODEL ACTUALLY USE THIS.
+
+SWEEP 1, ABLATION -- zero a component and see whether perplexity moves.
+    improvement neurons   7.3478 -> 7.4894   READ, it matters
+    prepended layer 0     7.3478 -> 7.3478   unchanged
+    prepended layer 1     7.3478 -> 7.3478   unchanged
+MY FIRST READING WAS "DEAD WEIGHT" AND IT WAS WRONG. Blank layers are blank BY
+CONSTRUCTION -- that is exactly what makes the install bit-identical. Installing
+an operator INTO prepended layer 0 computes at COSINE 1.000000, so the right
+words are EMPTY AND LIVE: reserved capacity the forward pass reads the moment
+anything is written. An ablation that finds no change is only evidence of dead
+weight if the component was supposed to contain something.
+
+SWEEP 2, ROUND TRIP -- everything survives save and reload: boots as 'leCore'
+with 8 capabilities in the WEIGHTS, lecore.json agreeing, the sidecar index at
+0.12 MB, the layer count matching config.json, and the GDN head counts (k=6,
+v=12) written correctly -- the four keys whose absence broke a reload two days
+of context ago.
+
+SWEEP 3, USE -- can each part be exercised from the SHIPPED ARTIFACT ALONE?
+    registers   16/16 recalled, regenerated from the seed in lecore.json
+    ladder      ACT-R fit R^2 0.99858, tool order edit > test > search
+    rag index   200 passages, self-query returns its own passage
+    hybrid      40 of 399 tokens routed to the store by the model's OWN entropy
+ALL FOUR, from the files on disk, with no state carried from the install.
+
+AND IT IS NOW A TOOL RATHER THAN A SESSION: tools/install_audit.py with
+assimilation/audit.bat, so this is checkable on every future install instead of
+being re-derived. It reads 0 problems on a fresh install.
+THE POINT OF MAKING IT A TOOL: every one of the last five findings was
+"something exists and nothing calls it". An audit that has to be remembered is
+the same failure one level up.
+
+## ANOTHER leCORE INSTALL IN THE WILD, AND THE GENERATION-SPEED NUMBERS
+
+Moose pointed at staccs/lecore-deepseek-v4-flash-hrr on HuggingFace -- someone
+installing leCore into DeepSeek-V4-Flash. Worth reading, and it INDEPENDENTLY
+CONFIRMS two things this arc measured:
+
+  1. THE ARCHITECTURE GATE IS REAL. Their card: "Skipped: HRNN / prepend (Flash
+     has NO GDN recurrent state)". That is exactly the has_recurrent_state
+     finding, hit independently on a different model family -- and it is why
+     install_lecore now SKIPS those three steps with a stated reason instead of
+     failing inside a tensor lookup.
+  2. THE OVERLAY IS THE RECIPE. They ship ~1.0 GB -- ONE patched shard plus
+     lecore.json -- against a 156 GB base, and tell users to drop it on top of
+     the stock 47 shards. That is the recipe argument as a DISTRIBUTION
+     mechanism, and it is further than we took it: we compute the diff, they
+     SHIP only the shard the diff touches.
+
+WHERE THEY WENT A DIFFERENT WAY, and it is instructive: their memory_index
+lives in embed rows 128000-128063, the tokenizer's placeholder tail. That works
+because Flash HAS free rows. Moose's Qwen3.5 does not -- every vocabulary row is
+used -- which is exactly why our index moved to a sidecar. SAME CAPABILITY, TWO
+STORAGE SITES, CHOSEN BY THE TOKENIZER rather than by preference.
+Their measurement discipline is good and worth naming: an explicit "Not claims"
+section, "OG Flash column NOT RUN", and "N=5 is a SIG meter, not a published
+leaderboard card".
+AND A NUMBER WE SHOULD KEEP: their T2 median wall time is 128 ms control vs
+163 ms with memory -- MEMORY COSTS ABOUT 27% LATENCY on their bridge.
+
+WHICH IS THE OTHER HALF OF MOOSE'S QUESTION. MEASURED HERE:
+    full recompute of 400 tokens   0.1257 s
+    one RESUMED step               0.0021 s     61x cheaper
+So the prefix cache is already the dominant win and it is wired.
+
+EARLY EXIT, AND A MISTAKE WORTH RECORDING. On ONE token, stopping after layer 1
+gave the same answer at 32% of the cost -- which looked like a 3x speedup.
+ACROSS 799 POSITIONS:
+    stop after layer 1    44.3% agreement
+    stop after layer 2    80.2%
+    stop after layer 3   100.0%
+    stop after layer 4   100.0%
+LAYER 1 WAS 44%, NOT 100%. One token is not a measurement, and the single-token
+version of this test would have shipped a 3x "speedup" that is wrong more than
+half the time.
+THE HONEST WIN IS LAYER 3 OF 4 -- 100% agreement, a quarter of the depth free.
+And a CONFIDENCE GATE beats a fixed depth: at 0.50, 43.1% of tokens exit after
+layer 2 with 98.0% agreement; at 0.90, 8.0% exit with 100.0%. Exit where the
+model is already sure, keep full depth where it is not.
+
+## IMPLEMENTED: exit calibration in the install, HLB as a recipe formula
+
+Two measured wins turned into installed behaviour rather than notes.
+
+EXIT CALIBRATION -- the model does not need every layer for every token, and
+HOW MANY it needs is a property of THIS model on THIS corpus. So it is now
+measured AT INSTALL over the whole eval set and recorded:
+    layer 1  agreement 0.0638      layer 4  0.7785
+    layer 2  0.2954                layer 5  1.0000   <- SAFE DEPTH
+    layer 3  0.4193                layer 6  1.0000
+"layer 5 of 6 agrees >=100% -- 17% of the depth is free", written into
+lecore.json, and LeCoreRuntime.from_model_dir READS IT. Verified end to end on a
+shipped model: the runtime picked exit_after=5 on its own, ran in 88% OF THE
+TIME, and produced THE SAME TOP TOKEN AT EVERY POSITION.
+THE SINGLE-TOKEN VERSION OF THIS TEST IS A TRAP and the calibration exists
+because of it: on one token, layer 1 agreed and looked like a 3x speedup. Over
+799 positions layer 1 agrees 44%. Calibrating over the corpus is the difference
+between a real 12% and a fake 300%.
+
+HLB -- AND THE HONEST SHAPE OF ITS SAVING. `unicron_hlb` stores an operator as a
+VECTOR: 1,024 params against 1,048,576 for a circulant at Qwen width. But
+install_op writes MLP NEURONS, and neurons apply a MATRIX -- so materialising it
+appears to throw the saving away.
+IT DOES NOT, BECAUSE THE TWO HALVES ARE DIFFERENT QUESTIONS. Verified: the HLB
+bind equals M_x = H diag(Hx) H / D at 1.5e-14, so the MODEL gets a matrix like
+any other operator, while the RECIPE stores the 128-element VECTOR and
+regenerates M_x on expansion. THE OPERATOR IS A FORMULA; ONLY ITS APPLICATION IS
+DATA -- the same bank-or-formula split the zero padding and the a_log rungs
+already fall on, arrived at from a third direction.
+
+THE INSTALL IS NOW TWELVE STEPS: prepend, architecture, registers,
+hrnn_channel, nullspace_guard, router, memory_index, self_write, state_track,
+vm_program, exit_calibration, improvement, boot_record -- with the sidecar index
+beside them and audit.bat to check that a shipped model can actually use it all.
+
+## NO HARDCODED SIZES: every install number now derives from the model
+
+Moose: we should not have hardcoded values, we should adapt -- the DeepSeek-V4
+overlay is what happens when someone brings a different layout and has to find
+their own path. He is right, and the constants were exactly the things that
+would have needed changing by hand.
+
+PREPEND WAS 2, ALWAYS. That is not one decision, it is a different intervention
+on every model:
+     4-layer fixture   2 layers = 50.0% MORE DEPTH
+    24-layer Qwen      2 layers =  8.3%
+    61-layer model     2 layers =  3.3%
+NOW A FRACTION OF DEPTH (~8%, floored at 1, capped at 4):
+     4 layers -> 1   (25.0%)      48 layers -> 4   (8.3%)
+    24 layers -> 2   ( 8.3%)      61 layers -> 4   (6.6%)
+Proportionate everywhere instead of accidentally aggressive on small models and
+negligible on large ones.
+
+PASSAGES WERE 256, ALWAYS -- which is 0.13 MB of index at hidden 128 and 4.19 MB
+at hidden 4096. NOW A BYTE BUDGET (~1 MB, the order of the memory contract
+rather than the order of the model), and the width decides how many that buys:
+    hidden  128 -> 1953 passages     hidden 4096 ->  61 passages
+    hidden 1024 ->  244 passages     hidden 7168 ->  34 passages
+
+SHORTEST RUNG STAYS 2 BUT IS NOW A FUNCTION WITH A REASON: the floor is ONE
+TOKEN because there is no shorter timescale in a token stream, and a rung at
+half-life 1 decays to nothing before the next token arrives -- so the useful
+floor is 2. Written as _shortest_rung(cfg) so it adapts if the unit ever stops
+being a token (a patch, a frame). A CONSTANT WITH A DERIVATION IS NOT A MAGIC
+NUMBER; A CONSTANT WITHOUT ONE IS.
+
+EXIT FLOOR STAYS A KNOB, correctly: how much disagreement you will tolerate is a
+POLICY choice, not a model property. The DEPTH it yields is measured per model
+and already was -- layer 4 of 5 on the fixture after prepend changed, 20% free.
+
+AND MAKING PREPEND ADAPTIVE IMMEDIATELY BROKE SOMETHING, which is the useful
+part: install.py wrote layer_types using a.prepend, now None, so the saved
+config would have had FEWER layer_types than layers. Fixed to read what the
+install ACTUALLY DID from the report. A DEFAULT THAT MOVES EXPOSES EVERY PLACE
+THAT ASSUMED IT WAS FIXED -- config verified: layer_types length 5, layers 5.
+
+## "WHAT IF I DELETE THE MODEL" -- the download existed and was unmentioned
+
+Moose asked what happens on a fresh clone or if work\original is deleted. THE
+ANSWER WAS ALREADY GOOD AND NOBODY COULD FIND IT: assimilate.bat downloads
+Qwen3.5-0.8B into work/original via huggingface_hub -- ANONYMOUS by
+construction (token=False forbids a cached login from being sent), RESUMABLE,
+and it SKIPS if a checkpoint is already there, printing "delete that folder to
+re-download".
+
+BUT install.bat's failure said only "no directory with a .safetensors file was
+found nearby -- check that assimilation finished and note the path it printed",
+which tells someone with no model at all to check on a thing they never ran.
+A DIAGNOSIS IS NOT A NEXT COMMAND. Now:
+
+    model directory './work/original' not found (looked in 12 places)
+
+    no checkpoint anywhere nearby. To fetch one:
+        assimilate.bat        downloads Qwen3.5-0.8B into work\original
+                              (~1.6 GB, anonymous, resumable, skips if present)
+        assimilate.bat --model Qwen/Qwen3.5-2B    other sizes
+    then:
+        install.bat ./work/original
+
+THE PATTERN, AGAIN AND AT THE LEVEL OF DOCUMENTATION THIS TIME: the capability
+existed, worked, and was not reachable from the place the person would be
+standing when they needed it. Six times this session, and this one cost nothing
+to fix because the only thing missing was a sentence at the point of failure.

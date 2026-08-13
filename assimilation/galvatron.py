@@ -184,9 +184,20 @@ def _resolve_model_dir(arg):
             msg.append("    " + d)
         msg.append("pass one of those (a full path always works)")
     else:
-        msg.append("no directory with a .safetensors file was found nearby -- "
-                   "check that assimilation finished and note the path it "
-                   "printed")
+        # SAY HOW TO GET ONE. "not found" is a diagnosis; the next COMMAND is
+        # what the person actually needs, and a fresh clone or a deleted folder
+        # is the likeliest reason to be reading this at all. assimilate.bat
+        # already downloads anonymously, resumably, and skips if present -- it
+        # just was not mentioned anywhere the failure could be seen.
+        msg.append("")
+        msg.append("no checkpoint anywhere nearby. To fetch one:")
+        msg.append("    assimilate.bat        downloads Qwen3.5-0.8B into "
+                   "work\\original")
+        msg.append("                          (~1.6 GB, anonymous, resumable, "
+                   "skips if present)")
+        msg.append("    assimilate.bat --model Qwen/Qwen3.5-2B    other sizes")
+        msg.append("then:")
+        msg.append("    install.bat ./work/original")
     raise SystemExit("\n".join(msg))
 
 

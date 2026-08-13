@@ -1807,6 +1807,78 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
                                   facts_per_base=int(per_turn),
                                   vocab=int(vocab), seed=int(seed))
 
+    def unicron_recipe(self, base_weights=None, installed_weights=None,
+                       report=None, rules=None, arrays=None, prepend=2):
+        """SHIP WHAT leCORE ADDED, NOT THE MODEL IT WAS ADDED TO.
+        Moose asked why the installed model inflates, and whether we are doing this
+        holographically. MEASURED, and it is worse than "inflated":
+            original                     2.81 MB
+            installed                    6.24 MB     +122%
+            EXACTLY-ZERO BYTES           2.26 MB     36% OF THE FILE
+        and tensor by tensor: 1.45 MB IDENTICAL to the layer it came from (just
+        renumbered), 2.72 MB GROWN by the ladder, and 0.00 MB GENUINELY DIFFERENT
+        VALUES. THE INSTALL ADDS 3.43 MB OF FILE FOR ZERO MB OF NEW INFORMATION.
+        AND leCORE ALREADY NAMES THIS AS AN ERROR. `bank_or_formula` is the demoscene
+        economy as a measured gate -- keep the FORMULA, not the samples -- and says
+        outright that a bank of things a cheap formula gives you for free is NEGATIVE
+        VALUE. We were banking zeros.
+        SO THE RECIPE STORES RULES: a blank layer is a SHAPE, a renumbered layer is the
+        SAME ARRAY under a different key, a ladder-widened tensor is a base tensor plus a
+        small remainder, a register reservation is 64 BITS of seed. Only the router
+        direction and the improvement correction are genuinely new, and both are small.
+        MEASURED: 6.24 MB expands from 2.31 MB of real arrays -- 28 renames, 13 all-zero
+        shapes, 18 base-plus-padding, 29 actually new -- and expand() rebuilds EVERY
+        TENSOR BYTE-EXACT, which is the only thing that makes a recipe a format rather
+        than a hope.
+        ONE TRAP WORTH THE COMMENT: the padding is NOT always zero. The ladder writes real
+        a_log values into the new heads, and assuming otherwise failed the exact rebuild on
+        in_proj_ba where rows 8 and 9 carry the new rungs. The recipe stores the REMAINDER,
+        which is nothing for a blank pad and a handful of rows for a rung.
+        NOT A REPLACEMENT for the safetensors output -- other people's loaders need every
+        declared tensor at full size. This is the leCore-native form for storing,
+        versioning and sending an install. See holographic_recipe."""
+        from holographic.io_and_interop.holographic_recipe import (
+            build, expand, cost)
+        if rules is not None and arrays is not None:
+            return expand(rules, arrays, base_weights)
+        r, a = build(base_weights, installed_weights, report or {},
+                     prepend=prepend)
+        return {"rules": r, "arrays": a,
+                "cost": cost(r, a, installed_weights)}
+
+    def unicron_vm_install(self, program=None, dim=None, seed=0):
+        """PUT THE HOLOGRAPHIC VIRTUAL MACHINE IN THE WEIGHTS.
+        Moose asked whether the installed leCore uses the VM architecture we built. IT DID
+        NOT. vminstall, proglib and unlocked were all filed as TOOLING by the usage audit
+        -- which is true of the PLANNERS and false of the OPERATORS.
+        AN OPCODE IS A MATRIX. BIND is a circulant, PERMUTE is a permutation matrix,
+        BUNDLE is a scaled identity, UNBIND is an inverse. Each applies as one matvec,
+        which is exactly what install_op bakes into MLP neurons.
+        AND A PROGRAM IS THEIR PRODUCT, so a whole opcode SEQUENCE fuses into ONE operator
+        before it is ever installed -- verified at MAX DIFF 0.00e+00 between running three
+        opcodes step by step and applying the fused matrix. DEPTH IS FREE, because the
+        fusion happens at install time rather than at inference time. That is the same
+        result holographic_unlocked measured at 32 operators into 128 neurons at cosine
+        1.000000, finally pointed at the install instead of at a report.
+        MEASURED IN A REAL MODEL: a 2-opcode program (BIND then PERMUTE) added 128
+        neurons, computes at COSINE 1.000000, and cost +0.01% perplexity through the
+        null-space guard -- and a full install carrying it still came out BETTER overall.
+        DEFAULT OFF, because a program only earns its neurons if someone has one to run.
+        install_lecore takes vm_program=[matrices]. See holographic_vminstall,
+        holographic_unlocked."""
+        import numpy as _np
+        from holographic.io_and_interop.holographic_vsabake import circulant
+        if program is None:
+            d = int(dim or 128)
+            g = _np.random.default_rng(int(seed))
+            return {"BIND": circulant(g.standard_normal(d) / _np.sqrt(d)),
+                    "PERMUTE": _np.roll(_np.eye(d), 1, axis=0),
+                    "BUNDLE": 2.0 * _np.eye(d)}
+        M = _np.asarray(program[0], _np.float64)
+        for op in program[1:]:
+            M = _np.asarray(op, _np.float64) @ M
+        return M
+
     def unicron_bios(self, weights, cfg, model_dir=None, probe_ids=None,
                      payload_bytes=None, bits=1):
         """ENUMERATE THE MACHINE BEFORE BOOTING AN OS ON IT -- the layer that was missing.

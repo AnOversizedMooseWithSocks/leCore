@@ -103,15 +103,24 @@ def prepend_layers(weights, cfg, n=2, intermediate=128):
         root = next(k.split("layers.")[0] for k in weights if "layers." in k)
     lp = "%slayers." % root
 
+    # RENAME, DO NOT COPY. This used to `np.array(v, copy=True)` EVERY tensor,
+    # which materialises the ENTIRE MODEL in RAM to perform an operation that
+    # changes no values at all -- renumbering is a DICTIONARY operation, and the
+    # arrays are the same arrays under different keys. On a 2.1 GB checkpoint
+    # that copy is 2.1 GB spent to rename some strings, and it lands on top of
+    # whatever the loader is already holding.
+    # This also preserves memory-mapped views: a copy would page in every byte
+    # and defeat the mmap the loader just set up, which is exactly the failure
+    # llama.cpp's streaming PR warns about -- "mmap prefetch would page the
+    # whole model into RAM and defeat streaming".
     out = {}
     for k, v in weights.items():
         if k.startswith(lp):
             rest = k[len(lp):]
             i, tail = rest.split(".", 1)
-            out["%s%d.%s" % (lp, int(i) + int(n), tail)] = np.array(
-                v, copy=True)
+            out["%s%d.%s" % (lp, int(i) + int(n), tail)] = v
         else:
-            out[k] = np.array(v, copy=True)
+            out[k] = v
     for j in range(int(n)):
         out.update(blank_layer(cfg, root, j, intermediate))
     c = dict(cfg)

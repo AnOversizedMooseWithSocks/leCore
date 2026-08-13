@@ -106,16 +106,94 @@ def load_safetensors(path, return_dtypes=False):
         raw = blob[a:b]
         shape = tuple(meta["shape"])
         dt = meta["dtype"]
-        if dt == "BF16":
-            arr = _decode_bf16(np.frombuffer(raw, dtype=np.uint16))
-        else:
-            if dt not in _ST_DTYPES:
-                raise ValueError("unsupported safetensors dtype: %s" % dt)
-            arr = np.frombuffer(raw, dtype=_ST_DTYPES[dt])
-        out[name] = arr.reshape(shape).copy()  # copy: frombuffer is read-only
+        # DO NOT MATERIALISE. The previous line ended in `.copy()` on EVERY
+        # tensor, which pages in the whole mapping and defeats the memmap that
+        # was just set up -- and for a BF16 checkpoint the eager _decode_bf16
+        # DOUBLED it again, because bf16 decodes to float32. A 2.1 GB bf16 model
+        # therefore cost 4.2 GB before anything was computed.
+        # llama.cpp's streaming PR names this exact trap: enabling streaming
+        # AUTO-DISABLES mmap because "mmap prefetch would page the whole model
+        # into RAM and defeat streaming". A copy is the same defeat.
+        # A _LazyTensor holds the OFFSET, not the bytes, and decodes the one
+        # tensor a caller actually touches. Every consumer here goes through
+        # np.asarray(), which triggers __array__ -- so nothing else changes.
+        if dt not in _ST_DTYPES and dt != "BF16":
+            raise ValueError("unsupported safetensors dtype: %s" % dt)
+        out[name] = _LazyTensor(blob, a, b, shape, dt)
     if return_dtypes:
         return out, {k: header[k]["dtype"] for k in out}
     return out
+
+
+class _LazyTensor:
+    """A tensor that is an OFFSET until someone asks for its values.
+
+    numpy calls __array__ on any np.asarray/np.array, so this behaves as an
+    ndarray everywhere in this codebase without a single call site changing.
+    `.shape` and `.dtype` answer from the header, so the many places that only
+    inspect geometry -- the architecture inference, the layer-type detection,
+    the size reports -- never touch a byte of the payload."""
+
+    __slots__ = ("_blob", "_a", "_b", "shape", "_dt", "_cache")
+
+    def __init__(self, blob, a, b, shape, dt):
+        self._blob = blob
+        self._a = int(a)
+        self._b = int(b)
+        self.shape = tuple(shape)
+        self._dt = dt
+        self._cache = None
+
+    @property
+    def dtype(self):
+        return np.dtype(np.float32) if self._dt == "BF16" \
+            else np.dtype(_ST_DTYPES[self._dt])
+
+    @property
+    def size(self):
+        n = 1
+        for d in self.shape:
+            n *= int(d)
+        return n
+
+    @property
+    def nbytes(self):
+        return self.size * self.dtype.itemsize
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    def __array__(self, dtype=None, copy=None):
+        if self._cache is None:
+            raw = bytes(self._blob[self._a:self._b])
+            if self._dt == "BF16":
+                arr = _decode_bf16(np.frombuffer(raw, dtype=np.uint16))
+            else:
+                arr = np.frombuffer(raw, dtype=_ST_DTYPES[self._dt])
+            self._cache = arr.reshape(self.shape)
+        return (self._cache if dtype is None
+                else self._cache.astype(dtype, copy=False))
+
+    def __getattr__(self, name):
+        # ANYTHING ELSE AN NDARRAY HAS, materialise and delegate. Enumerating
+        # the surface by hand fails on the first attribute nobody thought of --
+        # this hit `.T` immediately. A lazy value must be INDISTINGUISHABLE from
+        # the real one or it is a trap rather than an optimisation.
+        # THE UNDERSCORE GUARD IS LOAD-BEARING: without it, __getattr__ is
+        # reached for `_cache` before __init__ has set it, calls np.asarray,
+        # which reads `_cache`, which calls __getattr__ -- RecursionError in
+        # every module at once. A fallback that can invoke itself is not a
+        # fallback.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(np.asarray(self), name)
+
+    def __getitem__(self, k):
+        return np.asarray(self)[k]
+
+    def __len__(self):
+        return int(self.shape[0]) if self.shape else 0
 
 
 def _encode_bf16(f32):

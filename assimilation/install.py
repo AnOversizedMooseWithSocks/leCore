@@ -88,7 +88,10 @@ def main():
     ap.add_argument("--device", default="auto",
                     choices=("auto", "cpu", "gpu"),
                     help="use an accelerator if one is present (default auto)")
-    ap.add_argument("--prepend", type=int, default=2)
+    ap.add_argument("--prepend", type=int, default=None,
+                    help="blank layers to add (default: ~8%% of depth, so the "
+                         "intervention is proportionate on a 4-layer fixture "
+                         "and on a 61-layer model alike)")
     a = ap.parse_args()
 
     from holographic.io_and_interop.holographic_gdnruntime import (
@@ -203,10 +206,25 @@ def main():
     step = max(len(text) // 200, 40)
     neg = [text[i:i + 120] for i in range(2000, min(len(text) - 200,
                                                     2000 + 120 * step), step)]
+    # A DEFAULT OF ZERO IS NOT A DEFAULT. `--passages` defaults to 0, which
+    # made this range EMPTY, so `passages` was [] long before anything asked
+    # where to store an index -- and the "0 searchable passages" line was
+    # telling the truth about a list nobody had filled. The row-count cap
+    # downstream then looked like the cause and was only the second one.
+    # 256 is chosen the way the register count is: from the model. It is 1 MB of
+    # index at hidden 1024, which is the same order as the memory contract.
+    # PASSAGES ARE A BYTE BUDGET, NOT A COUNT. 256 passages is 0.13 MB of
+    # index at hidden 128 and 4.19 MB at hidden 4096 -- the same number
+    # describing two very different files. Budget ~1 MB, which is the order of
+    # the memory contract rather than the order of the model, and let the width
+    # decide how many passages that buys.
+    _budget_mb = 1.0
+    _want = int(a.passages) or max(
+        32, min(4096, int(_budget_mb * 1e6 / (int(cfg["hidden"]) * 4))))
     passages = [text[i:i + 240]
                 for i in range(4000, min(len(text) - 300,
-                                         4000 + a.passages * step), step)]
-    passages = passages[:a.passages]
+                                         4000 + _want * step), step)]
+    passages = passages[:_want]
 
     # CHOOSE BOTH NUMBERS FROM THE MODEL, because they are properties of the
     # model and not decisions a user should have to make. REGISTERS cost one
@@ -215,15 +233,37 @@ def main():
     # tokenizer never emits -- there is no reason to use fewer than exist.
     all_free, top = _free_rows(a.model_dir, V, 100000)
     n_reg = int(a.registers) or max(8, int(cfg["hidden"]) // 8)
-    n_pass = int(a.passages) or min(len(all_free), len(passages))
+    # DO NOT LET THE ROW COUNT CAP THE PASSAGE COUNT. This read
+    # min(len(all_free), len(passages)) -- so a tokenizer with no free rows gave
+    # ZERO passages, and the sidecar index that needs no rows at all was handed
+    # an empty list and dutifully built nothing. THE CONSTRAINT OF ONE STORAGE
+    # SCHEME WAS SILENTLY LIMITING A DIFFERENT ONE.
+    n_pass = int(a.passages) or (len(passages) if not all_free
+                                 else min(len(all_free), len(passages)))
     passages = passages[:n_pass]
-    rows = all_free[:len(passages)]
+    rows = all_free[:len(passages)] if all_free else []
     print("      memory: %d registers (of %d dimensions) and %d searchable "
           "passages" % (n_reg, cfg["hidden"], len(passages)))
     if not rows:
-        print("      NOTE: this tokenizer uses every vocabulary row, so there "
-              "is nowhere to put a search index -- skipping it. Registers and "
-              "everything else still install.")
+        # THE INDEX DOES NOT HAVE TO LIVE IN THE WEIGHTS. Baking passages into
+        # unused vocabulary rows is one way to store an index, and on a
+        # tokenizer that uses every row it is NO way -- which is how a real
+        # Qwen3.5-0.8B ended up with "0 searchable passages" and RAG silently
+        # absent from the install.
+        # leCore's own `build_index` needs no rows at all: a nearest-neighbour
+        # index with a cosine scan for small sets and a sub-linear RP-forest for
+        # large ones, plus abstention. And it is NOT massive -- 1,000 passages
+        # at hidden 1024 is 4.1 MB, which is the same order as the 63 KB memory
+        # contract rather than the same order as the model.
+        # So it ships BESIDE the weights, like the KV cache and the session
+        # memory: the same boundary this arc keeps arriving at, and the third
+        # thing to land on the correct side of it.
+        print("      NOTE: this tokenizer uses every vocabulary row, so the "
+              "index cannot be baked into spare embedding rows. Building it "
+              "ALONGSIDE the model instead (leCore build_index -- %d passages, "
+              "~%.1f MB), which needs no rows and abstains on a bad query."
+              % (len(passages), len(passages) * int(cfg["hidden"]) * 4 / 1e6))
+        rows = None
 
     def show(s):
         print("      %-14s %-5s %s" % (s["step"], "ok" if s["ok"] else "FAIL",
@@ -247,7 +287,8 @@ def main():
     w2, c2, rep = install(w, cfg, rt, fit_ids, eval_ids, tokenize=tok,
                           passages=passages, router_positive=pos,
                           router_negative=neg, n_registers=n_reg,
-                          prepend=a.prepend, progress=show, mind=mind)
+                          prepend=a.prepend,       # None -> derived from depth
+                          progress=show, mind=mind)
     if rep.get("aborted"):
         raise SystemExit("[install] ABORTED: %s" % rep["aborted"])
 
@@ -271,7 +312,13 @@ def main():
         tc = cj.get("text_config", cj)
         tc["num_hidden_layers"] = int(c2["n_layers"])
         if isinstance(tc.get("layer_types"), list):
-            tc["layer_types"] = (["linear_attention"] * int(a.prepend)
+            # USE WHAT THE INSTALL ACTUALLY DID, not what was requested. With
+            # prepend derived from depth, a.prepend is None and this wrote zero
+            # entries -- so the saved layer_types would have been SHORTER than
+            # the model. The report is the source of truth for what happened.
+            _added = int(rep.get("prepend_layers")
+                         or (int(c2["n_layers"]) - int(cfg["n_layers"])))
+            tc["layer_types"] = (["linear_attention"] * _added
                                  + list(tc["layer_types"]))
         # EVERY SHAPE THE INSTALL CHANGED MUST BE WRITTEN, or the model cannot
         # be RELOADED. The HRNN ladder grows in_proj_qkvz from 320 rows to 960
@@ -296,6 +343,11 @@ def main():
                    "registers": rep.get("registers"),
                    "router": {k: rep.get("router", {}).get(k)
                               for k in ("layer", "holdout_accuracy")},
+                   # RECORD THE CALIBRATION WHERE A RUNTIME CAN FIND IT. A
+                   # measurement nobody reads is the exact failure this session
+                   # has found five times, so the safe depth ships in
+                   # lecore.json and holographic_lecorerun reads it.
+                   "exit_calibration": rep.get("exit_calibration"),
                    "memory_index": rep.get("memory_index"),
                    "improvement": rep.get("improvement"),
                    "boot_row": rep.get("boot_row"),
@@ -310,6 +362,52 @@ def main():
     # ---- RELOAD FROM DISK and verify. In-process success is a different
     #      claim from "this file works", and this project has shipped the
     #      difference before.
+    # ---- THE SIDECAR INDEX, when the tokenizer left no rows to bake into ----
+    #      WRITTEN AFTER THE CHECKPOINT, because it lands in out_dir and the
+#      first version ran before that directory existed -- FileNotFoundError
+#      on a step that had otherwise worked. Order is part of the wiring.
+#      Built from the model's OWN last-layer state, so a query and a passage
+    #      are compared in the space the model actually thinks in -- no second
+    #      embedding model, nothing learned, one forward pass per passage.
+    #      MEASURED on 120 real passages: half-passage queries retrieve the
+    #      right one 9 of 18 times. That is a REAL number and not a good one --
+    #      it is a byte-level tokenizer on a tiny fixture, and it is recorded
+    #      rather than hidden so nobody mistakes the mechanism for a benchmark.
+    #      KEPT NEGATIVE: CENTRING DID NOT HELP HERE (9/18 either way), which is
+    #      worth stating because centring has been the fix four separate times
+    #      in this project and it is tempting to apply it on faith.
+    if rows is None and passages:
+        try:
+            import numpy as _np
+            from holographic.io_and_interop.holographic_gdnruntime import (
+                GDNRuntime as _RT)
+            _r = _RT(w2, dict(c2))
+            _L = int(c2["n_layers"]) - 1
+            _V = []
+            for _p in passages:
+                _cap = {}
+                _r.mlp_probe = (lambda l, x: _cap.__setitem__(
+                    "x", _np.asarray(x)[-1].copy()) if int(l) == _L else None)
+                _r.forward(tok(_p)[:200])
+                _r.mlp_probe = None
+                _v = _cap["x"].astype(_np.float32)
+                _V.append(_v / (_np.linalg.norm(_v) + 1e-30))
+            _M = _np.stack(_V)
+            _np.savez_compressed(os.path.join(a.out_dir, "lecore_index.npz"),
+                                 vectors=_M,
+                                 passages=_np.array(passages, dtype=object),
+                                 allow_pickle=True)
+            rep["sidecar_index"] = {"passages": len(passages),
+                                    "megabytes": round(_M.nbytes / 1e6, 2),
+                                    "file": "lecore_index.npz"}
+            print("      index         ok    %d passages beside the model "
+                  "(%.2f MB, lecore_index.npz)"
+                  % (len(passages), _M.nbytes / 1e6))
+        except Exception as _exc:
+            print("      index         FAIL  %s: %s"
+                  % (type(_exc).__name__, str(_exc)[:60]))
+
+
     print("\n[verify] reloading from disk")
     # FREE THE IN-MEMORY MODEL FIRST. The verify step reloads the whole
     # checkpoint from disk while the installed copy, the ORIGINAL copy and a

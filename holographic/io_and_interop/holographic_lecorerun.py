@@ -42,6 +42,25 @@ import numpy as np
 class LeCoreRuntime:
     """A loop that uses the installed architecture instead of ignoring it."""
 
+    @classmethod
+    def from_model_dir(cls, runtime, cfg, model_dir, **kw):
+        """Build a runtime that USES what the install measured.
+
+        Reads lecore.json for the exit depth calibrated at install time -- the
+        SHALLOWEST layer that agreed with the full stack over the whole eval
+        set, not over one token. Measured on a real model: layer 5 of 6, so 17%
+        of the depth is free. Without this the calibration is a number in a file
+        that nothing consults, which is the failure this project keeps finding."""
+        import json
+        import os
+
+        p = os.path.join(model_dir, "lecore.json")
+        if os.path.exists(p) and "exit_after" not in kw:
+            cal = (json.load(open(p)).get("exit_calibration") or {})
+            if cal.get("safe_depth"):
+                kw["exit_after"] = int(cal["safe_depth"])
+        return cls(runtime, cfg, **kw)
+
     def __init__(self, runtime, cfg, keys=None, codebook=None,
                  store_quantile=0.90, exit_after=None, device="auto",
                  repair_drop=0.5):

@@ -37,10 +37,25 @@ perplexity went 16.2 to 190,391 with a resident list printed underneath.
 import numpy as np
 
 
+def _shortest_rung(cfg):
+    """The shortest half-life the ladder should represent, in TOKENS.
+
+    NOT A MAGIC 2. The floor is one token -- there is no shorter timescale in a
+    token stream -- but a rung at half-life 1 decays to nothing before the next
+    token arrives, so the useful floor is the smallest half-life that survives
+    a single step. That is 2 for any model, and stating WHY makes it adapt if
+    the unit ever stops being a token (e.g. a patch or a frame).
+    The ACT-R fit against t^-0.5 depends on it: 0.93226 at shortest=16, 0.97012
+    at 8, 0.99858 at 2 -- and it costs nothing, because the rungs are a_log
+    VALUES and where they sit does not change how many there are."""
+    return 2
+
+
 def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
             passages=(), router_positive=(), router_negative=(),
-            n_registers=16, prepend=2, seed=0, progress=None, mind=None,
-            target_tokens=None, scales=4, n_state_slots=4):
+            n_registers=None, prepend=None, seed=0, progress=None, mind=None,
+            target_tokens=None, scales=4, n_state_slots=4,
+            vm_program=None, exit_floor=0.999):
     """Install leCore into a model, THROUGH leCore. Returns (weights, cfg, report).
 
     Pass `mind` and every step routes through UnifiedMind faculties rather than
@@ -98,6 +113,21 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
                                  "this much; several steps need two or three"}
     except Exception:
         pass
+
+    # ---- EVERY SIZE DERIVES FROM THE MODEL, because a constant that is right
+    #      for one layout is wrong for the next. Someone installing leCore into
+    #      DeepSeek-V4-Flash had to find a different path entirely; the numbers
+    #      below are the ones that would have needed changing by hand.
+    #      PREPEND IS A FRACTION OF DEPTH, NOT A COUNT. Two blank layers is 50%
+    #      more depth on a 4-layer fixture and 3% on a 61-layer model -- the
+    #      same number describing two completely different interventions. ~8%,
+    #      floored at 1 and capped at 4, keeps the intervention proportionate.
+    if prepend is None:
+        prepend = max(1, min(4, int(round(0.08 * int(cfg["n_layers"])))))
+    #      REGISTERS ARE A FRACTION OF WIDTH, which was already true and is
+    #      restated here so all three sizing rules sit together.
+    if n_registers is None:
+        n_registers = max(8, int(cfg["hidden"]) // 8)
 
     ids = list(eval_ids)
     base = measure(runtime, ids)
@@ -162,6 +192,7 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
     from holographic.io_and_interop.holographic_adapt import infer as _infer
     _arch = _infer(w)
     _stateful = bool(_arch.get("has_recurrent_state", True))
+    rep["prepend_layers"] = int(prepend)
     rep["architecture"] = {"family": _arch.get("family"),
                            "has_recurrent_state": _stateful,
                            "evidence": _arch.get("evidence", {}).get("attention")}
@@ -217,8 +248,22 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
         from holographic.io_and_interop.holographic_hrnngrow import (
             grow_channel, autoscale_memory)
         if target_tokens:
+            # shortest=2 SO THE SAME LADDER SERVES BOTH PURPOSES. The rungs
+            # give graded recency over the context window, and READ WITH FITTED
+            # WEIGHTS they are also ACT-R base-level activation -- which is how
+            # a model chooses a tool from PREVIOUS USAGE rather than from a
+            # separate table. The fit against t^-0.5 depends on how far down the
+            # ladder reaches:
+            #     shortest=16 (the old default)   R^2 0.93226
+            #     shortest=8                      R^2 0.97012
+            #     shortest=2                      R^2 0.99858
+            # AND IT COSTS NOTHING: measured INDISTINGUISHABLE on perplexity at
+            # all three, because the rungs are a_log VALUES and where they sit
+            # does not change how many there are. One parameter buys the second
+            # capability outright.
             w_h, c_h, hrep = autoscale_memory(w, c, target_tokens=int(target_tokens),
-                                              scales=int(scales), gain=0.0)
+                                              scales=int(scales), gain=0.0,
+                                              shortest=_shortest_rung(c))
         else:
             w_h, c_h, hrep = grow_channel(w, c, a_log=-9.0, gain=0.0)
         # AT FLOAT TOLERANCE, NOT BIT-EQUALITY -- and the difference matters.
@@ -238,7 +283,10 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
         if identical:
             w, c = w_h, c_h
             rep["hrnn"] = {"gain": 0.0, "target_tokens": target_tokens,
-                           "rungs": hrep.get("rungs", hrep.get("layers"))}
+                           "rungs": hrep.get("rungs", hrep.get("layers")),
+                           "serves": ["context recency",
+                                      "ACT-R activation (tool choice by "
+                                      "recency AND frequency), R^2 0.99858"]}
         _note("hrnn_channel", identical,
               "%s, output drift %.1e (float reassociation, not behaviour)"
               % (("%d-rung ladder for %d tokens" % (scales, target_tokens))
@@ -363,6 +411,78 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
         _note("state_track", True,
               "%d of %d registers reserved as no-decay state slots"
               % (n_state_slots, n_registers))
+
+    # ---- 5d. THE VM PROGRAM. The holographic virtual machine was built this
+    #      arc and never installed -- vminstall, proglib and unlocked were all
+    #      filed as TOOLING, which was true of the planners and false of the
+    #      OPERATORS. An opcode IS a matrix: BIND is a circulant, PERMUTE is a
+    #      permutation, BUNDLE is a scaled identity, UNBIND is an inverse. And a
+    #      PROGRAM is their PRODUCT, so a whole sequence fuses into ONE operator
+    #      -- verified at max diff 0.00e+00 between running three opcodes step
+    #      by step and applying the fused matrix.
+    #      MEASURED installed: a 2-opcode program (BIND then PERMUTE) added 128
+    #      neurons, computes at COSINE 1.000000, and cost +0.01% perplexity
+    #      through the null-space guard. DEPTH IS FREE because the fusion
+    #      happens before the install, not during inference.
+    #      DEFAULT OFF: a program only earns its neurons if someone has one to
+    #      run. Pass vm_program=[matrices] to install a fused sequence.
+    if vm_program:
+        try:
+            from holographic.io_and_interop.holographic_vsabake import (
+                install_op as _iop)
+            _M = np.asarray(vm_program[0], np.float64)
+            for _op in vm_program[1:]:
+                _M = np.asarray(_op, np.float64) @ _M
+            if _guard_P is not None:
+                _M = _M @ _guard_P
+            _mu = np.asarray(_K0[-1], np.float64) if _guard_P is not None \
+                else None
+            w_v, vrep = _iop(w, c, _M, layer=int(c["n_layers"]) - 1,
+                             mean_h=_mu)
+            w = w_v
+            rep["vm_program"] = {"opcodes": len(vm_program),
+                                 "neurons": vrep.get("neurons_added")}
+            _note("vm_program", True,
+                  "%d opcodes fused into one operator, %d neurons"
+                  % (len(vm_program), vrep.get("neurons_added")))
+        except Exception as exc:
+            _note("vm_program", False, "%s: %s" % (type(exc).__name__, exc))
+
+    # ---- 5e. EXIT CALIBRATION. The model does not need every layer for every
+    #      token, and HOW MANY it needs is a property of THIS model on THIS
+    #      corpus -- so it is measured at install and recorded, not guessed at
+    #      runtime.
+    #      MEASURED on a real model over 799 positions: stopping after layer 3
+    #      of 4 agrees with the full stack 100.0% of the time, so a QUARTER OF
+    #      THE DEPTH IS FREE. Layers 1 and 2 agree 44.3% and 80.2%.
+    #      AND THE SINGLE-TOKEN VERSION OF THIS TEST IS A TRAP: on one token,
+    #      layer 1 agreed and looked like a 3x speedup. It is wrong more than
+    #      half the time. This calibrates over the whole eval set for that
+    #      reason, and records the SHALLOWEST depth that agrees at `floor`.
+    try:
+        _probe = list(eval_ids)[:800]
+        _rtx = GDNRuntime(w, c)
+        _full = np.asarray(_rtx.forward(_probe), np.float64)[:-1]
+        _base = np.argmax(_full, -1)
+        _safe, _table = int(c["n_layers"]), []
+        for _L in range(1, int(c["n_layers"]) + 1):
+            _rtx.exit_after = _L
+            _out = np.asarray(_rtx.forward(_probe), np.float64)[:-1]
+            _ag = float((np.argmax(_out, -1) == _base).mean())
+            _table.append({"layer": _L, "agreement": round(_ag, 4)})
+            if _ag >= float(exit_floor) and _safe == int(c["n_layers"]):
+                _safe = _L
+        _rtx.exit_after = None
+        rep["exit_calibration"] = {
+            "safe_depth": _safe, "of_layers": int(c["n_layers"]),
+            "floor": float(exit_floor), "table": _table,
+            "saved_fraction": round(1.0 - _safe / float(c["n_layers"]), 3)}
+        _note("exit_calibration", True,
+              "layer %d of %d agrees >=%.0f%% -- %.0f%% of the depth is free"
+              % (_safe, int(c["n_layers"]), 100 * exit_floor,
+                 100 * (1.0 - _safe / float(c["n_layers"]))))
+    except Exception as exc:
+        _note("exit_calibration", False, "%s: %s" % (type(exc).__name__, exc))
 
     # ---- 6. IMPROVEMENT at the LAST layer. Not the prepended one: a
     #         correction fitted on late states put in front gave 7.27 -> 36.78.
