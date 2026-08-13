@@ -76,6 +76,23 @@ def test_unknown_archive_elsewhere_still_forces_full():
     assert affected_tests(["features/mystery_dataset.zip"], root=ROOT) == "ALL"
 
 
+def test_qwen_result_artifacts_select_the_qwen_contract_only():
+    artifact = (
+        "experiments/qwen35_acceptance/results/"
+        "v2-example/result/metrics.json"
+    )
+    assert affected_tests([artifact], root=ROOT) == ["tests/test_qwen_acceptance.py"]
+    assert affected_tests(
+        ["experiments/qwen35_acceptance/launch-manifest.json"], root=ROOT
+    ) == ["tests/test_qwen_acceptance.py"]
+
+
+def test_unknown_experiment_artifact_still_forces_full():
+    assert affected_tests(
+        ["experiments/unknown/results/v1/metrics.json"], root=ROOT
+    ) == "ALL"
+
+
 def test_a_committed_data_artifact_scopes_to_its_readers_not_the_world():
     """The CI-cost fix, pinned. Non-.py changes used to return ALL unconditionally, so ROUTINE BOT PUSHES --
     docs.yml commits capabilities.json, semantic-coverage.yml commits the routing index and seed -- took the
