@@ -1,6 +1,6 @@
 {
   "schema": "lecore.qwen35-launch.v1",
-  "state": "terminal_execution_failure",
+  "state": "authorized_prelaunch",
   "attempt": {
     "experiment_version": 2,
     "maximum_formal_runs": 1,
@@ -100,28 +100,7 @@
     "temporary_staging": "s3://zero-training-022118847419/qwen35-acceptance/2f32151-2fc06364-a6c9d113/v2-formal/",
     "review_index": "https://github.com/atimics/holostuff/pull/3",
     "permanent_transport": "Arweave",
-    "permanent_root": "https://arweave.net/f35OgXuOoulk9EcndJBNWIgZ5tmaQ6DRzeINP7ARZTU/",
-    "permanent_root_transaction": "f35OgXuOoulk9EcndJBNWIgZ5tmaQ6DRzeINP7ARZTU",
-    "publication_manifest_sha256": "21874555c7f9e73d20b9d11599c79236f8f40267ee975f703ffc053eb6b1f9ab",
     "publish_all_outcomes": true,
     "exclude_model_weights": true
-  },
-  "terminal": {
-    "completed_at": "2026-08-13T04:51:28.293Z",
-    "formal_duration_seconds": 15891.556,
-    "runner_exit_code": 1,
-    "timed_out": false,
-    "resolved_outcome": "execution_failure",
-    "scientific_result": false,
-    "failure_gate": "official_transformers_checkpoint_reload",
-    "aws_instance": "i-059aab8bf1d3d87c9",
-    "estimated_compute_usd": 4.71,
-    "evidence_bundle_sha256": "df2ba31608f9039e9528a43a93d4766c8e8feb023668a1b9ffc1c85553210c1c",
-    "ledger_verification": {
-      "valid": true,
-      "objects_checked": 15,
-      "events_checked": 16
-    },
-    "retry_authorized": false
   }
 }

@@ -1,0 +1,52 @@
+{
+  "schema": "lecore.qwen35-arweave-publication-receipt.v1",
+  "published_at": "2026-08-13T05:00:28Z",
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.2f32151c6d44.v2.acceptance",
+  "resolved_outcome": "execution_failure",
+  "publisher": {
+    "service": "ArDrive Turbo signed free upload",
+    "sdk": "@ardrive/turbo-sdk@1.42.0",
+    "ownership": "The uploads used one-use in-memory Arweave identities. Their private keys were never persisted."
+  },
+  "publication_manifest": {
+    "path": "publication-manifest.json",
+    "bytes": 9589,
+    "sha256": "21874555c7f9e73d20b9d11599c79236f8f40267ee975f703ffc053eb6b1f9ab",
+    "transaction_id": "l2Y6akCBi7igJoIQGyGCiDD3RGriYwoM_DvLIBkRiUE"
+  },
+  "arweave_path_manifest": {
+    "transaction_id": "f35OgXuOoulk9EcndJBNWIgZ5tmaQ6DRzeINP7ARZTU",
+    "bytes": 4854,
+    "sha256": "7a18bb60bc9c75022705be94f80abb6ea7ae90508545e3971a7bf0e20b032a34",
+    "item_count": 46,
+    "gateway_url": "https://arweave.net/f35OgXuOoulk9EcndJBNWIgZ5tmaQ6DRzeINP7ARZTU/",
+    "index_url": "https://arweave.net/f35OgXuOoulk9EcndJBNWIgZ5tmaQ6DRzeINP7ARZTU/publication-manifest.json",
+    "confirmed_cache_url": "https://turbo-gateway.com/f35OgXuOoulk9EcndJBNWIgZ5tmaQ6DRzeINP7ARZTU/",
+    "owner": "CYVtYCPST9t7ziybtEpHSxncOEgCiofFatuiHcTFSjA"
+  },
+  "selected_items": {
+    "native_evidence": {
+      "transaction_id": "G0rTDs3o1sbMHCCY2riLzLg-o6mkb2ByUcJ4PTMPilc",
+      "sha256": "11d8c155cce37e70e2eb8241e437b6c7190b6a7cbbbc3ffe329bfbe33bed4d95"
+    },
+    "ledger_events": {
+      "transaction_id": "99RUKhUlaM6Nags0ev35rICJ4o3WO6uLJzy4bIS7Yzs",
+      "sha256": "87808b4a4c1baa64e4388ea0b3c5e893d6f448324a74cb41c92a16cd8b52eb1e"
+    },
+    "ledger_verification": {
+      "transaction_id": "Cqv57F936hf4TQ3l35MZXQu7vX324hDQSEfshxZO_lA",
+      "sha256": "5e03d79a86e57f015be7b79666349b5813a1a702421883e8b58f3ed3a6a73663"
+    }
+  },
+  "confirmation": {
+    "status_service": "https://upload.ardrive.io/v1/tx/{transaction_id}/status",
+    "transactions_confirmed": 47,
+    "total_winc_charged": 0,
+    "public_cache_verified_at": "2026-08-13T05:00:28Z",
+    "public_gateway_verified_at": "2026-08-13T05:04:19Z",
+    "verified_downloads": {
+      "publication-manifest.json": "21874555c7f9e73d20b9d11599c79236f8f40267ee975f703ffc053eb6b1f9ab",
+      "ledger/events.jsonl": "87808b4a4c1baa64e4388ea0b3c5e893d6f448324a74cb41c92a16cd8b52eb1e"
+    }
+  }
+}

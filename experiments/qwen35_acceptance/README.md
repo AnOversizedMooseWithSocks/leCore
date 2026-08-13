@@ -1,16 +1,24 @@
 # Qwen3.5 acceptance experiment
 
 The committee-facing design and review questions are in
-[`PROPOSAL.md`](PROPOSAL.md). The first authorized run is preserved as an
-execution failure: ilxyr invoked the system interpreter instead of the selected
-virtual environment, so it produced no scientific result. The second and final
-currently authorized attempt is frozen in [`launch-manifest.json`](launch-manifest.json).
-It changes only the interpreter-path handling and the attempt identity; the
-model revision, corpora, thresholds, seed, and spending ceiling remain fixed.
+[`PROPOSAL.md`](PROPOSAL.md). Both authorized runs are preserved as execution
+failures. V1 exposed an interpreter-path bug before scientific execution. V2
+fixed that problem and completed both 4,097-token evaluations, but the emitted
+checkpoint failed the mandatory official Transformers reload because the two
+prepended layers' tensor names and MLP shapes do not match the saved Qwen
+architecture. The terminal v2 evidence is in
+[`results/v2-20c3330d0b3e-execution-failure/`](results/v2-20c3330d0b3e-execution-failure/).
+The permanent evidence index is
+[`f35OgXu…ARZTU`](https://arweave.net/f35OgXuOoulk9EcndJBNWIgZ5tmaQ6DRzeINP7ARZTU/).
+
+The layer-prepending installer therefore remains experimental. No v3 run is
+authorized. The model revision, corpora, thresholds, seed, and spending ceiling
+for the completed v2 attempt remain frozen in
+[`launch-manifest.json`](launch-manifest.json).
 
 This directory turns the open Qwen integration questions into a frozen ilxyr
-project for a separately authorized, bounded attempt. It does not claim that a
-future full run has passed. It generates the
+project and preserves its bounded executions. It does not claim that the full
+run passed. It generates the
 hypothesis, methodology contributions, experiment contract, two explicit model
 forecasts, funding record, and ordered ilxyr commands for one real checkpoint.
 

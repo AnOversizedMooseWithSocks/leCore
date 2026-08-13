@@ -1,0 +1,284 @@
+{
+  "evidence_ref": "artifact://sha256/15885a3e5fbb01a504473e3076c25c9d5d938c13f96faa340ed9600a245845cc",
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.2f32151c6d44.v2.acceptance",
+  "files": [
+    {
+      "bytes": 4020,
+      "media_type": "text/markdown",
+      "path": "README.md",
+      "sha256": "954c94e877052af688b1a3b40dc9a1c51a1835776578e9d639f35810d1fcbd4d"
+    },
+    {
+      "bytes": 29381,
+      "media_type": "application/json",
+      "path": "evidence/evidence.in-toto.json",
+      "sha256": "327ef5cf6c2f37e9b8afdabc0b6ca5546493292717a1abb09a9bf8618d320d93"
+    },
+    {
+      "bytes": 28212,
+      "media_type": "application/json",
+      "path": "evidence/evidence.native.json",
+      "sha256": "11d8c155cce37e70e2eb8241e437b6c7190b6a7cbbbc3ffe329bfbe33bed4d95"
+    },
+    {
+      "bytes": 23559,
+      "media_type": "application/json",
+      "path": "evidence/evidence.ro-crate.json",
+      "sha256": "0aa5e25a67a0e0f6de62574097e05102bd1871ca4c9bfddf2335b2ceff38b50c"
+    },
+    {
+      "bytes": 1324,
+      "media_type": "application/json",
+      "path": "evidence/exporter-provenance.json",
+      "sha256": "476e27c893316f3ad19552b8df987b4af734154a312ba9a4d8636e30fcb22895"
+    },
+    {
+      "bytes": 97,
+      "media_type": "application/json",
+      "path": "ledger/config.json",
+      "sha256": "2301b853e1e01b8844970b90e72036bed57c580ded81a857ec7faf27f8deca66"
+    },
+    {
+      "bytes": 9048,
+      "media_type": "application/octet-stream",
+      "path": "ledger/events.jsonl",
+      "sha256": "87808b4a4c1baa64e4388ea0b3c5e893d6f448324a74cb41c92a16cd8b52eb1e"
+    },
+    {
+      "bytes": 1212,
+      "media_type": "application/json",
+      "path": "project/engineering-review.json",
+      "sha256": "64e07a438050586d7fe72c8f759c392dbc449be0da809b3cb169d52644c586d2"
+    },
+    {
+      "bytes": 1394,
+      "media_type": "application/json",
+      "path": "project/experiment-design.json",
+      "sha256": "fe6c0dc84158519c298ecef5890a1aff44e5eae5be56915f656c1d7d1e8f47a3"
+    },
+    {
+      "bytes": 8781,
+      "media_type": "application/json",
+      "path": "project/experiment.json",
+      "sha256": "e2a3e732d22442d43f4d76afbb83c224621afe4f8d206ed3baf8851bfee723c6"
+    },
+    {
+      "bytes": 714,
+      "media_type": "application/json",
+      "path": "project/forecast-empirical.json",
+      "sha256": "e24492a9bf01f2b7dc790dc3474c4f2a53908f4bf0300241ae6c2707aa6315d5"
+    },
+    {
+      "bytes": 751,
+      "media_type": "application/json",
+      "path": "project/forecast-mechanistic.json",
+      "sha256": "8519dcd3c068bd28de7c245438ad1b7dad2abecd7bb9e7c66c0010a0448c5909"
+    },
+    {
+      "bytes": 1204,
+      "media_type": "application/json",
+      "path": "project/foundation.json",
+      "sha256": "17688757c9f1163fb374aabc0dac8da742750bcab997305f5e5d970d246d316c"
+    },
+    {
+      "bytes": 464,
+      "media_type": "application/json",
+      "path": "project/funding.json",
+      "sha256": "60b60d1c86999e6e56a2895aef4f08449babceaa21559aab03feffbc02b675ed"
+    },
+    {
+      "bytes": 993,
+      "media_type": "application/json",
+      "path": "project/hypothesis.json",
+      "sha256": "1a8a92cdb8f714328580194f1c559bd8487974f8aa22175e1afe5d9c83795a40"
+    },
+    {
+      "bytes": 4888,
+      "media_type": "application/json",
+      "path": "project/project.json",
+      "sha256": "ed0d30744b9009d31523883ecfd6adf7dd9be8fd7b38e4a3f50ac1fdac7aa674"
+    },
+    {
+      "bytes": 1958,
+      "media_type": "text/plain",
+      "path": "result/acceptance-artifacts/install.log",
+      "sha256": "c03b7b0e61a05ed2bedef887a1eedbe90b8d03320051d6edd019bcc5a440f229"
+    },
+    {
+      "bytes": 650,
+      "media_type": "application/json",
+      "path": "result/admission-preflight.json",
+      "sha256": "a51912a4ad4689142813260d4dc506a8ee57735eb327c9bdbc135dfd41aebbd0"
+    },
+    {
+      "bytes": 480,
+      "media_type": "application/json",
+      "path": "result/aws-instance-identity.json",
+      "sha256": "e635f72a56b251167f5c6634ee2e0770af8c0d9a7aa8a613ce8f3b1736cb8a47"
+    },
+    {
+      "bytes": 45353,
+      "media_type": "text/plain",
+      "path": "result/cloud-init-output.log",
+      "sha256": "d9675cc57a7bd7aa4fa7d6247815deb2977448b73487f98e941ae22687667d6b"
+    },
+    {
+      "bytes": 388,
+      "media_type": "application/json",
+      "path": "result/corpus-manifest.json",
+      "sha256": "2e3bbc256f95a2b6c68e3986e9e9d612a2eee6f16716387e94bb573edf274c54"
+    },
+    {
+      "bytes": 4830,
+      "media_type": "text/plain",
+      "path": "result/environment.txt",
+      "sha256": "dff45a28f0c4cc5d55f326d04647610e8a90e239c400ff472bffb82aec7c7d4a"
+    },
+    {
+      "bytes": 289,
+      "media_type": "application/json",
+      "path": "result/execution-summary.json",
+      "sha256": "322071f7abf3adb80b708207113101cd610ce00bb08f1e4187480b1def304940"
+    },
+    {
+      "bytes": 222,
+      "media_type": "application/json",
+      "path": "result/generation.json",
+      "sha256": "14a11085c04d6acb9fad4e873ecec958c6ba865820ee6a964fe6daf377e34cb8"
+    },
+    {
+      "bytes": 1813,
+      "media_type": "application/json",
+      "path": "result/ilxyr-admission.json",
+      "sha256": "03fa388faa765e3e7881a2cacb0ce01ec9e098563f4124864d92a6777ea52451"
+    },
+    {
+      "bytes": 259,
+      "media_type": "text/plain",
+      "path": "result/ilxyr-commit.txt",
+      "sha256": "32873b519f7170a47a099930a325f4bb29d04021b822fa7f5387c94a9976add4"
+    },
+    {
+      "bytes": 107,
+      "media_type": "application/json",
+      "path": "result/ilxyr-compile.json",
+      "sha256": "3f096ce40aa2a9db04acac937482fe11717f8d726df1aee0c3e6cea0df52c4cf"
+    },
+    {
+      "bytes": 107,
+      "media_type": "application/json",
+      "path": "result/ilxyr-contribute-engineering-review.json",
+      "sha256": "4dbaa1a5f6b9886a3dbf270d58c6340d6b7a7fe192a345e7af83c9bad5ed7650"
+    },
+    {
+      "bytes": 107,
+      "media_type": "application/json",
+      "path": "result/ilxyr-contribute-experiment-design.json",
+      "sha256": "658beda3484acb7136273b955d8377fdc255e389f049cdc8c73087dd9b4679c1"
+    },
+    {
+      "bytes": 107,
+      "media_type": "application/json",
+      "path": "result/ilxyr-contribute-foundation.json",
+      "sha256": "d52ecd321c77ce82a55f5bc0add453b6c2cf1b74fb8bf53c8ec35d2d978d41ef"
+    },
+    {
+      "bytes": 107,
+      "media_type": "application/json",
+      "path": "result/ilxyr-contribute-hypothesis.json",
+      "sha256": "2f43b8db274b224aff44c030db7391810e80a87893138225e8ef3a8fd3805443"
+    },
+    {
+      "bytes": 107,
+      "media_type": "application/json",
+      "path": "result/ilxyr-forecast-empirical.json",
+      "sha256": "d7a4284a01c451fa91aa0990820a81352f77e905b7a798eaa3bac43297d14ead"
+    },
+    {
+      "bytes": 107,
+      "media_type": "application/json",
+      "path": "result/ilxyr-forecast-mechanistic.json",
+      "sha256": "2ca73881259fd8e64597517b58b0b7115e1eb02772355f4cf525ba6f1cc7f8b8"
+    },
+    {
+      "bytes": 107,
+      "media_type": "application/json",
+      "path": "result/ilxyr-funding.json",
+      "sha256": "849f195c6f0d60b873d512c143f1ceb9c26c06fbe9506de10fc318aaacf6d730"
+    },
+    {
+      "bytes": 80,
+      "media_type": "application/json",
+      "path": "result/ilxyr-init.json",
+      "sha256": "2b53102e3ab266b14be6b330e7815ce35476f898845a92cbbb716b02c6be3b11"
+    },
+    {
+      "bytes": 15638,
+      "media_type": "application/json",
+      "path": "result/ilxyr-run.json",
+      "sha256": "c20f0c2e63ba78855017293f58350742eac8056ba699a4370d3152fba2459c22"
+    },
+    {
+      "bytes": 16118,
+      "media_type": "application/json",
+      "path": "result/ilxyr-status.json",
+      "sha256": "151d3d75656a2ed5c06e4a890fb7386e894208849c5fb4ead61d79cb4fc232b9"
+    },
+    {
+      "bytes": 69,
+      "media_type": "application/json",
+      "path": "result/ilxyr-verify.json",
+      "sha256": "5e03d79a86e57f015be7b79666349b5813a1a702421883e8b58f3ed3a6a73663"
+    },
+    {
+      "bytes": 3490,
+      "media_type": "application/json",
+      "path": "result/launch-manifest.json",
+      "sha256": "d1a1f255d2c12643f3e12336d85a6fce7441b5f39240cd5ee1554eef88c6e51d"
+    },
+    {
+      "bytes": 267,
+      "media_type": "text/plain",
+      "path": "result/lecore-commit.txt",
+      "sha256": "33322be861cc97fdeca7f8acdd994cf2388169cf92a3c4c31f97240f79984ee1"
+    },
+    {
+      "bytes": 0,
+      "media_type": "text/plain",
+      "path": "result/lecore-status.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes": 2023,
+      "media_type": "application/json",
+      "path": "result/model-manifest.json",
+      "sha256": "f352ac2c17ee1bea38f70d7ab1975e3297954423cb74f5330383134e4b6c493a"
+    },
+    {
+      "bytes": 588,
+      "media_type": "text/plain",
+      "path": "result/requirements-resolved.txt",
+      "sha256": "ffc5f6316f74e8e6c465b3845f6b4feb9e3b534160434299de9b05c809d7f647"
+    },
+    {
+      "bytes": 172,
+      "media_type": "application/json",
+      "path": "result/runner-status.json",
+      "sha256": "3300be84544ed76b749a74228591664b5a18cb4131aba6fd52c775bb0843d583"
+    },
+    {
+      "bytes": 41815,
+      "media_type": "text/plain",
+      "path": "result/user-data.log",
+      "sha256": "0bfd74c02c09a3dfef2ebae6abd3d8354e56be07c692bd275db5a02781ce6046"
+    }
+  ],
+  "ledger_verification": {
+    "events_checked": 16,
+    "objects_checked": 15,
+    "valid": true
+  },
+  "resolved_outcome": "execution_failure",
+  "run_ref": "artifact://sha256/dee0b19888937eb4b4109ef6558ce3e5c6a530469019b94f4905c01d144a6d8f",
+  "schema": "lecore.qwen35-publication-manifest.v1"
+}
