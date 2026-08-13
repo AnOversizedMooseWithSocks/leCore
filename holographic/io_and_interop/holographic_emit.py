@@ -476,13 +476,15 @@ def run_c(kernel, calls, dialect="c_f64", timeout=60):
         with open(csrc, "w") as fh:
             fh.write(prog)
         try:
-            subprocess.run(["cc", csrc, "-o", exe, "-lm"], check=True, capture_output=True, timeout=timeout)
+            subprocess.run(["cc", "-ffp-contract=off", csrc, "-o", exe, "-lm"],
+                           check=True, capture_output=True, timeout=timeout)
         except FileNotFoundError:
             # Z6: no system compiler. The `ziglang` wheel ships `zig cc`, a hermetic clang -- one pip install gives
             # the C validation path on any machine. Opt-in accelerator discipline: absent BOTH, run_c raises and the
             # caller (selftest) skips LOUDLY rather than silently passing.
             import sys
-            subprocess.run([sys.executable, "-m", "ziglang", "cc", csrc, "-o", exe, "-lm"],
+            subprocess.run([sys.executable, "-m", "ziglang", "cc", "-ffp-contract=off",
+                            csrc, "-o", exe, "-lm"],
                            check=True, capture_output=True, timeout=timeout)
         out = subprocess.run([exe], check=True, capture_output=True, text=True, timeout=timeout).stdout
     return [float(x) for x in out.split()]

@@ -56,7 +56,7 @@ def _bootstrap_means(values, rng, resamples, block):
     """Moving-block bootstrap means, truncated back to the original length."""
     values = np.asarray(values, np.float64).reshape(-1)
     n = len(values)
-    if block <= 1 or n <= 2 * block:
+    if block <= 1:
         return np.asarray([
             rng.choice(values, n, replace=True).mean()
             for _ in range(int(resamples))

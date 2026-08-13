@@ -45,6 +45,8 @@ import os
 
 import numpy as np
 
+from holographic.io_and_interop.holographic_gdnaccel import GDNRecurrence
+
 
 # ------------------------------------------------------------------- primitives
 
@@ -198,6 +200,12 @@ class GDNRuntime:
     def __init__(self, weights, cfg):
         self.cfg = dict(cfg)
         self._factors = {}
+        # The compiled recurrence is deliberately opt-in.  It owns only the
+        # sequential state update and first-call parity-gates itself against
+        # NumPy, including a separate gate when resuming carried state.
+        _backend = self.cfg.get("gdn_recurrence_backend",
+                                os.environ.get("LECORE_GDN_BACKEND", "numpy"))
+        self._gdn_recurrence = GDNRecurrence(_backend)
         # prefix auto-detect: the field-measured real name root
         roots = ("model.language_model.", "model.", "")
         for r in roots:
@@ -344,16 +352,9 @@ class GDNRuntime:
             k = np.repeat(k, r, axis=1)
         q = _l2norm(q) * (dk ** -0.5)
         k = _l2norm(k)
-        St = np.zeros((Vh, dk, dv), dtype=x.dtype) \
-            if (init is None or "S" not in init) \
-            else np.array(init["S"], dtype=x.dtype, copy=True)
-        out = np.zeros((S, Vh, dv), dtype=x.dtype)
-        for t in range(S):
-            St = St * np.exp(g[t])[:, None, None]
-            kv = np.einsum("hkv,hk->hv", St, k[t])
-            delta = (v[t] - kv) * beta[t][:, None]
-            St = St + k[t][:, :, None] * delta[:, None, :]
-            out[t] = np.einsum("hkv,hk->hv", St, q[t])
+        initial_state = (None if (init is None or "S" not in init)
+                         else init["S"])
+        out, St = self._gdn_recurrence(q, k, v, beta, g, initial_state)
         nw = self._g(layer, "linear_attn.norm.weight")
         eps = self.cfg["rms_eps"]
         out = _rmsnorm_gated(out, nw, z, eps).reshape(S, Vh * dv)
@@ -366,6 +367,10 @@ class GDNRuntime:
             collect["conv"] = pad[-(K - 1):].copy()
             collect["S"] = St
         return y
+
+    def acceleration_report(self):
+        """JSON-able status of the optional recurrent-scan substitution."""
+        return {"full_sequence_gdn_recurrence": self._gdn_recurrence.report()}
 
     def _attn(self, layer, x, positions, collect=None, init=None):
         c = self.cfg

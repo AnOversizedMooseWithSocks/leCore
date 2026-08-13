@@ -34,3 +34,20 @@ runner without a shell and records its strict `metrics`/`source` envelope.
 
 The layer-prepending installer is deliberately invoked with `--experimental`.
 An accepted ilxyr outcome is the evidence needed before removing that flag.
+
+Future-run performance controls are frozen into the generated project. The
+generator requests the parity-gated C recurrence, increases chunks above 128
+only when a checksummed benchmark report binds the model and evaluation corpus,
+evaluates original and installed checkpoints in isolated concurrent processes
+when memory permits, and uses
+Bonferroni-corrected looks at 1,024-token intervals for early rejection only.
+Every GO still requires all 4,096 paired positions and the unchanged final 95%
+paired block-bootstrap bound.
+
+On AWS, pass `--progress-upload-uri s3://bucket/prefix/progress.jsonl` while
+generating the project, or set `LECORE_PROGRESS_UPLOAD_URI` in the runner
+environment. The durable JSONL log is then refreshed in S3 after every
+evaluation chunk and stage transition; upload failures are reported but do not
+change the scientific result. Use the procedure in
+[`BENCHMARKING.md`](BENCHMARKING.md) with v3's observed peak before selecting a
+64 or 32 GiB instance.

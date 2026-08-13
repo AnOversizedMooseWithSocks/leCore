@@ -45,8 +45,12 @@ jobs:
           cache: pip
       - name: Install Qwen contract dependencies
         run: pip install numpy pytest safetensors torch "transformers==5.14.0"
-      - name: Run the portable, official-loader, and ilxyr contract gates
-        run: pytest -q tests/test_qwen_acceptance.py
+      - name: Run the portable, official-loader, native-runtime, benchmark, and ilxyr gates
+        run: >-
+          pytest -q
+          tests/test_qwen_acceptance.py
+          tests/test_qwen_gdn_acceleration.py
+          tests/test_qwen_runtime_benchmark.py
 
   pytest:
     # SHARDED, because the unscoped path is the whole suite in one 20-minute box and it started timing out.

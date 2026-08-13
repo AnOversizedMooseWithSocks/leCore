@@ -69,6 +69,15 @@ def write_json(path, payload):
                     encoding="utf-8")
 
 
+def frozen_sequential_looks(min_tokens):
+    """Four deterministic looks; interim boundaries may reject, never accept."""
+    total = int(min_tokens)
+    return sorted({look for look in
+                   (int(round(total * fraction / 4.0))
+                    for fraction in (1, 2, 3, 4))
+                   if look >= 1000 or look == total} | {total})
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("model_dir", type=Path)
@@ -86,6 +95,17 @@ def main(argv=None):
     ap.add_argument("--compute-credits", type=int, default=100)
     ap.add_argument("--experiment-version", type=int, default=1,
                     help="monotonic formal-attempt identity (default: 1)")
+    ap.add_argument("--initial-chunk-size", type=int, default=128)
+    ap.add_argument("--max-chunk-size", type=int,
+                    help="requires --benchmark-report when above initial chunk")
+    ap.add_argument("--benchmark-report", type=Path,
+                    help="checksummed output from tools/benchmark_qwen_runtime.py")
+    ap.add_argument("--memory-budget-fraction", type=float, default=0.20)
+    ap.add_argument("--evaluation-mode", choices=("auto", "serial", "parallel"),
+                    default="auto")
+    ap.add_argument("--gdn-backend", choices=("numpy", "c"), default="c")
+    ap.add_argument("--progress-upload-uri",
+                    help="optional s3:// URI refreshed after every evaluation chunk")
     ap.add_argument("--ilxyr-cli", type=Path,
                     default=Path.home() / "develop" / "ilxyr" / "target" / "debug" / "ilxyr")
     args = ap.parse_args(argv)
@@ -108,17 +128,82 @@ def main(argv=None):
         ap.error("--min-tokens must be at least 1000")
     if int(args.experiment_version) < 1:
         ap.error("--experiment-version must be at least 1")
+    if args.initial_chunk_size < 1:
+        ap.error("--initial-chunk-size must be positive")
+    if not 0 < args.memory_budget_fraction <= 0.5:
+        ap.error("--memory-budget-fraction must be in (0, 0.5]")
+    if args.progress_upload_uri and not args.progress_upload_uri.startswith("s3://"):
+        ap.error("--progress-upload-uri must be an s3:// URI")
+    sequential_looks = frozen_sequential_looks(args.min_tokens)
 
     model_digest, model_files = model_manifest(model_dir)
     installation_digest = sha256_file(installation_corpus)
     evaluation_digest = sha256_file(evaluation_corpus)
     if installation_digest == evaluation_digest:
         ap.error("installation and evaluation corpora must have distinct contents")
+    benchmark = None
+    benchmark_digest = None
+    benchmark_recommended_chunk = None
+    if args.benchmark_report:
+        benchmark_path = args.benchmark_report.expanduser().resolve()
+        if not benchmark_path.is_file():
+            ap.error("--benchmark-report does not exist")
+        try:
+            benchmark = json.loads(benchmark_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            ap.error("invalid --benchmark-report: %s" % exc)
+        if benchmark.get("schema") != "lecore.qwen_runtime_benchmark.v1":
+            ap.error("--benchmark-report has the wrong schema")
+        inputs = benchmark.get("inputs") or {}
+        if (inputs.get("corpus") or {}).get("sha256") != evaluation_digest:
+            ap.error("--benchmark-report does not bind the evaluation corpus")
+        if not inputs.get("weight_hashes_included"):
+            ap.error("--benchmark-report must include model weight hashes")
+        current_hashes = {row["path"]: row["sha256"] for row in model_files}
+        for row in inputs.get("model_files") or []:
+            if current_hashes.get(row.get("name")) != row.get("sha256"):
+                ap.error("--benchmark-report model hash mismatch: %s" %
+                         row.get("name"))
+        benchmark_recommended_chunk = int(
+            (benchmark.get("speed_and_cost_projection") or {}).get(
+                "recommended_chunk_size", 0))
+        if benchmark_recommended_chunk < args.initial_chunk_size:
+            ap.error("--benchmark-report has no usable recommended chunk")
+        benchmark_digest = sha256_file(benchmark_path)
+    if args.max_chunk_size is None:
+        args.max_chunk_size = (benchmark_recommended_chunk or
+                               args.initial_chunk_size)
+    if args.max_chunk_size < args.initial_chunk_size:
+        ap.error("--max-chunk-size must cover the initial chunk")
+    if (args.max_chunk_size > args.initial_chunk_size and
+            benchmark_recommended_chunk is None):
+        ap.error("increasing chunk size requires --benchmark-report")
+    if (benchmark_recommended_chunk is not None and
+            args.max_chunk_size > benchmark_recommended_chunk):
+        ap.error("--max-chunk-size exceeds the benchmark recommendation")
+    runner_policy = {
+        "initial_chunk_size": int(args.initial_chunk_size),
+        "max_chunk_size": int(args.max_chunk_size),
+        "memory_budget_fraction": float(args.memory_budget_fraction),
+        "evaluation_mode": args.evaluation_mode,
+        "gdn_backend": args.gdn_backend,
+        "progress_upload_uri": args.progress_upload_uri,
+        "sequential_looks": sequential_looks,
+        "sequential_family_alpha": 0.05,
+        "sequential_resamples": 10000,
+        "early_acceptance_allowed": False,
+        "early_rejection_allowed": True,
+        "accepted_requires_full_tokens": int(args.min_tokens),
+        "benchmark_report_sha256": benchmark_digest,
+    }
+    policy_digest = hashlib.sha256(json.dumps(
+        runner_policy, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     source_commit = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
-    stem = "lecore.qwen35.install.%s.%s.%s.%s.v%d" % (
+    stem = "lecore.qwen35.install.%s.%s.%s.%s.%s.v%d" % (
         model_digest[:12], installation_digest[:12], evaluation_digest[:12],
-        source_commit[:12], int(args.experiment_version))
+        source_commit[:12], policy_digest[:12], int(args.experiment_version))
     ids = {
         "hypothesis": stem + ".hypothesis",
         "foundation": stem + ".foundation",
@@ -139,23 +224,23 @@ def main(argv=None):
     foundation = contribution(
         ids["foundation"], "mathematical_foundation", "statistical-reviewer",
         "Paired moving-block inference is required for token-loss comparisons",
-        "Per-token losses are serially correlated. The acceptance decision therefore uses paired installed-minus-original token NLLs, estimates an autocorrelation-aware moving-block length, and requires the upper 95 percent confidence bound to stay within a one-percent perplexity regression budget. Point estimates and independent-token bootstrap intervals are not acceptance evidence.",
+        "Per-token losses are serially correlated. The acceptance decision therefore uses paired installed-minus-original token NLLs, estimates an autocorrelation-aware moving-block length, and requires the upper 95 percent confidence bound to stay within a one-percent perplexity regression budget. Up to four frozen looks, each after at least one thousand paired positions, divide a family-wise five-percent error budget by Bonferroni correction and may only stop for clear rejection; every accepted result still measures the complete preregistered token count. Point estimates and independent-token bootstrap intervals are not acceptance evidence.",
         [ids["hypothesis"]],
-        ["At least the preregistered minimum number of paired token positions is measured.",
+        ["Every accepted outcome measures the full preregistered paired token count; an early rejected outcome contains at least one thousand paired positions and its multiplicity-corrected boundary.",
          "The statistical gate is decided by the paired block interval rather than the point perplexity delta."],
         0.95)
     engineering = contribution(
         ids["engineering"], "engineering_review", "engineering-reviewer",
         "Qwen acceptance runner and provenance boundary",
-        "The shell-free runner uses absolute paths, records the exact leCore commit and checker hashes, keeps spectral filtering disabled, invokes the layer-prepending path only with its experimental acknowledgement, records peak memory, reloads the emitted artifact through both leCore and official Transformers, and exercises the official text and image-text interfaces.",
+        "The shell-free runner uses absolute paths, records the exact leCore commit and checker hashes, keeps spectral filtering disabled, invokes the layer-prepending path only with its experimental acknowledgement, records peak memory, reloads the emitted artifact through both leCore and official Transformers, and exercises the official text and image-text interfaces. Future runs request the narrow native Gated-DeltaNet recurrence, whose first real fresh and resumed states are parity-gated against NumPy and whose refusal falls back safely with diagnostics.",
         [ids["hypothesis"], ids["foundation"]],
         ["The emitted stdout is exactly the ilxyr metrics/source envelope.",
-         "Installer logs and a human-readable metrics artifact are retained beside the output checkpoint."],
+         "Installer logs, durable per-chunk progress, monotonic stage timings, memory-selected chunk sizes, and a human-readable metrics artifact are retained beside the output checkpoint."],
         0.85)
     design = contribution(
         ids["design"], "experiment_design", "experiment-designer",
         "One-shot Qwen3.5 installation acceptance run",
-        "Execute once against the content-bound public checkpoint, installation corpus, and separate held-out evaluation corpus. Do not tune thresholds or replace either corpus after admission. Resolve accepted only when source cleanliness, tokenizer parity, reference-logit parity, the paired statistical gate, leCore disk reload, official Transformers reload, official text generation, and official vision smoke all pass. An official model capability failure emits zero-valued gates and is preserved as rejected evidence; dependency or runner failure remains execution_failure.",
+        "Execute once against the content-bound public checkpoint, installation corpus, and separate held-out evaluation corpus. Do not tune thresholds, sequential looks, chunk limits, or replace either corpus after admission. Memory facts select a chunk no larger than %d and two isolated workers evaluate the same frozen token positions concurrently when a conservative host-memory admission passes. Sequential looks at %s paired tokens divide alpha equally across the frozen looks and may only stop for NO-GO; GO always requires all %d positions and the unchanged final 95 percent paired block interval. Resolve accepted only when source cleanliness, tokenizer parity, reference-logit parity, the paired statistical gate, leCore disk reload, official Transformers reload, official text generation, and official vision smoke all pass. An official model capability failure emits zero-valued gates and is preserved as rejected evidence; dependency or runner failure remains execution_failure." % (int(args.max_chunk_size), ", ".join(map(str, sequential_looks)), int(args.min_tokens)),
         [ids["hypothesis"], ids["foundation"], ids["engineering"]],
         ["Accepted and rejected are exhaustive for a valid metrics envelope.",
          "Runtime or dependency failure resolves separately as execution_failure."],
@@ -199,7 +284,16 @@ def main(argv=None):
             "program": str(python),
             "args": [str(HERE / "run.py"), str(model_dir), str(installed_dir),
                      str(installation_corpus), str(evaluation_corpus),
-                     "--min-tokens", str(int(args.min_tokens))],
+                     "--min-tokens", str(int(args.min_tokens)),
+                     "--chunk-size", str(int(args.initial_chunk_size)),
+                     "--max-chunk-size", str(int(args.max_chunk_size)),
+                     "--memory-budget-fraction", str(float(args.memory_budget_fraction)),
+                     "--evaluation-mode", args.evaluation_mode,
+                     "--gdn-backend", args.gdn_backend,
+                     "--sequential-looks", ",".join(map(str, sequential_looks)),
+                     "--allow-early-rejection"] +
+                    (["--progress-upload-uri", args.progress_upload_uri]
+                     if args.progress_upload_uri else []),
             "timeout_seconds": int(args.timeout_seconds),
             "max_cost_credits": int(args.compute_credits),
             "network": "open",
@@ -277,6 +371,7 @@ def main(argv=None):
         "schema": "lecore.ilxyr-project.v1", "experiment_id": ids["experiment"],
         "experiment_version": int(args.experiment_version),
         "source_commit": source_commit, "model_digest": model_digest,
+        "runner_policy_digest": policy_digest,
         "model_files": model_files,
         "corpora": {
             "installation": {"path": str(installation_corpus),
@@ -287,6 +382,7 @@ def main(argv=None):
                            "bytes": evaluation_corpus.stat().st_size},
         },
         "installed_dir": str(installed_dir), "commands": commands,
+        "runner_policy": runner_policy,
     })
     print(json.dumps({"project_dir": str(out_dir),
                       "experiment_id": ids["experiment"],

@@ -21,9 +21,12 @@ maintenance without a measured win. If a profile ever shows the gap matters, mea
 
 import ctypes
 import hashlib
+import json
 import os
+import platform
 import shutil
 import subprocess
+import tempfile
 
 import numpy as np
 
@@ -40,6 +43,43 @@ def cc_available():
         if cand and shutil.which(cand):
             return shutil.which(cand)
     return None
+
+
+def compiler_flags(opt):
+    """Deterministic supported flags for one cache/precision policy."""
+    flags = {"fast": ["-O3", "-ffp-contract=off"],
+             "safe": ["-O2", "-ffp-contract=off"]}.get(opt)
+    if flags is None:
+        raise EmitError("opt must be 'fast' or 'safe'")
+    return flags
+
+
+def compiler_identity(cc=None):
+    """JSON-able compiler/target identity bound into native cache keys."""
+    cc = cc or cc_available()
+    if cc is None:
+        raise EmitError("no C compiler found")
+
+    def capture(*args):
+        completed = subprocess.run(
+            [cc, *args], capture_output=True, text=True, check=False, timeout=30)
+        return (completed.stdout + completed.stderr).strip()[:4000]
+
+    resolved = os.path.realpath(cc)
+    try:
+        stat = os.stat(resolved)
+        file_identity = {"bytes": int(stat.st_size),
+                         "mtime_ns": int(stat.st_mtime_ns)}
+    except OSError:
+        file_identity = None
+    return {
+        "path": resolved,
+        "file_identity": file_identity,
+        "version": capture("--version"),
+        "target": capture("-dumpmachine"),
+        "host_system": platform.system(),
+        "host_machine": platform.machine(),
+    }
 
 
 def build_batch_source(kernel, dtype="f64"):
@@ -73,21 +113,41 @@ def compile_cached(source, opt="fast", timeout=300):
     if cc is None:
         raise EmitError("no C compiler found (tried $CC, cc, gcc, clang); "
                         "install one or use holographic_zigrun where Zig exists")
-    flags = {"fast": ["-O3"], "safe": ["-O2"]}.get(opt)
-    if flags is None:
-        raise EmitError("opt must be 'fast' or 'safe'")
-    key = hashlib.sha256(("%s|%s|%s" % (source, opt, cc)).encode()).hexdigest()[:24]
+    # C permits contraction at these optimization levels even without
+    # ``-ffast-math``.  Disable it so the accelerator cannot silently change
+    # the registered operation order; throughput work must pass parity first.
+    flags = compiler_flags(opt)
+    identity = compiler_identity(cc)
+    key = hashlib.sha256(
+        json.dumps({"source": source, "opt": opt, "flags": flags,
+                    "compiler": identity}, sort_keys=True,
+                   separators=(",", ":")).encode()
+    ).hexdigest()[:24]
     os.makedirs(CACHE_DIR, exist_ok=True)
     so = os.path.join(CACHE_DIR, "k_%s.so" % key)
     if os.path.exists(so):
         return so
-    csrc = os.path.join(CACHE_DIR, "k_%s.c" % key)
-    with open(csrc, "w") as fh:
-        fh.write(source)
-    tmp = so + ".tmp"
-    subprocess.run([cc] + flags + ["-shared", "-fPIC", csrc, "-o", tmp, "-lm"],
-                   check=True, capture_output=True, timeout=timeout, cwd=CACHE_DIR)
-    os.replace(tmp, so)
+    # Parallel evaluators may reach the same cold cache entry together.  Give
+    # each compiler invocation private source/output paths and publish only the
+    # complete shared object with an atomic replace.  Shared ``.tmp``/``.c``
+    # names let concurrent compilers truncate each other's inputs or outputs.
+    descriptor, csrc = tempfile.mkstemp(
+        prefix="k_%s." % key, suffix=".c", dir=CACHE_DIR)
+    os.close(descriptor)
+    tmp = csrc[:-2] + ".so.tmp"
+    try:
+        with open(csrc, "w") as fh:
+            fh.write(source)
+        subprocess.run(
+            [cc] + flags + ["-shared", "-fPIC", csrc, "-o", tmp, "-lm"],
+            check=True, capture_output=True, timeout=timeout, cwd=CACHE_DIR)
+        os.replace(tmp, so)
+    finally:
+        for path in (csrc, tmp):
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
     return so
 
 

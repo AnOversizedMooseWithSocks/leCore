@@ -1,6 +1,7 @@
 """Portable gates for the Qwen3.5/ilxyr experiment contract."""
 
 import importlib.util
+import hashlib
 import json
 import subprocess
 import sys
@@ -35,6 +36,17 @@ def test_paired_gate_uses_blocks_for_correlated_losses():
     assert verdict["effective_n"] < len(delta) // 4
     assert verdict["ci_lo_nats"] <= 0 <= verdict["ci_hi_nats"]
     assert verdict["verdict"] == "INDISTINGUISHABLE"
+
+
+def test_long_block_bootstrap_never_falls_back_to_iid_positions():
+    from holographic.io_and_interop.holographic_measure import _bootstrap_means
+
+    values = np.arange(12, dtype=np.float64)
+    # One full-length moving block has one legal start, so every draw must keep
+    # the serial sequence's mean.  The old IID fallback varied these means and
+    # manufactured precision precisely when correlation was strongest.
+    means = _bootstrap_means(values, np.random.default_rng(0), 200, len(values))
+    assert np.array_equal(means, np.full(200, values.mean()))
 
 
 def test_randomized_svd_preserves_float32():
@@ -176,6 +188,141 @@ def test_streamed_measure_matches_whole_forward(tmp_path):
     assert np.allclose(whole["nll"], streamed["nll"], rtol=2e-5, atol=2e-5)
 
 
+def test_runner_records_monotonic_stage_and_chunk_progress(tmp_path):
+    runner = load_script("qwen_acceptance_progress_runner",
+                         ROOT / "experiments" / "qwen35_acceptance" / "run.py")
+
+    class State:
+        logits = None
+
+    class Runtime:
+        lm_head = np.zeros((64, 8), np.float32)
+        cfg = {"hidden": 8, "intermediate": 24}
+
+        def forward(self, ids, collect_state=False, resume=None):
+            logits = np.zeros((len(ids), 64), np.float32)
+            state = State()
+            state.logits = logits[-1]
+            return (logits, state) if collect_state else logits
+
+    recorder = runner.ProgressRecorder(tmp_path / "progress.jsonl")
+    with recorder.stage("fixture_evaluation"):
+        result = runner.streamed_measure(
+            Runtime(), list(range(21)), chunk_size=4, max_chunk_size=8,
+            recorder=recorder, phase="fixture", resamples=20)
+
+    records = [json.loads(line) for line in
+               (tmp_path / "progress.jsonl").read_text().splitlines()]
+    stamps = [item["monotonic_seconds"] for item in records]
+    chunks = [item for item in records if item["kind"] == "evaluation_chunk"]
+    assert stamps == sorted(stamps)
+    assert chunks[-1]["eval_tokens_complete"] == result["n_tokens"] == 20
+    assert chunks[-1]["eval_tokens_total"] == 20
+    assert recorder.timings["fixture_evaluation"] >= 0
+
+
+def test_memory_plan_scales_chunks_and_parallel_admission_is_conservative():
+    runner = load_script("qwen_acceptance_memory_runner",
+                         ROOT / "experiments" / "qwen35_acceptance" / "run.py")
+
+    class Weight:
+        shape = (248320, 1024)
+
+    class Runtime:
+        lm_head = Weight()
+        cfg = {"hidden": 1024, "intermediate": 3584}
+
+    plan = runner.memory_chunk_plan(
+        Runtime(), requested=128, max_chunk=512, budget_fraction=0.20,
+        workers=2, available_mb=128_000)
+    assert plan["selected_chunk_size"] == 512
+    assert plan["estimated_chunk_working_mb"] > 0
+    assert runner.parallel_evaluation_feasible(2200, 2300, 128_000)
+    assert not runner.parallel_evaluation_feasible(2200, 2300, 12_000)
+
+
+def test_sequential_rule_can_only_reject_after_a_thousand_paired_tokens():
+    runner = load_script("qwen_acceptance_sequential_runner",
+                         ROOT / "experiments" / "qwen35_acceptance" / "run.py")
+    original = np.full(1024, 3.0)
+    clearly_worse = original + 0.2
+    equivalent = original.copy()
+    limit = np.log1p(0.01)
+
+    rejected = runner.sequential_rejection_test(
+        clearly_worse, original, limit, look_index=0, total_looks=4,
+        resamples=100)
+    not_rejected = runner.sequential_rejection_test(
+        equivalent, original, limit, look_index=0, total_looks=4,
+        resamples=100)
+    assert rejected["reject"] is True
+    assert not_rejected["reject"] is False
+    assert rejected["alpha_spent"] == 0.0125
+    assert runner.parse_sequential_looks("1024,2048,3072,4096", 4096) == \
+        [1024, 2048, 3072, 4096]
+    with __import__("pytest").raises(ValueError, match="at least 1000"):
+        runner.parse_sequential_looks("512,4096", 4096)
+
+
+def test_parallel_paired_evaluation_preserves_order(tmp_path, monkeypatch):
+    import importlib
+
+    runner = importlib.import_module("experiments.qwen35_acceptance.run")
+    from holographic.io_and_interop.holographic_bpe import BPE
+    from holographic.io_and_interop.holographic_ccrun import cc_available
+
+    if cc_available() is None:
+        __import__("pytest").skip("parallel native-cache test needs a C compiler")
+    monkeypatch.setenv("LECORE_GDN_BACKEND", "c")
+    monkeypatch.setenv("LECORE_CC_CACHE", str(tmp_path / "cold-cc-cache"))
+
+    output, _ = build_fixture(tmp_path)
+    ids = BPE.from_dir(output).encode("paired worker ordering " * 4)[:33]
+    recorder = runner.ProgressRecorder(tmp_path / "paired-progress.jsonl")
+    result = runner.paired_evaluation(
+        output, output, ids, chunk_size=4, max_chunk_size=8,
+        memory_budget_fraction=0.20, recorder=recorder,
+        sequential_looks=[len(ids) - 1], allow_early_rejection=False,
+        regression_limit=np.log1p(0.01), gdn_backend="c", parallel=True)
+
+    assert result["parallel"] is True
+    assert result["before"]["n_tokens"] == len(ids) - 1
+    assert np.array_equal(result["before"]["nll"], result["after"]["nll"])
+    assert result["early_rejection_at"] is None
+    assert result["plans"]["original"] == result["plans"]["installed"] == \
+        result["common_chunk_plan"]
+    assert set(result["acceleration_reports"]) == {"original", "installed"}
+    assert all(report["full_sequence_gdn_recurrence"]["active"] == "c"
+               for report in result["acceleration_reports"].values())
+
+
+def test_progress_recorder_refreshes_s3_after_each_chunk(tmp_path, monkeypatch):
+    runner = load_script("qwen_acceptance_upload_runner",
+                         ROOT / "experiments" / "qwen35_acceptance" / "run.py")
+    calls = []
+
+    class Completed:
+        returncode = 0
+        stderr = ""
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return Completed()
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    recorder = runner.ProgressRecorder(
+        tmp_path / "progress.jsonl",
+        upload_uri="s3://evidence/future/progress.jsonl")
+    recorder.emit("evaluation_chunk", eval_tokens_complete=128)
+    assert recorder.flush_upload()
+    assert calls[0][0][:3] == ["aws", "s3", "cp"]
+    assert calls[0][0][-2:] == ["s3://evidence/future/progress.jsonl",
+                                "--only-show-errors"]
+    assert recorder.upload_attempts == 1
+    assert recorder.upload_failures == 0
+    assert recorder.upload_requests == 1
+
+
 def test_generator_emits_complete_ilxyr_contract(tmp_path):
     output, _ = build_fixture(tmp_path)
     installation_corpus = tmp_path / "installation.txt"
@@ -210,10 +357,63 @@ def test_generator_emits_complete_ilxyr_contract(tmp_path):
         "config.json", "tokenizer.json", "model.safetensors",
     }
     assert len(manifest["commands"]) == 12
+    assert manifest["runner_policy"]["early_acceptance_allowed"] is False
+    assert manifest["runner_policy"]["accepted_requires_full_tokens"] == 1000
+    assert manifest["runner_policy"]["sequential_looks"] == [1000]
+    assert manifest["runner_policy"]["gdn_backend"] == "c"
+    assert manifest["runner_policy"]["max_chunk_size"] == 128
+    assert len(manifest["runner_policy_digest"]) == 64
+    assert manifest["runner_policy_digest"][:12] in manifest["experiment_id"]
+    gdn_index = experiment["execution"]["args"].index("--gdn-backend")
+    assert experiment["execution"]["args"][gdn_index + 1] == "c"
+    assert "--allow-early-rejection" in experiment["execution"]["args"]
     for name in ("hypothesis.json", "foundation.json", "engineering-review.json",
                  "experiment-design.json", "forecast-empirical.json",
                  "forecast-mechanistic.json", "funding.json"):
         assert (project / name).is_file()
+
+
+def test_generator_binds_benchmark_before_increasing_chunk(tmp_path):
+    output, _ = build_fixture(tmp_path)
+    installation = tmp_path / "installation.txt"
+    evaluation = tmp_path / "evaluation.txt"
+    installation.write_text("Install grounding. " * 400)
+    evaluation.write_text("Held-out benchmark corpus. " * 400)
+    digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+    report = {
+        "schema": "lecore.qwen_runtime_benchmark.v1",
+        "inputs": {
+            "weight_hashes_included": True,
+            "corpus": {"sha256": digest(evaluation)},
+            "model_files": [
+                {"name": path.name, "sha256": digest(path)}
+                for path in sorted(output.iterdir()) if path.is_file()
+            ],
+        },
+        "speed_and_cost_projection": {"recommended_chunk_size": 256},
+    }
+    report_path = tmp_path / "benchmark.json"
+    report_path.write_text(json.dumps(report))
+    project = tmp_path / "project"
+    completed = subprocess.run(
+        [sys.executable,
+         str(ROOT / "experiments" / "qwen35_acceptance" / "generate.py"),
+         str(output), str(installation), str(evaluation), str(project),
+         "--min-tokens", "1000", "--benchmark-report", str(report_path)],
+        cwd=tmp_path, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+    manifest = json.loads((project / "project.json").read_text())
+    assert manifest["runner_policy"]["max_chunk_size"] == 256
+    assert manifest["runner_policy"]["benchmark_report_sha256"] == digest(report_path)
+
+    refused = subprocess.run(
+        [sys.executable,
+         str(ROOT / "experiments" / "qwen35_acceptance" / "generate.py"),
+         str(output), str(installation), str(evaluation), str(tmp_path / "bad"),
+         "--min-tokens", "1000", "--max-chunk-size", "256"],
+        cwd=tmp_path, capture_output=True, text=True, check=False)
+    assert refused.returncode != 0
+    assert "requires --benchmark-report" in refused.stderr
 
 
 def test_generator_preserves_virtual_environment_python_path(tmp_path):
