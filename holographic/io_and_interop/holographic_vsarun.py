@@ -239,7 +239,7 @@ def repetition(runtime, prompts=("the holographic ", "a vector is ",
 def install_improvement(weights, cfg, runtime, fit_ids, eval_ids, layer=None,
                         projector=None,
                         steps=(32.0, 128.0, 512.0, 1024.0), progress=None,
-                        guard_generation=True):
+                        guard_generation=True, preserve_shape=False):
     """Fit the correction, then CHOOSE the step by measuring BOTH axes.
 
     Perplexity on held-out text with a paired bootstrap, AND generation
@@ -257,6 +257,17 @@ def install_improvement(weights, cfg, runtime, fit_ids, eval_ids, layer=None,
     from holographic.io_and_interop.holographic_measure import (
         measure, better_than)
     from holographic.io_and_interop.holographic_vsabake import install_op
+
+    # install_op appends one neuron per hidden dimension to an MLP.  That is a
+    # valid leCore-runtime extension, but ordinary Transformers architectures
+    # construct every decoder MLP from one fixed `intermediate_size`; changing
+    # a single layer without a public config field makes the checkpoint
+    # impossible to reload.  A portable install keeps this optional correction
+    # out until it has an official, shape-preserving representation.
+    if preserve_shape:
+        return weights, {"installed": False,
+                         "why": "skipped to preserve the checkpoint's fixed "
+                                "intermediate_size for official reload"}
 
     # THE FIT SET IS THE COST AND IT IS WORTH IT -- a kept negative, because
     # the obvious optimisation reads as a clear win on one window.

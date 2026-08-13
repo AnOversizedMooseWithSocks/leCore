@@ -94,6 +94,69 @@ def test_portable_qwen_fixture_loads_from_arbitrary_cwd(tmp_path):
     assert logits.shape[-1] == 512 and np.isfinite(logits).all()
 
 
+def test_prepend_matches_official_qwen_tensor_schema(tmp_path):
+    from holographic.io_and_interop.holographic_gdnruntime import (
+        load_runtime, load_weights_dir)
+    from holographic.io_and_interop.holographic_prepend import prepend_layers
+
+    output, _ = build_fixture(tmp_path)
+    _runtime, config = load_runtime(output)
+    weights = load_weights_dir(output)
+    installed, installed_config = prepend_layers(weights, config, n=2)
+    prefix = "model.language_model.layers.0."
+
+    assert prefix + "linear_attn.in_proj_qkv.weight" in installed
+    assert prefix + "linear_attn.in_proj_z.weight" in installed
+    assert prefix + "linear_attn.in_proj_a.weight" in installed
+    assert prefix + "linear_attn.in_proj_b.weight" in installed
+    assert prefix + "linear_attn.in_proj_qkvz.weight" not in installed
+    assert prefix + "linear_attn.in_proj_ba.weight" not in installed
+    assert prefix + "linear_attn.conv1d.bias" not in installed
+    assert installed[prefix + "mlp.gate_proj.weight"].shape[0] == \
+        config["intermediate"]
+    assert np.count_nonzero(installed[prefix + "input_layernorm.weight"]) == 0
+    assert installed_config["n_layers"] == config["n_layers"] + 2
+
+
+def test_installed_mini_qwen_reloads_and_generates_with_transformers(tmp_path):
+    torch = __import__("pytest").importorskip("torch")
+    safetensors = __import__("pytest").importorskip("safetensors.torch")
+    transformers = __import__("pytest").importorskip("transformers")
+
+    output, _ = build_fixture(tmp_path)
+    corpus = tmp_path / "installation.txt"
+    corpus.write_text("A portable checkpoint must reload through its public API. " * 900)
+    installed = tmp_path / "installed-mini-qwen"
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "assimilation" / "install.py"),
+         "--experimental", str(output), str(installed), "--doc", str(corpus),
+         "--device", "cpu"],
+        cwd=ROOT, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+    config_json = json.loads((installed / "config.json").read_text())
+    text_config = transformers.Qwen3_5TextConfig(**config_json["text_config"])
+    model = transformers.Qwen3_5ForCausalLM(text_config)
+    checkpoint = safetensors.load_file(installed / "model.safetensors")
+    text_checkpoint = {
+        key.replace("model.language_model.", "model.", 1): value
+        for key, value in checkpoint.items()
+        if key.startswith("model.language_model.")
+    }
+    incompatible = model.load_state_dict(text_checkpoint, strict=False)
+    model.tie_weights()
+
+    assert not incompatible.unexpected_keys
+    assert set(incompatible.missing_keys) <= {"lm_head.weight"}
+    input_ids = torch.tensor([[65, 66, 67, 68]], dtype=torch.long)
+    with torch.no_grad():
+        logits = model(input_ids=input_ids).logits
+        generated = model.generate(input_ids=input_ids, max_new_tokens=2,
+                                   do_sample=False)
+    assert torch.isfinite(logits).all()
+    assert generated.shape[-1] == input_ids.shape[-1] + 2
+
+
 def test_streamed_measure_matches_whole_forward(tmp_path):
     from holographic.io_and_interop.holographic_bpe import BPE
     from holographic.io_and_interop.holographic_gdnruntime import load_runtime
@@ -177,27 +240,27 @@ def test_generator_preserves_virtual_environment_python_path(tmp_path):
     assert experiment["execution"]["program"] != str(venv_python.resolve())
 
 
-def test_generator_can_freeze_a_second_formal_attempt(tmp_path):
+def test_generator_can_freeze_a_third_formal_attempt(tmp_path):
     output, _ = build_fixture(tmp_path)
     installation_corpus = tmp_path / "installation.txt"
     evaluation_corpus = tmp_path / "evaluation.txt"
     installation_corpus.write_text("Installation material. " * 400)
     evaluation_corpus.write_text("Held-out evaluation material. " * 400)
-    project = tmp_path / "project-v2"
+    project = tmp_path / "project-v3"
 
     completed = subprocess.run(
         [sys.executable,
          str(ROOT / "experiments" / "qwen35_acceptance" / "generate.py"),
          str(output), str(installation_corpus), str(evaluation_corpus),
-         str(project), "--min-tokens", "1000", "--experiment-version", "2"],
+         str(project), "--min-tokens", "1000", "--experiment-version", "3"],
         cwd=tmp_path, capture_output=True, text=True, check=False)
     assert completed.returncode == 0, completed.stderr
 
     experiment = json.loads((project / "experiment.json").read_text())
     manifest = json.loads((project / "project.json").read_text())
-    assert experiment["id"].endswith(".v2.acceptance")
-    assert experiment["evidence_authority"]["provenance"]["checker"].endswith("/v2")
-    assert manifest["experiment_version"] == 2
+    assert experiment["id"].endswith(".v3.acceptance")
+    assert experiment["evidence_authority"]["provenance"]["checker"].endswith("/v3")
+    assert manifest["experiment_version"] == 3
 
 
 def test_generator_rejects_reused_installation_and_evaluation_corpus(tmp_path):

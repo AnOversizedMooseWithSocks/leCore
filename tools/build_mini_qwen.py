@@ -92,11 +92,11 @@ def build(out_dir, shrink=8, vocab=512, added=26, seed=0, layers=None,
         return (rng.standard_normal(shape) * 0.02).astype(np.float32)
 
     w = {"model.language_model.embed_tokens.weight": r(vocab, H),
-         "model.language_model.norm.weight": np.ones(H, np.float32)}
+         "model.language_model.norm.weight": np.zeros(H, np.float32)}
     for i, kind in enumerate(types):
         p = "model.language_model.layers.%d." % i
-        w[p + "input_layernorm.weight"] = np.ones(H, np.float32)
-        w[p + "post_attention_layernorm.weight"] = np.ones(H, np.float32)
+        w[p + "input_layernorm.weight"] = np.zeros(H, np.float32)
+        w[p + "post_attention_layernorm.weight"] = np.zeros(H, np.float32)
         w[p + "mlp.gate_proj.weight"] = r(I, H)
         w[p + "mlp.up_proj.weight"] = r(I, H)
         w[p + "mlp.down_proj.weight"] = r(H, I)
@@ -104,15 +104,15 @@ def build(out_dir, shrink=8, vocab=512, added=26, seed=0, layers=None,
             w[p + "linear_attn.A_log"] = (rng.standard_normal(nlv) - 3.0
                                           ).astype(np.float32)
             w[p + "linear_attn.dt_bias"] = np.zeros(nlv, np.float32)
-            w[p + "linear_attn.in_proj_qkvz.weight"] = r(
-                2 * nlk * lk + 2 * nlv * lv, H)
-            w[p + "linear_attn.in_proj_ba.weight"] = r(2 * nlv, H)
+            w[p + "linear_attn.in_proj_qkv.weight"] = r(
+                2 * nlk * lk + nlv * lv, H)
+            w[p + "linear_attn.in_proj_z.weight"] = r(nlv * lv, H)
+            w[p + "linear_attn.in_proj_b.weight"] = r(nlv, H)
+            w[p + "linear_attn.in_proj_a.weight"] = r(nlv, H)
             w[p + "linear_attn.conv1d.weight"] = r(
                 nlk * lk * 2 + nlv * lv, 1, tc["linear_conv_kernel_dim"]
             ).reshape(nlk * lk * 2 + nlv * lv, 1,
                       tc["linear_conv_kernel_dim"])
-            w[p + "linear_attn.conv1d.bias"] = np.zeros(
-                nlk * lk * 2 + nlv * lv, np.float32)
             w[p + "linear_attn.norm.weight"] = np.ones(lv, np.float32)
             w[p + "linear_attn.out_proj.weight"] = r(H, nlv * lv)
         else:
@@ -120,8 +120,8 @@ def build(out_dir, shrink=8, vocab=512, added=26, seed=0, layers=None,
             w[p + "self_attn.k_proj.weight"] = r(nkv * hd, H)
             w[p + "self_attn.v_proj.weight"] = r(nkv * hd, H)
             w[p + "self_attn.o_proj.weight"] = r(H, nq * hd)
-            w[p + "self_attn.q_norm.weight"] = np.ones(hd, np.float32)
-            w[p + "self_attn.k_norm.weight"] = np.ones(hd, np.float32)
+            w[p + "self_attn.q_norm.weight"] = np.zeros(hd, np.float32)
+            w[p + "self_attn.k_norm.weight"] = np.zeros(hd, np.float32)
     # a VISION TOWER, because a third of the real model's tensors are one and
     # nothing in this pipeline should touch them
     for i in range(2):
@@ -140,7 +140,8 @@ def build(out_dir, shrink=8, vocab=512, added=26, seed=0, layers=None,
 
     tc.update(hidden_size=H, intermediate_size=I, vocab_size=vocab,
               head_dim=hd, linear_key_head_dim=lk, linear_value_head_dim=lv,
-              num_hidden_layers=len(types))
+              num_hidden_layers=len(types), layer_types=list(types),
+              tie_word_embeddings=True)
     cfg = {"architectures": real["architectures"],
            "model_type": real["model_type"],
            "text_config": tc,

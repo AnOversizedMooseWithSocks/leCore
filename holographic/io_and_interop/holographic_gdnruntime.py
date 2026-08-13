@@ -1055,6 +1055,7 @@ def config_from_json(cfg_json, weights=None):
     head_dim = int(c.get("head_dim") or (hidden // max(n_heads, 1)))
     out = dict(
         hidden=hidden,
+        intermediate=int(c.get("intermediate_size", 128)),
         n_layers=int(c["num_hidden_layers"]),
         rms_eps=float(c.get("rms_norm_eps", 1e-6)),
         rope_theta=float(theta),

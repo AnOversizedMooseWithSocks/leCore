@@ -149,37 +149,92 @@ def official_output_smokes(installed_dir):
     import torch
     from PIL import Image
     from transformers import AutoProcessor
+    diagnostics = []
+    model = None
+    processor = None
+    text_inputs = text_out = vision_inputs = vision_out = None
+    official_reload = 0
+    text_pass = 0
+    vision_pass = 0
+
+    def checked_load(model_class, **kwargs):
+        loaded = model_class.from_pretrained(
+            installed_dir, output_loading_info=True, **kwargs)
+        model_value, info = loaded
+        incompatible = {
+            key: info.get(key) or []
+            for key in ("missing_keys", "unexpected_keys", "mismatched_keys",
+                        "error_msgs")
+            if info.get(key)
+        }
+        if incompatible:
+            del model_value
+            gc.collect()
+            raise RuntimeError("official state-dict incompatibility: %s" %
+                               json.dumps(incompatible, default=str)[:4000])
+        return model_value.eval()
+
     try:
         from transformers import AutoModelForImageTextToText
-        model = AutoModelForImageTextToText.from_pretrained(
-            installed_dir, torch_dtype=torch.float32, trust_remote_code=True).eval()
-    except Exception:
-        from transformers import Qwen3_5ForConditionalGeneration
-        model = Qwen3_5ForConditionalGeneration.from_pretrained(
-            installed_dir, torch_dtype=torch.float32).eval()
-    processor = AutoProcessor.from_pretrained(installed_dir, trust_remote_code=True)
+        model = checked_load(AutoModelForImageTextToText,
+                             torch_dtype=torch.float32,
+                             trust_remote_code=True)
+        official_reload = 1
+    except Exception as auto_exc:
+        diagnostics.append("AutoModelForImageTextToText: %s: %s" %
+                           (type(auto_exc).__name__, str(auto_exc)[:1000]))
+        try:
+            from transformers import Qwen3_5ForConditionalGeneration
+            model = checked_load(Qwen3_5ForConditionalGeneration,
+                                 torch_dtype=torch.float32)
+            official_reload = 1
+        except Exception as qwen_exc:
+            diagnostics.append("Qwen3_5ForConditionalGeneration: %s: %s" %
+                               (type(qwen_exc).__name__, str(qwen_exc)[:1000]))
 
-    text_inputs = processor(text="Explain what a checksum protects.", return_tensors="pt")
-    with torch.no_grad():
-        text_out = model.generate(**text_inputs, max_new_tokens=4)
-    text_pass = int(text_out.shape[-1] > text_inputs["input_ids"].shape[-1])
+    if model is not None:
+        try:
+            processor = AutoProcessor.from_pretrained(
+                installed_dir, trust_remote_code=True)
+        except Exception as exc:
+            diagnostics.append("AutoProcessor: %s: %s" %
+                               (type(exc).__name__, str(exc)[:1000]))
 
-    image = Image.new("RGB", (32, 32), color=(32, 96, 160))
-    messages = [{"role": "user", "content": [
-        {"type": "image", "image": image},
-        {"type": "text", "text": "Name the dominant color."},
-    ]}]
-    vision_inputs = processor.apply_chat_template(
-        messages, tokenize=True, add_generation_prompt=True,
-        return_dict=True, return_tensors="pt")
-    with torch.no_grad():
-        vision_out = model.generate(**vision_inputs, max_new_tokens=1)
-    vision_pass = int(vision_out.shape[-1] > vision_inputs["input_ids"].shape[-1])
+    if model is not None and processor is not None:
+        try:
+            text_inputs = processor(
+                text="Explain what a checksum protects.", return_tensors="pt")
+            with torch.no_grad():
+                text_out = model.generate(**text_inputs, max_new_tokens=4)
+            text_pass = int(
+                text_out.shape[-1] > text_inputs["input_ids"].shape[-1])
+        except Exception as exc:
+            diagnostics.append("text generation: %s: %s" %
+                               (type(exc).__name__, str(exc)[:1000]))
+
+        try:
+            image = Image.new("RGB", (32, 32), color=(32, 96, 160))
+            messages = [{"role": "user", "content": [
+                {"type": "image", "image": image},
+                {"type": "text", "text": "Name the dominant color."},
+            ]}]
+            vision_inputs = processor.apply_chat_template(
+                messages, tokenize=True, add_generation_prompt=True,
+                return_dict=True, return_tensors="pt")
+            with torch.no_grad():
+                vision_out = model.generate(**vision_inputs, max_new_tokens=1)
+            vision_pass = int(
+                vision_out.shape[-1] > vision_inputs["input_ids"].shape[-1])
+        except Exception as exc:
+            diagnostics.append("vision generation: %s: %s" %
+                               (type(exc).__name__, str(exc)[:1000]))
+
     peak_gpu = (float(torch.cuda.max_memory_allocated()) / 1e6
                 if torch.cuda.is_available() else 0.0)
     del model, processor, text_inputs, text_out, vision_inputs, vision_out
     gc.collect()
-    return float(text_pass), float(vision_pass), peak_gpu
+    return (float(official_reload), float(text_pass), float(vision_pass),
+            peak_gpu, diagnostics)
 
 
 def source_snapshot(installation_corpus, evaluation_corpus):
@@ -293,13 +348,14 @@ def main(argv=None):
     comparison = better_than(after, before, resamples=1200, seed=0)
     regression_limit = math.log1p(float(args.max_regression))
     statistical_pass = float(comparison["ci_hi_nats"] <= regression_limit)
-    text_pass, vision_pass, peak_gpu = official_output_smokes(installed_dir)
+    official_reload, text_pass, vision_pass, peak_gpu, smoke_diagnostics = \
+        official_output_smokes(installed_dir)
 
     checkpoint_mb = sum(path.stat().st_size for path in
                         installed_dir.glob("*.safetensors")) / 1e6
     peak_rss = max(peak_rss_mb("RUSAGE_SELF"), child_peak)
     required = [source_clean, tok_pass, ref_pass, statistical_pass,
-                reload_pass, text_pass, vision_pass]
+                reload_pass, official_reload, text_pass, vision_pass]
     metrics = {
         "acceptance_pass": float(all(v >= 1.0 for v in required)),
         "source_clean": source_clean,
@@ -321,6 +377,7 @@ def main(argv=None):
         "peak_gpu_mb": float(peak_gpu),
         "emitted_checkpoint_mb": float(checkpoint_mb),
         "reload_pass": reload_pass,
+        "official_reload_pass": official_reload,
         "text_generation_pass": text_pass,
         "vision_smoke_pass": vision_pass,
     }
@@ -331,7 +388,9 @@ def main(argv=None):
         raise RuntimeError("non-finite acceptance metric")
     artifact_dir.mkdir(parents=True, exist_ok=True)
     (artifact_dir / "metrics.json").write_text(
-        json.dumps({"metrics": metrics, "source": source}, indent=2, sort_keys=True))
+        json.dumps({"metrics": metrics, "source": source,
+                    "diagnostics": {"official_smokes": smoke_diagnostics}},
+                   indent=2, sort_keys=True))
     print(json.dumps({"metrics": metrics, "source": source}, sort_keys=True))
     return 0
 

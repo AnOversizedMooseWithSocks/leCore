@@ -147,7 +147,7 @@ def main(argv=None):
     engineering = contribution(
         ids["engineering"], "engineering_review", "engineering-reviewer",
         "Qwen acceptance runner and provenance boundary",
-        "The shell-free runner uses absolute paths, records the exact leCore commit and checker hashes, keeps spectral filtering disabled, invokes the layer-prepending path only with its experimental acknowledgement, records peak memory, reloads the emitted artifact, and exercises the official Transformers text and image-text interfaces.",
+        "The shell-free runner uses absolute paths, records the exact leCore commit and checker hashes, keeps spectral filtering disabled, invokes the layer-prepending path only with its experimental acknowledgement, records peak memory, reloads the emitted artifact through both leCore and official Transformers, and exercises the official text and image-text interfaces.",
         [ids["hypothesis"], ids["foundation"]],
         ["The emitted stdout is exactly the ilxyr metrics/source envelope.",
          "Installer logs and a human-readable metrics artifact are retained beside the output checkpoint."],
@@ -155,7 +155,7 @@ def main(argv=None):
     design = contribution(
         ids["design"], "experiment_design", "experiment-designer",
         "One-shot Qwen3.5 installation acceptance run",
-        "Execute once against the content-bound public checkpoint, installation corpus, and separate held-out evaluation corpus. Do not tune thresholds or replace either corpus after admission. Resolve accepted only when source cleanliness, tokenizer parity, reference-logit parity, the paired statistical gate, disk reload, official text generation, and official vision smoke all pass. A cleanly executed no-go is preserved as rejected evidence.",
+        "Execute once against the content-bound public checkpoint, installation corpus, and separate held-out evaluation corpus. Do not tune thresholds or replace either corpus after admission. Resolve accepted only when source cleanliness, tokenizer parity, reference-logit parity, the paired statistical gate, leCore disk reload, official Transformers reload, official text generation, and official vision smoke all pass. An official model capability failure emits zero-valued gates and is preserved as rejected evidence; dependency or runner failure remains execution_failure.",
         [ids["hypothesis"], ids["foundation"], ids["engineering"]],
         ["Accepted and rejected are exhaustive for a valid metrics envelope.",
          "Runtime or dependency failure resolves separately as execution_failure."],

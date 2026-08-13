@@ -21,6 +21,7 @@ METRIC_SPECS = [
     {"name": "peak_gpu_mb", "unit": "megabytes", "description": "Peak accelerator allocation reported by PyTorch, or 0 when no accelerator was used."},
     {"name": "emitted_checkpoint_mb", "unit": "megabytes", "description": "Total safetensors size of the emitted installed checkpoint."},
     {"name": "reload_pass", "unit": "boolean", "description": "The emitted checkpoint reloaded from disk and produced finite logits."},
+    {"name": "official_reload_pass", "unit": "boolean", "description": "The emitted checkpoint reloaded through the official Transformers Qwen model without missing, unexpected, or mismatched layer tensors."},
     {"name": "text_generation_pass", "unit": "boolean", "description": "The emitted checkpoint generated text through the official Transformers model."},
     {"name": "vision_smoke_pass", "unit": "boolean", "description": "The emitted checkpoint accepted a synthetic image through the official Qwen vision-language processor and generated a token."},
 ]

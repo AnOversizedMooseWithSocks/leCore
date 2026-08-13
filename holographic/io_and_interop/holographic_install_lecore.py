@@ -488,7 +488,8 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
     #         correction fitted on late states put in front gave 7.27 -> 36.78.
     try:
         w4, irep = install_improvement(w, c, GDNRuntime(w, c), list(fit_ids),
-                                       ids, projector=_guard_P)
+                                       ids, projector=_guard_P,
+                                       preserve_shape=("intermediate" in c))
         if irep.get("installed"):
             w = w4
             rep["improvement"] = {"step": irep["step"],
