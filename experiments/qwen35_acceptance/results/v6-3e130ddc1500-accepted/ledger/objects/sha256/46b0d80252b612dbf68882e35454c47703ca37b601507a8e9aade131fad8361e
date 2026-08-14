@@ -1,0 +1,1 @@
+{"brier_score":1.0850000000000002,"experiment_id":"lecore.qwen35.install.20c3330d0b3e.0215736e2060.a6c9d1135a04.3e130ddc1500.ed018efbbb3a.v6.acceptance","forecast_id":"lecore.qwen35.install.20c3330d0b3e.0215736e2060.a6c9d1135a04.3e130ddc1500.ed018efbbb3a.v6.forecast.empirical","resolved_outcome":"accepted","schema":"ilxyr.forecast_settlement.v1","stake":5}

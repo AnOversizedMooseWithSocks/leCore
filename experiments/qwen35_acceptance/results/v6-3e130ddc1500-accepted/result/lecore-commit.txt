@@ -1,0 +1,7 @@
+commit 3e130ddc1500af084eb7a7fe94a5da647b0ff3ef
+Author:     atimics <atimics@ratimics.com>
+AuthorDate: Fri Aug 14 06:44:14 2026 -0700
+Commit:     atimics <atimics@ratimics.com>
+CommitDate: Fri Aug 14 06:44:14 2026 -0700
+
+    fix(qwen): enforce ilxyr executor contract in CI

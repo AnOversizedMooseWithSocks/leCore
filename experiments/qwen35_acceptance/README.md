@@ -1,29 +1,28 @@
 # Qwen3.5 acceptance experiment
 
 The committee-facing design and review questions are in
-[`PROPOSAL.md`](PROPOSAL.md). All three authorized runs are preserved as
-execution failures. V1 exposed an interpreter-path bug before scientific
-execution. V2 completed both evaluation streams but exposed an official
-Transformers checkpoint-layout incompatibility. V3 fixed that incompatibility
-and completed the full 4,096-position paired evaluation, but human-readable
-diagnostics before the metric JSON caused strict ilxyr ingestion to fail.
+[`PROPOSAL.md`](PROPOSAL.md). V1-v3 and v5 are preserved as execution
+failures, and v4 is preserved as a preflight failure. V6 is the first formally
+admitted, fully executed result and resolves the preregistered experiment as
+`accepted` — **GO**.
 
-The terminal v3 record is in
-[`results/v3-20c3330d0b3e-execution-failure/`](results/v3-20c3330d0b3e-execution-failure/).
+The accepted v6 record is in
+[`results/v6-3e130ddc1500-accepted/`](results/v6-3e130ddc1500-accepted/).
 Its complete evidence bundle, excluding model weights, is permanently indexed
-at [`h96JlX…ojYSw`](https://arweave.net/h96JlX-4ttZsPZdYRBuT-_JNO2s0lS18hoFjM4ojYSw/).
-The v3 diagnostic artifact completed all required positions and measured a
-31.0% perplexity regression, but it was not admitted and is therefore neither
-`GO` nor `NO-GO`.
+at [`Ks5BCVFX…ikiTs`](https://arweave.net/Ks5BCVFX6179VUXQL8lMczLXX6hAp7j-lUpOcXikiTs/).
+All 4,096 paired positions, the statistical gate, checkpoint reloads, text
+generation, and the official vision-input smoke test passed. Original and
+installed perplexity were identical in this frozen run.
 
-The layer-prepending installer remains experimental. No retry is authorized
-under the v3 identity. The model revision, corpora, thresholds, seed, and
-spending ceiling for the completed v3 attempt remain frozen in
-[`launch-manifest.json`](launch-manifest.json).
+The layer-prepending installer remains experimental pending committee review.
+V6 also recorded that the requested native GDN accelerator failed to compile
+on the AWS host and safely fell back to NumPy, so it validates correctness but
+not the compiled acceleration path. No retry is authorized under the v6
+identity.
 
 This directory turns the open Qwen integration questions into a frozen ilxyr
-project and preserves its bounded executions. It does not claim that the full
-run passed. It generates the
+project and preserves its bounded executions, including the accepted v6
+result. It generates the
 hypothesis, methodology contributions, experiment contract, two explicit model
 forecasts, funding record, and ordered ilxyr commands for one real checkpoint.
 
@@ -44,7 +43,7 @@ python experiments/qwen35_acceptance/generate.py \
   /absolute/path/to/installation-corpus.txt \
   /absolute/path/to/evaluation-corpus.txt \
   /absolute/path/to/ilxyr-project \
-  --experiment-version 3 \
+  --experiment-version 6 \
   --python .venv-qwen-acceptance/bin/python
 ```
 
@@ -80,7 +79,8 @@ re-hashes the source commit, complete model/processor manifest, installation
 corpus, and held-out corpus and refuses any drift from the admitted identity.
 
 The layer-prepending installer is deliberately invoked with `--experimental`.
-An accepted ilxyr outcome is the evidence needed before removing that flag.
+V6 supplies the first accepted ilxyr outcome; removing that flag remains a
+maintainer and committee decision.
 
 Future-run performance controls are frozen into the generated project. The
 generator requests the parity-gated C recurrence, increases chunks above 128
