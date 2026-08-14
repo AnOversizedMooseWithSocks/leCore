@@ -166,18 +166,27 @@ class BM25:
         # (same operands -> same IEEE bits). scores() then just adds each query term's weight vector into the
         # output -- O(postings) NumPy instead of O(terms x N) Python. Measured: 94.8 ms -> sub-ms per query at
         # N=20k, and the selftest asserts BIT-IDENTITY against the shipped reference loop, so no tie can flip.
-        self._postings = {}
-        for term, idf in self.idf.items():
-            idxs, wts = [], []
-            for i in range(self.N):
-                f = self.tf[i].get(term, 0)
-                if f == 0:
-                    continue
-                denom = f + self.k1 * (1.0 - self.b + self.b * self.doc_len[i] / (self.avgdl + 1e-12))
-                idxs.append(i)
-                wts.append(idf * (f * (self.k1 + 1.0)) / (denom + 1e-12))
-            if idxs:
-                self._postings[term] = (np.array(idxs, dtype=np.int64), np.array(wts, dtype=np.float64))
+        #
+        # BUILT DOC-MAJOR: one pass over each doc's term counts, appending to per-term lists, O(total tokens).
+        # The previous term-major loop (`for term in idf: for i in range(N): tf[i].get(term, 0)`) probed every
+        # (term, doc) pair whether or not the term occurs in the doc -- O(vocab x N) -- and on real prose vocab
+        # grows with N, so the build was effectively superlinear in corpus size. Measured at BEIR NQ scale
+        # (2,681,468 docs, vocab 821,276 under this file's own tokenize): 2.2e12 probes, build did not complete;
+        # the doc-major reorder finished in 309.8 s including tokenization. The postings are IDENTICAL by
+        # construction: same idf, same weight expression with the same operands (so the same IEEE bits), and
+        # ascending doc order per term either way -- asserted bit-for-bit in tests/test_bm25_docmajor_build.py.
+        post = {}
+        for i in range(self.N):
+            dl = self.doc_len[i]
+            for term, f in self.tf[i].items():
+                denom = f + self.k1 * (1.0 - self.b + self.b * dl / (self.avgdl + 1e-12))
+                lists = post.get(term)
+                if lists is None:
+                    lists = post[term] = ([], [])
+                lists[0].append(i)
+                lists[1].append(self.idf[term] * (f * (self.k1 + 1.0)) / (denom + 1e-12))
+        self._postings = {term: (np.array(idxs, dtype=np.int64), np.array(wts, dtype=np.float64))
+                          for term, (idxs, wts) in post.items()}
         # DERIVATIONAL SIBLING INDEX for opt-in query expansion: 'emissive' and 'emission' are the same root
         # wearing different suffixes, and exact-term BM25 misses the pair (measured live: BOTH forms exist
         # un-collapsed in this repo's vocabulary -- a query for one cannot see docs using the other). Group
