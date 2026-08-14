@@ -1,8 +1,8 @@
 # Qwen3.5 acceptance experiment
 
 This directory turns the open Qwen integration questions into a frozen ilxyr
-project for one owner-authorized, bounded attempt. It does not claim that the
-full run has passed. It generates the
+project for a separately authorized, bounded attempt. It does not claim that a
+future full run has passed. It generates the
 hypothesis, methodology contributions, experiment contract, two explicit model
 forecasts, funding record, and ordered ilxyr commands for one real checkpoint.
 
@@ -49,6 +49,13 @@ so the result also binds the frozen environment definition as evidence.
 for `~/develop/ilxyr/target/debug/ilxyr`. Review the forecasts and frozen
 thresholds before contributing them to an ilxyr workspace. ilxyr executes the
 runner without a shell and records its strict `metrics`/`source` envelope.
+That closed envelope contains only the fields accepted by the frozen ilxyr
+schema. Extended input and emitted-checkpoint provenance is stored in
+`runtime-provenance.json`; the runner includes that file's SHA-256 in
+`source.artifacts`, so the richer record remains content-bound evidence without
+adding undeclared executor fields. Before model loading, the runner also
+re-hashes the source commit, complete model/processor manifest, installation
+corpus, and held-out corpus and refuses any drift from the admitted identity.
 
 The layer-prepending installer is deliberately invoked with `--experimental`.
 An accepted ilxyr outcome is the evidence needed before removing that flag.
@@ -68,8 +75,15 @@ the evaluation and reference backends, all final and sequential statistical
 rules, official Torch/Transformers/Pillow versions, installation treatment,
 the ban on spectral and weight-resident metadata, content-addressed sidecars,
 telemetry behavior, timeout, and compute ceiling. The complete policy and its
-digest are stored in both `experiment.json` and `project.json`; changing any
+digest are stored in `project.json`; the digest is bound into the experiment ID
+and checker lineage in the schema-constrained `experiment.json`. Changing any
 bound setting therefore creates a different experiment identity.
+
+CI builds the exact pinned ilxyr revision, generates and admits a miniature
+project, and then performs a real zero-compute `ilxyr run --execute`. The job
+requires a clean executor parse, the exact metric set, an accepted evidence
+record, one `EvidenceRecorded` ledger event, and a valid workspace. This tests
+the production JSON boundary without loading a model or spending cloud compute.
 
 On AWS, pass `--progress-upload-uri s3://bucket/prefix/progress.jsonl` while
 generating the project, or set `LECORE_PROGRESS_UPLOAD_URI` in the runner

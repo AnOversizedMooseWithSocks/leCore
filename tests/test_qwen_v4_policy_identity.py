@@ -122,6 +122,24 @@ def test_v4_experiment_id_and_checker_bind_complete_policy(tmp_path):
     assert experiment["evidence_authority"]["provenance"]["checker"] == \
         "checker://lecore/qwen35-acceptance/%s/v4" % digest
     assert changed["experiment_id"] != project["experiment_id"]
+    execution_args = experiment["execution"]["args"]
+    runner_path = ROOT / "experiments" / "qwen35_acceptance" / "run.py"
+    runner_spec = importlib.util.spec_from_file_location(
+        "qwen_v4_runner_parser", runner_path)
+    runner = importlib.util.module_from_spec(runner_spec)
+    runner_spec.loader.exec_module(runner)
+    parsed = runner.argument_parser().parse_args(execution_args[1:])
+    assert parsed.model_dir == Path(execution_args[1])
+    frozen_flags = {
+        "--expected-source-commit": project["source_commit"],
+        "--expected-model-digest": project["model_digest"],
+        "--expected-installation-sha256":
+            project["corpora"]["installation"]["sha256"],
+        "--expected-evaluation-sha256":
+            project["corpora"]["evaluation"]["sha256"],
+    }
+    for flag, expected in frozen_flags.items():
+        assert execution_args[execution_args.index(flag) + 1] == expected
     assert policy["official_compatibility"]["dependency_versions"] == \
         generator.OFFICIAL_DEPENDENCY_VERSIONS
     lock = ROOT / policy["official_compatibility"]["environment_lock"]

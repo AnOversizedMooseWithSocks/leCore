@@ -47,7 +47,9 @@ def test_runtime_preflight_and_requirements_cannot_drift():
     }
     assert _contract_dependency_versions() == expected_preflight
     runner = (EXPERIMENT / "run.py").read_text(encoding="utf-8")
-    assert "from contract import METRIC_NAMES, OFFICIAL_DEPENDENCY_VERSIONS" in runner
+    assert "from contract import" in runner
+    assert "METRIC_NAMES" in runner
+    assert "OFFICIAL_DEPENDENCY_VERSIONS" in runner
 
 
 def test_ci_and_operator_docs_install_the_frozen_file():
@@ -61,7 +63,7 @@ def test_ci_and_operator_docs_install_the_frozen_file():
     assert relative in benchmark
 
 
-def test_ci_builds_frozen_ilxyr_and_admits_generated_project_without_execution():
+def test_ci_builds_frozen_ilxyr_and_executes_generated_envelope_contract():
     workflow = (REPO / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8")
     revision = (EXPERIMENT / "ilxyr-revision.txt").read_text(
@@ -76,4 +78,8 @@ def test_ci_builds_frozen_ilxyr_and_admits_generated_project_without_execution()
     assert "critical Qwen tests skipped" in workflow
     assert 'run([cli, "compile"' in preflight
     assert 'run([cli, "admit"' in preflight
-    assert 'run([cli, "run"' not in preflight
+    assert 'run([cli, "run"' in preflight
+    assert '"--execute"' in preflight
+    assert "qwen_executor_contract_fixture.py" in preflight
+    assert '"EvidenceRecorded"' in preflight
+    assert 'status.get("latest_evidence")' in preflight

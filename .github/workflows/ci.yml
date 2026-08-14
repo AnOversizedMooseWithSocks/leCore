@@ -73,7 +73,7 @@ jobs:
             tests/test_qwen_runtime_benchmark.py \
             tests/test_qwen_v4_policy_identity.py
           python -c "import xml.etree.ElementTree as E; r=E.parse('/tmp/qwen-contract.xml').getroot(); s=r.findall('.//skipped'); assert not s, 'critical Qwen tests skipped: %d' % len(s)"
-      - name: Compile and admit the generated miniature project without execution
+      - name: Execute the zero-compute Qwen envelope through frozen ilxyr
         run: >-
           python tools/ci_qwen_ilxyr_preflight.py
           --ilxyr-cli .ci/ilxyr/target/release/ilxyr

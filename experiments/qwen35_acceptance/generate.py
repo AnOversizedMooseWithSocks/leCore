@@ -17,7 +17,8 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from contract import (METRIC_NAMES, METRIC_SPECS,  # noqa: E402
-                      OFFICIAL_DEPENDENCY_VERSIONS, RUNNER_POLICY_SCHEMA)
+                      OFFICIAL_DEPENDENCY_VERSIONS, RUNNER_POLICY_SCHEMA,
+                      model_manifest)
 
 
 MODEL_REF = "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design"
@@ -29,21 +30,6 @@ def sha256_file(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def model_manifest(model_dir):
-    # Bind every top-level file in the materialized snapshot.  The processor,
-    # chat template, and index are part of the official vision/text smoke just
-    # as surely as config.json and the weights are.  Hidden local cache state
-    # is deliberately excluded.
-    paths = sorted(path for path in model_dir.iterdir()
-                   if path.is_file() and not path.name.startswith("."))
-    if not any(path.suffix == ".safetensors" for path in paths):
-        raise ValueError("no safetensors checkpoint in %s" % model_dir)
-    records = [{"path": path.name, "sha256": sha256_file(path),
-                "bytes": path.stat().st_size} for path in paths]
-    canonical = json.dumps(records, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(canonical).hexdigest(), records
 
 
 def actor(role):
@@ -364,6 +350,10 @@ def main(argv=None):
             "program": str(python),
             "args": [str(HERE / "run.py"), str(model_dir), str(installed_dir),
                      str(installation_corpus), str(evaluation_corpus),
+                     "--expected-source-commit", source_commit,
+                     "--expected-model-digest", model_digest,
+                     "--expected-installation-sha256", installation_digest,
+                     "--expected-evaluation-sha256", evaluation_digest,
                      "--min-tokens", str(int(args.min_tokens)),
                      "--chunk-size", str(int(args.initial_chunk_size)),
                      "--max-chunk-size", str(int(args.max_chunk_size)),

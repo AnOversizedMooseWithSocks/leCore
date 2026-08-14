@@ -1,5 +1,9 @@
 """Frozen metric and dependency contract for Qwen acceptance experiments."""
 
+import hashlib
+import json
+from pathlib import Path
+
 
 # v4 binds these exact public-interface dependencies into the admitted
 # experiment identity.  The runner independently verifies the same versions
@@ -13,6 +17,29 @@ OFFICIAL_DEPENDENCY_VERSIONS = {
 }
 
 RUNNER_POLICY_SCHEMA = "lecore.qwen35.runner-policy.v4"
+
+
+def model_manifest(model_dir):
+    """Content-bind every public top-level model/processor file."""
+    root = Path(model_dir)
+    paths = sorted(path for path in root.iterdir()
+                   if path.is_file() and not path.name.startswith("."))
+    if not any(path.suffix == ".safetensors" for path in paths):
+        raise ValueError("no safetensors checkpoint in %s" % root)
+
+    def digest(path):
+        value = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                value.update(chunk)
+        return value.hexdigest()
+
+    records = [{"path": path.name, "sha256": digest(path),
+                "bytes": path.stat().st_size} for path in paths]
+    canonical = json.dumps(
+        records, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(canonical).hexdigest(), records
+
 
 METRIC_SPECS = [
     {"name": "acceptance_pass", "unit": "boolean", "description": "All mandatory Qwen installation acceptance gates passed, encoded as 0 or 1."},

@@ -9,6 +9,7 @@ import types
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +29,47 @@ def load_script(name, path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_executor_envelope_is_closed_and_rejects_extended_source_fields():
+    runner = load_script(
+        "qwen_acceptance_executor_contract",
+        ROOT / "experiments" / "qwen35_acceptance" / "run.py")
+    envelope = runner.executor_contract_fixture(min_tokens=1000)
+
+    assert set(envelope) == {"metrics", "source"}
+    assert set(envelope["metrics"]) == set(runner.METRIC_NAMES)
+    assert set(envelope["source"]) == {"repository", "commit", "artifacts"}
+    assert envelope["metrics"]["acceptance_pass"] == 1.0
+    assert envelope["metrics"]["eval_tokens"] == 1000.0
+
+    for illegal_key in ("inputs", "emitted_checkpoint"):
+        source = dict(envelope["source"])
+        source[illegal_key] = {}
+        with pytest.raises(ValueError, match="source.*keys drifted"):
+            runner.build_executor_output(envelope["metrics"], source)
+
+    metrics = dict(envelope["metrics"])
+    metrics["acceptance_pass"] = float("nan")
+    with pytest.raises(ValueError, match="must be finite"):
+        runner.build_executor_output(metrics, envelope["source"])
+
+
+def test_zero_compute_fixture_emits_the_production_envelope():
+    completed = subprocess.run([
+        sys.executable, str(ROOT / "tools" / "qwen_executor_contract_fixture.py"),
+        str(ROOT / "experiments" / "qwen35_acceptance" / "run.py"),
+        "/unused/model", "/unused/output", "/unused/install.txt",
+        "/unused/evaluation.txt", "--min-tokens", "1000",
+        "--expected-source-commit", "1" * 40,
+    ], cwd=ROOT, capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.stderr == ""
+    envelope = json.loads(completed.stdout)
+    assert set(envelope) == {"metrics", "source"}
+    assert set(envelope["source"]) == {"repository", "commit", "artifacts"}
+    assert envelope["source"]["commit"] == "1" * 40
+    assert envelope["metrics"]["eval_tokens"] == 1000.0
 
 
 def test_paired_gate_uses_blocks_for_correlated_losses():
@@ -263,6 +305,25 @@ def test_default_installer_is_logit_safe_and_binds_sidecar_bytes(tmp_path):
     assert files["model.safetensors"]["sha256"] == hashlib.sha256(
         (installed / "model.safetensors").read_bytes()).hexdigest()
     assert files["lecore_index.npz"]["model_weights"] is False
+    evaluation = tmp_path / "evaluation.txt"
+    evaluation.write_text("Held-out provenance bytes are distinct.")
+    frozen_inputs = runner.frozen_input_snapshot(output, corpus, evaluation)
+    expected = {
+        "source_commit": frozen_inputs["source_commit"],
+        "model_digest": frozen_inputs["model"]["manifest_sha256"],
+        "installation_sha256": frozen_inputs["installation_corpus"]["sha256"],
+        "evaluation_sha256": frozen_inputs["evaluation_corpus"]["sha256"],
+    }
+    assert runner.require_frozen_input_identity(frozen_inputs, expected) == expected
+    provenance = runner.runtime_provenance_snapshot(frozen_inputs, installed)
+    assert provenance["schema"] == "lecore.qwen35-runtime-provenance.v1"
+    assert set(provenance) == {"schema", "inputs", "emitted_checkpoint"}
+    assert provenance["emitted_checkpoint"] == snapshot
+
+    evaluation.write_text("Changed after admission.")
+    drifted = runner.frozen_input_snapshot(output, corpus, evaluation)
+    with pytest.raises(ValueError, match="evaluation_sha256"):
+        runner.require_frozen_input_identity(drifted, expected)
 
 
 def test_installed_mini_qwen_reloads_and_generates_with_transformers(tmp_path):

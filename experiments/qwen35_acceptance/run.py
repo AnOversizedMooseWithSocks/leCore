@@ -28,7 +28,14 @@ for path in (str(HERE), str(REPO)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from contract import METRIC_NAMES, OFFICIAL_DEPENDENCY_VERSIONS  # noqa: E402
+from contract import (METRIC_NAMES, OFFICIAL_DEPENDENCY_VERSIONS,  # noqa: E402
+                      model_manifest)
+
+
+EXECUTOR_OUTPUT_KEYS = frozenset(("metrics", "source"))
+SOURCE_SNAPSHOT_KEYS = frozenset(("repository", "commit", "artifacts"))
+EXTERNAL_ARTIFACT_KEYS = frozenset(("path", "sha256"))
+RUNTIME_PROVENANCE_SCHEMA = "lecore.qwen35-runtime-provenance.v1"
 
 
 def log(message):
@@ -181,6 +188,101 @@ def sha256_file(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _require_exact_keys(label, payload, expected):
+    if not isinstance(payload, dict):
+        raise ValueError("%s must be a JSON object" % label)
+    actual = frozenset(payload)
+    if actual != expected:
+        raise ValueError(
+            "%s keys drifted: expected %s, got %s" %
+            (label, sorted(expected), sorted(actual)))
+
+
+def build_executor_output(metrics, source):
+    """Build the exact closed JSON envelope accepted by frozen ilxyr.
+
+    This validation intentionally duplicates only the tiny public boundary,
+    while CI submits the resulting object to the frozen ilxyr parser itself.
+    Extended run provenance belongs in a hashed external artifact, never as an
+    undeclared field under ``source``.
+    """
+    _require_exact_keys("executor source", source, SOURCE_SNAPSHOT_KEYS)
+    if not isinstance(source["repository"], str) or not source["repository"]:
+        raise ValueError("executor source repository must be a non-empty string")
+    if not isinstance(source["commit"], str) or not source["commit"]:
+        raise ValueError("executor source commit must be a non-empty string")
+    if (len(source["commit"]) != 40 or
+            any(char not in "0123456789abcdef" for char in source["commit"])):
+        raise ValueError("executor source commit must be lowercase 40-character hex")
+    if not isinstance(source["artifacts"], list):
+        raise ValueError("executor source artifacts must be a list")
+    artifacts = []
+    for index, artifact in enumerate(source["artifacts"]):
+        _require_exact_keys(
+            "executor source artifact %d" % index, artifact,
+            EXTERNAL_ARTIFACT_KEYS)
+        path = artifact["path"]
+        digest = artifact["sha256"]
+        if not isinstance(path, str) or not path:
+            raise ValueError("executor source artifact path must be non-empty")
+        if (not isinstance(digest, str) or len(digest) != 64 or
+                any(char not in "0123456789abcdef" for char in digest)):
+            raise ValueError(
+                "executor source artifact sha256 must be lowercase hex")
+        artifacts.append({"path": path, "sha256": digest})
+
+    if not isinstance(metrics, dict) or frozenset(metrics) != frozenset(METRIC_NAMES):
+        raise ValueError("executor metrics do not match the frozen metric contract")
+    normalized_metrics = {}
+    for name in METRIC_NAMES:
+        value = metrics[name]
+        if isinstance(value, bool) or not isinstance(
+                value, (int, float, np.integer, np.floating)):
+            raise ValueError("executor metric %s must be numeric" % name)
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError("executor metric %s must be finite" % name)
+        normalized_metrics[name] = value
+
+    envelope = {
+        "metrics": normalized_metrics,
+        "source": {
+            "repository": source["repository"],
+            "commit": source["commit"],
+            "artifacts": artifacts,
+        },
+    }
+    _require_exact_keys("executor output", envelope, EXECUTOR_OUTPUT_KEYS)
+    return envelope
+
+
+def executor_contract_fixture(min_tokens=4096, source_commit=None):
+    """A zero-compute representative envelope for the frozen-ilxyr CI run."""
+    metrics = {name: 0.0 for name in METRIC_NAMES}
+    for name in (
+            "acceptance_pass", "source_clean", "experimental_installer_used",
+            "tokenizer_parity_pass", "reference_logit_parity_pass",
+            "full_evaluation_pass", "statistical_gate_pass", "reload_pass",
+            "official_reload_pass", "text_generation_pass",
+            "vision_smoke_pass"):
+        metrics[name] = 1.0
+    metrics["eval_tokens"] = float(min_tokens)
+    metrics["sequential_looks_completed"] = 1.0
+    metrics["original_perplexity"] = 1.0
+    metrics["installed_perplexity"] = 1.0
+    metrics["paired_block_length"] = 1.0
+    metrics["paired_effective_tokens"] = float(min_tokens)
+    source = {
+        "repository": "https://github.com/atimics/holostuff.git",
+        "commit": source_commit or "0" * 40,
+        "artifacts": [{
+            "path": "experiments/qwen35_acceptance/run.py",
+            "sha256": sha256_file(Path(__file__)),
+        }],
+    }
+    return build_executor_output(metrics, source)
 
 
 def peak_rss_mb(who):
@@ -808,7 +910,7 @@ def official_output_smokes(installed_dir):
             peak_gpu, diagnostics)
 
 
-def source_snapshot(installation_corpus, evaluation_corpus):
+def source_snapshot():
     repository = subprocess.check_output(
         ["git", "remote", "get-url", "origin"], cwd=REPO, text=True).strip()
     commit = subprocess.check_output(
@@ -834,20 +936,55 @@ def source_snapshot(installation_corpus, evaluation_corpus):
     return float(not dirty), {
         "repository": repository,
         "commit": commit,
-        "inputs": {
-            "installation_corpus": {
-                "path": str(installation_corpus),
-                "sha256": sha256_file(installation_corpus),
-                "bytes": installation_corpus.stat().st_size,
-            },
-            "evaluation_corpus": {
-                "path": str(evaluation_corpus),
-                "sha256": sha256_file(evaluation_corpus),
-                "bytes": evaluation_corpus.stat().st_size,
-            },
-        },
         "artifacts": [{"path": str(path.relative_to(REPO)),
                        "sha256": sha256_file(path)} for path in paths],
+    }
+
+
+def frozen_input_snapshot(model_dir, installation_corpus, evaluation_corpus):
+    model_digest, model_files = model_manifest(model_dir)
+    return {
+        "source_commit": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip(),
+        "model": {
+            "path": str(model_dir),
+            "manifest_sha256": model_digest,
+            "files": model_files,
+        },
+        "installation_corpus": {
+            "path": str(installation_corpus),
+            "sha256": sha256_file(installation_corpus),
+            "bytes": installation_corpus.stat().st_size,
+        },
+        "evaluation_corpus": {
+            "path": str(evaluation_corpus),
+            "sha256": sha256_file(evaluation_corpus),
+            "bytes": evaluation_corpus.stat().st_size,
+        },
+    }
+
+
+def require_frozen_input_identity(snapshot, expected):
+    observed = {
+        "source_commit": snapshot["source_commit"],
+        "model_digest": snapshot["model"]["manifest_sha256"],
+        "installation_sha256": snapshot["installation_corpus"]["sha256"],
+        "evaluation_sha256": snapshot["evaluation_corpus"]["sha256"],
+    }
+    drift = {name: {"expected": expected[name], "observed": observed[name]}
+             for name in expected if observed[name] != expected[name]}
+    if drift:
+        raise ValueError("frozen experiment inputs drifted: %s" %
+                         json.dumps(drift, sort_keys=True))
+    return observed
+
+
+def runtime_provenance_snapshot(frozen_inputs, installed_dir):
+    """Record extended run inputs and checkpoint bytes outside ilxyr source."""
+    return {
+        "schema": RUNTIME_PROVENANCE_SCHEMA,
+        "inputs": frozen_inputs,
+        "emitted_checkpoint": emitted_checkpoint_snapshot(installed_dir),
     }
 
 
@@ -864,9 +1001,7 @@ def emitted_checkpoint_snapshot(installed_dir):
             "total_bytes": sum(item["bytes"] for item in files)}
 
 
-def _main(argv=None, metric_stdout=None):
-    if metric_stdout is None:
-        metric_stdout = sys.stdout
+def argument_parser():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("model_dir", type=Path)
     ap.add_argument("installed_dir", type=Path)
@@ -874,6 +1009,10 @@ def _main(argv=None, metric_stdout=None):
                     help="text used only to ground the experimental installation")
     ap.add_argument("evaluation_corpus", type=Path,
                     help="separate held-out text used only for paired evaluation")
+    ap.add_argument("--expected-source-commit", required=True)
+    ap.add_argument("--expected-model-digest", required=True)
+    ap.add_argument("--expected-installation-sha256", required=True)
+    ap.add_argument("--expected-evaluation-sha256", required=True)
     ap.add_argument("--min-tokens", type=int, default=4096)
     ap.add_argument("--chunk-size", type=int, default=128)
     ap.add_argument("--max-chunk-size", type=int, default=512)
@@ -889,7 +1028,13 @@ def _main(argv=None, metric_stdout=None):
                     help="honor frozen multiplicity-corrected interim NO-GO looks")
     ap.add_argument("--max-regression", type=float, default=0.01)
     ap.add_argument("--logit-tolerance", type=float, default=1e-3)
-    args = ap.parse_args(argv)
+    return ap
+
+
+def _main(argv=None, metric_stdout=None):
+    if metric_stdout is None:
+        metric_stdout = sys.stdout
+    args = argument_parser().parse_args(argv)
 
     model_dir = args.model_dir.resolve()
     installed_dir = args.installed_dir.resolve()
@@ -947,6 +1092,18 @@ def _main(argv=None, metric_stdout=None):
     with recorder.stage("official_dependency_preflight"):
         dependency_versions = official_dependency_preflight()
     recorder.emit("official_dependencies", versions=dependency_versions)
+    with recorder.stage("frozen_input_identity"):
+        frozen_inputs = frozen_input_snapshot(
+            model_dir, installation_corpus, evaluation_corpus)
+        try:
+            require_frozen_input_identity(frozen_inputs, {
+                "source_commit": args.expected_source_commit,
+                "model_digest": args.expected_model_digest,
+                "installation_sha256": args.expected_installation_sha256,
+                "evaluation_sha256": args.expected_evaluation_sha256,
+            })
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
 
     from holographic.io_and_interop.holographic_bpe import BPE
     from holographic.io_and_interop.holographic_gdnruntime import load_runtime
@@ -961,8 +1118,7 @@ def _main(argv=None, metric_stdout=None):
     token_ids = token_ids[:needed]
 
     with recorder.stage("source_snapshot"):
-        source_clean, source = source_snapshot(
-            installation_corpus, evaluation_corpus)
+        source_clean, source = source_snapshot()
     with recorder.stage("reference_parity"):
         with selected_gdn_backend("numpy"):
             tok_pass, ref_error, ref_pass = reference_parity(
@@ -1049,7 +1205,16 @@ def _main(argv=None, metric_stdout=None):
     with recorder.stage("official_output_smokes"):
         official_reload, text_pass, vision_pass, peak_gpu, smoke_diagnostics = \
             official_output_smokes(installed_dir)
-    source["emitted_checkpoint"] = emitted_checkpoint_snapshot(installed_dir)
+    runtime_provenance = runtime_provenance_snapshot(
+        frozen_inputs, installed_dir)
+    provenance_path = artifact_dir / "runtime-provenance.json"
+    provenance_path.write_text(
+        json.dumps(runtime_provenance, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8")
+    source["artifacts"].append({
+        "path": str(provenance_path),
+        "sha256": sha256_file(provenance_path),
+    })
 
     worker_peaks = list(evaluation["worker_peak_rss_mb"].values())
     evaluation_aggregate_peak_upper = (
@@ -1096,12 +1261,14 @@ def _main(argv=None, metric_stdout=None):
                            % (tuple(metrics), METRIC_NAMES))
     if not all(math.isfinite(value) for value in metrics.values()):
         raise RuntimeError("non-finite acceptance metric")
+    executor_output = build_executor_output(metrics, source)
     recorder.emit("run_complete", acceptance_pass=metrics["acceptance_pass"],
                   eval_tokens=metrics["eval_tokens"])
     recorder.flush_upload()
     artifact_dir.mkdir(parents=True, exist_ok=True)
     (artifact_dir / "metrics.json").write_text(
         json.dumps({"metrics": metrics, "source": source,
+                    "runtime_provenance": runtime_provenance,
                     "diagnostics": {
                         "official_smokes": smoke_diagnostics,
                         "official_dependencies": dependency_versions,
@@ -1130,7 +1297,7 @@ def _main(argv=None, metric_stdout=None):
                         },
                     }},
                    indent=2, sort_keys=True))
-    print(json.dumps({"metrics": metrics, "source": source}, sort_keys=True),
+    print(json.dumps(executor_output, sort_keys=True),
           file=metric_stdout, flush=True)
     return 0
 
