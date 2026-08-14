@@ -18,10 +18,23 @@
       "bytes": 1315106,
       "sha256": "35d572230f328797ea26963f0db4b7d9e931fea0732e2e938dc3c7e243223d9a",
       "contains_model_weights": false
+    },
+    {
+      "name": "preflight-003",
+      "source_commit": "c1ddc22916957238c00890bec13fd0609b01b521",
+      "s3_uri": "s3://zero-training-022118847419/qwen35-acceptance/c1ddc22-2fc06364-a6c9d113/v4-formal/qwen35-evidence.tgz",
+      "bytes": 1331849,
+      "sha256": "29d4b28aa0be9896f8993ead3a93a741c831346f64356c35dc7e73bd6f8243de",
+      "contains_model_weights": false
     }
   ],
   "arweave_publication": {
-    "status": "not_applicable_before_ilxyr_verification",
-    "reason": "Both attempts stopped before ilxyr initialization and admission; no ledger or verified experiment result exists to publish."
+    "status": "published",
+    "reason": "Preflight 003 produced a valid partial ilxyr ledger and is published separately without claiming a scientific result.",
+    "root_transaction_id": "S_abPRyuad89zt2QFN-f9G6kIbumkvqBWqg5_K0SkJk",
+    "gateway_url": "https://arweave.net/S_abPRyuad89zt2QFN-f9G6kIbumkvqBWqg5_K0SkJk/",
+    "publication_manifest_sha256": "8ffd2eca944c8731a2db94c553ced22a9a95b90d5aeca0c178b64576c06ba899",
+    "transactions_confirmed": 69,
+    "total_winc_charged": 0
   }
 }

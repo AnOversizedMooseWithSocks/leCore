@@ -1,0 +1,13 @@
+{
+  "schema": "lecore.qwen35-v4-aws-cleanup.v1",
+  "instance_id": "i-0f022ea2acd745193",
+  "instance_state": "terminated",
+  "root_volume_id": "vol-0503ebcb0e04f542a",
+  "root_volume_state": "deleted_not_found",
+  "security_group_id": "sg-075d83f594e2f78ba",
+  "security_group_state": "deleted_not_found",
+  "formal_run_started": false,
+  "retry_launched": false,
+  "estimated_compute_usd_upper_bound": 0.15,
+  "cumulative_v4_preflight_compute_usd_upper_bound": 0.27
+}
