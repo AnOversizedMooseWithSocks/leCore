@@ -1,0 +1,17 @@
+{
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.d5bcfc297a3a.be5d1f431823.v5.acceptance",
+  "forecaster": {
+    "id": "model://codex/lecore-qwen/forecaster-mechanistic",
+    "kind": "model",
+    "model_ref": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/forecaster-mechanistic"
+  },
+  "id": "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.d5bcfc297a3a.be5d1f431823.v5.forecast-mechanistic",
+  "probabilities": {
+    "accepted": 0.15,
+    "execution_failure": 0.3,
+    "rejected": 0.55
+  },
+  "rationale": "The blank prepend has a strong identity construction, while full-checkpoint memory pressure and official multimodal reload remain material execution risks.",
+  "schema": "ilxyr.forecast.v1",
+  "stake": 5
+}
