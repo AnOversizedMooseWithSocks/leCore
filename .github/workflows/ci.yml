@@ -43,6 +43,16 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - name: Check out the frozen ilxyr verifier
+        uses: actions/checkout@v4
+        with:
+          repository: cenetex/ilXyr
+          ref: e92382ff2a5e8714466533a160f6609b4ef9cee8
+          path: .ci/ilxyr
+      - name: Set up Rust for the frozen ilxyr verifier
+        uses: dtolnay/rust-toolchain@1.85.0
+      - name: Build the frozen ilxyr verifier
+        run: cargo build --locked --release -p ilxyr-cli --manifest-path .ci/ilxyr/Cargo.toml
       - name: Install Qwen contract dependencies
         run: |
           python -m pip install --upgrade pip
@@ -55,12 +65,19 @@ jobs:
           assert torchvision.__version__.split('+', 1)[0] == '0.26.0';
           assert transformers.__version__ == '5.14.0'"
       - name: Run the portable, official-loader, native-runtime, benchmark, and ilxyr gates
+        run: |
+          pytest -q --junitxml=/tmp/qwen-contract.xml \
+            tests/test_qwen_acceptance.py \
+            tests/test_qwen_cpu_environment.py \
+            tests/test_qwen_gdn_acceleration.py \
+            tests/test_qwen_runtime_benchmark.py \
+            tests/test_qwen_v4_policy_identity.py
+          python -c "import xml.etree.ElementTree as E; r=E.parse('/tmp/qwen-contract.xml').getroot(); s=r.findall('.//skipped'); assert not s, 'critical Qwen tests skipped: %d' % len(s)"
+      - name: Compile and admit the generated miniature project without execution
         run: >-
-          pytest -q
-          tests/test_qwen_acceptance.py
-          tests/test_qwen_cpu_environment.py
-          tests/test_qwen_gdn_acceleration.py
-          tests/test_qwen_runtime_benchmark.py
+          python tools/ci_qwen_ilxyr_preflight.py
+          --ilxyr-cli .ci/ilxyr/target/release/ilxyr
+          --ilxyr-source .ci/ilxyr
 
   pytest:
     # SHARDED, because the unscoped path is the whole suite in one 20-minute box and it started timing out.

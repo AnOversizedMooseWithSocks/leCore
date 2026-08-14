@@ -59,3 +59,21 @@ def test_ci_and_operator_docs_install_the_frozen_file():
     assert "pip install -r %s" % relative in workflow
     assert relative in readme
     assert relative in benchmark
+
+
+def test_ci_builds_frozen_ilxyr_and_admits_generated_project_without_execution():
+    workflow = (REPO / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8")
+    revision = (EXPERIMENT / "ilxyr-revision.txt").read_text(
+        encoding="utf-8").strip()
+    preflight = (REPO / "tools" / "ci_qwen_ilxyr_preflight.py").read_text(
+        encoding="utf-8")
+    assert len(revision) == 40
+    assert "ref: %s" % revision in workflow
+    assert "--locked --release -p ilxyr-cli" in workflow
+    assert "tools/ci_qwen_ilxyr_preflight.py" in workflow
+    assert "--junitxml=/tmp/qwen-contract.xml" in workflow
+    assert "critical Qwen tests skipped" in workflow
+    assert 'run([cli, "compile"' in preflight
+    assert 'run([cli, "admit"' in preflight
+    assert 'run([cli, "run"' not in preflight

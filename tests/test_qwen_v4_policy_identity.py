@@ -113,8 +113,10 @@ def test_v4_experiment_id_and_checker_bind_complete_policy(tmp_path):
     digest = generator.canonical_policy_digest(policy)
 
     assert project["runner_policy_digest"] == digest
-    assert experiment["runner_policy_digest"] == digest
-    assert experiment["runner_policy"] == policy
+    # ilxyr.experiment.v1 is a closed schema.  The complete policy belongs in
+    # project.json; experiment identity and checker lineage bind its digest.
+    assert "runner_policy_digest" not in experiment
+    assert "runner_policy" not in experiment
     assert digest[:12] in experiment["id"]
     assert experiment["id"].endswith(".v4.acceptance")
     assert experiment["evidence_authority"]["provenance"]["checker"] == \

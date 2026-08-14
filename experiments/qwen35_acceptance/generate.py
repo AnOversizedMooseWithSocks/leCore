@@ -347,8 +347,6 @@ def main(argv=None):
         "models": ["weight://Qwen/Qwen3.5-0.8B/%s" % model_digest],
         "metrics": METRIC_SPECS,
         "seeds": [0],
-        "runner_policy": runner_policy,
-        "runner_policy_digest": policy_digest,
         "outcome_contract": {
             "primary_metric": "acceptance_pass",
             "success_outcome": "accepted",
