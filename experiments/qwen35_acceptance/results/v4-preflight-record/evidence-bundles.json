@@ -1,0 +1,27 @@
+{
+  "schema": "lecore.qwen35-v4-preflight-evidence.v1",
+  "formal_run_started": false,
+  "scientific_result_admitted": false,
+  "attempts": [
+    {
+      "name": "preflight-001",
+      "source_commit": "13849b0ebd2ed1f0a252534a130c2a030966c7d1",
+      "s3_uri": "s3://zero-training-022118847419/qwen35-acceptance/13849b0-2fc06364-a6c9d113/v4-formal/qwen35-evidence.tgz",
+      "bytes": 1315010,
+      "sha256": "a718a320e5010886f8631e022ddf6df2a0900c55fbc835559938aadfaa7a1a39",
+      "contains_model_weights": false
+    },
+    {
+      "name": "preflight-002",
+      "source_commit": "df412cc7c938bb376014b7a68067ccc91ad9a5a6",
+      "s3_uri": "s3://zero-training-022118847419/qwen35-acceptance/df412cc-2fc06364-a6c9d113/v4-formal/qwen35-evidence.tgz",
+      "bytes": 1315106,
+      "sha256": "35d572230f328797ea26963f0db4b7d9e931fea0732e2e938dc3c7e243223d9a",
+      "contains_model_weights": false
+    }
+  ],
+  "arweave_publication": {
+    "status": "not_applicable_before_ilxyr_verification",
+    "reason": "Both attempts stopped before ilxyr initialization and admission; no ledger or verified experiment result exists to publish."
+  }
+}
