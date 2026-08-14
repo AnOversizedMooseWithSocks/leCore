@@ -69,8 +69,8 @@ Bonferroni-corrected looks at 1,024-token intervals for early rejection only.
 Every GO still requires all 4,096 paired positions and the unchanged final 95%
 paired block-bootstrap bound.
 
-For v4, the full runner policy is canonical JSON whose SHA-256 digest is part
-of the experiment ID and checker lineage. It covers chunking and worker mode,
+Starting with v4, the full runner policy is canonical JSON whose SHA-256 digest
+is part of the experiment ID and checker lineage. It covers chunking and worker mode,
 the evaluation and reference backends, all final and sequential statistical
 rules, official Torch/Transformers/Pillow versions, installation treatment,
 the ban on spectral and weight-resident metadata, content-addressed sidecars,
@@ -79,8 +79,17 @@ digest are stored in `project.json`; the digest is bound into the experiment ID
 and checker lineage in the schema-constrained `experiment.json`. Changing any
 bound setting therefore creates a different experiment identity.
 
-CI builds the exact pinned ilxyr revision, generates and admits a miniature
-project, and then performs a real zero-compute `ilxyr run --execute`. The job
+Experiment v7 and later additionally make native GDN execution a mandatory
+acceptance gate when the C backend is requested. Both isolated evaluators must
+report successful fresh-state and resumed-state parity checks, actual native
+calls and tokens, and no refusal or fallback. A completed run that preserves
+model correctness but falls back to NumPy is therefore NO-GO for the native
+acceleration claim, rather than GO with a diagnostic caveat.
+
+CI builds the exact pinned ilxyr revision, verifies a real native compilation
+from an ilxyr-style environment with no inherited `PATH`, generates and admits
+a miniature project, and then performs a real zero-compute `ilxyr run
+--execute`. The job
 requires a clean executor parse, the exact metric set, an accepted evidence
 record, one `EvidenceRecorded` ledger event, and a valid workspace. This tests
 the production JSON boundary without loading a model or spending cloud compute.

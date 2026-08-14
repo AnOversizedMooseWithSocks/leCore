@@ -258,6 +258,15 @@ def build_executor_output(metrics, source):
     return envelope
 
 
+def acceptance_gate_pass(required_gates, native_gdn_active,
+                         require_native_gdn=False):
+    """Resolve GO only from the frozen mandatory gates for this run policy."""
+    gates = list(required_gates)
+    if require_native_gdn:
+        gates.append(native_gdn_active)
+    return float(all(float(value) >= 1.0 for value in gates))
+
+
 def executor_contract_fixture(min_tokens=4096, source_commit=None):
     """A zero-compute representative envelope for the frozen-ilxyr CI run."""
     metrics = {name: 0.0 for name in METRIC_NAMES}
@@ -1021,6 +1030,8 @@ def argument_parser():
                     default="auto")
     ap.add_argument("--gdn-backend", choices=("numpy", "c"),
                     help="default: LECORE_GDN_BACKEND, otherwise numpy")
+    ap.add_argument("--require-native-gdn", action="store_true",
+                    help="make complete parity-gated native GDN evidence a mandatory acceptance gate")
     ap.add_argument("--progress-upload-uri",
                     help="optional s3:// URI refreshed after every evaluation chunk")
     ap.add_argument("--sequential-looks", default="1024,2048,3072,4096")
@@ -1067,6 +1078,8 @@ def _main(argv=None, metric_stdout=None):
     gdn_backend = args.gdn_backend or os.environ.get("LECORE_GDN_BACKEND", "numpy")
     if gdn_backend not in ("numpy", "c"):
         raise SystemExit("LECORE_GDN_BACKEND must be numpy or c")
+    if args.require_native_gdn and gdn_backend != "c":
+        raise SystemExit("--require-native-gdn requires --gdn-backend c")
     artifact_dir = installed_dir.parent / (installed_dir.name + ".acceptance")
     progress_upload_uri = (args.progress_upload_uri or
                            os.environ.get("LECORE_PROGRESS_UPLOAD_URI"))
@@ -1081,6 +1094,7 @@ def _main(argv=None, metric_stdout=None):
         memory_budget_fraction=float(args.memory_budget_fraction),
         evaluation_mode=args.evaluation_mode,
         gdn_backend=gdn_backend,
+        require_native_gdn=bool(args.require_native_gdn),
         reference_backend="numpy",
         installation_backend="numpy",
         progress_upload_uri=progress_upload_uri,
@@ -1226,7 +1240,9 @@ def _main(argv=None, metric_stdout=None):
                 statistical_pass,
                 reload_pass, official_reload, text_pass, vision_pass]
     metrics = {
-        "acceptance_pass": float(all(v >= 1.0 for v in required)),
+        "acceptance_pass": acceptance_gate_pass(
+            required, native_gdn_active,
+            require_native_gdn=bool(args.require_native_gdn)),
         "source_clean": source_clean,
         "spectral_filtering_enabled": 0.0,
         "experimental_installer_used": 1.0,

@@ -1,6 +1,11 @@
 """Parity and fallback gates for the optional native Qwen GDN recurrence."""
 
 from concurrent.futures import ThreadPoolExecutor
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -42,13 +47,16 @@ def test_auto_is_rejected_instead_of_silently_aliasing_c():
 
 
 def test_native_scan_parity_including_resumed_state():
+    from holographic.io_and_interop import holographic_ccrun as ccrun
+
     arrays = _inputs(tokens=53)
     first_ref = gdn_recurrence_numpy(*arrays)
     dispatch = GDNRecurrence("c")
     first = dispatch(*arrays)
     if dispatch.report()["refused"]:
-        # No system compiler is a supported NumPy-only installation, and the
-        # fallback must still be exactly the reference result.
+        # A compiler-less installation supports the exact NumPy fallback.  If
+        # a compiler exists, refusal is a failed native contract, not a pass.
+        assert ccrun.cc_available() is None, dispatch.report()["refused"]
         assert np.array_equal(first[0], first_ref[0])
         assert np.array_equal(first[1], first_ref[1])
         return
@@ -76,6 +84,65 @@ def test_native_scan_parity_including_resumed_state():
     assert provenance["compiler"]["host_machine"]
     assert provenance["compiler"]["target"]
     assert provenance["compiler"]["pointer_bits"] in (32, 64)
+    assert provenance["compiler"]["execution_environment"]["PATH"]
+
+
+def test_native_compile_survives_ilxyr_cleared_environment(tmp_path):
+    """Mirror ilxyr's env_clear boundary in a fresh Python interpreter."""
+    from holographic.io_and_interop import holographic_ccrun as ccrun
+
+    if ccrun.cc_available() is None:
+        pytest.skip("cleared-environment test needs a C compiler")
+    cache = tmp_path / "cleared-env-cache"
+    program = """
+import json
+import sys
+from holographic.io_and_interop import holographic_ccrun as ccrun
+ccrun.CACHE_DIR = sys.argv[1]
+details = ccrun.compile_cached_details('void lecore_env_probe(void) {}\\n', opt='safe')
+print(json.dumps(details, sort_keys=True))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", program, str(cache)],
+        cwd=Path(__file__).resolve().parents[1],
+        env={"ILXYR_EXPERIMENT_ID": "ci-env-clear",
+             "ILXYR_RUN_ID": "ci-env-clear"},
+        capture_output=True, text=True, check=False, timeout=120)
+    assert completed.returncode == 0, completed.stderr
+    details = json.loads(completed.stdout)
+    assert Path(details["path"]).is_file()
+    assert len(details["library_sha256"]) == 64
+    compile_env = details["compiler"]["execution_environment"]
+    assert compile_env["LC_ALL"] == "C"
+    assert os.path.dirname(details["compiler"]["path"]) in \
+        compile_env["PATH"].split(os.pathsep)
+
+
+def test_compiler_failure_preserves_stderr_in_refusal(tmp_path, monkeypatch):
+    from holographic.io_and_interop import holographic_ccrun as ccrun
+    from holographic.io_and_interop.holographic_emit import EmitError
+
+    class Completed:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(command, **_kwargs):
+        if "--version" in command:
+            return Completed(stdout="synthetic cc 1.0")
+        if "-dumpmachine" in command:
+            return Completed(stdout="synthetic-target")
+        return Completed(returncode=23, stderr="synthetic linker failure")
+
+    monkeypatch.setattr(ccrun, "cc_available", lambda: sys.executable)
+    monkeypatch.setattr(ccrun.subprocess, "run", fake_run)
+    monkeypatch.setattr(ccrun, "CACHE_DIR", str(tmp_path / "failure-cache"))
+    with pytest.raises(EmitError) as caught:
+        ccrun.compile_cached_details("void failure_probe(void) {}\n", opt="safe")
+    message = str(caught.value)
+    assert "exit code 23" in message
+    assert "synthetic linker failure" in message
 
 
 def test_bad_native_result_is_refused_and_falls_back(monkeypatch):

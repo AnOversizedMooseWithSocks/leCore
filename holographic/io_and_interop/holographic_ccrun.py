@@ -38,6 +38,41 @@ from holographic.io_and_interop.holographic_emit import EmitError, _as_node_and_
 CACHE_DIR = os.environ.get("LECORE_CC_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "lecore_cc"))
 
 
+def compiler_environment(cc, temp_dir=None):
+    """Minimal deterministic environment required by a system compiler.
+
+    ilxyr deliberately executes admitted experiments with ``env_clear()``.
+    GCC/Clang can still be located through Python's default search path, but
+    their driver processes need ``PATH`` to locate the linker and assembler.
+    Reconstruct that toolchain path here instead of weakening ilxyr's clean
+    execution boundary or inheriting unrelated host variables.
+    """
+    compiler_dir = os.path.dirname(os.path.realpath(cc))
+    inherited_path = os.environ.get("PATH") or os.defpath
+    path_entries = []
+    for entry in [compiler_dir] + inherited_path.split(os.pathsep):
+        if entry and entry not in path_entries:
+            path_entries.append(entry)
+    environment = {
+        "PATH": os.pathsep.join(path_entries),
+        "LC_ALL": "C",
+        "LANG": "C",
+    }
+    # These are OS runtime locations, not user configuration.  MSVC and
+    # temporary-file creation may require them on platforms that define them.
+    for name in ("SYSTEMROOT", "WINDIR"):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
+    if temp_dir is not None:
+        # An env-cleared macOS process cannot recover DARWIN_USER_TEMP_DIR.
+        # The content-addressed cache is already writable and private to this
+        # compile, so it is also a safe compiler scratch location.
+        for name in ("TMPDIR", "TEMP", "TMP"):
+            environment[name] = os.path.abspath(temp_dir)
+    return environment
+
+
 def cc_available():
     """Path of a usable C compiler, or None. Order: $CC, cc, gcc, clang -- $CC first because the person who
     set it knows their container better than we do."""
@@ -61,12 +96,13 @@ def compiler_identity(cc=None):
     cc = cc or cc_available()
     if cc is None:
         raise EmitError("no C compiler found")
+    execution_environment = compiler_environment(cc)
 
     def capture(*args):
         try:
             completed = subprocess.run(
                 [cc, *args], capture_output=True, text=True, check=False,
-                timeout=30)
+                timeout=30, env=execution_environment)
             return (completed.stdout + completed.stderr).strip()[:4000]
         except (OSError, subprocess.SubprocessError) as exc:
             # Identity probing must not turn an otherwise usable compiler into
@@ -91,7 +127,20 @@ def compiler_identity(cc=None):
         "host_machine": platform.machine(),
         "pointer_bits": ctypes.sizeof(ctypes.c_void_p) * 8,
         "byteorder": sys.byteorder,
+        "execution_environment": execution_environment,
     }
+
+
+def _compiler_failure(completed, command):
+    """Create a bounded diagnostic that survives the native fallback path."""
+    def bounded(value):
+        value = (value or "").strip()
+        return value if len(value) <= 8000 else value[-8000:]
+
+    return EmitError(
+        "C compiler failed with exit code %d\ncommand: %s\nstdout:\n%s\nstderr:\n%s" %
+        (completed.returncode, " ".join(command), bounded(completed.stdout),
+         bounded(completed.stderr)))
 
 
 def build_batch_source(kernel, dtype="f64"):
@@ -182,9 +231,22 @@ def compile_cached_details(source, opt="fast", timeout=300):
         try:
             with open(csrc, "w") as fh:
                 fh.write(source)
-            subprocess.run(
-                [cc] + flags + ["-shared", "-fPIC", csrc, "-o", tmp, "-lm"],
-                check=True, capture_output=True, timeout=timeout, cwd=CACHE_DIR)
+            command = ([cc] + flags +
+                       ["-shared", "-fPIC", csrc, "-o", tmp, "-lm"])
+            try:
+                completed = subprocess.run(
+                    command, check=False, capture_output=True, text=True,
+                    timeout=timeout, cwd=CACHE_DIR,
+                    env=compiler_environment(cc, temp_dir=CACHE_DIR))
+            except subprocess.TimeoutExpired as exc:
+                raise EmitError(
+                    "C compiler timed out after %s seconds: %s" %
+                    (timeout, " ".join(command))) from exc
+            except OSError as exc:
+                raise EmitError("could not execute C compiler %s: %s" %
+                                (cc, exc)) from exc
+            if completed.returncode != 0:
+                raise _compiler_failure(completed, command)
             os.replace(tmp, so)
         finally:
             for path in (csrc, tmp):

@@ -124,6 +124,9 @@ def main(argv=None):
         ap.error("--min-tokens must be at least 1000")
     if int(args.experiment_version) < 4:
         ap.error("this repaired policy is v4; --experiment-version must be at least 4")
+    require_native_gdn = int(args.experiment_version) >= 7
+    if require_native_gdn and args.gdn_backend != "c":
+        ap.error("experiment version 7+ requires --gdn-backend c")
     if args.initial_chunk_size < 1:
         ap.error("--initial-chunk-size must be positive")
     if not 0 < args.memory_budget_fraction <= 0.5:
@@ -189,6 +192,7 @@ def main(argv=None):
         "initial_chunk_size": int(args.initial_chunk_size),
         "max_chunk_size": int(args.max_chunk_size),
         "gdn_backend": args.gdn_backend,
+        "native_gdn_required_for_acceptance": require_native_gdn,
         "sequential_looks": sequential_looks,
         "early_acceptance_allowed": False,
         "early_rejection_allowed": True,
@@ -204,6 +208,7 @@ def main(argv=None):
             "common_chunk_schedule_required": True,
             "backend": args.gdn_backend,
             "reference_backend": "numpy",
+            "native_gdn_required_for_acceptance": require_native_gdn,
             "benchmark_report_sha256": benchmark_digest,
         },
         "statistical_decision": {
@@ -303,10 +308,14 @@ def main(argv=None):
         ["The emitted stdout is exactly the ilxyr metrics/source envelope.",
          "Installer logs, durable per-chunk progress, monotonic stage timings, memory-selected chunk sizes, and a human-readable metrics artifact are retained beside the output checkpoint."],
         0.85)
+    native_acceptance_clause = (
+        " Both paired evaluators must also prove actual native C Gated-DeltaNet "
+        "execution with fresh-state and resumed-state parity and no fallback."
+        if require_native_gdn else "")
     design = contribution(
         ids["design"], "experiment_design", "experiment-designer",
         "One-shot Qwen3.5 installation acceptance run",
-        "Execute once against the content-bound public checkpoint, installation corpus, and separate held-out evaluation corpus. Do not tune thresholds, sequential looks, chunk limits, or replace either corpus after admission. Memory facts select a chunk no larger than %d and two isolated workers evaluate the same frozen token positions concurrently when a conservative host-memory admission passes. Sequential looks at %s paired tokens divide alpha equally across the frozen looks and may only stop for NO-GO; GO always requires all %d positions and the unchanged final 95 percent paired block interval. Resolve accepted only when source cleanliness, tokenizer parity, reference-logit parity, the paired statistical gate, leCore disk reload, official Transformers reload, official text generation, and official vision smoke all pass. An official model capability failure emits zero-valued gates and is preserved as rejected evidence; dependency or runner failure remains execution_failure." % (int(args.max_chunk_size), ", ".join(map(str, sequential_looks)), int(args.min_tokens)),
+        ("Execute once against the content-bound public checkpoint, installation corpus, and separate held-out evaluation corpus. Do not tune thresholds, sequential looks, chunk limits, or replace either corpus after admission. Memory facts select a chunk no larger than %d and two isolated workers evaluate the same frozen token positions concurrently when a conservative host-memory admission passes. Sequential looks at %s paired tokens divide alpha equally across the frozen looks and may only stop for NO-GO; GO always requires all %d positions and the unchanged final 95 percent paired block interval. Resolve accepted only when source cleanliness, tokenizer parity, reference-logit parity, the paired statistical gate, leCore disk reload, official Transformers reload, official text generation, and official vision smoke all pass.%s An official model capability failure emits zero-valued gates and is preserved as rejected evidence; dependency or runner failure remains execution_failure." % (int(args.max_chunk_size), ", ".join(map(str, sequential_looks)), int(args.min_tokens), native_acceptance_clause)),
         [ids["hypothesis"], ids["foundation"], ids["engineering"]],
         ["Accepted and rejected are exhaustive for a valid metrics envelope.",
          "Runtime or dependency failure resolves separately as execution_failure."],
@@ -362,6 +371,7 @@ def main(argv=None):
                      "--gdn-backend", args.gdn_backend,
                      "--sequential-looks", ",".join(map(str, sequential_looks)),
                      "--allow-early-rejection"] +
+                    (["--require-native-gdn"] if require_native_gdn else []) +
                     (["--progress-upload-uri", args.progress_upload_uri]
                      if args.progress_upload_uri else []),
             "timeout_seconds": int(args.timeout_seconds),

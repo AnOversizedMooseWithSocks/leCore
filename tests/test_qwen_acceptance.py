@@ -55,6 +55,19 @@ def test_executor_envelope_is_closed_and_rejects_extended_source_fields():
         runner.build_executor_output(metrics, envelope["source"])
 
 
+def test_v7_native_gate_cannot_be_omitted_from_go():
+    runner = load_script(
+        "qwen_acceptance_native_gate",
+        ROOT / "experiments" / "qwen35_acceptance" / "run.py")
+    correctness_gates = [1.0] * 9
+    assert runner.acceptance_gate_pass(
+        correctness_gates, 0.0, require_native_gdn=False) == 1.0
+    assert runner.acceptance_gate_pass(
+        correctness_gates, 0.0, require_native_gdn=True) == 0.0
+    assert runner.acceptance_gate_pass(
+        correctness_gates, 1.0, require_native_gdn=True) == 1.0
+
+
 def test_zero_compute_fixture_emits_the_production_envelope():
     completed = subprocess.run([
         sys.executable, str(ROOT / "tools" / "qwen_executor_contract_fixture.py"),
@@ -701,10 +714,42 @@ def test_generator_emits_complete_ilxyr_contract(tmp_path):
     gdn_index = experiment["execution"]["args"].index("--gdn-backend")
     assert experiment["execution"]["args"][gdn_index + 1] == "c"
     assert "--allow-early-rejection" in experiment["execution"]["args"]
+    assert "--require-native-gdn" not in experiment["execution"]["args"]
     for name in ("hypothesis.json", "foundation.json", "engineering-review.json",
                  "experiment-design.json", "forecast-empirical.json",
                  "forecast-mechanistic.json", "funding.json"):
         assert (project / name).is_file()
+
+
+def test_v7_contract_requires_native_gdn_for_go(tmp_path):
+    output, _ = build_fixture(tmp_path)
+    installation = tmp_path / "installation.txt"
+    evaluation = tmp_path / "evaluation.txt"
+    installation.write_text("Installation grounding. " * 400)
+    evaluation.write_text("Held-out evaluation. " * 400)
+    project = tmp_path / "project-v7"
+    command = [
+        sys.executable,
+        str(ROOT / "experiments" / "qwen35_acceptance" / "generate.py"),
+        str(output), str(installation), str(evaluation), str(project),
+        "--min-tokens", "1000", "--experiment-version", "7",
+        "--gdn-backend", "c",
+    ]
+    completed = subprocess.run(command, cwd=tmp_path, capture_output=True,
+                               text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+    experiment = json.loads((project / "experiment.json").read_text())
+    manifest = json.loads((project / "project.json").read_text())
+    assert "--require-native-gdn" in experiment["execution"]["args"]
+    assert manifest["runner_policy"]["native_gdn_required_for_acceptance"] is True
+    assert manifest["runner_policy"]["evaluation"][
+        "native_gdn_required_for_acceptance"] is True
+
+    rejected = subprocess.run(
+        command[:-1] + ["numpy"], cwd=tmp_path, capture_output=True,
+        text=True, check=False)
+    assert rejected.returncode != 0
+    assert "version 7+ requires --gdn-backend c" in rejected.stderr
 
 
 def test_generator_binds_benchmark_before_increasing_chunk(tmp_path):
