@@ -14,6 +14,15 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def assert_portable_identity_logits(original, installed):
+    """Require sub-micro numerical identity across platform BLAS kernels."""
+    # Shifting unchanged tensors to new layer keys can change their mapped
+    # alignment and therefore float32 reduction order.  This fixture gate is
+    # still 1,000x tighter than the preregistered 1e-3 real-model relative-logit
+    # acceptance tolerance, without pretending bit identity is portable.
+    np.testing.assert_allclose(original, installed, rtol=1e-6, atol=1e-6)
+
+
 def load_script(name, path):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -237,14 +246,7 @@ def test_default_installer_is_logit_safe_and_binds_sidecar_bytes(tmp_path):
     assert np.array_equal(original_embedding, installed_embedding)
     original_logits = original_runtime.forward(heldout_ids)
     installed_logits = installed_runtime.forward(heldout_ids)
-    # The prepended layer is a mathematical identity, but shifting the original
-    # tensors to new layer keys can change their mapped alignment and therefore
-    # BLAS reduction order across platforms.  Linux x86 and Apple arm64 differ
-    # by sub-micro float32 rounding here, so bit identity is not a portable
-    # scientific invariant.  This fixture gate remains 1,000x tighter than the
-    # preregistered 1e-3 real-model relative-logit acceptance tolerance.
-    np.testing.assert_allclose(
-        original_logits, installed_logits, rtol=1e-6, atol=1e-6)
+    assert_portable_identity_logits(original_logits, installed_logits)
     assert manifest["weight_resident_metadata"] is False
     assert manifest["memory_index"]["mode"] == "sidecar"
     assert manifest["boot_record"]["mode"] == "sidecar"
@@ -296,8 +298,9 @@ def test_installed_mini_qwen_reloads_and_generates_with_transformers(tmp_path):
     manifest = json.loads((installed / "lecore.json").read_text())
 
     assert np.array_equal(original_embedding, installed_embedding)
-    assert np.array_equal(original_runtime.forward(heldout_ids),
-                          installed_runtime.forward(heldout_ids))
+    assert_portable_identity_logits(
+        original_runtime.forward(heldout_ids),
+        installed_runtime.forward(heldout_ids))
     assert manifest["weight_resident_metadata"] is False
     assert manifest["memory_index"]["mode"] == "sidecar"
     assert manifest["boot_record"]["mode"] == "sidecar"
