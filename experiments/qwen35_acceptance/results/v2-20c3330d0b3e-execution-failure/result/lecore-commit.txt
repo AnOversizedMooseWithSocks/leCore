@@ -1,0 +1,7 @@
+commit 2f32151c6d44c80a7e2ff98c0696650cd1d9c6f1
+Author:     atimics <atimics@ratimics.com>
+AuthorDate: Wed Aug 12 17:08:37 2026 -0700
+Commit:     atimics <atimics@ratimics.com>
+CommitDate: Wed Aug 12 17:08:37 2026 -0700
+
+    experiments: version formal qwen attempts

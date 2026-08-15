@@ -1,0 +1,58 @@
+..........F.....................................                         [100%]
+=================================== FAILURES ===================================
+_______ test_installed_mini_qwen_reloads_and_generates_with_transformers _______
+
+tmp_path = PosixPath('/tmp/pytest-of-root/pytest-0/test_installed_mini_qwen_reloa0')
+
+    def test_installed_mini_qwen_reloads_and_generates_with_transformers(tmp_path):
+        torch = __import__("pytest").importorskip("torch")
+        safetensors = __import__("pytest").importorskip("safetensors.torch")
+        transformers = __import__("pytest").importorskip("transformers")
+
+        output, _ = build_fixture(tmp_path)
+        corpus = tmp_path / "installation.txt"
+        corpus.write_text("A portable checkpoint must reload through its public API. " * 900)
+        installed = tmp_path / "installed-mini-qwen"
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "assimilation" / "install.py"),
+             "--experimental", str(output), str(installed), "--doc", str(corpus),
+             "--device", "cpu"],
+            cwd=ROOT, capture_output=True, text=True, check=False)
+        assert completed.returncode == 0, completed.stdout + completed.stderr
+
+        from holographic.io_and_interop.holographic_gdnruntime import (
+            load_runtime, load_weights_dir)
+
+        original_weights = load_weights_dir(output)
+        installed_weights = load_weights_dir(installed)
+        original_embedding = next(
+            value for key, value in original_weights.items()
+            if key.endswith("embed_tokens.weight"))
+        installed_embedding = next(
+            value for key, value in installed_weights.items()
+            if key.endswith("embed_tokens.weight"))
+        original_runtime, _ = load_runtime(output)
+        installed_runtime, _ = load_runtime(installed)
+        heldout_ids = list(range(32, 96))
+        manifest = json.loads((installed / "lecore.json").read_text())
+
+        assert np.array_equal(original_embedding, installed_embedding)
+>       assert np.array_equal(original_runtime.forward(heldout_ids),
+                              installed_runtime.forward(heldout_ids))
+E       assert False
+E        +  where False = <function array_equal at 0x7f03980a6670>(array([[ 1.00232527e-01,  7.81588653e-02, -1.13997911e-02, ...,\n         6.99373312e-02,  1.15552742e-01, -2.69618838e...84220312e-01,  4.61942501e-01, ...,\n        -1.60303838e-01, -2.99593797e-02,  1.73522094e-01]],\n      shape=(64, 512)), array([[ 1.00232560e-01,  7.81588302e-02, -1.13998115e-02, ...,\n         6.99373250e-02,  1.15552758e-01, -2.69618850e...84220273e-01,  4.61942485e-01, ...,\n        -1.60303840e-01, -2.99593612e-02,  1.73522160e-01]],\n      shape=(64, 512)))
+E        +    where <function array_equal at 0x7f03980a6670> = np.array_equal
+E        +    and   array([[ 1.00232527e-01,  7.81588653e-02, -1.13997911e-02, ...,\n         6.99373312e-02,  1.15552742e-01, -2.69618838e...84220312e-01,  4.61942501e-01, ...,\n        -1.60303838e-01, -2.99593797e-02,  1.73522094e-01]],\n      shape=(64, 512)) = forward([32, 33, 34, 35, 36, 37, ...])
+E        +      where forward = <holographic.io_and_interop.holographic_gdnruntime.GDNRuntime object at 0x7f0365a48a40>.forward
+E        +    and   array([[ 1.00232560e-01,  7.81588302e-02, -1.13998115e-02, ...,\n         6.99373250e-02,  1.15552758e-01, -2.69618850e...84220273e-01,  4.61942485e-01, ...,\n        -1.60303840e-01, -2.99593612e-02,  1.73522160e-01]],\n      shape=(64, 512)) = forward([32, 33, 34, 35, 36, 37, ...])
+E        +      where forward = <holographic.io_and_interop.holographic_gdnruntime.GDNRuntime object at 0x7f0364bdbef0>.forward
+
+opt/qwen35-acceptance-v4/lecore/tests/test_qwen_acceptance.py:299: AssertionError
+----------------------------- Captured stderr call -----------------------------
+      sanity: perplexity 522.2 on plain English (chance ~512) -- LIKELY MISREAD
+      ^ the weights are probably being interpreted wrongly (layout, head counts, or a transpose). Numbers measured now would blame the MODEL for a reading error -- run --verify.
+      sanity: perplexity 522.2 on plain English (chance ~512) -- LIKELY MISREAD
+      ^ the weights are probably being interpreted wrongly (layout, head counts, or a transpose). Numbers measured now would blame the MODEL for a reading error -- run --verify.
+=========================== short test summary info ============================
+FAILED opt/qwen35-acceptance-v4/lecore/tests/test_qwen_acceptance.py::test_installed_mini_qwen_reloads_and_generates_with_transformers
+1 failed, 47 passed in 25.43s

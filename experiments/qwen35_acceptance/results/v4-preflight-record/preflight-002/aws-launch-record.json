@@ -1,0 +1,55 @@
+{
+  "schema": "lecore.qwen35-aws-launch.v4",
+  "authorized": true,
+  "maximum_formal_runs": 1,
+  "retry_after_admission": false,
+  "launched_at": "2026-08-14T00:27:09Z",
+  "account": "022118847419",
+  "region": "us-east-1",
+  "instance": {
+    "id": "i-06ad0837226fe5d33",
+    "type": "r7i.4xlarge",
+    "availability_zone": "us-east-1a",
+    "ami": "ami-07a5b367e8dc8bd92",
+    "instance_profile": "zero-training-ec2",
+    "instance_initiated_shutdown_behavior": "terminate",
+    "metadata_tokens": "required",
+    "client_token": "qwen35-v4-df412cc-2e365e13-20260814"
+  },
+  "network": {
+    "vpc": "vpc-50cd4a29",
+    "subnet": "subnet-eb3e2f8e",
+    "security_group": "sg-026b4df90398b9d1b",
+    "inbound_rules": []
+  },
+  "root_volume": {
+    "id": "vol-042c6334730fff86f",
+    "size_gib": 100,
+    "type": "gp3",
+    "encrypted": true,
+    "delete_on_termination": true
+  },
+  "source": {
+    "commit": "df412cc7c938bb376014b7a68067ccc91ad9a5a6"
+  },
+  "inputs": {
+    "evaluation_corpus_sha256": "a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94",
+    "launch_manifest_sha256": "2e365e13024b0ebb0bea93923414b4dc13fdfb494a222033b9ec1578041318d5",
+    "runner_sha256": "727fd3dd587038b4c854ae288942551f22f4d056afe70645341db4a2352d94bb",
+    "bootstrap_sha256": "44ab2ea2f209e9f1756fee766d437cfce810bdd56465ab623a0d580fdf8c3b1b"
+  },
+  "replaces_preflight": {
+    "instance_id": "i-056acaa4153e31371",
+    "formal_run_started": false,
+    "evidence_bundle_sha256": "a718a320e5010886f8631e022ddf6df2a0900c55fbc835559938aadfaa7a1a39",
+    "estimated_usd": 0.06
+  },
+  "budget": {
+    "hourly_compute_usd": 1.0584,
+    "lifetime_guard_seconds": 28800,
+    "maximum_compute_usd": 8.4672,
+    "prior_preflight_estimate_usd": 0.06,
+    "total_ceiling_usd": 10.0
+  },
+  "staging_prefix": "s3://zero-training-022118847419/qwen35-acceptance/df412cc-2fc06364-a6c9d113/v4-formal/"
+}

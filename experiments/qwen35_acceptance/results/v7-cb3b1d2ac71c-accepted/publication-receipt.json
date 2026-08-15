@@ -1,0 +1,1273 @@
+{
+  "schema": "lecore.qwen35-arweave-publication-receipt.v1",
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.cb3b1d2ac71c.5a73ec7002a4.v7.acceptance",
+  "resolved_outcome": "accepted",
+  "published_at": "2026-08-15T01:53:45Z",
+  "formal_run_started": true,
+  "scientific_result_admitted": true,
+  "evidence_bundle": {
+    "original_name": "qwen35-evidence.tgz",
+    "bytes": 1359758,
+    "sha256": "2871b7fa96685bd7f5d75f79368808d00649f9cf91950f4655e6099266319f8f",
+    "arweave_parts": 16,
+    "part_size_bytes": 90000,
+    "contains_model_weights": false,
+    "reconstruction": "Concatenate bundle-parts/qwen35-evidence.tgz.part-000 through part-015 in lexical order, then verify SHA-256."
+  },
+  "confirmation": {
+    "status_service": "https://upload.ardrive.io/v1/tx/{transaction_id}/status",
+    "transactions_confirmed": 95,
+    "total_winc_charged": 0,
+    "public_cache_verified_at": "2026-08-15T02:04:42Z",
+    "public_gateway_verified_at": "2026-08-15T02:06:55Z",
+    "verified_downloads": {
+      "publication-manifest.json": "f97e75341f5913dfd9b91663dd8e2db9bd67862b79339a5df12e2a101a88d10d",
+      "ledger/events.jsonl": "b558cf918abc393f50c2c45b16d214d56aa8245b831c33a85b4f0d47fd41e88e",
+      "reconstructed qwen35-evidence.tgz": "2871b7fa96685bd7f5d75f79368808d00649f9cf91950f4655e6099266319f8f"
+    }
+  },
+  "publisher": {
+    "service": "ArDrive Turbo signed free upload",
+    "sdk": "@ardrive/turbo-sdk@1.42.0",
+    "ownership": "Items were signed by a one-use in-memory Arweave identity. Its private key was never persisted."
+  },
+  "publication_manifest_sha256": "f97e75341f5913dfd9b91663dd8e2db9bd67862b79339a5df12e2a101a88d10d",
+  "arweave_path_manifest": {
+    "id": "RaDOgThGonnt9eLUe_1eKjJukMY-FnbXlBYSRmCUSa0",
+    "bytes": 10918,
+    "sha256": "3a233bc75c7d401103e686a3db3b7d30f290cb8586c523d5f6b6eb1d224a5025",
+    "gateway_url": "https://arweave.net/RaDOgThGonnt9eLUe_1eKjJukMY-FnbXlBYSRmCUSa0/",
+    "index_url": "https://arweave.net/RaDOgThGonnt9eLUe_1eKjJukMY-FnbXlBYSRmCUSa0/publication-manifest.json",
+    "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+    "data_caches": [
+      "turbo-gateway.com"
+    ],
+    "fast_finality_indexes": [
+      "turbo-gateway.com"
+    ]
+  },
+  "items": [
+    {
+      "path": "README.md",
+      "bytes": 3494,
+      "sha256": "959ce254541709b8bde17d0af86e20461ff5b1de0633639dc02b4fc8841a774f",
+      "id": "rEhEfpuGndiOjnsvupRQWNABL7XKf9ar_Fd7cF8PWkk",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-000",
+      "bytes": 90000,
+      "sha256": "9408d66fdaf2b15a378495b11fff7f3d124eb4b0e3150f868750d12730028feb",
+      "id": "5vXR_p4oDKXN4E8LxeNRj5TkCs8IGqvBJJFKrbmK7r4",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-001",
+      "bytes": 90000,
+      "sha256": "4c672b5b6917d9db20248ccde95878590c74a0e03f77d7efc622db620b76b9ce",
+      "id": "NalkDn-3iaDxn8jRW2zBiB0f5tGQwUr5FEssvnb-3ag",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-002",
+      "bytes": 90000,
+      "sha256": "9f14706a6f54b913db7f87bda531def62514c0492e6d25f54bd92c3bed0c0f52",
+      "id": "oy-_5_KE-2VWyi_EmU-qSLxCydC44jQFH49FvO4LojA",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-003",
+      "bytes": 90000,
+      "sha256": "517ddb870b74e5d54b52ba12c50fe0e27dc4cf4d3d581c2aba5116bd1d464448",
+      "id": "ON4z5vquxeSrPXdQVMNOmDq2HdeeyhYKz9YeUhMgwO8",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-004",
+      "bytes": 90000,
+      "sha256": "bdefe91786ec0767a344e3d0eebf339a3fff2b93143bd125f46775055c0add95",
+      "id": "lGUocZT2drbdY87OKAcpbCg8Avg4CG9kuITMC1l9mDE",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-005",
+      "bytes": 90000,
+      "sha256": "24f23c73d5ccb7767833275ab03b931615e304d73cc6420eb57c0bfba6f91e86",
+      "id": "F2KkBBJYGz37uZl3YJ1BkEdIzrod5rVABYXK_fCHAZc",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-006",
+      "bytes": 90000,
+      "sha256": "633a14b2bb634a18aecc80abe3ddef89ae6b6175da34926e36aecb73944ec6f3",
+      "id": "URjy2gyYP_l1naPJ13EAU9psAV8n3-YUJHaJYeqTT9g",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-007",
+      "bytes": 90000,
+      "sha256": "f98cff58b555ce8cf0c030b6ec0d655370a0073fb16d47384c52fc89a4de2d02",
+      "id": "wJenS8-sniXEx04OzEKg-SA5i3IM_BVQJeey5N3nJL8",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-008",
+      "bytes": 90000,
+      "sha256": "36115e71831b579c80d30d7ea3d993561ccda95e1e838addb51f8d0150bc42a8",
+      "id": "s0B5Y4g-Ay2iRXRs_-hIe-18-GPGX48eoNWspXkdqCU",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-009",
+      "bytes": 90000,
+      "sha256": "6047432ff6c7fc143fb2fb0fda1865e4ba8318b6b304979d5ca60cc022202015",
+      "id": "u3VA9oVFChsIypRno0gWyJKTa6UCrLcwDAvp7vM7Sgs",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-010",
+      "bytes": 90000,
+      "sha256": "95ccd0abee5f7cc6e339d580781b064a097533b5af3f23a8b95d9dc3d21066a7",
+      "id": "NikzbtXxbaSbk4Rdep3yxZK-Q8zdtsCWZ9PM1rsSl7A",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-011",
+      "bytes": 90000,
+      "sha256": "81f04704f8d40fe90116cb87f96b9dc1cceebc7aec9dbafd36615a378806af8f",
+      "id": "VtcjNiYMhAactOGLmVmfxExWEXJidV3MUwx-8MnVmyQ",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-012",
+      "bytes": 90000,
+      "sha256": "aa8439118498884401494378640a56e70e1e9ea9124005962a1b4ba3572da14e",
+      "id": "V8O67Jk9XbMJzu2d80mvEhTTqZbOLmzrqZ-Xg4fNVO0",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-013",
+      "bytes": 90000,
+      "sha256": "05c7706b45fc55e2a01097ba005de5f942618448463585c532b01b0c5cfbad38",
+      "id": "ekM6ZZbIorpq9NhghAiLjyyFhZ-YD2CHhTKR53-9i60",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-014",
+      "bytes": 90000,
+      "sha256": "d05337ff22b531cc605cbcab8fe97ba3ca3e799bcea7f3c0242e863dcd33f1f9",
+      "id": "m7ASY1V_kVGQniSwYbVITYYQln8WWvxgkHdOh_DS7hI",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "bundle-parts/qwen35-evidence.tgz.part-015",
+      "bytes": 9758,
+      "sha256": "7dcd929a17e1030910928a179dbb62a4e3204be4ff9adabebd8011549f9771f4",
+      "id": "m0gxeCqTZvCYppQtDMvWI9j1emIWmmnTDJ0ItWRi5o4",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "evidence/evidence-bundle.json",
+      "bytes": 412,
+      "sha256": "7b8e2d26b02a1470e5d641da82218197d8f64f43cdd9a72d85b5151668545ad8",
+      "id": "N7Vhh_xs0WeBgOagO90ib6XGBc66R7GrZDuKjaE0v_Y",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/config.json",
+      "bytes": 97,
+      "sha256": "2301b853e1e01b8844970b90e72036bed57c580ded81a857ec7faf27f8deca66",
+      "id": "sU0bFIw7C_snKg4lI74P_ToFZ5GT8mwMzJTSmNofQdo",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/events.jsonl",
+      "bytes": 9230,
+      "sha256": "b558cf918abc393f50c2c45b16d214d56aa8245b831c33a85b4f0d47fd41e88e",
+      "id": "22vHGd3K718WzgbyLdVGI1d5oVNrltEcF3aqidze5Co",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/2970f2d19be7e8b8592afcdccf40938ddf4fb39258582fdceaa3c48b491adb48",
+      "bytes": 930,
+      "sha256": "90946584ea7f2eb7a58aa287da1407c2e1878fdd196d303814934893eba2caca",
+      "id": "ShA1OlikwTk7GOweKECuNQkNy7MxGz6oGOYnkGejy30",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/2ef1a0f767ae6b1cb9eafb9ac37fb1bbf5b8cdc95a29df7295f5ea822b7ae0a8",
+      "bytes": 1475,
+      "sha256": "fae3aa88dcea764ce2f85e5d66b4d0e0da25b1449dad3fa5b197866deccee107",
+      "id": "urrmW31SXt5ONzTPYAvK58d604nVFU3byfeDRmB_8_o",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/3f25a0739be2a6387ef4472afdefdfa7f26059f4e441025e6f477683a700ec7f",
+      "bytes": 669,
+      "sha256": "553f67db9470fd03a4962dabeb8eff2467c03c872f33d7e9e0bb89cf98ddfe79",
+      "id": "ehpjU2fVHsiX721518_FVzGoqpQJjSM718gc6h8boE8",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/41b1d7c74316eeffdec5550f52beb8a5d33dd4da31d77e039e9e53007914357f",
+      "bytes": 2065,
+      "sha256": "087aa8268d7c09cb1d7002885bd1804103945e85e5cada41ad81ce4bd02842c3",
+      "id": "MH5ZdN4E3zPYK5hHVnyxcjF2IYK_FrpWOFsZJYY47RY",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/604b6e87cf15e1b482da76f48e7f44ab689ea6a7e92bf89e03a54ff68387506f",
+      "bytes": 706,
+      "sha256": "2e80859f0467cc843b8ded87d2f5b658c9165a97bf0176568798e832da0f9ebb",
+      "id": "AofhRd-eif-Pcp10Km1QdfUsDRhv4TBeWGli11CxdyI",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/6fb7363869ee687c051132d936f7ae1513ad1d8ab6f0ce8b13ad2290db4c27c5",
+      "bytes": 2211,
+      "sha256": "d594671d65d40df2202b819c0483984dd7b88496b6a33e5066528226c46ce6e0",
+      "id": "dp4qIv6idktVmlTQWBVVLU91RpsjzNYX6n_lMd1nPbI",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/7e23bc82dc969ae730460e417e8e3095a3ed05d68c8dd6e7ffb98209d2efa90b",
+      "bytes": 19288,
+      "sha256": "946fe8a916994f4a105524e581c16c66f4a80a0ade2ec8e59f0e32e0b4745d6c",
+      "id": "XeBv-epYPIi2dueh_5cdClS2Z6awx_Tl70k7ohrbH78",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/9fa2334ebd89c7bb5bac3c0bfbdcf24835cab17c25e5823dff5232d4111ad0f4",
+      "bytes": 348,
+      "sha256": "02a932b05a8b4abe82b9c3452f875f55c1ea315d62ef7afe5c0c8b63f409ea80",
+      "id": "wi94RIzKjjEKf0p2rr5K4RbcUsLuhAiGLnOrt42C0BU",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/ad8adb4960f426351d948b8f89c636ec36c5ddbc2bf99ea3ec64c95bf518bb0a",
+      "bytes": 1394,
+      "sha256": "7b070bd059491138c5c66b8335f601792b06235443984275f89a0b9b126bccf1",
+      "id": "xIMwqcc93QhVEVeCDk2o6C3_Dhodmv4DAVU0ezZ_gu0",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/babeec79c9aa9f991887a2f174213439c94f20d1653c5e1704cd22453b93dee3",
+      "bytes": 450,
+      "sha256": "e724bd34a523311c3a22c35a45e7f3eca141dd4c6e27cb6a9532645757aa5c05",
+      "id": "u7-1FlsxXMakSP5nrshc4_woDJe1BavtWRA99oZ2hvA",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/c444bffaed95aa2d7c8ae25468bb8ab454b3c3ca02c00434432f783d8405df20",
+      "bytes": 1524,
+      "sha256": "dfa8261d1ed0aa87f9e58a65c2f563b1b286b35d183051ff8259deb8844312d7",
+      "id": "TWpuLrAzfa5sRjmQ4-Qzq0z0i_qvJmrN-CwTc1wFCTM",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/c9d704d40a82efb5c7cd2b042d3d0daba0ce990ec5646ea9c8a0c733f06654d3",
+      "bytes": 359,
+      "sha256": "d43da7c958751f67f18ec218b17ae52db10213bdf91fc920889a0d0110a8d0ac",
+      "id": "J0e70KX26CmwyMhb-c04PsSm17bneZrhqIR-3EUTPGo",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/d5afa3a91a690730bdf0288c0e8cb576303760fa18e0655f6445fbc6f7928e1a",
+      "bytes": 10928,
+      "sha256": "8ba703ed5692091af974ff010d1a13607d73dd170136393e2b8133647272ee92",
+      "id": "0-30vmGK1XQmIHLnZn3RrtICxWhBPVFmpFNrqVT1ZqA",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/d75c5ed84dc3d9904d11258b10ea255fe14c5a02b9a520891a6ba1d73b5f4e84",
+      "bytes": 443,
+      "sha256": "a2a26c62387b33f19788c02a3f93759678386318f39786f8acf5ee2196eeffc6",
+      "id": "9kpcPruwAr9nQ8kvpgf7um3zctE2Bs2Ag_Au0CahJhI",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "ledger/objects/sha256/e8b73190abb45a5c9d3d45e8cb6a00b6f10e7aa782449228dc0c17e772cc6648",
+      "bytes": 421,
+      "sha256": "4688f55c3eee1056c7e42abd2faf86ab085382d8f5a2e3ee773f4bbfb0757d14",
+      "id": "15tu4cLjA7_s2Thw5k07Sl4xF5l13X0n9yY9XzXRjqQ",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "project/engineering-review.json",
+      "bytes": 1559,
+      "sha256": "58fdffe832f941166ff15695f4b1238d7ecbf4c634ef133168e7075133da71b9",
+      "id": "NRYMS1CxrDJ-0mrG5e6lQc1Vjb0Q8GF7oHkuCX7ZXyE",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "project/experiment-design.json",
+      "bytes": 2154,
+      "sha256": "ca7f458beb6f44df6a253b14419c4787955079f7a40f585f67688ce22e6cf94b",
+      "id": "U9Fqr4ZEt2bzX0nGj2Ku-E82y5L3lyfFxU7SDFOW0ys",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "project/experiment.json",
+      "bytes": 11546,
+      "sha256": "5fcc0f4d466de9c1014b7e7400e14fa456e6f3f7daee97d458b2c2c281023372",
+      "id": "wUdRZKu32d1bBLFus8NVWmhYywnADvX9h7qGhCR0P8w",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "project/forecast-empirical.json",
+      "bytes": 740,
+      "sha256": "437bf9dac5f34eaf155e5a1dd573f697460a16480c626c126e5d90c614e87cd8",
+      "id": "xGCb3uITTxXZwT6ycA-o5gUiVunvpaHcc2p7XmRauZI",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "project/forecast-mechanistic.json",
+      "bytes": 777,
+      "sha256": "b4c0a3bcede721bcccd6b5070fd79cb295c20dd7766dad26a099fced46dafca7",
+      "id": "XM78BQSjiNWAnYlx_SshpqIbCBiHzwBdcui9RhN3scw",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "project/foundation.json",
+      "bytes": 1603,
+      "sha256": "a7b3ddd86e2101a7a7668738d8e8c984f7b4aba6456fe0ed38a45c251864fadc",
+      "id": "RsOmMLoLtOJQSHnFpe4OWX_ujZNqsYe74hWRqCjw73s",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "project/funding.json",
+      "bytes": 490,
+      "sha256": "fb471d0a54b6a00ff4f70fa53c576fb823b77c498b7f4713487e7ae0e8c19df7",
+      "id": "bWjaNt12WvMnzk3msuPE1Hq8LD89OvjFRLby24uugJo",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "project/hypothesis.json",
+      "bytes": 1006,
+      "sha256": "e43e2578c86a12cd0365ff193e6d530f164017ceaf35ce09689abb4ec8317713",
+      "id": "FPaSQHz50zGDoL0cl4LYA8vhjhMFHGeSgDIO77-_3L0",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "project/project.json",
+      "bytes": 8631,
+      "sha256": "f0b82fadfc96a36a25c779fb8ac27e5fc567909fa4c547c2c386bc4854a77413",
+      "id": "qJiABV7GuLayQ9qxsgZIiknzDCAWrSGkMOsbs8AoUaI",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/acceptance-artifacts/install.log",
+      "bytes": 2297,
+      "sha256": "2181a0b93fa8a852a2e116e58bd8d83e214729eb0c1a97244328da32898fbea2",
+      "id": "LDYE-CJCBBMAoMBAOU033leMTCX55-Zgwli3lDDPbvE",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/acceptance-artifacts/metrics.json",
+      "bytes": 28140,
+      "sha256": "8e47ec46d9ddf27fabbc0b6a1e0092eae9cb54dbc820fd9bd9b99af2cc6e7a2f",
+      "id": "rGvkPl1C916CyhLyw3o_uoWSiQrj7BeKsBcWAcHvCRQ",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/acceptance-artifacts/progress.jsonl",
+      "bytes": 10048,
+      "sha256": "e3eec7b7dd70bdbe6589356a58896c8196206de8ef9a1196a558058f93433a7e",
+      "id": "Zzk7UxxeO3g-EqZVdVoaK8CRhca-zzbB-gTivLFtqq4",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/acceptance-artifacts/runtime-provenance.json",
+      "bytes": 5897,
+      "sha256": "841379a1b970bcca8861ba6226fe6d6468b22bc55f39b106b8848cef789dbed1",
+      "id": "gTy5p3Ieqklz0R7bsM1aIJ9ji1VHYmcnfGA8m2Nu_xw",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/admission-preflight.json",
+      "bytes": 1700,
+      "sha256": "8a1b85c28b136db1cc6ce68d40f2d016c520244f84628e3f0d53bdbb7b079b84",
+      "id": "55QFAuV31quLy8XBcX7aNLoZLvzVS--GBpmDHwX0PC0",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/aws-cleanup.json",
+      "bytes": 430,
+      "sha256": "9613ab9d924242324b8c9c831c8470480069f484c00b27c571c20963951ba62b",
+      "id": "TnQC0XaMoq2_fOJ-VQwg6EeZWLDjDLukR2YL-bp3vE8",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/aws-instance-identity.json",
+      "bytes": 479,
+      "sha256": "e123c5e1f280fb59d4af3e8d254c8823e2fa78fbc2bcfa15dfde862989dc1e51",
+      "id": "y5Vg23NIXxavj8sxBhU8JyFDo8tCqdoT4L1FBAinGW0",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/aws-launch-record.json",
+      "bytes": 2038,
+      "sha256": "e951157537d29ef15c3e5af4a1864c533732bae0d6e45fbdeee0316aa5454ffb",
+      "id": "sPnpR1TJjftIqHYG27VDvWYfhD3J63pEWog_5YEkeaY",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/benchmark-report.json",
+      "bytes": 22100,
+      "sha256": "f120c5ee50e1817e3308e80240cf0e9f818670a6d3318356617635e623dc7db6",
+      "id": "vxGAq1QthozjQtIIiq4hxwgdlBxJCKrjPCXupnFe7yk",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/benchmark-report.json.sha256",
+      "bytes": 121,
+      "sha256": "dbbcbdb55f4c35c9c88a9a5b5abd2ee632eb76c2d837ef36239e313b8ec487f2",
+      "id": "4LA1PJhXRA5QVWUeIUIDwTw2UfTlsD97oAUZU-6OaRk",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/benchmark.stderr",
+      "bytes": 84,
+      "sha256": "00983ac34b0d57c360b9034936187fba272d412461f09d2cb9864bb8828358ea",
+      "id": "EXh_s442JMXlvdNqvLDyJIcpU7mK-Xa7kbGA2uQTRUU",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/benchmark.stdout",
+      "bytes": 22100,
+      "sha256": "f120c5ee50e1817e3308e80240cf0e9f818670a6d3318356617635e623dc7db6",
+      "id": "8ZVjnBcYns79pc5SHaR3UBvBIxQT_CM7CeO7nK8h_Mg",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/bootstrap-user-data.sh",
+      "bytes": 645,
+      "sha256": "fe852054995d9ca3bf00a31177a2b0328f74a06f3231406b62b82450701fc58f",
+      "id": "ohdwFjkqQyIwxkGrJOYEufvvAMPl8Y6MeGvaH2CqmQc",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/cloud-init-output.log",
+      "bytes": 51792,
+      "sha256": "325e4f7f3de39906a067a1595c44196837175773ec10cf4a91a02d04964ffafb",
+      "id": "q81yC1dojZfuDZoBCGP3UXDLM-esnX4msiVoJCHqQu0",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/corpus-manifest.json",
+      "bytes": 388,
+      "sha256": "9d331e42f423e502f1c003c12bce8c5a319a1f2b2a997c2bd4ff97598a55386d",
+      "id": "bt36TZXUemEDHSMMqIOOpiuoOKqc3atraKD_tkEu148",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/environment.txt",
+      "bytes": 5439,
+      "sha256": "f2d419a4b5bc6ce4870a471be8dfa119d8e983f2b586296fa3eef56d74aace51",
+      "id": "yoRS-aXMuEFCrKYLw6wOpD5FrTpDiE666qFBtKkFgbA",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/execution-summary.json",
+      "bytes": 302,
+      "sha256": "3e402eedcc8bec55bfa79f18ac3501826834994e195abb015378b2c9a26468a5",
+      "id": "zpjyrPzYNw8fUZ9LWKJDDPp6760yk1wAwnbFxvBmsAg",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/frozen-preflight-junit.xml",
+      "bytes": 7364,
+      "sha256": "13bf33c4899aa55f6e0de936d61151bf98d9a5fab84f1661e279b65a15f20c11",
+      "id": "EvK92X42YCiLe-5YZwExEqCnTmZPB9anGRD1enUeghA",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/frozen-preflight-tests.txt",
+      "bytes": 100,
+      "sha256": "343aae74be788814d7f713cb5d345146bc0af5649d1617379d4a4e40db75bc12",
+      "id": "sqDyAZuks4aGSUA1NJaCbLQRAWsUWP92HoUF670cp-k",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/generation.json",
+      "bytes": 235,
+      "sha256": "fa9e602c0ee3e71f4aa7c4b997971be21281d67a2e4dc52a0d339e39d34ea0cc",
+      "id": "66F6YPW1bUewezglj2saCSIkvVlMiV5m11k5LZ1HIlE",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-admission.json",
+      "bytes": 1826,
+      "sha256": "c89f620214f4334841da333dccb5d55fdecd7ada39060c50b126a96059a86497",
+      "id": "vaU7LBjsmJNFErwj5ZiYuYIewh6zey6n0oyikNi8N0I",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-commit.txt",
+      "bytes": 259,
+      "sha256": "32873b519f7170a47a099930a325f4bb29d04021b822fa7f5387c94a9976add4",
+      "id": "dRf6a0cG_i2ElYq8E8ZFwYI7fGNxGWIf8SP6N6YKLco",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-compile.json",
+      "bytes": 107,
+      "sha256": "ec18127b43aac6aa4cee353b32e081e85540c80e2c6d5615907e7bb5c87c7970",
+      "id": "_g86-8g-sQPxNf6iJBIG8AuXwIaL_7eyXvJP3qdc6sk",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-contribute-engineering-review.json",
+      "bytes": 107,
+      "sha256": "c3c85d9ecdbfe2ad99c0e87288e3166af9c684c52247347b502790782115b53a",
+      "id": "YPi_w45C7JCnIaj8vq37GH8vXzhjc3L3_cZFOMYywkg",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-contribute-experiment-design.json",
+      "bytes": 107,
+      "sha256": "92efe51a9e7d4cbbcddf506f48ba07faee55c91d66e10660241181fd9fd8613c",
+      "id": "qOH2fdj6GurTk2Nlwg9QFZTnwoN3SGvAwLPTm6-iFPo",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-contribute-foundation.json",
+      "bytes": 107,
+      "sha256": "c72d02dc8d026ec5771924efe8a348ca903021a931d3c0c344acaf10b703a427",
+      "id": "fIgGPUcSFqXFzRwcy0tVUpbbU6NNVsm5S4_WiroEl7c",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-contribute-hypothesis.json",
+      "bytes": 107,
+      "sha256": "e619eebd6ef1ba9f386c5f4c275152fb9d90edf99ef73006cdeedbd70b41e471",
+      "id": "ujo1P6FuEHAMFTx4qI3K-8cMPHZQtew1LqPzu4hipS4",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-forecast-empirical.json",
+      "bytes": 107,
+      "sha256": "b25a829dc5bf5e72f43ea7ecfc272bb1adc4a855308a043dd2176cbbaa58010a",
+      "id": "bYN1RVguJFCVZEWTZhe6XlQgIN0o9RJoRQhH32dM2ds",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-forecast-mechanistic.json",
+      "bytes": 107,
+      "sha256": "2254666d5595d8fa13a518a98907c269b801b0b42fd8a5ac2625edf1602659be",
+      "id": "mT1dbrnqhdtLSomVLB306UlhD0bS47Kn8mHwfVdtjhA",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-funding.json",
+      "bytes": 107,
+      "sha256": "329b94105b842c216bcc25d424b3e93bf3f43622c21c473fdc869ce666929b36",
+      "id": "_PkvTo55Dq_a_Z7WeZzZDukIvfPjkV5U9I-Bqy57wBo",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-init.json",
+      "bytes": 80,
+      "sha256": "bdd06ec425b0164e0bd91e9eb091ca7cac43205c8f0a72d472aacdc9932efa55",
+      "id": "HybqjNLLXnwYtefonH33xzj8y_3NgdlwLyr3PjDMu6g",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-run.json",
+      "bytes": 24890,
+      "sha256": "6e30933db1e47cb4cfd1f6d6dac977c0780f8730eea5111d17001ba39a1c206e",
+      "id": "aXErctlOJM6TVZD80ZdPgghDqHpMAzKQd2KIjFTuWQA",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-run.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "id": "dewAH-xfjatMSDLtbv7tIv4hJV6vf-UTuEifKIsncds",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-status.json",
+      "bytes": 25297,
+      "sha256": "dda3c907b5e133679b9e3b0d716f3b868fdd704d16a55f09de923a83e1a722c0",
+      "id": "XF8wn32nMotzPOKNdwGYqEjb1CilOMUQdSl8yAF0EGc",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-status.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "id": "dOGRZkTZwFRCHrz0JVx5yY-OffdoRWgjQpCpc7KKjdM",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-verify.json",
+      "bytes": 69,
+      "sha256": "5e03d79a86e57f015be7b79666349b5813a1a702421883e8b58f3ed3a6a73663",
+      "id": "RcSXElMUnDzo1kZn6THU1MMEEH61gp8D6vTpeRtczQs",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/ilxyr-verify.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "id": "i9dpgx_so3U75kUPIkesV5WoFsdCEHpUAXt3KsJ9mQc",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/launch-manifest.json",
+      "bytes": 7254,
+      "sha256": "9863b88a92448769de0b68162e7e9485aad836f522dd9dc56e6558ed82835a6c",
+      "id": "m2vZHzo0TRyIUAet3K1oMzs78atHQys-53Vun8l154Y",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/lecore-commit.txt",
+      "bytes": 267,
+      "sha256": "4482411ca66ed726c6e21778be66e20d13ce41ade78ad3e4c6e8175455006b76",
+      "id": "jWSnfoBnXlTmLpRb7phY2lhO4Id3AMfi7WVukG5iP1s",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/lecore-status.txt",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "id": "AO2rr8VElNosq8TX6cOrAx_u1y04x9qdUAFHFF0TtXc",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/miniature-ilxyr-preflight.json",
+      "bytes": 508,
+      "sha256": "3ed76c82e5b1007a1f10cb2f75b79d67f4efa623c7786f15a6f2d2f49b269c43",
+      "id": "q-fTyE065GU_VdeftgvtbmGYqYqiGd5JP5OtNvnZCq4",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/model-manifest.json",
+      "bytes": 2023,
+      "sha256": "f352ac2c17ee1bea38f70d7ab1975e3297954423cb74f5330383134e4b6c493a",
+      "id": "KSo6NhD2tXhAD0T-OzX8twaskeyK_bu5fZU0T1Z8F3A",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/official-dependency-imports.txt",
+      "bytes": 106,
+      "sha256": "2785a70a5c8c5d810e8e782a0c385a614f3bea50525e09d445b45c3e69ef7ddb",
+      "id": "bkAHqAaq-MMI8HjYZols2ikZormpHQtCYb6dkC_jDXU",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/requirements-cpu.txt",
+      "bytes": 740,
+      "sha256": "91193feb4e831e25ec3d4988c22fd78f9d3e770409a8d7cafda2cf50b6189b78",
+      "id": "xMgJFRUJMhVdg8FhMeVNYdQDMWW2F5ynbOB8M1GFyLA",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/requirements-resolved.txt",
+      "bytes": 657,
+      "sha256": "1f38b03bd096916905b6ee7579876240760a4bce9fd03c4b6dceb3c67e8e9592",
+      "id": "wxKPOoEWhau4KO6odYriUZpOGCLwOdDGWQ-61WsWeSI",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/runner-status.json",
+      "bytes": 385,
+      "sha256": "2dcfed454872072925bd7174966bfe2b31f363c57fbe225e8176966270d866fc",
+      "id": "wgbCuQLsK4GiTOuB2lpn17JMPRW3o8L36Bxs72AULms",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/runner.sh",
+      "bytes": 22689,
+      "sha256": "705bfcf15653eab1996d94b480fb7cb097a1b0ef5c0da38de9266458075798ed",
+      "id": "9I3VxacqGGjJuMP_vgkPaA3eNgaTdTgTvSw9y-Mn0kM",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/s3-terminal-status.json",
+      "bytes": 385,
+      "sha256": "87d616787b43cdc33ebbee75e9cdec8117255f71f31089f57d13c3711eb75038",
+      "id": "2h78cvkjZtW5Hl8Vd3Y_JRRMfafAXOBSBimiSmejEEo",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "result/user-data.log",
+      "bytes": 48128,
+      "sha256": "2c9879fc72791a9dfe017f3ad17de01e0c072f77a7061fa830686bc82da943b6",
+      "id": "H9dZ3tG6L5H7rWYjc92RlQlzFuH8D--Qn0U8lpl4L1c",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    },
+    {
+      "path": "publication-manifest.json",
+      "bytes": 20804,
+      "sha256": "f97e75341f5913dfd9b91663dd8e2db9bd67862b79339a5df12e2a101a88d10d",
+      "id": "1GIXGclrJDgNJokQ7-ZM0bw7HnjtyB-RIgYfZJpKPYU",
+      "owner": "dFGQBNylv-sEZKOvDxSPHmrr423_dU8fhbXc1AhPD2E",
+      "data_caches": [
+        "turbo-gateway.com"
+      ],
+      "fast_finality_indexes": [
+        "turbo-gateway.com"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "compute_credits": 100,
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.59f551d452cf.a6c9d1135a04.f399cd6bc7f2.v3.acceptance",
+  "funder": {
+    "id": "service://lecore/qwen-experiment-generator",
+    "kind": "service"
+  },
+  "id": "lecore.qwen35.install.20c3330d0b3e.59f551d452cf.a6c9d1135a04.f399cd6bc7f2.v3.funding",
+  "rationale": "Reserve one complete public-weight Qwen acceptance run under the frozen contract.",
+  "schema": "ilxyr.funding.v1"
+}

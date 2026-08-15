@@ -1,0 +1,20 @@
+{
+  "actor": {
+    "id": "model://codex/lecore-qwen/statistical-reviewer",
+    "kind": "model",
+    "model_ref": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/statistical-reviewer"
+  },
+  "body": "Per-token losses are serially correlated. The acceptance decision therefore uses paired installed-minus-original token NLLs, estimates an autocorrelation-aware moving-block length, and requires the upper 95 percent confidence bound to stay within a one-percent perplexity regression budget. Point estimates and independent-token bootstrap intervals are not acceptance evidence.",
+  "claims": [
+    "At least the preregistered minimum number of paired token positions is measured.",
+    "The statistical gate is decided by the paired block interval rather than the point perplexity delta."
+  ],
+  "confidence": 0.95,
+  "id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.2f32151c6d44.v2.foundation",
+  "input_refs": [
+    "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.2f32151c6d44.v2.hypothesis"
+  ],
+  "schema": "ilxyr.contribution.v1",
+  "stage": "mathematical_foundation",
+  "title": "Paired moving-block inference is required for token-loss comparisons"
+}

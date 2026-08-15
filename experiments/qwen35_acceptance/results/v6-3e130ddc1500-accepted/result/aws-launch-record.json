@@ -1,0 +1,58 @@
+{
+  "schema": "lecore.qwen35-aws-launch.v6",
+  "authorized": true,
+  "maximum_formal_runs": 1,
+  "retry_after_admission": false,
+  "launched_at": "2026-08-14T14:14:39Z",
+  "account": "022118847419",
+  "region": "us-east-1",
+  "instance": {
+    "id": "i-0daae54594415b2c7",
+    "type": "r7i.4xlarge",
+    "availability_zone": "us-east-1a",
+    "ami": "ami-07a5b367e8dc8bd92",
+    "instance_profile": "zero-training-ec2",
+    "instance_initiated_shutdown_behavior": "terminate",
+    "metadata_tokens": "required",
+    "client_token": "qwen35-v6-3e130dd-2a93f8bf-20260814"
+  },
+  "network": {
+    "vpc": "vpc-50cd4a29",
+    "subnet": "subnet-eb3e2f8e",
+    "security_group": "sg-027e59a8ca9edd35b",
+    "inbound_rules": []
+  },
+  "root_volume": {
+    "id": "vol-0d82cb75c3f2aeec7",
+    "size_gib": 100,
+    "type": "gp3",
+    "encrypted": true,
+    "delete_on_termination": true
+  },
+  "source": {
+    "commit": "3e130ddc1500af084eb7a7fe94a5da647b0ff3ef"
+  },
+  "inputs": {
+    "evaluation_corpus_sha256": "a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94",
+    "launch_manifest_sha256": "2a93f8bfb176ff57986218a9f7c5771c10c10313ba818540c92eabdf2af6f670",
+    "runner_sha256": "28aced75dbe2eb23af96814ae20eb44efa31b4b220049a7e804dbe4191440618",
+    "bootstrap_sha256": "ac144b34fe01e00f82e9ab9ecd4a2625c9471fe36a84f4d7b08380bdab9cfa4c"
+  },
+  "predecessor": {
+    "experiment_version": 5,
+    "outcome": "execution_failure",
+    "formal_run_started": true,
+    "scientific_result": false,
+    "evidence_bundle_sha256": "32be545966b2d1fe9254ac1d100b7c4285adddf911f2e7c428ffbe40741db500",
+    "estimated_cumulative_compute_usd": 2.84
+  },
+  "budget": {
+    "hourly_compute_usd": 1.0584,
+    "lifetime_guard_seconds": 23400,
+    "maximum_v6_compute_usd": 6.8796,
+    "prior_attempt_estimate_usd": 2.84,
+    "maximum_cumulative_compute_usd": 9.7196,
+    "total_ceiling_usd": 10.0
+  },
+  "staging_prefix": "s3://zero-training-022118847419/qwen35-acceptance/3e130dd-2fc06364-a6c9d113/v6-formal/"
+}

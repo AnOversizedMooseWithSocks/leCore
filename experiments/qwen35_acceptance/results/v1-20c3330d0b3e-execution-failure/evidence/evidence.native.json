@@ -1,0 +1,383 @@
+{
+  "certificates": [],
+  "cold_replayable": false,
+  "compiled": {
+    "evidence_authority": {
+      "level": "corpus_proxy",
+      "provenance": {
+        "artifact_hashes": [
+          "artifact://sha256/04bed9185d0a9647fea419ac6cb2f671a106ae60bc82c23b172aacff6dbcaf0b",
+          "artifact://sha256/3b4c72fe06906bda15e22dac5fd12f9d1b1347f687f3656bbaa6ff3c3d11cbd1",
+          "artifact://sha256/50519e75792a64ca250e673ed7b05be888419d53969be5ec4c074fb50ed8ebb7",
+          "artifact://sha256/826a9741b544257f3658ecb4014abc4bcaee45a33be7e5e467dc1cb2786fc17e"
+        ],
+        "checker": "checker://lecore/qwen35-acceptance/v1",
+        "model_lineage": "model://Qwen/Qwen3.5-0.8B/20c3330d0b3e00c98b38e7813202b12952f37d6a4415a30da103c9bfe994d680"
+      },
+      "scope": {
+        "coverage": 1.0,
+        "eval_set": "dataset://lecore/qwen-evaluation/a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94",
+        "seeds": [
+          0
+        ]
+      }
+    },
+    "resolved_lineage": {
+      "engineering_review": "artifact://sha256/04bed9185d0a9647fea419ac6cb2f671a106ae60bc82c23b172aacff6dbcaf0b",
+      "experiment_design": "artifact://sha256/3b4c72fe06906bda15e22dac5fd12f9d1b1347f687f3656bbaa6ff3c3d11cbd1",
+      "hypothesis": "artifact://sha256/50519e75792a64ca250e673ed7b05be888419d53969be5ec4c074fb50ed8ebb7",
+      "mathematical_foundation": "artifact://sha256/826a9741b544257f3658ecb4014abc4bcaee45a33be7e5e467dc1cb2786fc17e"
+    },
+    "schema": "ilxyr.compiled_experiment.v1",
+    "source_digest": "8eaaa021df860a5ab62ef3847c0d0fc857a25ce571cba8f5492b81937d8cc030",
+    "spec": {
+      "baseline": "baseline://Qwen/Qwen3.5-0.8B/20c3330d0b3e00c98b38e7813202b12952f37d6a4415a30da103c9bfe994d680",
+      "datasets": [
+        "dataset://lecore/qwen-installation/d6905f043e7856b93b2dd72dac5fa0dc593898c55d6c54c51f3153f4317d6b7f",
+        "dataset://lecore/qwen-evaluation/a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94"
+      ],
+      "evidence_authority": {
+        "level": "corpus_proxy",
+        "provenance": {
+          "artifact_hashes": [],
+          "checker": "checker://lecore/qwen35-acceptance/v1",
+          "model_lineage": "model://Qwen/Qwen3.5-0.8B/20c3330d0b3e00c98b38e7813202b12952f37d6a4415a30da103c9bfe994d680"
+        },
+        "scope": {
+          "coverage": 1.0,
+          "eval_set": "dataset://lecore/qwen-evaluation/a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94",
+          "seeds": [
+            0
+          ]
+        }
+      },
+      "execution": {
+        "args": [
+          "/opt/qwen35-acceptance/lecore/experiments/qwen35_acceptance/run.py",
+          "/opt/qwen35-acceptance/model",
+          "/opt/qwen35-acceptance/installed-checkpoint",
+          "/opt/qwen35-acceptance/lecore/REFERENCE.md",
+          "/opt/qwen35-acceptance/inputs/federalist-papers.txt",
+          "--min-tokens",
+          "4096"
+        ],
+        "executor": "local-command",
+        "max_cost_credits": 100,
+        "network": "open",
+        "program": "/usr/bin/python3.12",
+        "timeout_seconds": 21600
+      },
+      "expected_outputs": [
+        "metrics.acceptance_pass",
+        "metrics.source_clean",
+        "metrics.spectral_filtering_enabled",
+        "metrics.experimental_installer_used",
+        "metrics.tokenizer_parity_pass",
+        "metrics.reference_logit_parity_pass",
+        "metrics.reference_logit_relative_error",
+        "metrics.eval_tokens",
+        "metrics.original_perplexity",
+        "metrics.installed_perplexity",
+        "metrics.perplexity_delta_pct",
+        "metrics.paired_ci_lo_nats",
+        "metrics.paired_ci_hi_nats",
+        "metrics.statistical_gate_pass",
+        "metrics.paired_block_length",
+        "metrics.paired_effective_tokens",
+        "metrics.peak_rss_mb",
+        "metrics.peak_gpu_mb",
+        "metrics.emitted_checkpoint_mb",
+        "metrics.reload_pass",
+        "metrics.text_generation_pass",
+        "metrics.vision_smoke_pass",
+        "resolved_outcome",
+        "forecast_settlements"
+      ],
+      "funding": {
+        "minimum_forecasters": 2,
+        "minimum_total_stake": 10,
+        "required_compute_credits": 100
+      },
+      "hypothesis": "The experimental layer-prepending installer can emit an ordinary Qwen3.5 checkpoint while preserving reference behavior within a preregistered paired confidence bound and retaining official text and vision-language execution.",
+      "id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+      "lineage": {
+        "engineering_review": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.engineering-review",
+        "experiment_design": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.experiment-design",
+        "hypothesis": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.hypothesis",
+        "mathematical_foundation": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.foundation"
+      },
+      "metrics": [
+        {
+          "description": "All mandatory Qwen installation acceptance gates passed, encoded as 0 or 1.",
+          "name": "acceptance_pass",
+          "unit": "boolean"
+        },
+        {
+          "description": "The tracked leCore checkout was clean when the run began, encoded as 0 or 1.",
+          "name": "source_clean",
+          "unit": "boolean"
+        },
+        {
+          "description": "Whether research-only spectral filtering was used; the acceptance path requires 0.",
+          "name": "spectral_filtering_enabled",
+          "unit": "boolean"
+        },
+        {
+          "description": "The explicitly acknowledged layer-prepending installer ran, encoded as 0 or 1.",
+          "name": "experimental_installer_used",
+          "unit": "boolean"
+        },
+        {
+          "description": "leCore and the official Transformers tokenizer produced identical reference token IDs.",
+          "name": "tokenizer_parity_pass",
+          "unit": "boolean"
+        },
+        {
+          "description": "Pre-install leCore logits matched the official Transformers text model within the frozen tolerance.",
+          "name": "reference_logit_parity_pass",
+          "unit": "boolean"
+        },
+        {
+          "description": "Maximum absolute pre-install logit error divided by the maximum absolute reference logit.",
+          "name": "reference_logit_relative_error",
+          "unit": "ratio"
+        },
+        {
+          "description": "Paired token positions included in the streamed evaluation.",
+          "name": "eval_tokens",
+          "unit": "tokens"
+        },
+        {
+          "description": "Original checkpoint perplexity on the frozen corpus and chunking procedure.",
+          "name": "original_perplexity",
+          "unit": "perplexity"
+        },
+        {
+          "description": "Installed checkpoint perplexity on the same token positions.",
+          "name": "installed_perplexity",
+          "unit": "perplexity"
+        },
+        {
+          "description": "Installed minus original perplexity as a percentage of original.",
+          "name": "perplexity_delta_pct",
+          "unit": "percent"
+        },
+        {
+          "description": "Lower 95 percent paired moving-block-bootstrap bound for installed minus original NLL.",
+          "name": "paired_ci_lo_nats",
+          "unit": "nats_per_token"
+        },
+        {
+          "description": "Upper 95 percent paired moving-block-bootstrap bound for installed minus original NLL.",
+          "name": "paired_ci_hi_nats",
+          "unit": "nats_per_token"
+        },
+        {
+          "description": "The paired upper confidence bound stayed within the preregistered maximum regression.",
+          "name": "statistical_gate_pass",
+          "unit": "boolean"
+        },
+        {
+          "description": "Moving-block length inferred from autocorrelation in paired token loss differences.",
+          "name": "paired_block_length",
+          "unit": "tokens"
+        },
+        {
+          "description": "Effective paired sample size after serial-correlation adjustment.",
+          "name": "paired_effective_tokens",
+          "unit": "tokens"
+        },
+        {
+          "description": "Peak resident memory observed across the runner and installer child process.",
+          "name": "peak_rss_mb",
+          "unit": "megabytes"
+        },
+        {
+          "description": "Peak accelerator allocation reported by PyTorch, or 0 when no accelerator was used.",
+          "name": "peak_gpu_mb",
+          "unit": "megabytes"
+        },
+        {
+          "description": "Total safetensors size of the emitted installed checkpoint.",
+          "name": "emitted_checkpoint_mb",
+          "unit": "megabytes"
+        },
+        {
+          "description": "The emitted checkpoint reloaded from disk and produced finite logits.",
+          "name": "reload_pass",
+          "unit": "boolean"
+        },
+        {
+          "description": "The emitted checkpoint generated text through the official Transformers model.",
+          "name": "text_generation_pass",
+          "unit": "boolean"
+        },
+        {
+          "description": "The emitted checkpoint accepted a synthetic image through the official Qwen vision-language processor and generated a token.",
+          "name": "vision_smoke_pass",
+          "unit": "boolean"
+        }
+      ],
+      "models": [
+        "weight://Qwen/Qwen3.5-0.8B/20c3330d0b3e00c98b38e7813202b12952f37d6a4415a30da103c9bfe994d680"
+      ],
+      "outcome_contract": {
+        "outcomes": [
+          {
+            "description": "Every frozen Qwen acceptance gate passed.",
+            "id": "accepted",
+            "predicate": {
+              "kind": "metric",
+              "metric": "acceptance_pass",
+              "operator": "gte",
+              "threshold": 1.0
+            }
+          },
+          {
+            "description": "The run completed but at least one acceptance gate failed.",
+            "id": "rejected",
+            "predicate": {
+              "kind": "metric",
+              "metric": "acceptance_pass",
+              "operator": "lt",
+              "threshold": 1.0
+            }
+          },
+          {
+            "description": "The runner failed or did not emit its exact metric contract.",
+            "id": "execution_failure",
+            "predicate": {
+              "kind": "execution_failure"
+            }
+          }
+        ],
+        "primary_metric": "acceptance_pass",
+        "success_outcome": "accepted"
+      },
+      "proposer": {
+        "id": "model://codex/lecore-qwen/research-director",
+        "kind": "model",
+        "model_ref": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/research-director"
+      },
+      "rationale": "This converts the unresolved Qwen integration claims into one frozen, replayable, statistically gated run. Spectral filtering is a separate research control and is forbidden in this contract.",
+      "schema": "ilxyr.experiment.v1",
+      "security": {
+        "code_policy": "arbitrary",
+        "export_policy": "artifacts",
+        "weight_class": "public"
+      },
+      "seeds": [
+        0
+      ],
+      "title": "Qwen3.5 leCore layer-prepending acceptance"
+    }
+  },
+  "compiled_ref": "artifact://sha256/3d4c5b79be266085e4a3495a83cbfe3c4c8434c230bef81e7b6a19ed7eeb3ff6",
+  "evidence": {
+    "authority": {
+      "level": "corpus_proxy",
+      "provenance": {
+        "artifact_hashes": [
+          "artifact://sha256/04bed9185d0a9647fea419ac6cb2f671a106ae60bc82c23b172aacff6dbcaf0b",
+          "artifact://sha256/3b4c72fe06906bda15e22dac5fd12f9d1b1347f687f3656bbaa6ff3c3d11cbd1",
+          "artifact://sha256/50519e75792a64ca250e673ed7b05be888419d53969be5ec4c074fb50ed8ebb7",
+          "artifact://sha256/826a9741b544257f3658ecb4014abc4bcaee45a33be7e5e467dc1cb2786fc17e",
+          "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731"
+        ],
+        "checker": "checker://lecore/qwen35-acceptance/v1",
+        "model_lineage": "model://Qwen/Qwen3.5-0.8B/20c3330d0b3e00c98b38e7813202b12952f37d6a4415a30da103c9bfe994d680"
+      },
+      "scope": {
+        "coverage": 1.0,
+        "eval_set": "dataset://lecore/qwen-evaluation/a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94",
+        "seeds": [
+          0
+        ]
+      }
+    },
+    "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+    "id": "evidence:run:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance:1786571246690",
+    "lane": "promoted",
+    "metrics": {},
+    "recorded_at_ms": 1786571246771,
+    "resolved_outcome": "execution_failure",
+    "run_ref": "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731",
+    "schema": "ilxyr.evidence.v1"
+  },
+  "evidence_event_hash": "f20843ffca03b8df2cacc86f57dcdd0b48aa839114c16953be8d9719063eaee4",
+  "evidence_ref": "artifact://sha256/22fc1c29c182563c80d9188e4e2d077e6fbb72dcdc0c1d046e7d7e22dd3c00e1",
+  "executor_attestations": [],
+  "executor_attested": false,
+  "forecast_risked": true,
+  "forecasts": [
+    {
+      "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+      "forecaster": {
+        "id": "model://codex/lecore-qwen/forecaster-mechanistic",
+        "kind": "model",
+        "model_ref": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/forecaster-mechanistic"
+      },
+      "id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast-mechanistic",
+      "probabilities": {
+        "accepted": 0.15,
+        "execution_failure": 0.3,
+        "rejected": 0.55
+      },
+      "rationale": "The blank prepend has a strong identity construction, while full-checkpoint memory pressure and official multimodal reload remain material execution risks.",
+      "schema": "ilxyr.forecast.v1",
+      "stake": 5
+    },
+    {
+      "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+      "forecaster": {
+        "id": "model://codex/lecore-qwen/forecaster-empirical",
+        "kind": "model",
+        "model_ref": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/forecaster-empirical"
+      },
+      "id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast.empirical",
+      "probabilities": {
+        "accepted": 0.2,
+        "execution_failure": 0.15,
+        "rejected": 0.65
+      },
+      "rationale": "Structural rehearsal passes, but no complete post-memory-fix real-Qwen install and powered acceptance run has succeeded yet.",
+      "schema": "ilxyr.forecast.v1",
+      "stake": 5
+    }
+  ],
+  "ledger_head": "2ab7e993f5ebef3f6635b08fb4a7f9f067de2e254668f12378f7882ba1b0907f",
+  "run": {
+    "completed_at_ms": 1786571246741,
+    "exit_code": 1,
+    "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+    "id": "run:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance:1786571246690",
+    "metrics": {},
+    "output_truncated": false,
+    "schema": "ilxyr.run.v1",
+    "started_at_ms": 1786571246690,
+    "stderr": "Traceback (most recent call last):\n  File \"/opt/qwen35-acceptance/lecore/experiments/qwen35_acceptance/run.py\", line 17, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'\n",
+    "stdout": "",
+    "timed_out": false
+  },
+  "run_ref": "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731",
+  "schema": "ilxyr.evidence_bundle.v1",
+  "settlements": [
+    {
+      "brier_score": 0.815,
+      "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+      "forecast_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast-mechanistic",
+      "resolved_outcome": "execution_failure",
+      "schema": "ilxyr.forecast_settlement.v1",
+      "stake": 5
+    },
+    {
+      "brier_score": 1.185,
+      "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+      "forecast_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast.empirical",
+      "resolved_outcome": "execution_failure",
+      "schema": "ilxyr.forecast_settlement.v1",
+      "stake": 5
+    }
+  ],
+  "source_attested": false
+}

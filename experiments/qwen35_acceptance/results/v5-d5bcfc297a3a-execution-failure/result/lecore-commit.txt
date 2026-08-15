@@ -1,0 +1,7 @@
+commit d5bcfc297a3af8e4f8f0c60b3d8ad21b67e0e55a
+Author:     atimics <atimics@ratimics.com>
+AuthorDate: Fri Aug 14 01:17:56 2026 -0700
+Commit:     atimics <atimics@ratimics.com>
+CommitDate: Fri Aug 14 01:17:56 2026 -0700
+
+    ci(qwen): rehearse ilxyr admission before launch

@@ -1,0 +1,70 @@
+{
+  "diagnostics": {
+    "official_smokes": [
+      "AutoProcessor: ImportError: \nQwen3VLVideoProcessor requires the Torchvision library but it was not found in your environment. Check out the instructions on the\ninstallation page: https://pytorch.org/get-started/locally/ and follow the ones that match your environment.\nPlease note that you may need to restart your runtime after installation.\n"
+    ]
+  },
+  "metrics": {
+    "acceptance_pass": 0.0,
+    "emitted_checkpoint_mb": 2112.911655,
+    "eval_tokens": 4096.0,
+    "experimental_installer_used": 1.0,
+    "installed_perplexity": 10.357574708230848,
+    "official_reload_pass": 1.0,
+    "original_perplexity": 7.9062244629535465,
+    "paired_block_length": 4.0,
+    "paired_ci_hi_nats": 0.34246740100294987,
+    "paired_ci_lo_nats": 0.20259645914578694,
+    "paired_effective_tokens": 2279.0,
+    "peak_gpu_mb": 0.0,
+    "peak_rss_mb": 24306.52734375,
+    "perplexity_delta_pct": 31.005320640258482,
+    "reference_logit_parity_pass": 1.0,
+    "reference_logit_relative_error": 6.787656774900957e-07,
+    "reload_pass": 1.0,
+    "source_clean": 1.0,
+    "spectral_filtering_enabled": 0.0,
+    "statistical_gate_pass": 0.0,
+    "text_generation_pass": 0.0,
+    "tokenizer_parity_pass": 1.0,
+    "vision_smoke_pass": 0.0
+  },
+  "source": {
+    "artifacts": [
+      {
+        "path": "experiments/qwen35_acceptance/run.py",
+        "sha256": "d1c3ecec0fe19a9aea1c30354032919ad25b15092ffd547a3f487dcb1a10f849"
+      },
+      {
+        "path": "experiments/qwen35_acceptance/contract.py",
+        "sha256": "3710f24df07431b2be710ee291f6369aaae48c369bbab32e3534cfa5d31a501b"
+      },
+      {
+        "path": "assimilation/install.py",
+        "sha256": "a980357333b0820230ec5deba94ce3cb95260a17da95c786997a7bc527a8ddce"
+      },
+      {
+        "path": "holographic/io_and_interop/holographic_measure.py",
+        "sha256": "95ceb45ca9e57962cb1e81e6a335f8ff2d46f7f6b7a128a62b8bdd2682a15527"
+      },
+      {
+        "path": "holographic/io_and_interop/holographic_gdnruntime.py",
+        "sha256": "82122011e226ee8eee0ce2ffeec946dcd60f4f95c622c627e6cb7522d82a7928"
+      }
+    ],
+    "commit": "f399cd6bc7f24383a792fdcf32c43a4e1197d4f1",
+    "inputs": {
+      "evaluation_corpus": {
+        "bytes": 1213410,
+        "path": "/opt/qwen35-acceptance-v3/inputs/federalist-papers.txt",
+        "sha256": "a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94"
+      },
+      "installation_corpus": {
+        "bytes": 2303549,
+        "path": "/opt/qwen35-acceptance-v3/lecore/REFERENCE.md",
+        "sha256": "59f551d452cfb0664deeb6dfbe5b98598abb1633cc38a5bb020ec100ac3cd33a"
+      }
+    },
+    "repository": "https://github.com/atimics/holostuff.git"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "schema": "lecore.qwen35-arweave-publication-receipt.v1",
+  "published_at": "2026-08-13T21:29:26Z",
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.59f551d452cf.a6c9d1135a04.f399cd6bc7f2.v3.acceptance",
+  "resolved_outcome": "execution_failure",
+  "scientific_result_admitted": false,
+  "publisher": {
+    "service": "ArDrive Turbo signed free upload",
+    "sdk": "@ardrive/turbo-sdk@1.42.0",
+    "ownership": "The uploads used one-use in-memory Arweave identities. Their private keys were never persisted."
+  },
+  "publication_manifest": {
+    "path": "publication-manifest.json",
+    "bytes": 16447,
+    "sha256": "19ac497b7e55881422e28cc8a118085a48e685a8bd5c5e7ee8abe2839ef8f8bb",
+    "transaction_id": "1SvpypXJlC2JNqX5QyF08ExECvjiYxm0B-pmWGaNqKY"
+  },
+  "arweave_path_manifest": {
+    "transaction_id": "h96JlX-4ttZsPZdYRBuT-_JNO2s0lS18hoFjM4ojYSw",
+    "bytes": 8605,
+    "sha256": "844a8410e74b91bdc5c15fa4435d0c4ccdab21bec4b8a8fd858431825e880674",
+    "item_count": 75,
+    "gateway_url": "https://arweave.net/h96JlX-4ttZsPZdYRBuT-_JNO2s0lS18hoFjM4ojYSw/",
+    "index_url": "https://arweave.net/h96JlX-4ttZsPZdYRBuT-_JNO2s0lS18hoFjM4ojYSw/publication-manifest.json",
+    "confirmed_cache_url": "https://turbo-gateway.com/h96JlX-4ttZsPZdYRBuT-_JNO2s0lS18hoFjM4ojYSw/",
+    "owner": "Tp9rnI0lVaMBpPbhbofJXTBI6yJtfoxrI5KWM4GEXKE"
+  },
+  "evidence_bundle": {
+    "original_name": "qwen35-evidence.tgz",
+    "bytes": 1325327,
+    "sha256": "84db563708d77fb13ff93f072dec85f19e96ec7cfe33a22e56e639df78dfcc60",
+    "arweave_parts": 15,
+    "part_size_bytes": 90000,
+    "reconstruction": "Concatenate bundle-parts/qwen35-evidence.tgz.part-000 through part-014 in lexical order, then verify SHA-256. The bundle contains no model weights."
+  },
+  "selected_items": {
+    "ledger_events": {
+      "transaction_id": "REmYCo1Hta3RPPNYipNshvJ9ec8onIVndNGN63Fw2Zo",
+      "sha256": "ee844391a410ec83c471939d212572b94cc25168597bee3741081335c093ae0f"
+    },
+    "ledger_verification": {
+      "transaction_id": "-5WEUj_anDpdkxIR_sgUNbpFvWFWnVFmLMlLrNuqqjU",
+      "sha256": "7220969c8bef798767522784933b4abe4ae820c26d3ea560291545df66cd57c2"
+    },
+    "diagnostic_metrics": {
+      "transaction_id": "TpXJ4v8jUJuB2E9X_KOIVBXWFcbawfTotnG-iQ0wNh4",
+      "sha256": "34da55d92d3c4e4a7f273eb82d31fc09b106ff077ffb61c1acc68205a1df81dd",
+      "admitted": false
+    },
+    "aws_cleanup": {
+      "transaction_id": "KZlZD7uPtO5CtS5hyDrn5qh1FmQaOZiuKSMUbSX83jU",
+      "sha256": "e74f5143af8bf797f3e14accf4a44121c1ccf8e5f8dd16bf55e09c6e4dd3967e"
+    }
+  },
+  "confirmation": {
+    "status_service": "https://upload.ardrive.io/v1/tx/{transaction_id}/status",
+    "transactions_confirmed": 76,
+    "total_winc_charged": 0,
+    "public_cache_verified_at": "2026-08-13T21:33:10Z",
+    "public_gateway_verified_at": "2026-08-13T21:44:56Z",
+    "verified_downloads": {
+      "publication-manifest.json": "19ac497b7e55881422e28cc8a118085a48e685a8bd5c5e7ee8abe2839ef8f8bb",
+      "ledger/events.jsonl": "ee844391a410ec83c471939d212572b94cc25168597bee3741081335c093ae0f",
+      "reconstructed qwen35-evidence.tgz": "84db563708d77fb13ff93f072dec85f19e96ec7cfe33a22e56e639df78dfcc60"
+    }
+  }
+}

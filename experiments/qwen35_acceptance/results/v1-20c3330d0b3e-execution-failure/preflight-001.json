@@ -1,0 +1,19 @@
+{
+  "schema": "lecore.qwen35-preflight-record.v1",
+  "attempt": "preflight-001",
+  "instance_id": "i-0b49b8662723706f0",
+  "launched_at": "2026-08-12T21:41:10Z",
+  "completed_at": "2026-08-12T21:42:03.491811+00:00",
+  "formal_run_started": false,
+  "stage": "preflight_failure",
+  "exit_code": 128,
+  "expected_source_commit": "a04ab563ea159398a58a4cb002568cc78b9f14bb",
+  "observed_checkout_commit": "3d6454062982907b7d95c2e6dc267e70a9b921b6",
+  "cause": "The frozen source commit was mistyped and did not exist in the remote repository.",
+  "corrected_source_commit": "a04ab5692be38f06120aba4b0bc5e2a284eb2c79",
+  "evidence_bundle": {
+    "uri": "s3://zero-training-022118847419/qwen35-acceptance/a04ab56-2fc06364-a6c9d113/qwen35-evidence.tgz",
+    "bytes": 408293,
+    "sha256": "836fd6b29fa63ca6a636a3f9b3f1e66b7928605e0166e868e871a8797357e76a"
+  }
+}

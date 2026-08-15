@@ -1,0 +1,483 @@
+Shutdown scheduled for Fri 2026-08-14 20:44:55 UTC, use 'shutdown -c' to cancel.
+Amazon Linux 2023 repository                     71 MB/s |  75 MB     00:01    
+Amazon Linux 2023 Kernel Livepatch repository   644 kB/s |  69 kB     00:00    
+Package tar-2:1.34-1.amzn2023.0.4.x86_64 is already installed.
+Package gzip-1.12-1.amzn2023.0.1.x86_64 is already installed.
+Dependencies resolved.
+================================================================================
+ Package                Arch    Version                      Repository    Size
+================================================================================
+Installing:
+ cargo                  x86_64  1.97.0-1.amzn2023.0.1        amazonlinux  8.2 M
+ gcc                    x86_64  11.5.0-5.amzn2023.0.5        amazonlinux   36 M
+ git                    x86_64  2.50.1-1.amzn2023.0.1        amazonlinux   53 k
+ python3.12             x86_64  3.12.13-2.amzn2023.0.5       amazonlinux   27 k
+ python3.12-pip         noarch  23.2.1-4.amzn2023.0.10       amazonlinux  2.8 M
+ rust                   x86_64  1.97.0-1.amzn2023.0.1        amazonlinux   62 M
+Installing dependencies:
+ annobin-docs           noarch  12.69-1.amzn2023.0.1         amazonlinux   93 k
+ annobin-plugin-gcc     x86_64  12.69-1.amzn2023.0.1         amazonlinux  974 k
+ cpp                    x86_64  11.5.0-5.amzn2023.0.5        amazonlinux   11 M
+ gc                     x86_64  8.0.4-5.amzn2023.0.2         amazonlinux  105 k
+ gcc-plugin-annobin     x86_64  11.5.0-5.amzn2023.0.5        amazonlinux   38 k
+ git-core               x86_64  2.50.1-1.amzn2023.0.1        amazonlinux  4.9 M
+ git-core-doc           noarch  2.50.1-1.amzn2023.0.1        amazonlinux  2.8 M
+ glibc-devel            x86_64  2.34-231.amzn2023.0.5        amazonlinux   33 k
+ glibc-headers-x86      noarch  2.34-231.amzn2023.0.5        amazonlinux  439 k
+ guile22                x86_64  2.2.7-2.amzn2023.0.3         amazonlinux  6.4 M
+ kernel-headers         x86_64  1:6.1.177-224.371.amzn2023   amazonlinux  1.4 M
+ libmpc                 x86_64  1.2.1-2.amzn2023.0.2         amazonlinux   62 k
+ libtool-ltdl           x86_64  2.4.7-1.amzn2023.0.3         amazonlinux   38 k
+ libxcrypt-devel        x86_64  4.4.33-7.amzn2023            amazonlinux   32 k
+ make                   x86_64  1:4.3-5.amzn2023.0.2         amazonlinux  534 k
+ mpdecimal              x86_64  2.5.1-3.amzn2023.0.3         amazonlinux  101 k
+ perl-Error             noarch  1:0.17030-2.amzn2023.0.1     amazonlinux   42 k
+ perl-File-Find         noarch  1.37-477.amzn2023.0.9        amazonlinux   26 k
+ perl-Git               noarch  2.50.1-1.amzn2023.0.1        amazonlinux   41 k
+ perl-TermReadKey       x86_64  2.38-9.amzn2023.0.3          amazonlinux   36 k
+ perl-lib               x86_64  0.65-477.amzn2023.0.9        amazonlinux   15 k
+ python3.12-libs        x86_64  3.12.13-2.amzn2023.0.5       amazonlinux  9.2 M
+ python3.12-pip-wheel   noarch  23.2.1-4.amzn2023.0.10       amazonlinux  1.5 M
+ rust-std-static        x86_64  1.97.0-1.amzn2023.0.1        amazonlinux   39 M
+Installing weak dependencies:
+ python3.12-setuptools  noarch  68.2.2-4.amzn2023.0.3        amazonlinux  1.4 M
+
+Transaction Summary
+================================================================================
+Install  31 Packages
+
+Total download size: 189 M
+Installed size: 700 M
+Downloading Packages:
+(1/31): annobin-docs-12.69-1.amzn2023.0.1.noarc 2.5 MB/s |  93 kB     00:00    
+(2/31): annobin-plugin-gcc-12.69-1.amzn2023.0.1  20 MB/s | 974 kB     00:00    
+(3/31): gc-8.0.4-5.amzn2023.0.2.x86_64.rpm      3.7 MB/s | 105 kB     00:00    
+(4/31): cpp-11.5.0-5.amzn2023.0.5.x86_64.rpm     71 MB/s |  11 MB     00:00    
+(5/31): cargo-1.97.0-1.amzn2023.0.1.x86_64.rpm   38 MB/s | 8.2 MB     00:00    
+(6/31): gcc-plugin-annobin-11.5.0-5.amzn2023.0. 1.1 MB/s |  38 kB     00:00    
+(7/31): git-2.50.1-1.amzn2023.0.1.x86_64.rpm    1.7 MB/s |  53 kB     00:00    
+(8/31): git-core-2.50.1-1.amzn2023.0.1.x86_64.r  71 MB/s | 4.9 MB     00:00    
+(9/31): git-core-doc-2.50.1-1.amzn2023.0.1.noar  50 MB/s | 2.8 MB     00:00    
+(10/31): glibc-devel-2.34-231.amzn2023.0.5.x86_ 1.3 MB/s |  33 kB     00:00    
+(11/31): glibc-headers-x86-2.34-231.amzn2023.0.  14 MB/s | 439 kB     00:00    
+(12/31): kernel-headers-6.1.177-224.371.amzn202  33 MB/s | 1.4 MB     00:00    
+(13/31): guile22-2.2.7-2.amzn2023.0.3.x86_64.rp  74 MB/s | 6.4 MB     00:00    
+(14/31): libmpc-1.2.1-2.amzn2023.0.2.x86_64.rpm 2.0 MB/s |  62 kB     00:00    
+(15/31): libtool-ltdl-2.4.7-1.amzn2023.0.3.x86_ 1.5 MB/s |  38 kB     00:00    
+(16/31): libxcrypt-devel-4.4.33-7.amzn2023.x86_ 1.4 MB/s |  32 kB     00:00    
+(17/31): mpdecimal-2.5.1-3.amzn2023.0.3.x86_64. 4.5 MB/s | 101 kB     00:00    
+(18/31): gcc-11.5.0-5.amzn2023.0.5.x86_64.rpm    75 MB/s |  36 MB     00:00    
+(19/31): perl-Error-0.17030-2.amzn2023.0.1.noar 396 kB/s |  42 kB     00:00    
+(20/31): make-4.3-5.amzn2023.0.2.x86_64.rpm     3.8 MB/s | 534 kB     00:00    
+(21/31): perl-Git-2.50.1-1.amzn2023.0.1.noarch. 1.7 MB/s |  41 kB     00:00    
+(22/31): perl-File-Find-1.37-477.amzn2023.0.9.n 880 kB/s |  26 kB     00:00    
+(23/31): perl-TermReadKey-2.38-9.amzn2023.0.3.x 1.2 MB/s |  36 kB     00:00    
+(24/31): perl-lib-0.65-477.amzn2023.0.9.x86_64. 603 kB/s |  15 kB     00:00    
+(25/31): python3.12-3.12.13-2.amzn2023.0.5.x86_ 1.0 MB/s |  27 kB     00:00    
+(26/31): python3.12-pip-wheel-23.2.1-4.amzn2023  45 MB/s | 1.5 MB     00:00    
+(27/31): python3.12-pip-23.2.1-4.amzn2023.0.10.  56 MB/s | 2.8 MB     00:00    
+(28/31): python3.12-setuptools-68.2.2-4.amzn202  35 MB/s | 1.4 MB     00:00    
+(29/31): python3.12-libs-3.12.13-2.amzn2023.0.5  58 MB/s | 9.2 MB     00:00    
+(30/31): rust-std-static-1.97.0-1.amzn2023.0.1.  76 MB/s |  39 MB     00:00    
+(31/31): rust-1.97.0-1.amzn2023.0.1.x86_64.rpm   57 MB/s |  62 MB     00:01    
+--------------------------------------------------------------------------------
+Total                                           106 MB/s | 189 MB     00:01     
+Running transaction check
+Transaction check succeeded.
+Running transaction test
+Transaction test succeeded.
+Running transaction
+  Preparing        :                                                        1/1 
+  Installing       : libmpc-1.2.1-2.amzn2023.0.2.x86_64                    1/31 
+  Installing       : git-core-2.50.1-1.amzn2023.0.1.x86_64                 2/31 
+  Installing       : git-core-doc-2.50.1-1.amzn2023.0.1.noarch             3/31 
+  Installing       : cpp-11.5.0-5.amzn2023.0.5.x86_64                      4/31 
+  Installing       : python3.12-pip-wheel-23.2.1-4.amzn2023.0.10.noarch    5/31 
+  Installing       : perl-lib-0.65-477.amzn2023.0.9.x86_64                 6/31 
+  Installing       : perl-TermReadKey-2.38-9.amzn2023.0.3.x86_64           7/31 
+  Installing       : perl-File-Find-1.37-477.amzn2023.0.9.noarch           8/31 
+  Installing       : perl-Error-1:0.17030-2.amzn2023.0.1.noarch            9/31 
+  Installing       : perl-Git-2.50.1-1.amzn2023.0.1.noarch                10/31 
+  Installing       : git-2.50.1-1.amzn2023.0.1.x86_64                     11/31 
+  Installing       : mpdecimal-2.5.1-3.amzn2023.0.3.x86_64                12/31 
+  Installing       : python3.12-3.12.13-2.amzn2023.0.5.x86_64             13/31 
+  Installing       : python3.12-libs-3.12.13-2.amzn2023.0.5.x86_64        14/31 
+  Installing       : python3.12-setuptools-68.2.2-4.amzn2023.0.3.noarch   15/31 
+  Installing       : libtool-ltdl-2.4.7-1.amzn2023.0.3.x86_64             16/31 
+  Installing       : kernel-headers-1:6.1.177-224.371.amzn2023.x86_64     17/31 
+  Installing       : glibc-headers-x86-2.34-231.amzn2023.0.5.noarch       18/31 
+  Installing       : libxcrypt-devel-4.4.33-7.amzn2023.x86_64             19/31 
+  Installing       : glibc-devel-2.34-231.amzn2023.0.5.x86_64             20/31 
+  Installing       : gc-8.0.4-5.amzn2023.0.2.x86_64                       21/31 
+  Installing       : guile22-2.2.7-2.amzn2023.0.3.x86_64                  22/31 
+  Installing       : make-1:4.3-5.amzn2023.0.2.x86_64                     23/31 
+  Installing       : gcc-11.5.0-5.amzn2023.0.5.x86_64                     24/31 
+  Running scriptlet: gcc-11.5.0-5.amzn2023.0.5.x86_64                     24/31 
+  Installing       : rust-std-static-1.97.0-1.amzn2023.0.1.x86_64         25/31 
+  Installing       : rust-1.97.0-1.amzn2023.0.1.x86_64                    26/31 
+  Installing       : annobin-docs-12.69-1.amzn2023.0.1.noarch             27/31 
+  Installing       : annobin-plugin-gcc-12.69-1.amzn2023.0.1.x86_64       28/31 
+  Running scriptlet: annobin-plugin-gcc-12.69-1.amzn2023.0.1.x86_64       28/31 
+  Installing       : cargo-1.97.0-1.amzn2023.0.1.x86_64                   29/31 
+  Installing       : gcc-plugin-annobin-11.5.0-5.amzn2023.0.5.x86_64      30/31 
+  Installing       : python3.12-pip-23.2.1-4.amzn2023.0.10.noarch         31/31 
+  Running scriptlet: python3.12-pip-23.2.1-4.amzn2023.0.10.noarch         31/31 
+  Verifying        : annobin-docs-12.69-1.amzn2023.0.1.noarch              1/31 
+  Verifying        : annobin-plugin-gcc-12.69-1.amzn2023.0.1.x86_64        2/31 
+  Verifying        : cargo-1.97.0-1.amzn2023.0.1.x86_64                    3/31 
+  Verifying        : cpp-11.5.0-5.amzn2023.0.5.x86_64                      4/31 
+  Verifying        : gc-8.0.4-5.amzn2023.0.2.x86_64                        5/31 
+  Verifying        : gcc-11.5.0-5.amzn2023.0.5.x86_64                      6/31 
+  Verifying        : gcc-plugin-annobin-11.5.0-5.amzn2023.0.5.x86_64       7/31 
+  Verifying        : git-2.50.1-1.amzn2023.0.1.x86_64                      8/31 
+  Verifying        : git-core-2.50.1-1.amzn2023.0.1.x86_64                 9/31 
+  Verifying        : git-core-doc-2.50.1-1.amzn2023.0.1.noarch            10/31 
+  Verifying        : glibc-devel-2.34-231.amzn2023.0.5.x86_64             11/31 
+  Verifying        : glibc-headers-x86-2.34-231.amzn2023.0.5.noarch       12/31 
+  Verifying        : guile22-2.2.7-2.amzn2023.0.3.x86_64                  13/31 
+  Verifying        : kernel-headers-1:6.1.177-224.371.amzn2023.x86_64     14/31 
+  Verifying        : libmpc-1.2.1-2.amzn2023.0.2.x86_64                   15/31 
+  Verifying        : libtool-ltdl-2.4.7-1.amzn2023.0.3.x86_64             16/31 
+  Verifying        : libxcrypt-devel-4.4.33-7.amzn2023.x86_64             17/31 
+  Verifying        : make-1:4.3-5.amzn2023.0.2.x86_64                     18/31 
+  Verifying        : mpdecimal-2.5.1-3.amzn2023.0.3.x86_64                19/31 
+  Verifying        : perl-Error-1:0.17030-2.amzn2023.0.1.noarch           20/31 
+  Verifying        : perl-File-Find-1.37-477.amzn2023.0.9.noarch          21/31 
+  Verifying        : perl-Git-2.50.1-1.amzn2023.0.1.noarch                22/31 
+  Verifying        : perl-TermReadKey-2.38-9.amzn2023.0.3.x86_64          23/31 
+  Verifying        : perl-lib-0.65-477.amzn2023.0.9.x86_64                24/31 
+  Verifying        : python3.12-3.12.13-2.amzn2023.0.5.x86_64             25/31 
+  Verifying        : python3.12-libs-3.12.13-2.amzn2023.0.5.x86_64        26/31 
+  Verifying        : python3.12-pip-23.2.1-4.amzn2023.0.10.noarch         27/31 
+  Verifying        : python3.12-pip-wheel-23.2.1-4.amzn2023.0.10.noarch   28/31 
+  Verifying        : python3.12-setuptools-68.2.2-4.amzn2023.0.3.noarch   29/31 
+  Verifying        : rust-1.97.0-1.amzn2023.0.1.x86_64                    30/31 
+  Verifying        : rust-std-static-1.97.0-1.amzn2023.0.1.x86_64         31/31 
+
+Installed:
+  annobin-docs-12.69-1.amzn2023.0.1.noarch                                      
+  annobin-plugin-gcc-12.69-1.amzn2023.0.1.x86_64                                
+  cargo-1.97.0-1.amzn2023.0.1.x86_64                                            
+  cpp-11.5.0-5.amzn2023.0.5.x86_64                                              
+  gc-8.0.4-5.amzn2023.0.2.x86_64                                                
+  gcc-11.5.0-5.amzn2023.0.5.x86_64                                              
+  gcc-plugin-annobin-11.5.0-5.amzn2023.0.5.x86_64                               
+  git-2.50.1-1.amzn2023.0.1.x86_64                                              
+  git-core-2.50.1-1.amzn2023.0.1.x86_64                                         
+  git-core-doc-2.50.1-1.amzn2023.0.1.noarch                                     
+  glibc-devel-2.34-231.amzn2023.0.5.x86_64                                      
+  glibc-headers-x86-2.34-231.amzn2023.0.5.noarch                                
+  guile22-2.2.7-2.amzn2023.0.3.x86_64                                           
+  kernel-headers-1:6.1.177-224.371.amzn2023.x86_64                              
+  libmpc-1.2.1-2.amzn2023.0.2.x86_64                                            
+  libtool-ltdl-2.4.7-1.amzn2023.0.3.x86_64                                      
+  libxcrypt-devel-4.4.33-7.amzn2023.x86_64                                      
+  make-1:4.3-5.amzn2023.0.2.x86_64                                              
+  mpdecimal-2.5.1-3.amzn2023.0.3.x86_64                                         
+  perl-Error-1:0.17030-2.amzn2023.0.1.noarch                                    
+  perl-File-Find-1.37-477.amzn2023.0.9.noarch                                   
+  perl-Git-2.50.1-1.amzn2023.0.1.noarch                                         
+  perl-TermReadKey-2.38-9.amzn2023.0.3.x86_64                                   
+  perl-lib-0.65-477.amzn2023.0.9.x86_64                                         
+  python3.12-3.12.13-2.amzn2023.0.5.x86_64                                      
+  python3.12-libs-3.12.13-2.amzn2023.0.5.x86_64                                 
+  python3.12-pip-23.2.1-4.amzn2023.0.10.noarch                                  
+  python3.12-pip-wheel-23.2.1-4.amzn2023.0.10.noarch                            
+  python3.12-setuptools-68.2.2-4.amzn2023.0.3.noarch                            
+  rust-1.97.0-1.amzn2023.0.1.x86_64                                             
+  rust-std-static-1.97.0-1.amzn2023.0.1.x86_64                                  
+
+Complete!
+/opt/qwen35-acceptance-v6/inputs/launch-manifest.json: OK
+Cloning into '/opt/qwen35-acceptance-v6/lecore'...
+Updating files:   0% (2/1714)Updating files:   1% (18/1714)Updating files:   2% (35/1714)Updating files:   3% (52/1714)Updating files:   4% (69/1714)Updating files:   5% (86/1714)Updating files:   6% (103/1714)Updating files:   7% (120/1714)Updating files:   8% (138/1714)Updating files:   9% (155/1714)Updating files:  10% (172/1714)Updating files:  11% (189/1714)Updating files:  12% (206/1714)Updating files:  13% (223/1714)Updating files:  14% (240/1714)Updating files:  15% (258/1714)Updating files:  16% (275/1714)Updating files:  17% (292/1714)Updating files:  18% (309/1714)Updating files:  19% (326/1714)Updating files:  20% (343/1714)Updating files:  21% (360/1714)Updating files:  22% (378/1714)Updating files:  23% (395/1714)Updating files:  24% (412/1714)Updating files:  25% (429/1714)Updating files:  26% (446/1714)Updating files:  27% (463/1714)Updating files:  28% (480/1714)Updating files:  29% (498/1714)Updating files:  30% (515/1714)Updating files:  31% (532/1714)Updating files:  32% (549/1714)Updating files:  33% (566/1714)Updating files:  34% (583/1714)Updating files:  35% (600/1714)Updating files:  36% (618/1714)Updating files:  37% (635/1714)Updating files:  38% (652/1714)Updating files:  39% (669/1714)Updating files:  40% (686/1714)Updating files:  41% (703/1714)Updating files:  42% (720/1714)Updating files:  43% (738/1714)Updating files:  44% (755/1714)Updating files:  45% (772/1714)Updating files:  46% (789/1714)Updating files:  47% (806/1714)Updating files:  48% (823/1714)Updating files:  49% (840/1714)Updating files:  50% (857/1714)Updating files:  51% (875/1714)Updating files:  52% (892/1714)Updating files:  53% (909/1714)Updating files:  54% (926/1714)Updating files:  55% (943/1714)Updating files:  56% (960/1714)Updating files:  57% (977/1714)Updating files:  58% (995/1714)Updating files:  59% (1012/1714)Updating files:  60% (1029/1714)Updating files:  61% (1046/1714)Updating files:  62% (1063/1714)Updating files:  63% (1080/1714)Updating files:  64% (1097/1714)Updating files:  65% (1115/1714)Updating files:  66% (1132/1714)Updating files:  67% (1149/1714)Updating files:  68% (1166/1714)Updating files:  69% (1183/1714)Updating files:  70% (1200/1714)Updating files:  71% (1217/1714)Updating files:  72% (1235/1714)Updating files:  73% (1252/1714)Updating files:  74% (1269/1714)Updating files:  75% (1286/1714)Updating files:  76% (1303/1714)Updating files:  77% (1320/1714)Updating files:  78% (1337/1714)Updating files:  79% (1355/1714)Updating files:  80% (1372/1714)Updating files:  81% (1389/1714)Updating files:  82% (1406/1714)Updating files:  83% (1423/1714)Updating files:  84% (1440/1714)Updating files:  85% (1457/1714)Updating files:  86% (1475/1714)Updating files:  87% (1492/1714)Updating files:  88% (1509/1714)Updating files:  89% (1526/1714)Updating files:  90% (1543/1714)Updating files:  91% (1560/1714)Updating files:  92% (1577/1714)Updating files:  93% (1595/1714)Updating files:  94% (1612/1714)Updating files:  95% (1629/1714)Updating files:  96% (1646/1714)Updating files:  97% (1663/1714)Updating files:  98% (1680/1714)Updating files:  99% (1697/1714)Updating files: 100% (1714/1714)Updating files: 100% (1714/1714), done.
+HEAD is now at 3e130dd fix(qwen): enforce ilxyr executor contract in CI
+/opt/qwen35-acceptance-v6/lecore/REFERENCE.md: OK
+/opt/qwen35-acceptance-v6/inputs/federalist-papers.txt: OK
+/opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt: OK
+Cloning into '/opt/qwen35-acceptance-v6/ilxyr'...
+HEAD is now at e92382f Publish EXP-006 experiment evidence
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded zmij v1.0.23
+  Downloaded signature v2.2.0
+  Downloaded curve25519-dalek v4.1.3
+  Downloaded ed25519-dalek v2.2.0
+  Downloaded digest v0.10.7
+  Downloaded ed25519 v2.2.3
+  Downloaded getrandom v0.2.17
+  Downloaded memchr v2.8.3
+  Downloaded base64 v0.22.1
+  Downloaded block-buffer v0.10.4
+  Downloaded generic-array v0.14.7
+  Downloaded der v0.7.10
+  Downloaded rustc_version v0.4.1
+  Downloaded serde_derive v1.0.229
+  Downloaded itoa v1.0.18
+  Downloaded pkcs8 v0.10.2
+  Downloaded rand_core v0.6.4
+  Downloaded version_check v0.9.5
+  Downloaded zeroize v1.9.0
+  Downloaded crypto-common v0.1.7
+  Downloaded proc-macro2 v1.0.106
+  Downloaded semver v1.0.28
+  Downloaded serde_json v1.0.150
+  Downloaded sha2 v0.10.9
+  Downloaded cfg-if v1.0.4
+  Downloaded const-oid v0.9.6
+  Downloaded spki v0.7.3
+  Downloaded base64ct v1.8.3
+  Downloaded subtle v2.6.1
+  Downloaded syn v2.0.119
+  Downloaded typenum v1.20.1
+  Downloaded cpufeatures v0.2.17
+  Downloaded curve25519-dalek-derive v0.1.1
+  Downloaded quote v1.0.46
+  Downloaded serde_core v1.0.229
+  Downloaded unicode-ident v1.0.24
+  Downloaded libc v0.2.186
+  Downloaded serde v1.0.229
+  Downloaded syn v3.0.0
+   Compiling proc-macro2 v1.0.106
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.46
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.1
+   Compiling semver v1.0.28
+   Compiling serde_core v1.0.229
+   Compiling cpufeatures v0.2.17
+   Compiling zmij v1.0.23
+   Compiling cfg-if v1.0.4
+   Compiling signature v2.2.0
+   Compiling subtle v2.6.1
+   Compiling serde_json v1.0.150
+   Compiling zeroize v1.9.0
+   Compiling serde v1.0.229
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling base64 v0.22.1
+   Compiling ed25519 v2.2.3
+   Compiling rustc_version v0.4.1
+   Compiling generic-array v0.14.7
+   Compiling curve25519-dalek v4.1.3
+   Compiling syn v2.0.119
+   Compiling syn v3.0.0
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling serde_derive v1.0.229
+   Compiling curve25519-dalek-derive v0.1.1
+   Compiling ed25519-dalek v2.2.0
+   Compiling ilxyr-core v0.1.0 (/opt/qwen35-acceptance-v6/ilxyr/crates/ilxyr-core)
+   Compiling ilxyr-cli v0.1.0 (/opt/qwen35-acceptance-v6/ilxyr/crates/ilxyr-cli)
+    Finished `release` profile [optimized] target(s) in 21.77s
+Looking in indexes: https://pypi.org/simple, https://download.pytorch.org/whl/cpu
+Ignoring torch: markers 'sys_platform == "darwin"' don't match your environment
+Ignoring torchvision: markers 'sys_platform == "darwin"' don't match your environment
+Collecting numpy==2.4.6 (from -r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 9))
+  Obtaining dependency information for numpy==2.4.6 from https://files.pythonhosted.org/packages/99/60/14115e6364fa676c5397c2ad3004e527e9aa487abf5d0706ec81bbd08529/numpy-2.4.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata
+  Downloading numpy-2.4.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+Collecting Pillow==12.3.0 (from -r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 10))
+  Obtaining dependency information for Pillow==12.3.0 from https://files.pythonhosted.org/packages/84/21/a35af28dcc61f37ed850a2d64c65c701321dfbf25085e469d5559360cbbf/pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata
+  Downloading pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (9.1 kB)
+Collecting safetensors==0.8.0 (from -r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 11))
+  Obtaining dependency information for safetensors==0.8.0 from https://files.pythonhosted.org/packages/28/50/f203ff3a3ddfe19308efc83c5a3a29ed02bf786732ec35e68bf9162f3365/safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.2 kB)
+Collecting torch==2.11.0+cpu (from -r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 12))
+  Obtaining dependency information for torch==2.11.0+cpu from https://download-r2.pytorch.org/whl/cpu/torch-2.11.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl.metadata
+  Downloading https://download-r2.pytorch.org/whl/cpu/torch-2.11.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl.metadata (29 kB)
+Collecting torchvision==0.26.0+cpu (from -r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 14))
+  Obtaining dependency information for torchvision==0.26.0+cpu from https://download-r2.pytorch.org/whl/cpu/torchvision-0.26.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl.metadata
+  Downloading https://download-r2.pytorch.org/whl/cpu/torchvision-0.26.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl.metadata (5.5 kB)
+Collecting transformers==5.14.0 (from -r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for transformers==5.14.0 from https://files.pythonhosted.org/packages/19/3b/a0a807b957c5f8f2075a8740f597a021420583bb0aa68ff6432d74a530d4/transformers-5.14.0-py3-none-any.whl.metadata
+  Downloading transformers-5.14.0-py3-none-any.whl.metadata (32 kB)
+Collecting filelock (from torch==2.11.0+cpu->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 12))
+  Obtaining dependency information for filelock from https://files.pythonhosted.org/packages/a7/8e/50f46a9c0ce8d2861a394c1347caae037ea0431d2f67d7feb151cbc4649a/filelock-3.32.3-py3-none-any.whl.metadata
+  Downloading filelock-3.32.3-py3-none-any.whl.metadata (2.0 kB)
+Collecting typing-extensions>=4.10.0 (from torch==2.11.0+cpu->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 12))
+  Obtaining dependency information for typing-extensions>=4.10.0 from https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl.metadata
+  Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting setuptools<82 (from torch==2.11.0+cpu->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 12))
+  Obtaining dependency information for setuptools<82 from https://files.pythonhosted.org/packages/e1/e3/c164c88b2e5ce7b24d667b9bd83589cf4f3520d97cad01534cd3c4f55fdb/setuptools-81.0.0-py3-none-any.whl.metadata
+  Downloading setuptools-81.0.0-py3-none-any.whl.metadata (6.6 kB)
+Collecting sympy>=1.13.3 (from torch==2.11.0+cpu->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 12))
+  Obtaining dependency information for sympy>=1.13.3 from https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl.metadata
+  Downloading sympy-1.14.0-py3-none-any.whl.metadata (12 kB)
+Collecting networkx>=2.5.1 (from torch==2.11.0+cpu->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 12))
+  Obtaining dependency information for networkx>=2.5.1 from https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl.metadata
+  Downloading networkx-3.6.1-py3-none-any.whl.metadata (6.8 kB)
+Collecting jinja2 (from torch==2.11.0+cpu->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 12))
+  Obtaining dependency information for jinja2 from https://download.pytorch.org/whl/jinja2-3.1.6-py3-none-any.whl.metadata
+  Downloading https://download.pytorch.org/whl/jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+Collecting fsspec>=0.8.5 (from torch==2.11.0+cpu->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 12))
+  Obtaining dependency information for fsspec>=0.8.5 from https://files.pythonhosted.org/packages/fd/3c/6a2bf344106328fd04963664a60b9bb6496fc25df8e962fcdc1367285fb9/fsspec-2026.7.0-py3-none-any.whl.metadata
+  Downloading fsspec-2026.7.0-py3-none-any.whl.metadata (10 kB)
+Collecting huggingface-hub<2.0,>=1.5.0 (from transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for huggingface-hub<2.0,>=1.5.0 from https://files.pythonhosted.org/packages/de/d8/95b735e183957c1f26d94c52977f09d466d55119cbbc1558ea4975e4c216/huggingface_hub-1.27.0-py3-none-any.whl.metadata
+  Downloading huggingface_hub-1.27.0-py3-none-any.whl.metadata (16 kB)
+Collecting packaging>=20.0 (from transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for packaging>=20.0 from https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl.metadata
+  Downloading packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+Collecting pyyaml>=5.1 (from transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for pyyaml>=5.1 from https://files.pythonhosted.org/packages/8b/9d/b3589d3877982d4f2329302ef98a8026e7f4443c765c46cfecc8858c6b4b/pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata
+  Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+Collecting regex>=2025.10.22 (from transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for regex>=2025.10.22 from https://files.pythonhosted.org/packages/2a/8e/096d00c7c480ef2ff4265349b14e2261d4ab787ba1f74e2e80d1c58079c3/regex-2026.7.19-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata
+  Downloading regex-2026.7.19-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 40.5/40.5 kB 12.7 MB/s eta 0:00:00
+Collecting tokenizers<=0.23.0,>=0.22.0 (from transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for tokenizers<=0.23.0,>=0.22.0 from https://files.pythonhosted.org/packages/2e/76/932be4b50ef6ccedf9d3c6639b056a967a86258c6d9200643f01269211ca/tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+Collecting typer (from transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for typer from https://files.pythonhosted.org/packages/43/89/9518bc0c3929bee36b3a4a8e3daddd6e03f92f9961c66d4983b837160543/typer-0.27.1-py3-none-any.whl.metadata
+  Downloading typer-0.27.1-py3-none-any.whl.metadata (16 kB)
+Collecting tqdm>=4.60 (from transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for tqdm>=4.60 from https://files.pythonhosted.org/packages/f9/1c/01bfd571a64e7f270e6bab5e33777debe0edc56759233ce84f27dec92d14/tqdm-4.70.0-py3-none-any.whl.metadata
+  Downloading tqdm-4.70.0-py3-none-any.whl.metadata (57 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.3/57.3 kB 25.4 MB/s eta 0:00:00
+Collecting click<9.0.0,>=8.4.2 (from huggingface-hub<2.0,>=1.5.0->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for click<9.0.0,>=8.4.2 from https://files.pythonhosted.org/packages/fb/e2/79c688af8b210d232694e31e59da9f6ec747bae31c3f5946e4e9b98860d5/click-8.4.2-py3-none-any.whl.metadata
+  Downloading click-8.4.2-py3-none-any.whl.metadata (2.6 kB)
+Collecting hf-xet<2.0.0,>=1.5.2 (from huggingface-hub<2.0,>=1.5.0->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for hf-xet<2.0.0,>=1.5.2 from https://files.pythonhosted.org/packages/67/4e/a28359bf1c1ecf11eba22123168c138698f7cb576ac678f5a2e16cd5da08/hf_xet-1.6.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata
+  Downloading hf_xet-1.6.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (4.9 kB)
+Collecting httpx<1,>=0.23.0 (from huggingface-hub<2.0,>=1.5.0->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for httpx<1,>=0.23.0 from https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl.metadata
+  Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting mpmath<1.4,>=1.1.0 (from sympy>=1.13.3->torch==2.11.0+cpu->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 12))
+  Obtaining dependency information for mpmath<1.4,>=1.1.0 from https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl.metadata
+  Downloading mpmath-1.3.0-py3-none-any.whl.metadata (8.6 kB)
+Collecting MarkupSafe>=2.0 (from jinja2->torch==2.11.0+cpu->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 12))
+  Obtaining dependency information for MarkupSafe>=2.0 from https://download.pytorch.org/whl/markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata
+  Downloading https://download.pytorch.org/whl/markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+Collecting shellingham>=1.3.0 (from typer->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for shellingham>=1.3.0 from https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl.metadata
+  Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+Collecting rich>=13.8.0 (from typer->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for rich>=13.8.0 from https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl.metadata
+  Downloading rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+Collecting annotated-doc>=0.0.2 (from typer->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for annotated-doc>=0.0.2 from https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl.metadata
+  Downloading annotated_doc-0.0.5-py3-none-any.whl.metadata (6.5 kB)
+Collecting anyio (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.5.0->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for anyio from https://files.pythonhosted.org/packages/da/35/f2287558c17e29fafc8ef3daf819bb9834061cfa43bff8014f7df7f63bdc/anyio-4.14.2-py3-none-any.whl.metadata
+  Downloading anyio-4.14.2-py3-none-any.whl.metadata (4.6 kB)
+Collecting certifi (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.5.0->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for certifi from https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl.metadata
+  Downloading certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+Collecting httpcore==1.* (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.5.0->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for httpcore==1.* from https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl.metadata
+  Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Collecting idna (from httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.5.0->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for idna from https://files.pythonhosted.org/packages/1e/5e/d4e9f1a599fb8e573b7b87160658329fbf28d19eac2718f51fc3def3aa5a/idna-3.18-py3-none-any.whl.metadata
+  Downloading idna-3.18-py3-none-any.whl.metadata (6.1 kB)
+Collecting h11>=0.16 (from httpcore==1.*->httpx<1,>=0.23.0->huggingface-hub<2.0,>=1.5.0->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for h11>=0.16 from https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl.metadata
+  Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting markdown-it-py>=2.2.0 (from rich>=13.8.0->typer->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for markdown-it-py>=2.2.0 from https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl.metadata
+  Downloading markdown_it_py-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+Collecting pygments<3.0.0,>=2.13.0 (from rich>=13.8.0->typer->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for pygments<3.0.0,>=2.13.0 from https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl.metadata
+  Downloading pygments-2.20.0-py3-none-any.whl.metadata (2.5 kB)
+Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=13.8.0->typer->transformers==5.14.0->-r /opt/qwen35-acceptance-v6/lecore/experiments/qwen35_acceptance/requirements-cpu.txt (line 16))
+  Obtaining dependency information for mdurl~=0.1 from https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl.metadata
+  Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+Downloading numpy-2.4.6-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 16.6/16.6 MB 81.9 MB/s eta 0:00:00
+Downloading pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (6.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.9/6.9 MB 219.6 MB/s eta 0:00:00
+Downloading safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (516 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 516.0/516.0 kB 110.3 MB/s eta 0:00:00
+Downloading https://download-r2.pytorch.org/whl/cpu/torch-2.11.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl (190.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 190.3/190.3 MB 13.9 MB/s eta 0:00:00
+Downloading https://download-r2.pytorch.org/whl/cpu/torchvision-0.26.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl (1.9 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.9/1.9 MB 205.3 MB/s eta 0:00:00
+Downloading transformers-5.14.0-py3-none-any.whl (11.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 11.6/11.6 MB 108.2 MB/s eta 0:00:00
+Downloading fsspec-2026.7.0-py3-none-any.whl (206 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 206.6/206.6 kB 10.4 MB/s eta 0:00:00
+Downloading huggingface_hub-1.27.0-py3-none-any.whl (784 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 784.9/784.9 kB 13.9 MB/s eta 0:00:00
+Downloading filelock-3.32.3-py3-none-any.whl (98 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 98.9/98.9 kB 1.8 MB/s eta 0:00:00
+Downloading networkx-3.6.1-py3-none-any.whl (2.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 40.0 MB/s eta 0:00:00
+Downloading packaging-26.3-py3-none-any.whl (129 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 130.0/130.0 kB 3.6 MB/s eta 0:00:00
+Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 807.9/807.9 kB 14.8 MB/s eta 0:00:00
+Downloading regex-2026.7.19-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (801 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 801.8/801.8 kB 12.1 MB/s eta 0:00:00
+Downloading setuptools-81.0.0-py3-none-any.whl (1.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 17.4 MB/s eta 0:00:00
+Downloading sympy-1.14.0-py3-none-any.whl (6.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.3/6.3 MB 67.1 MB/s eta 0:00:00
+Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 64.8 MB/s eta 0:00:00
+Downloading tqdm-4.70.0-py3-none-any.whl (80 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 80.2/80.2 kB 4.9 MB/s eta 0:00:00
+Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 45.6/45.6 kB 3.1 MB/s eta 0:00:00
+Downloading https://download.pytorch.org/whl/jinja2-3.1.6-py3-none-any.whl (134 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.9/134.9 kB 6.3 MB/s eta 0:00:00
+Downloading typer-0.27.1-py3-none-any.whl (122 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 122.9/122.9 kB 3.0 MB/s eta 0:00:00
+Downloading annotated_doc-0.0.5-py3-none-any.whl (5.3 kB)
+Downloading click-8.4.2-py3-none-any.whl (119 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 119.2/119.2 kB 6.1 MB/s eta 0:00:00
+Downloading hf_xet-1.6.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 59.1 MB/s eta 0:00:00
+Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.5/73.5 kB 1.8 MB/s eta 0:00:00
+Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.8/78.8 kB 1.4 MB/s eta 0:00:00
+Downloading https://download.pytorch.org/whl/markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+Downloading mpmath-1.3.0-py3-none-any.whl (536 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 536.2/536.2 kB 10.4 MB/s eta 0:00:00
+Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 310.7/310.7 kB 4.6 MB/s eta 0:00:00
+Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+Downloading markdown_it_py-4.2.0-py3-none-any.whl (91 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 91.7/91.7 kB 4.8 MB/s eta 0:00:00
+Downloading pygments-2.20.0-py3-none-any.whl (1.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 199.7 MB/s eta 0:00:00
+Downloading anyio-4.14.2-py3-none-any.whl (125 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 125.8/125.8 kB 36.3 MB/s eta 0:00:00
+Downloading idna-3.18-py3-none-any.whl (65 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 65.5/65.5 kB 22.8 MB/s eta 0:00:00
+Downloading certifi-2026.7.22-py3-none-any.whl (136 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 137.0/137.0 kB 42.1 MB/s eta 0:00:00
+Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+Installing collected packages: mpmath, typing-extensions, tqdm, sympy, shellingham, setuptools, safetensors, regex, pyyaml, pygments, Pillow, packaging, numpy, networkx, mdurl, MarkupSafe, idna, hf-xet, h11, fsspec, filelock, click, certifi, annotated-doc, markdown-it-py, jinja2, httpcore, anyio, torch, rich, httpx, typer, torchvision, huggingface-hub, tokenizers, transformers
+Successfully installed MarkupSafe-3.0.3 Pillow-12.3.0 annotated-doc-0.0.5 anyio-4.14.2 certifi-2026.7.22 click-8.4.2 filelock-3.32.3 fsspec-2026.7.0 h11-0.16.0 hf-xet-1.6.0 httpcore-1.0.9 httpx-0.28.1 huggingface-hub-1.27.0 idna-3.18 jinja2-3.1.6 markdown-it-py-4.2.0 mdurl-0.1.2 mpmath-1.3.0 networkx-3.6.1 numpy-2.4.6 packaging-26.3 pygments-2.20.0 pyyaml-6.0.3 regex-2026.7.19 rich-15.0.0 safetensors-0.8.0 setuptools-81.0.0 shellingham-1.5.4 sympy-1.14.0 tokenizers-0.22.2 torch-2.11.0+cpu torchvision-0.26.0+cpu tqdm-4.70.0 transformers-5.14.0 typer-0.27.1 typing-extensions-4.16.0
+
+[notice] A new release of pip is available: 23.2.1 -> 26.2.1
+[notice] To update, run: python3.12 -m pip install --upgrade pip
+WARNING: There was an error checking the latest version of pip.
+Collecting pytest==9.0.2
+  Obtaining dependency information for pytest==9.0.2 from https://files.pythonhosted.org/packages/3b/ab/b3226f0bd7cdcf710fbede2b3548584366da3b19b5021e74f5bde2a8fa3f/pytest-9.0.2-py3-none-any.whl.metadata
+  Downloading pytest-9.0.2-py3-none-any.whl.metadata (7.6 kB)
+Collecting iniconfig>=1.0.1 (from pytest==9.0.2)
+  Obtaining dependency information for iniconfig>=1.0.1 from https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl.metadata
+  Downloading iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+Requirement already satisfied: packaging>=22 in /opt/qwen35-acceptance-v6/venv/lib64/python3.12/site-packages (from pytest==9.0.2) (26.3)
+Collecting pluggy<2,>=1.5 (from pytest==9.0.2)
+  Obtaining dependency information for pluggy<2,>=1.5 from https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl.metadata
+  Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+Requirement already satisfied: pygments>=2.7.2 in /opt/qwen35-acceptance-v6/venv/lib64/python3.12/site-packages (from pytest==9.0.2) (2.20.0)
+Downloading pytest-9.0.2-py3-none-any.whl (374 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 374.8/374.8 kB 40.1 MB/s eta 0:00:00
+Downloading iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+Installing collected packages: pluggy, iniconfig, pytest
+Successfully installed iniconfig-2.3.0 pluggy-1.6.0 pytest-9.0.2
+No broken requirements found.
+Fetching 13 files:   0%|          | 0/13 [00:00<?, ?it/s]Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Fetching 13 files:  85%|████████▍ | 11/13 [00:00<00:00, 91.24it/s]Fetching 13 files: 100%|██████████| 13/13 [00:05<00:00,  2.46it/s]
+/opt/qwen35-acceptance-v6/model/model.safetensors-00001-of-00001.safetensors: OK
+/opt/qwen35-acceptance-v6/model/tokenizer.json: OK
+lecore.qwen35.install.20c3330d0b3e.0215736e2060.a6c9d1135a04.3e130ddc1500.ed018efbbb3a.v6.acceptance

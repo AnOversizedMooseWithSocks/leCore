@@ -1,0 +1,22 @@
+{
+  "schema": "lecore.qwen35-aws-cleanup-receipt.v1",
+  "checked_at": "2026-08-14T10:56:23Z",
+  "region": "us-east-1",
+  "instance": {
+    "id": "i-01ed9a97837d59d00",
+    "state": "terminated"
+  },
+  "root_volume": {
+    "id": "vol-089fdad2568e0b3fe",
+    "post_termination_lookup": "InvalidVolume.NotFound"
+  },
+  "security_group": {
+    "id": "sg-0d8e69dff64e4de55",
+    "delete_return": true,
+    "post_delete_lookup": "InvalidGroup.NotFound"
+  },
+  "estimated_v5_compute_usd": 2.57,
+  "estimated_cumulative_compute_usd": 2.84,
+  "budget_ceiling_usd": 10.0,
+  "retry_launched": false
+}

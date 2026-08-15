@@ -1,0 +1,32 @@
+      sanity: perplexity 16.2 on plain English (chance ~248320) -- looks correct
+      sanity: perplexity 16.2 on plain English (chance ~248320) -- looks correct
+[load] /opt/qwen35-acceptance-v5/model
+      hidden 1024 | 24 layers | vocab 248320 | BF16, F32
+      inferred from tensors alone: 24 layers, hidden 1024, tied=True (confidence 1.00)
+      tokenizer: model tokenizer
+      corpus: /opt/qwen35-acceptance-v5/lecore/REFERENCE.md (2305 KB)
+      memory: 128 registers (of 1024 dimensions) and 200 searchable passages
+      NOTE: searchable memory and the boot manifest will be stored beside the checkpoint. No vocabulary embedding, output logit, or low-bit weight surface will be changed.
+
+[install] leCore into the weights
+      hardware: cpu (disabled)
+      prepend        ok    2 layers added, drift 0.000e+00 (relative 0.000e+00, first at token 0) -- bit-identical
+      registers      ok    128 reserved slots, 896 dims left to the model
+      hrnn_channel   FAIL  4-rung ladder for 4096 tokens, output drift 7.8e-06 (float reassociation, not behaviour)
+      nullspace_guard ok    994 of 1024 dims safe to write (true null space)
+      router         ok    layer 0, held-out accuracy 90%
+      memory_index   ok    200 passages staged for sidecar index; no vocabulary or output-head row changed
+      self_write     skip  candidate did not clear its install threshold: r=0.727, 40% top-decile hit
+      state_track    ok    4 of 128 registers reserved as no-decay state slots
+      exit_calibration ok    layer 25 of 26 agrees >=100% -- 4% of the depth is free
+      improvement    skip  skipped to preserve the checkpoint's fixed intermediate_size for official reload
+      boot_record    ok    manifest staged for lecore.json sidecar; no embedding, output head, or low-bit weight surface changed
+
+[wrote] /opt/qwen35-acceptance-v5/installed-checkpoint  (2112.9 MB, BF16, F32)
+      index         ok    200 passages beside the model (0.82 MB, lecore_index.npz)
+
+[verify] reloading from disk
+      26 layers | perplexity 20.3446 (was 20.3446) | boots as 'leCore (lecore.json sidecar)'
+      verdict INDISTINGUISHABLE (+0.000%) | repetition 0.96 -> 0.96
+
+Next:  assess.bat        (or: python assimilation/galvatron.py /opt/qwen35-acceptance-v5/installed-checkpoint --assess out.npz)

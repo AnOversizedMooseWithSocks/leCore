@@ -1,0 +1,4 @@
+torch 2.11.0+cpu
+torchvision 0.26.0+cpu
+transformers 5.14.0
+AutoProcessor Qwen3_5ForConditionalGeneration

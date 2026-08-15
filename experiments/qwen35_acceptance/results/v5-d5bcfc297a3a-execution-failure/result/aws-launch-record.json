@@ -1,0 +1,69 @@
+{
+  "schema": "lecore.qwen35-aws-launch.v5",
+  "authorized": true,
+  "maximum_formal_runs": 1,
+  "retry_after_admission": false,
+  "launched_at": "2026-08-14T08:25:56Z",
+  "account": "022118847419",
+  "region": "us-east-1",
+  "instance": {
+    "id": "i-01ed9a97837d59d00",
+    "type": "r7i.4xlarge",
+    "availability_zone": "us-east-1a",
+    "ami": "ami-07a5b367e8dc8bd92",
+    "instance_profile": "zero-training-ec2",
+    "instance_initiated_shutdown_behavior": "terminate",
+    "metadata_tokens": "required",
+    "client_token": "qwen35-v5-d5bcfc2-38c88e34-20260814"
+  },
+  "network": {
+    "vpc": "vpc-50cd4a29",
+    "subnet": "subnet-eb3e2f8e",
+    "security_group": "sg-0d8e69dff64e4de55",
+    "inbound_rules": []
+  },
+  "root_volume": {
+    "id": "vol-089fdad2568e0b3fe",
+    "size_gib": 100,
+    "type": "gp3",
+    "encrypted": true,
+    "delete_on_termination": true
+  },
+  "source": {
+    "commit": "d5bcfc297a3af8e4f8f0c60b3d8ad21b67e0e55a"
+  },
+  "inputs": {
+    "evaluation_corpus_sha256": "a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94",
+    "launch_manifest_sha256": "38c88e34eeb13b2c6bf05785235341cd574f2296cac3deb9b2adbce46f1b7123",
+    "runner_sha256": "c28b0614684722ccd7272d531dec8569a6b26867e67aa0665f100f0ab33d4acc",
+    "bootstrap_sha256": "d71838c31eef524b46bdec52c303cf0b43acbce40c0a2dffeccf7ab1bf6fc96f"
+  },
+  "replaces_preflights": [
+    {
+      "instance_id": "i-056acaa4153e31371",
+      "formal_run_started": false,
+      "evidence_bundle_sha256": "a718a320e5010886f8631e022ddf6df2a0900c55fbc835559938aadfaa7a1a39",
+      "estimated_usd": 0.06
+    },
+    {
+      "instance_id": "i-06ad0837226fe5d33",
+      "formal_run_started": false,
+      "evidence_bundle_sha256": "35d572230f328797ea26963f0db4b7d9e931fea0732e2e938dc3c7e243223d9a",
+      "estimated_usd": 0.06
+    },
+    {
+      "instance_id": "i-0f022ea2acd745193",
+      "formal_run_started": false,
+      "evidence_bundle_sha256": "29d4b28aa0be9896f8993ead3a93a741c831346f64356c35dc7e73bd6f8243de",
+      "estimated_usd": 0.15
+    }
+  ],
+  "budget": {
+    "hourly_compute_usd": 1.0584,
+    "lifetime_guard_seconds": 28800,
+    "maximum_compute_usd": 8.4672,
+    "prior_preflight_estimate_usd": 0.27,
+    "total_ceiling_usd": 10.0
+  },
+  "staging_prefix": "s3://zero-training-022118847419/qwen35-acceptance/d5bcfc2-2fc06364-a6c9d113/v5-formal/"
+}

@@ -1,0 +1,7 @@
+{
+  "exit_code": 1,
+  "formal_run_started": true,
+  "schema": "lecore.qwen35-runner-status.v3",
+  "stage": "execution_failure",
+  "updated_at": "2026-08-13T21:21:31.540759+00:00"
+}
