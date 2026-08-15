@@ -102,6 +102,16 @@ STOP = set('the a an of to in for and or is are with by on as it its that this b
            'was were has have do does did can just why what when how there more'.split())
 
 
+# THE SHIPPED FUSION WEIGHT -- one constant, three followers (route_semantic's default, this exam's
+# gated row, and the CI bars). RE-PINNED 2026-08: the champion is a MEASURED object per corpus epoch,
+# not a setting. gamma=0.5 was crowned at 537 entries (7/12, median 1 -- the numbers the old bars
+# encode). The corpus grew to 715 (+33% distractors, fixed 12-ask suite), and per this tool's own
+# recorded mechanism (AllButTheTop refits on the corpus mean, so every docstring shifts every rank)
+# the champion moved: CI's full sweep now shows gamma=1.0 Pareto-dominating 0.5 at BOTH 128d
+# (top-1 6 vs 5, median 2 vs 2.5, worst 80 vs 90, top-5 8=8) and 768d (6/8/2/111 vs 6/7/2/130).
+# The bars in the workflow are re-pinned to this champion with ZERO slack and ratchet DOWN only.
+SHIPPED_GAMMA = 1.0
+
 def words(s):
     return set(w for w in re.findall(r"[a-z]{3,}", s.lower()) if w not in STOP)
 
@@ -755,9 +765,9 @@ def main():
                 # capture per-ask where the RESULT is: measured, the structural win lands at the SHIP dim
                 # (128d), not 768d -- so detail at 768d showed a row with no win and told us nothing about
                 # WHICH ask flipped. Capture the winning row at 128d, keyed by (beta, gamma, dim).
-                if args.structural and (beta, gamma, d) in {(0.0, 0.5, 128), (0.0, 0.5, 768), (0.0, 0.5, 64)}:
+                if args.structural and (beta, gamma, d) in {(0.0, SHIPPED_GAMMA, 128), (0.0, SHIPPED_GAMMA, 768), (0.0, SHIPPED_GAMMA, 64)}:
                     detail_rows[(beta, gamma, d)] = detail
-                if args.structural and (beta, gamma, d) == (0.0, 0.5, 128):
+                if args.structural and (beta, gamma, d) == (0.0, SHIPPED_GAMMA, 128):
                     fused_top1_128 = t1                        # the champion row, for the --require-fused-top1 gate
                     # ALSO capture the champion row's OWN median/top-5. The gate reads top-5 and median from
                     # flat @768d ("full-width only") but reads top-1 from fused @128d -- three criteria, two
@@ -1027,13 +1037,13 @@ def main():
     # numbers stay in the log as an encoder diagnostic; a dense regression still trips the gate, because
     # dense feeds fusion and a median of 1.0 leaves it nowhere to hide.
     if args.gate_shipped_row and locals().get("fused_top5_128") is not None:
-        gate_top5, gate_median, gate_src = fused_top5_128, fused_med_128, "SHIPPED row (fused, g=0.50, 128d)"
+        gate_top5, gate_median, gate_src = fused_top5_128, fused_med_128, "SHIPPED row (fused, g=%.2f, 128d)" % SHIPPED_GAMMA
     else:
         gate_top5, gate_median, gate_src = exam_top5, exam_median, "flat @768d"
     ok = gate_top5 >= args.require_top5 and gate_median <= args.require_median
     _fm, _f5 = locals().get("fused_med_128"), locals().get("fused_top5_128")
     if _fm is not None:
-        print(f"  [note] the SHIPPED row (fused, gamma=0.50, 128d) scores top-5 {_f5} | median {_fm:.1f} | "
+        print(f"  [note] the SHIPPED row (fused, gamma={SHIPPED_GAMMA:.2f}, 128d) scores top-5 {_f5} | median {_fm:.1f} | "
               f"top-1 {locals().get('fused_top1_128')}. The gate takes top-5 and median from FLAT @768d and "
               f"top-1 from this row -- two configurations, one verdict.")
     fused_msg = ""

@@ -287,15 +287,16 @@ class _UnifiedPart08:
         self._user_embedder = fn
         return report
 
-    def route_semantic(self, problem, k=5, query_vec=None, gamma=0.5):
+    def route_semantic(self, problem, k=5, query_vec=None, gamma=1.0):
         """N28 -- route a request to the right MODULE by cosine in nomic's embedding space, not token
         overlap. Uses the shipped q8 index (lecore_data/routing/index_128d.npz preferred, 64d fallback)
-        with the ABTT correction baked in. Measured on the 12-ask suite at 128d: token overlap 1/12 top-1;
-        dense 6/12; dense + workflow bones (gamma=0.5) 7/12, median 1, ZERO per-ask regressions.
-        gamma DEFAULTS to 0.5 (the measured strict-Pareto winner at this exact dim): this method was broken
-        before the fusion landed (missing helper, raised on every call), so there is no prior behaviour to
-        preserve -- 0.5 is its first WORKING default. Pass gamma=0.0 for plain cosine. Boneless index ->
-        gamma degrades gracefully to plain dense, so old artifacts stay safe.
+        with the ABTT correction baked in. THE DEFAULT gamma IS THE MEASURED CHAMPION PER CORPUS EPOCH,
+        not a setting: 0.5 was crowned at 537 corpus entries (7/12 top-1, median 1 on the 12-ask suite);
+        at 715 entries CI's full sweep showed gamma=1.0 Pareto-dominating 0.5 at the ship dim (top-1 6
+        vs 5, median 2 vs 2.5, worst 80 vs 90, top-5 equal) and at 768d, so the default moved 0.5 -> 1.0
+        with the exam's SHIPPED_GAMMA and the CI bars in lockstep (tools/semantic/knowledge_index.py has
+        the full record). Keyword-overlap baseline for scale: 1/12 top-1. Pass gamma=0.0 for plain
+        cosine. Boneless index -> gamma degrades gracefully to plain dense, so old artifacts stay safe.
 
         It needs a query VECTOR. Supply one via `query_vec` (a 64d nomic vector your app produced), OR
         rely on the build-time cache for a known phrase. With NEITHER -- a brand-new free-text query and
