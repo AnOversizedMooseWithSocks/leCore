@@ -113,6 +113,9 @@ def _selftest():
     assert _np.array_equal(rfft(a), _np.fft.rfft(a)), "default rfft must equal np.fft.rfft byte-for-byte"
     assert _np.array_equal(irfft(rfft(a), n=1024), _np.fft.irfft(_np.fft.rfft(a), n=1024))
     msg = "fft selftest ok: default=numpy byte-identical"
+    # WHY: bare-name reads inside this module bypass module __getattr__; materialize
+    # the lazy flag into globals() before referencing it (use_pyfftw does the same).
+    _ensure_pyfftw()
     if HAS_PYFFTW:
         use_pyfftw(True)
         assert fft_backend() == "pyfftw"
