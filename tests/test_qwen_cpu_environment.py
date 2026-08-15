@@ -74,7 +74,7 @@ def test_ci_builds_frozen_ilxyr_and_executes_generated_envelope_contract():
     assert "ref: %s" % revision in workflow
     assert "--locked --release -p ilxyr-cli" in workflow
     assert "tools/ci_qwen_ilxyr_preflight.py" in workflow
-    assert "--junitxml=/tmp/qwen-contract.xml" in workflow
+    assert "--run-slow --junitxml=/tmp/qwen-contract.xml" in workflow
     assert "critical Qwen tests skipped" in workflow
     assert 'run([cli, "compile"' in preflight
     assert 'run([cli, "admit"' in preflight
