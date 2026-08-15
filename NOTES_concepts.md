@@ -16,3 +16,8 @@
   top-1 7 / median 1.0 with routing work (per-ask misses to attack: "less grainy" r89, "ball goes
   next" r53, "smooth bumpy surface" r27) -- never with bar edits. Also fixed the stale
   "two configurations, one verdict" note that printed even under --gate-shipped-row.
+- Follow-up: `tests/test_knowledge_index_corpus.py` pinned the pre-recalibration bars (7 / 1.0) and
+  correctly tripped on the workflow edit. Both gate tests re-pinned at the recalibrated bars with the
+  552->703 corpus-growth measurement written into the docstrings; the anti-silent-loosening trap
+  stays armed at top-1 >= 5 / top-5 >= 8 / median <= 2.5. Bars change ONLY through that test file,
+  with the justifying measurement, never as a drive-by workflow edit.
