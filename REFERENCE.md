@@ -554,8 +554,8 @@
 | [`holographic_skymodel.py`](#holographic-skymodel) | holographic_skymodel.py -- a PARAMETRIC sky: time of day, sun, moon, stars, and HIGH cloud layers, as | 450 |
 | [`holographic_slime.py`](#holographic-slime) | Slime-mold path-finding over a HOLOGRAPHIC associative graph. | 391 |
 | [`holographic_smokepresets.py`](#holographic-smokepresets) | holographic_smokepresets.py -- SMOKE PRESETS (fluids/matter backlog, content item 1). | 159 |
-| [`holographic_snap.py`](#holographic-snap) | holographic_snap.py (mesh_and_geometry) -- the MODELING-GIZMO snap adapter: it answers 'where does this dragge | 184 |
 | [`holographic_snap.py`](#holographic-snap) | holographic_snap.py -- SNAPPING = cleanup, applied to geometry (modeling-app feature layer). | 141 |
+| [`holographic_snap.py`](#holographic-snap) | holographic_snap.py (mesh_and_geometry) -- the MODELING-GIZMO snap adapter: it answers 'where does this dragge | 184 |
 | [`holographic_softbody.py`](#holographic-softbody) | Position-Based Dynamics -- softbody & hardbody simulation, exposed to VSA. | 680 |
 | [`holographic_sparsefield.py`](#holographic-sparsefield) | FS-2 -- the narrow-band sparse field (holographic_sparsefield), array-backed for parallelism. | 530 |
 | [`holographic_spatial.py`](#holographic-spatial) | holographic_spatial.py -- ONE shared spatial index. Bin points into a uniform grid of cells so radius, | 191 |
@@ -576,8 +576,8 @@
 | [`holographic_structure.py`](#holographic-structure) | Proof of meaning: verify that a sequence carries structure, rather than trust | 174 |
 | [`holographic_subdivcurve.py`](#holographic-subdivcurve) | Subdivision curves on hypervector sequences (ARCH-5): Loop subdivision (FWD-8), turned inward. | 148 |
 | [`holographic_supermemory.py`](#holographic-supermemory) | Superposed key-value memory with a CLOSED-FORM capacity law, a single-shot allocator, | 634 |
-| [`holographic_superposed.py`](#holographic-superposed) | holographic_superposed.py  --  parallel computation in superposition (the WIDTH faculty). | 363 |
 | [`holographic_superposed.py`](#holographic-superposed) | COMPATIBILITY SHIM -- this module moved to `holographic_supermemory`. | 51 |
+| [`holographic_superposed.py`](#holographic-superposed) | holographic_superposed.py  --  parallel computation in superposition (the WIDTH faculty). | 363 |
 | [`holographic_superres.py`](#holographic-superres) | holographic_superres.py -- EXAMPLE-BASED SUPER-RESOLUTION / GUIDED UPSAMPLING (inverse-rendering ST3). | 83 |
 | [`holographic_superschedule.py`](#holographic-superschedule) | holographic_superschedule.py -- Fill 3: AUTO-SUPERPOSITION + SPILL. The latency-hiding move: hold N | 225 |
 | [`holographic_surface.py`](#holographic-surface) | holographic_surface.py -- the FIRST-CLASS render material: every channel is a Param socket, resolved PER HIT. | 293 |
@@ -22364,6 +22364,28 @@
 
 ### holographic_snap.py
 
+> holographic_snap.py -- SNAPPING = cleanup, applied to geometry (modeling-app feature layer).
+>
+> Thinking holographically: snapping IS cleanup. VSA cleanup projects a noisy vector onto the nearest CLEAN atom in
+> a codebook; snapping projects a dragged, continuous position onto the nearest ALLOWED place -- a grid node, an
+> existing vertex, a point on an edge, an angle increment. Same operation, geometric codebook. And just as cleanup
+> can REFUSE a weak match (return "no confident atom"), a snap has a TOLERANCE: if nothing allowed is close enough,
+> the point is left where it is. That confidence gate is what stops a cursor from teleporting across the screen.
+>
+> These read raw coordinates (the honest way -- no lossy encoding for something this exact). NumPy + stdlib only;
+> deterministic.
+
+**Public API:**
+
+- `def snap_to_grid(p, spacing, origin)` -- Snap a point to the nearest grid node -- round each coordinate to the lattice. The simplest cleanup: the
+- `def snap_to_points(p, points, tol)` -- Snap to the NEAREST point in a set -- this is literally cleanup (nearest codebook entry). Returns
+- `def snap_to_segment(p, a, b)` -- The nearest point on the line SEGMENT a-b (clamped to the endpoints) -- snapping to an edge.
+- `def snap_value(x, increment, origin)` -- Snap a scalar to the nearest multiple of `increment` from `origin` -- e.g. a length to 0.25 m steps.
+- `def snap_angle(theta, increment)` -- Snap an angle (radians) to the nearest multiple of `increment` -- e.g. rotate in 15-degree steps.
+- `class Snapper` -- Snaps a point to the nearest snap target within a tolerance, combining a GRID and a VERTEX set. Whichever
+
+### holographic_snap.py
+
 > holographic_snap.py (mesh_and_geometry) -- the MODELING-GIZMO snap adapter: it answers 'where does this dragged
 > point / transform delta actually go?' in the shapes the interactive edit spine wants (dict hit records, a corrected
 > transform delta), DELEGATING all the actual snap math to the canonical snap primitives in
@@ -22388,28 +22410,6 @@
 - `def snap_to_intersections(point, polylines, max_dist, tol)` -- Snap a point to the nearest INTERSECTION of a set of 2-D polylines -- the 'intersection' object-snap. Computes
 - `def snap_to_edge(point, vertices, edges, max_dist)` -- Snap a point to the nearest point ON any edge, returned as {edge, position, distance, t}, or None if beyond
 - `def snap_transform_delta(delta, target, increment, moved_point, vertices, edges, origin, max_dist)` -- Snap a TRANSFORM DELTA so the moved point lands on a snap target, and return the corrected delta. This is the
-
-### holographic_snap.py
-
-> holographic_snap.py -- SNAPPING = cleanup, applied to geometry (modeling-app feature layer).
->
-> Thinking holographically: snapping IS cleanup. VSA cleanup projects a noisy vector onto the nearest CLEAN atom in
-> a codebook; snapping projects a dragged, continuous position onto the nearest ALLOWED place -- a grid node, an
-> existing vertex, a point on an edge, an angle increment. Same operation, geometric codebook. And just as cleanup
-> can REFUSE a weak match (return "no confident atom"), a snap has a TOLERANCE: if nothing allowed is close enough,
-> the point is left where it is. That confidence gate is what stops a cursor from teleporting across the screen.
->
-> These read raw coordinates (the honest way -- no lossy encoding for something this exact). NumPy + stdlib only;
-> deterministic.
-
-**Public API:**
-
-- `def snap_to_grid(p, spacing, origin)` -- Snap a point to the nearest grid node -- round each coordinate to the lattice. The simplest cleanup: the
-- `def snap_to_points(p, points, tol)` -- Snap to the NEAREST point in a set -- this is literally cleanup (nearest codebook entry). Returns
-- `def snap_to_segment(p, a, b)` -- The nearest point on the line SEGMENT a-b (clamped to the endpoints) -- snapping to an edge.
-- `def snap_value(x, increment, origin)` -- Snap a scalar to the nearest multiple of `increment` from `origin` -- e.g. a length to 0.25 m steps.
-- `def snap_angle(theta, increment)` -- Snap an angle (radians) to the nearest multiple of `increment` -- e.g. rotate in 15-degree steps.
-- `class Snapper` -- Snaps a point to the nearest snap target within a tolerance, combining a GRID and a VERTEX set. Whichever
 
 ### holographic_softbody.py
 
@@ -23599,6 +23599,20 @@
 
 ### holographic_superposed.py
 
+> COMPATIBILITY SHIM -- this module moved to `holographic_supermemory`.
+>
+> WHY THE RENAME (Rule-0 lesson, on record in NOTES): a week-old, DIFFERENT module
+> already lived at holographic/misc/holographic_superposed.py (leOS-ported "computing
+> in superposition"); this one's build audit queried capability phrasings but never
+> grepped the basename, so two unrelated modules shared a name across families -- a
+> discoverability tax caught by the fuzzy-ask demo answering 'misc' for this module's
+> name. The capacity-law memory now lives under its own name; this shim keeps every
+> existing import working forever (additive, backward-compatible only).
+
+*(no public functions or classes -- internal or data-only)*
+
+### holographic_superposed.py
+
 > holographic_superposed.py  --  parallel computation in superposition (the WIDTH faculty).
 >
 > PORTED FROM leOS (`superposed_compute.py`, "one processor, many states simultaneously").
@@ -23635,20 +23649,6 @@
 - `def chunk_coverage(codebook, groups, n_leaves)` -- What fraction of the groups actually used are PRESENT in the learned chunk codebook? Returns
 - `def hierarchical_recall(S, group_key, leaf_key, chunk_codebook, item_codebook, min_chunk_similarity)` -- Descend one hierarchical superposition with a CLEANUP at the middle level.
 - `def flat_recall(S, group_key, leaf_key, item_codebook)` -- The BASELINE hierarchical_recall must beat, and the strongest honest one: unbind both roles from the single
-
-### holographic_superposed.py
-
-> COMPATIBILITY SHIM -- this module moved to `holographic_supermemory`.
->
-> WHY THE RENAME (Rule-0 lesson, on record in NOTES): a week-old, DIFFERENT module
-> already lived at holographic/misc/holographic_superposed.py (leOS-ported "computing
-> in superposition"); this one's build audit queried capability phrasings but never
-> grepped the basename, so two unrelated modules shared a name across families -- a
-> discoverability tax caught by the fuzzy-ask demo answering 'misc' for this module's
-> name. The capacity-law memory now lives under its own name; this shim keeps every
-> existing import working forever (additive, backward-compatible only).
-
-*(no public functions or classes -- internal or data-only)*
 
 ### holographic_superres.py
 
