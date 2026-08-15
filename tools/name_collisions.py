@@ -72,7 +72,8 @@ KNOWN_COLLISIONS = {
     "camera_rays": frozenset({"gemrender", "zigmarch"}),
     # Pure homonyms, unrelated jobs, read and benign:
     "cluster": frozenset({"crystalgrow", "query"}),        # a druse of crystals vs semantic GROUP BY
-    "fingerprint": frozenset({"assets", "modeltrain"}),    # file state record vs stream signature
+    # file state record vs stream signature vs whole-model hypervector (unicron) -- three domains
+    "fingerprint": frozenset({"assets", "modeltrain", "unicron"}),
     # Same FAMILY, different roles: modeltrain BUILDS a certified surrogate from a function; surrogate
     # RESOLVES a name to a callable. Genuinely confusable -- flagged as the one pair here worth renaming
     # (e.g. resolve_surrogate) rather than budgeting forever, but both predate this review.
@@ -96,13 +97,16 @@ KNOWN_COLLISIONS = {
     "divergence": frozenset({"curlnoise", "fields", "opponent", "probability_current"}),  # three vector-field
     # divergences under different discretizations (finite-diff / spectral / bc-aware central-diff) plus
     # opponent's unrelated angular-disagreement homonym. Read; each serves its own data layout.
-    "route": frozenset({"extras", "pivot", "skills"}),
+    # region SDF / pivot-tree beam / module ranking / agent decision / representation choice /
+    # MoE gate argmax -- six domains, all "route" as a verb, no shared math to unify
+    "route": frozenset({"extras", "pivot", "router", "skills", "storeroute", "swarmbake"}),
     "agree": frozenset({"hardening", "opponent"}),
     "ball": frozenset({"extras", "field"}),
     "benchmark": frozenset({"fft", "pack"}),
     "byte_report": frozenset({"chunkcodebook", "codestructure"}),
     "centroid": frozenset({"equivariance", "metrology"}),
-    "classify": frozenset({"equivariance", "opponent"}),
+    # verdict-family homonyms: symmetry verdict / disagreement type / installability verdict
+    "classify": frozenset({"equivariance", "opponent", "vminstall"}),
     "compose_object": frozenset({"compose", "material"}),
     "connected_components": frozenset({"island", "route"}),
     # Read all three bodies before extending this: sdfemit.coverage() reports which holographic_sdf node KINDS the
@@ -117,7 +121,8 @@ KNOWN_COLLISIONS = {
     "compile_cached": frozenset({"ccrun", "zigrun"}),
     "build_batch_source": frozenset({"ccrun", "zigrun"}),
     "coverage": frozenset({"ldexplore", "sdfemit", "semantictag"}),
-    "decompose": frozenset({"codestructure", "transform"}),
+    # AST split / low-rank rebuild / 4x4-matrix split -- three unrelated decompositions
+    "decompose": frozenset({"codestructure", "refactor", "transform"}),
     "demo_organizer": frozenset({"navigator", "organizer"}),
     "demo_text": frozenset({"encoders", "text"}),
     "diffusion_transfer": frozenset({"laplacian", "simreadout"}),
@@ -129,7 +134,9 @@ KNOWN_COLLISIONS = {
     "leaf": frozenset({"fuse", "schedule"}),
     "manifest": frozenset({"dictionary", "skills"}),
     "pack": frozenset({"pack", "superposed"}),
-    "plan": frozenset({"plan", "schedule"}),
+    # corridor bake / DAG fuse plan / context-retention budget / per-layer decision / install mode
+    # -- "plan" the noun and verb across five families; bodies read, nothing delegatable
+    "plan": frozenset({"billionctx", "plan", "schedule", "transform", "unlocked"}),
     "render_scene": frozenset({"compose", "semantic"}),
     "sample_field": frozenset({"fields", "meshbridge"}),
     "shade": frozenset({"equivariance", "matlib"}),
@@ -159,6 +166,62 @@ KNOWN_COLLISIONS = {
     # -- PINNED DIVERGENCES: same name, DIFFERENT answers, not merged. Each has a test asserting the divergence. --
     "psnr": frozenset({"reproject", "splat"}),                   # differ in the tie band 0<mse<1e-12 (pinned)
     "quat_rotate": frozenset({"cosserat", "transform"}),         # sandwich vs matrix: agree on unit q, diverge off it (pinned)
+    # ---- REVIEWED IN THE WILD-RELEASE SWEEP (unicron/galvatron family; every body read). ----
+    # THE ALGEBRA TRIO, divergence deliberate (three costumes of binding, quat_rotate precedent):
+    # ai = HRR via FFT circular convolution; hlb = Hadamard/WHT-domain elementwise; vsaroles =
+    # integer cyclic shifts (roles as permutation powers, storage-free). Same verb, three algebras,
+    # each module states its own; unifying would erase the distinction the modules exist to make.
+    "bind": frozenset({"ai", "hlb", "vsaroles"}),
+    "unbind": frozenset({"ai", "hlb", "vsaroles"}),
+    # bundle: ai renormalizes; vsaroles is raw addition (residual-stream semantics); galvabundle is
+    # a PACKAGING verb (write a deployment bundle) -- homonym across abstraction levels.
+    "bundle": frozenset({"ai", "galvabundle", "vsaroles"}),
+    # BIT-IDENTICAL one-line FFT primitives, kept local ON PURPOSE: querypath and vsarun ship as
+    # self-contained installable payloads, and a cross-import would break payload isolation. If a
+    # third copy ever appears, promote to one home and delegate.
+    "cconv": frozenset({"querypath", "vsarun"}),
+    "ccorr": frozenset({"querypath", "vsarun"}),
+    # Plate's involution (reverse-all-but-first) in both; ai documents the trick, vsabake is the
+    # payload-local copy for the same isolation reason as cconv above.
+    "involution": frozenset({"ai", "vsabake"}),
+    # same guard, different field: ai is real cosine; unicron is the FHRR Hermitian real part --
+    # they agree on reals and diverge on complex inputs BY DESIGN (the FHRR similarity).
+    "cosine": frozenset({"ai", "unicron"}),
+    # same word, different instrument level: voidexplore's is the raw density dot product;
+    # voidmanifold's DECODES a void point back to hidden space. Signatures disjoint.
+    "void_probe": frozenset({"voidexplore", "voidmanifold"}),
+    # ---- different-domain homonyms (box/psnr precedent), bodies read pairwise, no delegation
+    # possible or appropriate; module namespaces are the disambiguator: ----
+    "allocate": frozenset({"calltoken", "supermemory"}),      # token rows vs capacity law inverse
+    "audit": frozenset({"install", "orphanaudit"}),           # install reachability vs repo orphans
+    "build": frozenset({"directed", "recipe"}),               # graph assembly vs install rules
+    "build_index": frozenset({"codemap", "memsearch"}),       # source tree vs passage addresses
+    "compare": frozenset({"assess", "hybrid", "querytime"}),  # runs vs accuracies vs branches
+    "content_key": frozenset({"declare", "galvacache", "querypath"}),  # digest/digest/hypervector
+    "decode_record": frozenset({"boot", "planshape"}),        # byte-packed row vs role-filler record
+    "encode_record": frozenset({"boot", "planshape"}),        # (the write halves of the above)
+    "describe": frozenset({"proglib", "vision"}),             # word bundle vs image features
+    "export": frozenset({"galvaport", "testkit"}),            # GGUF sidecar vs npz test kit
+    "fuse": frozenset({"fuse", "vminstall"}),                 # FFT expression tree vs operator fold
+    "head_of": frozenset({"earlyexit", "factbake"}),          # same lookup, both 4 lines; local on
+                                                              # purpose (payload isolation, as cconv)
+    "health": frozenset({"reversible", "selfheal"}),          # codebook cosine vs register margins
+    "imbue": frozenset({"galvapack", "unicron"}),             # packaging verb vs task-vector write
+    "install": frozenset({"galvacache", "install", "install_lecore"}),  # monkey-patch cache vs
+                                                              # weight install vs six-part assembly
+    "load": frozenset({"core", "sidecar", "testkit"}),        # npz objects vs curtain vs kit
+    "load_model": frozenset({"modelstore", "unicron"}),       # container vs safetensors front door
+    "measure": frozenset({"hrnnbake", "measure"}),            # ppl+horizon vs ppl+uncertainty
+    "place": frozenset({"devicerun", "machinemodel"}),        # device placement vs cost arithmetic
+    "project": frozenset({"hlb", "nullspace", "query"}),      # WHT sign vs subspace vs SELECT
+    "recall": frozenset({"boot", "modelvault"}),              # ccorr read vs vault unpack
+    "recall_all": frozenset({"ai", "hybrid"}),                # trace sweep vs register sweep
+    "reconstruct": frozenset({"ratedistortion", "refactor"}), # rANS decode vs factor re-dense
+    "report": frozenset({"bios", "measure"}),                 # BIOS screen vs ppl bootstrap
+    "save": frozenset({"core", "sidecar"}),                   # npz objects vs sidecar write
+    "search": frozenset({"dictionary", "memsearch"}),         # prefix words vs state ranking
+    "select": frozenset({"scene_query", "writepolicy"}),      # scene predicates vs register policy
+
 }
 
 

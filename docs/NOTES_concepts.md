@@ -67483,3 +67483,42 @@ does the zoo know that my corpus's own structure licenses and lacks?
 
 ZOO.md sec 11 is the spec stacc can build against: receipts/cache/billing,
 federated discovery, memory-as-commodity (laptop lane, referees shipped).
+
+================================================================================
+CI BURN-DOWN: eight failures, eight fixes, zero budget inflation [green]
+================================================================================
+
+CI ran the FULL suite (we ran targeted -- the lesson: budget/lint traps only
+fire on full runs; they are CI's job by design, but a pre-push full pass on
+touched FAMILIES would have caught these). All eight, with the honest fix:
+
+1  p16 had no selftest -> added per part convention (check_part + one
+   representative faculty), not budgeted away.
+2  look_at was a dark alias-less faculty -> four aliases in _METHOD_ALIASES.
+3  vsaroles line 85 was the batchable K-roll comprehension -> ONE fancy-index
+   gather, proven bit-identical to the loop it replaced.
+4  39 unreviewed name collisions + 5 stale entries -> every body dumped and
+   read. THE SHARP FINDING: bind/unbind are THREE deliberately different
+   algebras (ai=FFT HRR, hlb=Hadamard/WHT, vsaroles=integer shifts) -- pinned
+   divergence, quat_rotate precedent; cconv/ccorr are bit-identical one-line
+   payload-local copies (isolation on purpose; promote if a third appears).
+5  Two shape duplicates -> __init__ pair is four-field-constructor shape
+   coincidence (FileEntry precedent); _addressed pair is genuinely the same
+   wrong-seed check in two audit batteries (silhouette_mask precedent:
+   accepted, unify when a third battery appears).
+6  Three cumsum(S*S) energy fractions tripped the rolling-second-moment ban
+   -> rewritten to the sanctioned ** 2 spelling (non-negative spectra, no
+   cancellation hazard; the spelling IS the marker). One indent casualty on
+   unicron.py caught by file_python_check and repaired.
+7  devicerun + gdnruntime wired the backend without fallback tests -> two
+   equivalence tests pinning the GPU-less contract (asking never raises,
+   reports honestly, weights untouched) + covered set updated.
+8  55 orphans vs budget 50 -> SIX BACKFILLED with real contract tests
+   (outer_bind, sh_rotate_dc, to_rows, is_zero, has_phase_data, add_file),
+   not a bigger budget. Probe lesson repeated: add() returns the entry LIST.
+
+THE BIG ONE: p16_unicron at 3,407 lines vs the 2,000 cap -> MECHANICAL split
+at the unicron_actr method boundary into p16 (1,730) + p17 (1,738), each
+with its own check_part selftest; shim inherits both. 75+83=158 facade defs
+preserved, all 138 unicron faculties reachable, no name/behavior change.
+Full re-run of every failed file: 67 passed.

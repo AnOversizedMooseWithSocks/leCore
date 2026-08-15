@@ -153,7 +153,9 @@ class DreamerResident:
         lam[:len(S)] = (S * S) / max(len(Hc), 1)
         self.lam = lam
         self.n_est = max(n_est, 1)
-        e = np.cumsum(S * S) / max(np.sum(S * S), 1e-300)
+        # energy fraction over a NON-NEGATIVE spectrum (singular values) -- the ** 2 spelling is
+        # the numerics-adoption marker separating this from the banned rolling-second-moment form
+        e = np.cumsum(S ** 2) / max(np.sum(S ** 2), 1e-300)
         # rank from an ENERGY budget, fitted per subject -- the parameter the
         # default would have gotten wrong
         self.rank = int(np.searchsorted(e, float(energy))) + 1

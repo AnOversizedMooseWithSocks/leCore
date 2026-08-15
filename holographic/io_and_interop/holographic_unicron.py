@@ -1631,7 +1631,8 @@ def delta_encode(base, finetuned, energy=0.9999, bits=8, tol=1e-12, mode="lowran
             q1 = alpha * sign
             resid = d - q1
             Ur, Sr, Vtr = np.linalg.svd(resid, full_matrices=False)
-            er = np.cumsum(Sr * Sr) / max(np.sum(Sr * Sr), 1e-300)
+            # energy fraction over singular values (** 2 = the sanctioned energy-fraction spelling)
+            er = np.cumsum(Sr ** 2) / max(np.sum(Sr ** 2), 1e-300)
             rr = int(np.searchsorted(er, energy)) + 1
             sz = d.size / 8.0 + rr * (d.shape[0] + d.shape[1]) * (bits / 8.0)
             if sz < dense_sz:
@@ -1642,7 +1643,7 @@ def delta_encode(base, finetuned, energy=0.9999, bits=8, tol=1e-12, mode="lowran
                 rep["delta_bytes"] += sz
                 continue
         U, S, Vt = np.linalg.svd(d, full_matrices=False)
-        e = np.cumsum(S * S) / max(np.sum(S * S), 1e-300)
+        e = np.cumsum(S ** 2) / max(np.sum(S ** 2), 1e-300)
         r = int(np.searchsorted(e, energy)) + 1
         lr_sz = r * (d.shape[0] + d.shape[1]) * (bits / 8.0)
         if lr_sz < dense_sz:

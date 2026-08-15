@@ -82,7 +82,11 @@ def decode_structure(trace, roles, codebook, mind=None):
     names = list(codebook)
     M = np.stack([np.asarray(codebook[n], np.float64) for n in names])
     M = M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-30)
-    Q = np.stack([unbind(trace, r) for r in roles])
+    # B3 batched form (bit-identical): unbind-by-shift is integer indexing, so K unbinds are
+    # ONE fancy-index gather -- roll(trace, -r)[i] == trace[(i + r) % D] -- instead of K rolls.
+    t = np.asarray(trace)
+    rr = np.asarray([int(r) for r in roles])
+    Q = t[(np.arange(t.shape[0])[None, :] + rr[:, None]) % t.shape[0]]
     norms = np.linalg.norm(Q, axis=1, keepdims=True)
     Q = Q / (norms + 1e-30)
     if mind is not None:

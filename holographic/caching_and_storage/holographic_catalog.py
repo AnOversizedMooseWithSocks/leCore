@@ -1053,6 +1053,8 @@ _METHOD_ALIASES = {
                            "run the model with a subconscious",
                            "let inner agents vote on the next token",
                            "orchestrate a swarm and merge the result"),
+    "look_at": ("camera view matrix", "point the camera at a target", "opengl look at matrix",
+                "make a view matrix from eye and target"),
     "unicron_galvatron": ("rebuild a model with resident experts", "put lecore inside the model",
                           "model with a memory expert and a guard", "make a galvatron",
                           "run a model with residents in its forward pass",
