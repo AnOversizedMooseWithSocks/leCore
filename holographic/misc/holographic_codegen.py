@@ -219,6 +219,9 @@ def sdf_numba_fn(expr, variables=("x", "y", "z")):
 
 
 def _selftest():
+    # WHY: bare-name reads inside this module bypass module __getattr__, so the lazy
+    # flag must be materialized into globals() before it is referenced (same as _require).
+    _ensure_sympy()
     if not HAS_SYMPY:
         print("codegen selftest skipped (no sympy)")
         return
