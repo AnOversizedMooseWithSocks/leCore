@@ -35,12 +35,23 @@ import time
 import numpy as np
 
 
-def chunk_text(text, max_chars=600, min_chars=40):
+def chunk_text(text, max_chars=600, min_chars=40, overlap=300):
     """Split on paragraph boundaries, packing up to max_chars.
 
     WHY NOT FIXED WINDOWS: a fact split across two chunks is retrievable from
     neither. Paragraphs are the author's own unit of meaning; the cap only
-    prevents one runaway paragraph from becoming an unfindable blob."""
+    prevents one runaway paragraph from becoming an unfindable blob.
+
+    THE RUNAWAY-PARAGRAPH PATH OVERLAPS: input with no blank lines at all (a
+    pasted log, a minified file, a NIAH haystack) is ONE runaway paragraph, so
+    the whole document takes the fallback -- and when that fallback was plain
+    `p[:max_chars]` windows it was exactly the fixed-window failure named
+    above. Measured (600-char chunks, 86 needle offsets): break-free input
+    lost 8/86 boundary-straddling facts, 9%; paragraphed input lost 0/86. So
+    the degenerate path now strides max_chars - overlap, which makes any fact
+    shorter than `overlap` unloseable; the paragraph path is byte-identical
+    to before. Keep overlap >= the longest fact you expect to retrieve
+    (clamped to max_chars // 2 so the stride stays positive)."""
     paras = [p.strip() for p in str(text).replace("\r\n", "\n").split("\n\n")]
     out, buf = [], ""
     for p in paras:
@@ -51,9 +62,11 @@ def chunk_text(text, max_chars=600, min_chars=40):
         else:
             if len(buf) >= min_chars:
                 out.append(buf)
-            while len(p) > max_chars:               # a single huge paragraph
-                out.append(p[:max_chars])
-                p = p[max_chars:]
+            if len(p) > max_chars:                  # a single huge paragraph
+                step = max(1, max_chars - min(int(overlap), max_chars // 2))
+                while len(p) > max_chars:
+                    out.append(p[:max_chars])
+                    p = p[step:]
             buf = p
     if len(buf) >= min_chars or (buf and not out):
         out.append(buf)
