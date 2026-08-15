@@ -4,6 +4,24 @@
 
 [![tests](https://github.com/AnOversizedMooseWithSocks/leCore/actions/workflows/ci.yml/badge.svg)](https://github.com/AnOversizedMooseWithSocks/leCore/actions/workflows/ci.yml)
 
+> **New here (human or AI)?** Don't summarize this project from the file tree — the
+> capabilities are documented in the engine's own catalog and stay invisible to a skim.
+> 1. **Read [CAPABILITIES.md](CAPABILITIES.md)** — the auto-generated menu of everything
+>    the engine does, with runnable examples and search aliases.
+> 2. **Run the proof**: `PYTHONHASHSEED=0 python3 tools/showcase.py` — six flagship
+>    claims as live assertions, ~2 s, laptop CPU, no GPU/torch.
+> 3. **Ask the engine itself** — it is often *easier to use leCore to learn leCore*,
+>    because it carries a semantic search engine over its own capabilities:
+>    ```python
+>    import lecore
+>    mind = lecore.UnifiedMind()
+>    mind.find_capability("prevent hallucination")   # ranked capability homes
+>    mind.suggest("compress a float series")          # homes + confidence + the call
+>    ```
+> 4. **The map**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (the whole, then the
+>    parts) and [docs/SHOWCASE.md](docs/SHOWCASE.md) (what summaries miss, and what
+>    this project is *not*). AI assistants: see also [llms.txt](llms.txt).
+
 ---
 
 ## What is this?

@@ -134,14 +134,18 @@ def register_p06(c):
                                                 "particle system", "particles", "emitter", "mass spring", "spring",
                                                 "rigid body", "collision"), module="fluid", consumes=('field',), produces=('field',))
     c.register_capability("Encoders (number to vector)", "turn raw values into hypervectors: scalar & fractional-power "
-                          "encoding (encoders/fpe -- nearby numbers map to nearby vectors), N-D coordinate fields "
+                          "encoding (taper='kaiser:beta' shapes similarity SIDELOBES by aperture-taper design -- "
+                          "measured -13 -> -37.5 dB, weak-item margin 1.5x -> 18.2x beyond the mainlobe, price "
+                          "2.7x mainlobe width -- redistribution not creation), N-D coordinate fields "
                           "(fpefield), complex-phasor FHRR (fhrr), sparse block codes (sbc), geometric-algebra Clifford "
                           "(clifford), and exact integer arithmetic over phasors (rns). How data ENTERS the substrate",
                           example="from holographic.io_and_interop.holographic_encoders import ScalarEncoder; from holographic.sampling_and_signal.holographic_fpe import ...",
                           native=True, aliases=("encode", "encoder", "number to vector", "scalar encoding",
                                                 "fractional power encoding", "fpe", "encode coordinates", "phasor", "fhrr",
                                                 "sparse block codes", "sbc", "clifford", "geometric algebra",
-                                                "exact integer arithmetic", "rns", "embed a value"))
+                                                "exact integer arithmetic", "rns", "embed a value",
+                                                "suppress similarity sidelobes", "kernel taper",
+                                                "weak item buried under strong", "phased array kernel"))
     c.register_capability("Physics & chemistry (domain)", "physical/chemical PROPERTIES and their evolution: the matter "
                           "model (Mixture/matter_step: smoke->oil separation), diffusion, equilibrium propagation, "
                           "thin-film iridescence, oxidation/weathering", example="from holographic.misc.holographic_mixture import Mixture, matter_step",
@@ -1316,13 +1320,350 @@ def register_p06(c):
                               "quantize shading bands", "cartoon render", "rim darkening"))
 
 
+    c.register_capability("Tiered memory (adaptive short-term / long-term with promotion & demotion)",
+        "mind.tiered_memory(hot_capacity=K) is the ST/LT conductor over existing levers: a bounded EXACT hot "
+        "dict (O(1), zero loss -- low overhead for what matters), and demoted items in a CONSTANT-size "
+        "superposed trace plus zlib-compressed exact spill (low disk/RAM for what doesn't). Demotion picks the "
+        "lowest importance = recency-decay x (1+hits), with a recency-window veto (kept negative: pure "
+        "frequency ordering starved every new item, twice). LT access verifies trace vs spill, then PROMOTES "
+        "back to hot. get() returns (value, tier).",
+        example="tm=mind.tiered_memory(hot_capacity=4); [tm.put(k,(k*7)%256) for k in range(9)]; "
+                "print(tm.get(0), tm.stats())",
+        native=True, aliases=("short term and long term memory", "adaptive memory tiers",
+                              "consolidate short term into long term", "promote important memories",
+                              "demote stale memories", "move memories between tiers",
+                              "low overhead for what matters", "spend less disk on unimportant data",
+                              "working memory with archive", "importance based eviction",
+                              "hot and cold memory", "memory that forgets gracefully",
+                              # the value-head move applied to the POLICY itself (policy='holo'):
+                              "cache policy as a hypervector", "importance as a bundle readout",
+                              "eviction decided inside the vsa", "holographic cache policy",
+                              # Quilez-seat persistence: the trace is a derived view, save the rule
+                              "save memory as the rule not the bytes",
+                              "persist a cache and regenerate its trace",
+                              "constant size save for tiered memory"))
+
+    c.register_capability("Celled memory (domain repetition over the capacity law -- unbounded pairs, bounded cells)",
+        "mind.celled_memory() escapes the capacity wall the HONEST way: cells of EXACTLY n* pairs (the "
+        "measured limit IS the tile size -- Quilez opRep applied to memory), one shared seed-derived "
+        "codebook, warm/cold cell tiers with the crossing cost measured, exact key->cell directory. "
+        "MEASURED on real corpus pairs at dim 4096: ONE memory 70x past the law recalls at 0.007 "
+        "(interference collapse, as the law predicts); celled recalls 1.000 across 71 cells. Kept "
+        "negative: a holographic directory would re-buy the interference the cells escape.",
+        example="cm=mind.celled_memory(dim=2048, vocab=4096); import numpy as np; "
+                "ks=np.arange(500); cm.store(ks,(ks*7)%4096); print((cm.recall(ks)==(ks*7)%4096).mean(), cm.stats())",
+        native=True, aliases=("store more pairs than the capacity law allows", "escape the capacity limit",
+                              "unbounded associative memory", "tile memory into cells",
+                              "domain repetition for memory", "memory beyond the interference wall",
+                              "millions of key value pairs holographically", "scale superposed memory"))
+
+    c.register_capability("Learn this codebase (the map, the menu, and the method)",
+        "Reading order for new eyes, human or AI: (1) docs/ARCHITECTURE.md -- the whole system then the "
+        "parts; (2) CAPABILITIES.md -- the auto-generated menu of every capability with runnable examples "
+        "(this very catalog, exported); (3) tools/showcase.py -- the flagship claims as live assertions. "
+        "THE METHOD: it is often easier to use leCore to learn leCore -- find_capability/suggest/route ARE "
+        "semantic search over this catalog and beat grep for 'where does X live'. llms.txt/AGENTS.md carry "
+        "the same guidance for AI assistants landing on the repo.",
+        example="print(open('docs/ARCHITECTURE.md').read()[:400])",
+        native=True, aliases=("how do I learn this codebase", "where do I start", "reading order",
+                              "explain the architecture", "how is this organized", "onboarding",
+                              "documentation entry point", "map of the project"))
+
+    c.register_capability("Routed roles (the semantic system staffs the swarm)",
+        "mind.dispatch_roles(tasks, spec): task phrases ('leave a map of the target', 'move along the "
+        "shared map', 'adjust the texture gains') route to registry roles (scout/mover/texturer) via "
+        "the engine's OWN BM25 -- leCore staffing leCore; nobody hand-builds member stacks. Builders "
+        "close over spec (targets, steps, channels), so dispatch COMPOSES. AMBIGUITY IS AN ERROR: no "
+        "match or two tasks claiming one role raises WITH NAMES -- silent misstaffing is a ghost. "
+        "Pinned end-to-end: routed members converge in the workspace loop.",
+        example="import lecore, numpy as np; m=lecore.UnifiedMind(); [r for r,_ in m.dispatch_roles(['leave a map of the target direction','adjust the texture gains'], {'target_params': np.ones(3)})]",
+        native=True, aliases=("route tasks to swarm roles", "staff the swarm", "assign agent roles",
+                              "texture the scene routes to texturer", "role dispatch"))
+
+    c.register_capability("Shared workspace for swarm roles (coordinate through slots, not chatter)",
+        "mind.shared_workspace() + render_critique_loop(workspace=): named slots the roles read and "
+        "write while deliberating -- the designer leaves the layout, the texturer reads it and leaves "
+        "gains. Writes BUFFER within a round and commit together (even on no-improvement rounds: a "
+        "scout that only leaves a map IS the round's progress -- the first pin run proved bootstrap "
+        "dies otherwise); collisions resolve to the LOWEST member index and are LOGGED, never silent. "
+        "Pinned: coordination is LOAD-BEARING (the mover fails without the scout's slot).",
+        example="import lecore; m=lecore.UnifiedMind(); ws=m.shared_workspace(); ws.write(0,'layout',[1,2]); ws.commit(1); ws.read('layout')",
+        native=True, aliases=("shared workspace between agents", "swarm scratchpad", "roles coordinate",
+                              "blackboard for the swarm", "agents share scene state"))
+
+    c.register_capability("The inner eye's 2D toolset (image ops as installed chain steps)",
+        "mind.image_op_library(h, w): the classic editing bench as FAC-ready callables, verdicts "
+        "MEASURED AT IMAGE SCALE (probe scale= names the certification DOMAIN -- at unit scale a "
+        "threshold certified linear on the zero function): blur/unsharp/sobel certify, flip/rot90/warp "
+        "are PERMUTATIONS (D ints), brightness/contrast install; threshold/gamma REFUSE and ride "
+        "HOST:APPLY. Chains track state dim across rectangular steps. Compose with "
+        "render_critique_loop: the eye can look at ANY pipeline's output.",
+        example="import lecore; m=lecore.UnifiedMind(); lib=m.image_op_library(4,4); import numpy as np; sorted(lib.keys())[:5]",
+        native=True, aliases=("blur inside the weights", "image pipeline installed", "2d editing in the model",
+                              "installed image filters", "which image ops install", "flip is a permutation"))
+
+    c.register_capability("The inner eye (render, look, iterate, THEN speak the picture)",
+        "mind.render_critique_loop: swarm-role members propose scene params, an INSTALLED chain "
+        "renders, the frame goes through the model's OWN vision (eye is injectable: the assimilated "
+        "Qwen3.5-VL tower on the host; ReferenceEye in CI -- the seam IS the honesty), a critic scores "
+        "in EYE SPACE (kept negative: pixel-space critics reward changes the eye cannot see -- pinned "
+        "with a checkerboard the eye pools away), loop until satisfied, emit PGM through the mouth. "
+        "Deterministic: same intent, same picture, every run. Stalls stop honestly.",
+        example="import numpy as np; from holographic.agents_and_reasoning.holographic_machine import HoloMachine; from holographic.agents_and_reasoning.holographic_innereye import ReferenceEye; import lecore; m=lecore.UnifiedMind(); Wf=np.abs(np.random.default_rng(0).standard_normal((16,2)))*50; eye=ReferenceEye(4,4,embed_dim=8,patch=2); mm=HoloMachine(dim=2,seed=9,data=['a']); mm.functions_symbolic={}; pgm,rep=m.render_critique_loop(mm,[('FAC',('f',lambda p: Wf@p)),('HALT',None)],np.zeros(2),[('d',lambda p,s,r: p+0.1)],eye,eye(Wf@np.array([0.6,0.6])),4,4,satisfy=0.99,max_rounds=20); rep['satisfied']",
+        native=True, aliases=("look at a render before outputting", "inner eye loop",
+                              "render critique iterate", "model looks at its own render",
+                              "design render look loop", "swarm renders and inspects"))
+
+    c.register_capability("The installed generative model (HDRIFT head: model == one certified matrix)",
+        "mind.drift_head(model): a drift generative model's readout is its (d+1) x D moment matrix "
+        "[mu; nu_j] -- certified DENSE at 0.0, so the model ships as ONE weight matrix. MODEL "
+        "ARITHMETIC IN WEIGHT SPACE, exact: head(A)+head(B) == head(compose(A,B)) at 0.0; subtract == "
+        "ablate; transport == a certified linear action on rows (3.6e-16). drift_head_load inverts "
+        "(field bit-identical). HONEST BOUNDARY: the sampling recurrence is nonlinear -- the projector "
+        "refuses it (residual 8e-2); enc = host-feature lane, generation stays host-shape.",
+        example="import numpy as np, lecore; from holographic.sampling_and_signal.holographic_hdrift import DriftModel, drift_moments, drift_compose; from holographic.sampling_and_signal.holographic_fpe import VectorFunctionEncoder; m=lecore.UnifiedMind(); r=np.random.default_rng(0); e=VectorFunctionEncoder(2, dim=512, bounds=[(-3,3),(-3,3)], bandwidth=6.0, seed=1); A=DriftModel(e, *drift_moments(r.standard_normal((80,2))*0.3, e), 80); B=DriftModel(e, *drift_moments(r.standard_normal((80,2))*0.3+1.0, e), 80); float(np.max(np.abs(m.drift_head(drift_compose(A,B)) - (m.drift_head(A)+m.drift_head(B)))))",
+        native=True, aliases=("add two generative models", "model arithmetic in weight space",
+                              "install the drift head", "merge distributions by adding weights",
+                              "generative model as a matrix", "ship the model as weights"))
+
+    c.register_capability("Ouroboros (the closed memory loop: leCore eats the installed model's memory)",
+        "THE NAMED PROCESS: a model with leCore installed in its weights OUTPUTS memory -- GDN head "
+        "state (an outer-product accumulator, leCore's own HRR trace) and durable notes -- and "
+        "server-side leCore CONSUMES it as an ordinary data structure, then feeds it back. MEASURED "
+        "on exact GDN algebra: read 0.935; external write reads 0.951 by the model's own readout "
+        "(zero forward passes); delete -> -0.24; capacity 0.932 pred / 0.905 meas; transcript "
+        "consolidation 0.767 -> 0.918 (self-rehearsal = pollution, kept negative). Durable side: "
+        "memory_write/memory_search per-tenant partition. docs/ZOO.md 7-8.",
+        example="from holographic_mcp import MCPServer; import tempfile; s=MCPServer(memory_root=tempfile.mkdtemp()); s.handle({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'memory_write','arguments':{'text':'ouroboros lives'}}})['result']['isError']",
+        native=True, aliases=("ouroboros", "closed memory loop", "feed the model's memory back",
+                              "manage the installed model's memory", "the snake eats its tail",
+                              "external memory of the installed model",
+                              "the leap", "leap outside the training data"))
+
+    c.register_capability("MCP server (mount leCore in any Model Context Protocol host)",
+        "holographic_mcp.py: JSON-RPC 2.0 over stdio, stdlib-only, delegating to /tools + /invoke. "
+        "Tools: lecore_map/find/describe/invoke; corpus_bind/ask; void_explore(handle_b=...) = the "
+        "FEDERATED LEAP (A's licensed gaps instantiated in B, warrant attached); memory_write/"
+        "search per-tenant partition; receipt_verify + lecore.receipt sha256 pair on EVERY call -- "
+        "determinism is the proof system (charge once, serve the hash). Cost in _meta.",
+        example="from holographic_mcp import MCPServer; s=MCPServer(); r=s.handle({'jsonrpc':'2.0','id':1,'method':'tools/list'}); [t['name'] for t in r['result']['tools']]",
+        native=True, aliases=("mcp", "model context protocol", "serve tools over mcp", "openzoo",
+                              "mount lecore in claude desktop", "mcp stdio server", "proof of inference receipt", "charge once serve the hash", "federated leap", "what does the zoo know that my corpus lacks"))
+
+    c.register_capability("The memory mountain (measure your own cache tiers; the tiers predict the benchmarks)",
+        "mind.memory_mountain(): streaming GB/s vs working set, tier detection (peak / knee / floor), "
+        "predict_streaming_ms from the measured floor. THIS box: peak ~90 GB/s @ 0.5-1 MB (L2), floor "
+        "~26 GB/s from 4 MB -- and bytes/floor REPRODUCED the fast-arbiter table to ~15% (exact f64 "
+        "9.1 pred / 10.4 meas; f32 4.5/5.1; screens 1.6/1.9): the fast-path wins ARE the mountain "
+        "wearing different working sets. KEPT NEGATIVES: the left flank is DISPATCH overhead (a Python "
+        "probe cannot see L1, and says so); L3/RAM merge to ONE floor on a virtualized host.",
+        example="import lecore; m=lecore.UnifiedMind(); curve,tiers=m.memory_mountain(sizes=[256e3,1e6,8e6,32e6]); tiers['peak_gbs'] > tiers['floor_gbs']",
+        native=True, aliases=("measure cache bandwidth", "detect cache size", "memory mountain",
+                              "L1 L2 L3 boundaries", "how fast is my ram", "why is the matvec this slow"))
+
+    c.register_capability("The time machine (unitary dynamics: reversible, random-access, superposable time)",
+        "mind.time_machine(): for UNITARY steps (|spectrum|=1) time is an ADDRESSABLE AXIS: time_jump "
+        "reaches step 977 in one spectral power (5e-13) and t<0 REVERSES exactly (1.4e-15 back; decaying "
+        "steps refuse WITH eig_min^t -- the probe measured 1.4e+121 first). bundle_sims: K sims in ONE "
+        "vector (circulant steps commute with binding, 1.6e-15); members read at the 1/sqrt(K) LAW; "
+        "evolve_functional: a PRECOMMITTED ensemble readout, EXACT. KEPT NEGATIVE: keyed functionals are "
+        "NOT exact (cosine 0.34 -- crosstalk survives weighting).",
+        example="import numpy as np, lecore; m=lecore.UnifiedMind(); tm=m.time_machine(); spec=tm.make_unitary_step(64, seed=3); x=np.random.default_rng(0).standard_normal(64); y=tm.time_jump(x, spec, 500); back=tm.time_jump(y, spec, -500); float(np.max(np.abs(back-x)))",
+        native=True, aliases=("run the simulation backwards", "jump to timestep t", "time travel state",
+                              "reverse the dynamics", "many simulations one vector", "ensemble in superposition",
+                              "undo n steps"))
+
+    c.register_capability("The HRNN collapse (n timesteps as ONE installed operator)",
+        "mind.collapse_recurrence(machine, step_program, n): a linear recurrence x_t = M x_(t-1) + b IS "
+        "leCore's HRNN (decay inside M) -- and n applications of one operator ARE one operator, so 100 "
+        "sim steps collapse to a single certified affine matvec. MEASURED: 156x on endpoint queries at "
+        "2e-15 vs the stepped trajectory; affine drift+decay collapses exactly (geometric-series "
+        "offset); the certificate prices the SPECTRUM (eig_max^n -- explosive recurrences announce "
+        "themselves at compile); HOST links (clamps, branches) REFUSE with names -- sim_program_run "
+        "stays the referee and the drift instrument.",
+        example="import numpy as np; from holographic.agents_and_reasoning.holographic_machine import HoloMachine; import lecore; m=lecore.UnifiedMind(); mm=HoloMachine(dim=6,seed=7,data=['a']); mm.functions_symbolic={}; run,cert=m.collapse_recurrence(mm,[('FAC',('d',lambda f: 0.9*f)),('HALT',None)],40); (round(float(run(np.ones(6))[0]),6), round(cert['eign_max'],6))",
+        native=True, aliases=("collapse a recurrence", "n steps in one matvec", "hrnn in the weights",
+                              "fast forward the simulation", "skip to the end state", "decay gate installed"))
+
+    c.register_capability("Simulation in the weights (installed physics step, drift-audited)",
+        "mind.sim_program_run(machine, step_program, init, n_steps): compile ONE physics step (linear "
+        "projections install certified; clamps ride as marked HOST:APPLY links), iterate it installed "
+        "with the state fed back -- the chain IS the integrator. Returns (trajectory, manifest, DRIFT "
+        "curve vs the live step): measured 100-step PBD chain at drift identically 0.0. Any nonzero "
+        "drift is the certificate residual compounding -- visible, never hidden.",
+        example="import numpy as np; from holographic.agents_and_reasoning.holographic_machine import HoloMachine; import lecore; m=lecore.UnifiedMind(); mm=HoloMachine(dim=6,seed=7,data=['a']); mm.functions_symbolic={}; tr,man,dr=m.sim_program_run(mm,[('FAC',('s',lambda f: f*0.9)),('HALT',None)],np.ones(6),10); (tr.shape, float(dr.max()))",
+        native=True, aliases=("run a physics sim in the weights", "installed simulation",
+                              "physics step as a model", "drift curve", "simulate inside the model"))
+
+    c.register_capability("Render to text from the weights (installed image formation -> PGM)",
+        "mind.raster_program_pgm(machine, program, params, w, h): run an installed image-formation "
+        "chain (RECTANGULAR linear maps certify -- 3 lights -> 64 pixels) and emit the frame as PGM P2 "
+        "ASCII -- the picture leaves through the mouth, no file I/O; byte-exact vs the live path "
+        "(pinned). Quantization to 0..255 ints is the SERIALIZER's job, stated in the docstring.",
+        example="import numpy as np; from holographic.agents_and_reasoning.holographic_machine import HoloMachine; import lecore; m=lecore.UnifiedMind(); W=np.full((4,2),40.0); mm=HoloMachine(dim=2,seed=7,data=['a']); mm.functions_symbolic={}; pgm,_=m.raster_program_pgm(mm,[('FAC',('f',lambda q: W@q)),('HALT',None)],np.ones(2),2,2); print(pgm)",
+        native=True, aliases=("render from the weights", "picture out of the model", "installed render",
+                              "emit an image as text", "pgm from the model"))
+
+    c.register_capability("Cleanup as one attention head (certified agreement, priced ties)",
+        "mind.cleanup_as_attention(codebook, beta) expresses exact cleanup as y = A^T softmax(beta*Ax) "
+        "-- ONE attention head, codebook as keys AND values: the host's own mechanism. "
+        "mind.attention_read_certificate(codebook, queries, beta) MEASURES agreement vs exact cleanup "
+        "on YOUR queries (real wiki: 0.575 @beta=4, 1.000 @beta>=16). PRE-REGISTERED NEGATIVE, held by "
+        "theorem: softmax averages exactly-tied rows -- the lowest-index tie rule is inexpressible; "
+        "ties are the agreement floor.",
+        example="import numpy as np, lecore; m=lecore.UnifiedMind(); rng=np.random.default_rng(0); A=rng.standard_normal((50,16)); A/=np.linalg.norm(A,axis=1,keepdims=True); q=A[:8]+0.05*rng.standard_normal((8,16)); m.attention_read_certificate(A,q,beta=64.0)",
+        native=True, aliases=("install cleanup as attention", "attention read certificate",
+                              "measure attention agreement", "cleanup as a head", "softmax vs argmax gap"))
+
+    c.register_capability("Mesh through the weights, OBJ out the mouth (installed 3D program)",
+        "mind.mesh_program_obj(machine, program, verts, faces): compile FAC steps (rigid transforms "
+        "certify BLOCKDIAG -- 9+3 params/step), run the chain INSTALLED with the mesh's flattened "
+        "vertices as the state, and get the transformed mesh back as an OBJ TEXT DUMP -- the token "
+        "stream is the output device, no file I/O anywhere. BYTE-EXACT vs the live-faculty path "
+        "(pinned). host_fallback=True lets refused steps ride as marked HOST:APPLY links.",
+        example="import numpy as np; from holographic.agents_and_reasoning.holographic_machine import HoloMachine; from holographic.agents_and_reasoning.holographic_compileinstall import mesh_program_obj; mm=HoloMachine(dim=12,seed=3,data=['a']); mm.functions_symbolic={}; obj,_=mesh_program_obj(mm,[('FAC',('s',lambda f: f*2.0)),('HALT',None)],np.eye(4,3),[(0,1,2)]); print(obj[:60])",
+        native=True, aliases=("run a mesh through installed weights", "obj from the model",
+                              "3d program in the weights", "emit a mesh as text", "installed mesh transform"))
+
+    c.register_capability("Byte-plane float packing (compress the 'incompressible', byte-exact)",
+        "mind.float_pack_bytes / float_unpack_bytes: general codecs get ~1.08x on float embeddings "
+        "(interleaved sign/exponent/mantissa reads as noise). Byte-plane TRANSPOSE groups like bytes "
+        "before lzma: 1.19x on the same real bytes, byte-exact round trip (f32/f64, any shape, F-order "
+        "handled). KEPT NEGATIVE, measured: row-delta before planing adds NOTHING -- embedding rows are "
+        "not sequentially correlated; the filter ships without it.",
+        example="import numpy as np, lecore; m=lecore.UnifiedMind(); A=(np.random.default_rng(0).standard_normal((50,16))*0.1).astype(np.float32); b=m.float_pack_bytes(A); (np.array_equal(m.float_unpack_bytes(b), A), len(b) < A.nbytes)",
+        native=True, aliases=("compress embeddings lossless", "float compression byte exact",
+                              "byte plane shuffle", "pack float arrays smaller", "embeddings wont compress"))
+
+    c.register_capability("Flagship benchmarks (real data, SOTA context, negatives loud)",
+        "tools/benchmarks_flagship.py + docs/BENCHMARKS.md: calibrated abstention realized-vs-promised "
+        "FA on SHUFFLED-REAL noise (0.013 @ alpha=0.01, power 1.000 -- within binomial CI; no SOTA ships "
+        "the promise); screens recall 0.97 [0.94,0.99] self-measured with honest demotion (context: DARTH "
+        "SLOs; 2026 HNSW silent-degradation post-mortems); 175-byte model re-bakes 2048 params "
+        "bit-identically (Tracr stores weights, we store the rule); codec baselines set as the honest bar. "
+        "KEPT NEGATIVE: screens wall-clock LOSES to exact BLAS at 36k -- scan savings != latency there.",
+        example="import subprocess; print(subprocess.run(['python3','tools/benchmarks_flagship.py'],capture_output=True,text=True).stdout[:300])",
+        native=True, aliases=("benchmarks", "sota comparison", "how does it compare to hnsw",
+                              "beat state of the art", "benchmark scores", "prove it with numbers"))
+
+    c.register_capability("The showcase (runnable proof of what makes this engine different)",
+        "tools/showcase.py executes the six flagship claims as LIVE assertions in ~2 s on a laptop CPU: "
+        "calibrated abstention (0/100 noise passed at alpha=0.01), the recall budget demoting honestly with "
+        "the measurement attached, exact tiled search with cross-tile tie identity, the ~250-byte model file "
+        "re-baking bit-identical weights, VM==installed==symbolic three-referee conformance, and the one "
+        "determinism tie rule. docs/SHOWCASE.md is the companion for new eyes: run the proof before "
+        "summarizing the project.",
+        example="import subprocess; print(subprocess.run(['python3','tools/showcase.py'],capture_output=True,text=True).stdout[-200:])",
+        native=True, aliases=("what makes this project special", "summarize this project", "demo",
+                              "show me what it can do", "why is this different", "elevator pitch",
+                              "prove the claims", "quickstart"))
+
+    c.register_capability("Native holographic micro-model (baked; the model IS the program)",
+        "mind.native_model(dim, seed, program): a from-scratch model, no pretrained host -- layers are the "
+        "certified parameterizations (circulant/permutation/dense), registers are recurrent state, forward() "
+        "= the compiled program (pinned == VM). BAKED: save() writes a ~250-byte RULE file; load() re-bakes "
+        "bit-identical weights. unitary=True bakes norm-preserving atoms for DEEP programs (depth-256 error "
+        "7.8e82 -> 6e-15 measured; the conditioning warning names this switch). to_dense(op) exports the "
+        "literal host matrix.",
+        example="mdl=mind.native_model(512, 7, [('LOAD','a'),('BIND','k'),('HALT',None)], data=['a','k']); "
+                "y=mdl.forward(); print(mdl.layers())",
+        native=True, aliases=("model without pretrained weights", "bake a model from a program",
+                              "deep bind chain explodes", "norm preserving atoms", "unitary bake",
+                              "neurosymbolic", "interpretable by construction", "white box model",
+                              "auditable AI model", "model library in one file", "many programs one model",
+                              "function library as weights",
+                              "tiny model file regenerates weights", "vsa native model",
+                              "export layer as matrix", "the model is the program"))
+
+    c.register_capability("Compile a VM program into installed form (conformance + manifest)",
+        "mind.compile_program_installed(machine, program): a symbolic HoloMachine program becomes a chain of "
+        "projector-CERTIFIED matvecs + register slots; REPEAT of a linear body collapses to ONE operator "
+        "power (spectral, exact). CONFORMANCE PINNED: VM and installed chain agree NUMERICALLY (allclose, "
+        "not cosine) on a REPEAT+STORE/RECALL program. Nonlinear bodies refuse. Every compile yields the "
+        "manifest (kind, payload SHAPE, residual per op); save_manifest writes the sidecar.",
+        example="from holographic.agents_and_reasoning.holographic_machine import HoloMachine; "
+                "mach=HoloMachine(dim=512, seed=7, data=['a','k']); mach.functions_symbolic={}; "
+                "run,man=mind.compile_program_installed(mach, [('LOAD','a'),('BIND','k'),('HALT',None)]); "
+                "print(man['chain'])",
+        native=True, aliases=("run a program in the weights", "compile to installed opcodes",
+                              "manifest schema", "model card fields", "what installs into weights",
+                              "which units cannot install",
+                              "vm conformance installed", "repeat as operator power",
+                              "manifest of installed capabilities", "what is installed in the model"))
+
+    c.register_capability("Out-of-core exact search (top-k over on-disk arrays of any size)",
+        "mind.out_of_core_search(path, queries, k) runs EXACT tie-safe top-k over an .npy file WITHOUT "
+        "loading it: np.memmap + the tiled fold stream tiles from disk, so memory is bounded by the tile "
+        "whatever the file size. MEASURED: 600 MB file, 40.5 ms/q k=5, peak RSS 0.75 GB. The 2026 ANN "
+        "consensus calls exact 'not applicable' at scale and ships approximate+rerank; this is the honest "
+        "inversion -- exact all the way down, recall 1.0 by construction, deterministic ties.",
+        example="import numpy as np; np.save('/tmp/d.npy', np.random.default_rng(0).standard_normal((5000,64))); "
+                "v,i = mind.out_of_core_search('/tmp/d.npy', np.random.default_rng(1).standard_normal(64), k=3); print(i[:,0])",
+        native=True, aliases=("search a file bigger than memory", "exact search on disk",
+                              "top k over a huge npy", "streaming nearest neighbours",
+                              "dataset does not fit in ram"))
+
+    c.register_capability("The projector (measure a faculty into installed form, or refuse)",
+        "mind.project_faculty(f, dim): probe a callable, CERTIFY on held-out inputs: permutation / "
+        "circulant / blockdiag / dense / rectangular; refusals retry HOST vocabulary (rmsnorm, "
+        "gated/SwiGLU) then ENGINE kinds (powerlaw: gamma/tone certify at 1e-16 -- render chains lost "
+        "their last host links). scale= names the DOMAIN. Census: 8.8% facade / 8.6% module verdict "
+        "rate -- frame hypothesis REFUTED; the ore is the 11.4% module refusals (vocabulary targets); "
+        "FAC closures make this a LOWER bound.",
+        example="import numpy as np; p=mind.project_faculty(lambda v: np.roll(v,3), 64); "
+                "print(p['kind'], p['residual'])",
+        native=True, aliases=("turn a function into a matrix", "can this install into weights",
+                              "block diagonal detection", "certify against host layers", "rmsnorm target",
+                              "installability census", "what fraction installs",
+                              "compile a faculty into the model", "project code into vsa form",
+                              "is this operation linear", "measure an operator into installed form"))
+
+    c.register_capability("Trace energy partition (the saturation ledger: signal / crosstalk / damage)",
+        "mind.trace_partition(trace, atoms[, stored_idx]) splits a bundle's FIXED energy into signal "
+        "(least-squares onto stored atoms), the law's ~n/dim crosstalk floor, and damage above it. "
+        "Fractions SUM TO 1 by construction -- the ledger attributes power, never creates it. Membership "
+        "MAD-gated when stored_idx unknown (estimated=True). Selftest: clean~all-signal; injected damage "
+        "moves only the damage account.",
+        example="import numpy as np; A=np.random.default_rng(0).standard_normal((128,512)); "
+                "A/=np.linalg.norm(A,axis=1,keepdims=True); t=A[:9].sum(0); print(mind.trace_partition(t, A))",
+        native=True, aliases=("how much of this bundle is signal", "signal versus crosstalk fraction",
+                              "is my trace damaged or just loaded", "memory health report",
+                              "energy budget of a superposition", "saturation ledger"))
+
+    c.register_capability("Tiled matmul-reduce (exact per-query max/argmax/sum, memory bounded by the tile)",
+        "holographic_tiledreduce.tiled_matreduce(items, Q) reduces an (N x D)x(D x Q) product per query "
+        "WITHOUT the (N,Q) matrix: a pure FOLD (step(state, tile) -> state over a commutative monoid), so "
+        "peak memory is tile x Q whatever N is, and the step is REPEAT-expressible for the installed side. "
+        "MEASURED: bit-identical argmax to dense on 12k REAL text vectors (strict-> preserves the first-index "
+        "tie rule -- planted cross-tile ties pinned), FASTER than dense at these shapes (0.13 vs 0.22s), 3 MB "
+        "vs 19 MB. This is what turned calibrated abstention's 7.45 GiB death at N=500k into a 0.9 GB loop.",
+        example="import numpy as np; from holographic.sampling_and_signal.holographic_tiledreduce import "
+                "tiled_matreduce; X=np.random.default_rng(0).standard_normal((5000,64)); "
+                "b,a=tiled_matreduce(X, X[:3].T); print(a)",
+        aliases=("argmax over a huge matrix without memory", "chunked similarity max", "tiled reduction",
+                 "exact search bounded memory", "abstention at large scale", "blockwise matmul reduce"))
+
+    c.register_capability("Deterministic top-k (the tie-safe shortlist rule, stated once)",
+        "holographic_determinism.topk_det(scores, k): indices of the k best, descending, ties to the LOWEST "
+        "index -- argmax_tiebreak extended to a list, and the ISA-1 pattern applied at k>1 (the same "
+        "shortlist rule had been hand-copied into THREE sites, each with its own kept-negative comment about "
+        "the k+1 boundary bug). Index.nearest, Index.nearest_batch and BM25.rank now DELEGATE here; planted "
+        "discrete-tie traps pin bit-identity. Conformance home for ANY substrate's top-k.",
+        example="import numpy as np; from holographic.misc.holographic_determinism import topk_det; "
+                "print(topk_det(np.array([3.,1.,3.,2.]), 2))",
+        aliases=("stable top k", "tie safe shortlist", "deterministic ranking rule", "top k contract",
+                 "ties resolve lowest index",
+                 # outsider vocabulary: the determinism SPINE should win these, not a leaf module
+                 "reproducible AI", "deterministic machine learning", "bit identical results",
+                 "same answer every run", "reproducible builds for models"))
+
     c.register_capability("Superposed key-value memory (capacity law + allocator + gated resonator decode)",
-        "mind.superposed_memory(vocab=V) stores pairs as ONE vector (sum of bind(k,v)); "
-        "mind.memory_capacity_law(dim,V,alpha) PREDICTS how many fit in closed form (the V-scaling is the "
-        "Qinv((1-a)/V)^2 term, measured); mind.allocate_memory_dim(n,V) inverts it BEFORE storing. "
-        "recall(decoder='pic') is resonator-style interference cancellation, exact to ~1.5x the one-shot wall, "
-        "and LOAD-GATED: past its phase transition it refuses and answers matched-filter (kept negative: "
-        "undamped PIC there is WORSE than one-shot). int8 memory is decision-free; sign keeps ~70% capacity.",
+        "mind.superposed_memory(vocab=V) stores pairs as ONE vector (sum of bind(k,v)). "
+        "codebook='hadamard' GENERATES atoms (O(dim), zero crosstalk; vocab<=2*dim refused); 'lazy' seeds "
+        "rows per-index for unbounded vocab (1M measured: O(1) build, recall 1.0, 0.6 vs 32 GB dense). "
+        "memory_capacity_law PREDICTS how many pairs fit; allocate_memory_dim inverts it BEFORE storing. "
+        "recall(decoder='pic') cancels interference to ~1.5x the one-shot wall, LOAD-GATED past its phase "
+        "transition (kept negative: undamped PIC there is worse). int8 decision-free; sign keeps ~70%.",
         example="import numpy as np; mem=mind.superposed_memory(vocab=256); n=mind.memory_capacity_law(vocab=256); "
                 "ks=np.arange(n); vs=(ks*7)%256; r=mem.store(ks,vs).recall(ks, decoder='pic'); "
                 "print(n, (r['values']==vs).mean(), r['decoder'])",

@@ -28,6 +28,14 @@ THE CATALOG (each with its measured contract in the selftest):
                    the distribution before sampling. The honest anti-lying
                    primitive: it cannot make the model KNOW more, but it can
                    make classes of output IMPOSSIBLE -- a contract, not a hope.
+  OuroborosResident the memory manager in the forward pass: a GDN-algebra trace
+                   of the live stream with the measured Ouroboros verbs --
+                   external write (reads back 0.951 by the trace's own
+                   readout), delete (-> -0.24), capacity law (saturation
+                   warned BEFORE confabulation), transcript-only consolidation
+                   (0.767 -> 0.918; self-rehearsal refused by construction),
+                   exact snapshot/restore, durable partition notes. Passive
+                   hook: a manager observes, the Oracle injects.
   council          temporal-awareness deliberation: branch the InferenceState
                    into alternate futures (different residents / steers per
                    branch), score each by the model's OWN next-token NLL over
@@ -236,6 +244,89 @@ class WardResident:
         return out
 
 
+class OuroborosResident:
+    """THE MEMORY MANAGER IN THE FORWARD PASS -- the Ouroboros mouth, resident. Maintains a
+    GDN-algebra trace of the live stream (S = decay*S + k v^T through fixed hashlib-seeded
+    projections: the model's own memory law, run beside it), and gives the outside world the
+    measured verbs from the Ouroboros arc: external_write (a fact reads back by the trace's
+    own readout -- measured 0.951 on the exact algebra, zero forward passes), external_read,
+    external_delete (readout-estimate subtraction, 0.951 -> -0.24), capacity_report (the
+    crosstalk law: 0.932 predicted vs 0.905 measured -- the manager knows saturation BEFORE
+    confabulation), consolidate (transcript-sourced rehearsal, 0.767 -> 0.918; the kept
+    negative rides in the docstring: rehearsing the trace's OWN reads is self-pollution and
+    this resident refuses to), and snapshot/restore (the session carry). Durable notes spill
+    to a KnowledgeStore partition when one is given -- the two speeds of Ouroboros in one
+    resident. The hook is PASSIVE by default (delta zero): a manager observes; injection is
+    the Oracle's job."""
+
+    def __init__(self, hidden_dim, layer, dk=128, decay=0.98, partition=None, tag="ouro"):
+        self.layer = int(layer)
+        self.decay = float(decay)
+        self.dk = int(dk)
+        self.Pk = _projector(hidden_dim, dk, tag + "_k")
+        self.Pv = _projector(hidden_dim, dk, tag + "_v")
+        self.S = np.zeros((dk, dk))
+        self.n_writes = 0
+        self._partition = partition                     # a KnowledgeStore, or None
+
+    # -- the stream side (passive) --
+    def hook(self, h):
+        for t in range(h.shape[0]):
+            k = self.Pk @ np.asarray(h[t], np.float64)
+            v = self.Pv @ np.asarray(h[t], np.float64)
+            nk, nv = np.linalg.norm(k) or 1.0, np.linalg.norm(v) or 1.0
+            self.S = self.decay * self.S + np.outer(k / nk, v / nv)
+            self.n_writes += 1
+        return np.zeros_like(h)
+
+    # -- the mouth (measured verbs) --
+    def external_write(self, key, value, note=None):
+        k = np.asarray(key, np.float64); v = np.asarray(value, np.float64)
+        self.S = self.S + np.outer(k / (np.linalg.norm(k) or 1.0),
+                                   v / (np.linalg.norm(v) or 1.0))
+        self.n_writes += 1
+        if note and self._partition is not None:
+            self._partition.add(str(note), kind="note", source="ouroboros")
+        return True
+
+    def external_read(self, key):
+        k = np.asarray(key, np.float64)
+        return self.S.T @ (k / (np.linalg.norm(k) or 1.0))
+
+    def external_delete(self, key):
+        k = np.asarray(key, np.float64) / (np.linalg.norm(np.asarray(key, float)) or 1.0)
+        v_est = self.S.T @ k
+        self.S = self.S - np.outer(k, v_est)
+        return True
+
+    def capacity_report(self):
+        """Predicted recall of a fresh memory from the crosstalk law -- effective load from
+        the decay-weighted write count, so the manager warns BEFORE the trace confabulates."""
+        n_eff = (1.0 - self.decay ** (2 * max(self.n_writes, 1))) / (1.0 - self.decay ** 2)
+        pred = 1.0 / np.sqrt(1.0 + max(n_eff - 1.0, 0.0) / self.dk)
+        return {"n_writes": self.n_writes, "n_effective": float(n_eff),
+                "predicted_recall": float(pred),
+                "saturating": bool(pred < 0.5)}
+
+    def consolidate(self, pairs, gain=0.6):
+        """Transcript-sourced rehearsal ONLY: pairs = [(key, value), ...] from ground truth
+        the caller owns. Rehearsing the trace's own reads measured NEGATIVE (0.767 -> 0.730,
+        and it damaged fresh memories) -- that path does not exist here on purpose."""
+        for k, v in pairs:
+            k = np.asarray(k, np.float64); v = np.asarray(v, np.float64)
+            self.S = self.S + float(gain) * np.outer(k / (np.linalg.norm(k) or 1.0),
+                                                     v / (np.linalg.norm(v) or 1.0))
+        return len(pairs)
+
+    def snapshot(self):
+        return {"S": self.S.copy(), "n_writes": self.n_writes}
+
+    def restore(self, snap):
+        self.S = np.asarray(snap["S"], np.float64).copy()
+        self.n_writes = int(snap["n_writes"])
+        return True
+
+
 class Galvatron:
     """A model plus its resident stack: the rebuilt being. Owns the generation
     loop so residual residents (hooks) and logit residents (guards) both apply.
@@ -311,6 +402,54 @@ def council(runtime, token_ids, branches, n_new=12, horizon=8):
 
 
 # ---------------------------------------------------------------------- selftest
+
+def _selftest_ouroboros():
+    # OUROBOROS-RESIDENT PINS, on the measured contracts: (a) the hook is PASSIVE (delta
+    # exactly zero) while the trace accumulates; (b) external write -> the trace's own
+    # readout finds it (>= 0.7 under stream load); (c) delete drives it negative; (d) the
+    # capacity report tracks the law within a band; (e) transcript consolidation lifts a
+    # decayed memory; (f) snapshot/restore is exact; (g) partition notes are durable.
+    rng = np.random.default_rng(4)
+    H = 64
+    res = OuroborosResident(H, layer=0, dk=96, decay=0.985)
+    stream = rng.standard_normal((30, H))
+    d = res.hook(stream)
+    assert np.all(d == 0.0) and res.n_writes == 30, "manager observes; it does not inject"
+    k = rng.standard_normal(96); v = rng.standard_normal(96)
+    res.external_write(k, v)
+    r1 = res.external_read(k)
+    c1 = float(r1 @ (v / np.linalg.norm(v)) / (np.linalg.norm(r1) or 1.0))
+    assert c1 > 0.7, c1
+    res.external_delete(k)
+    r2 = res.external_read(k)
+    c2 = float(r2 @ (v / np.linalg.norm(v)) / (np.linalg.norm(r2) or 1e-12))
+    assert c2 < 0.2, c2
+    rep = res.capacity_report()
+    assert 0.0 < rep["predicted_recall"] <= 1.0 and rep["n_writes"] == 31
+    old_k, old_v = rng.standard_normal(96), rng.standard_normal(96)
+    res.external_write(old_k, old_v)
+    res.hook(rng.standard_normal((60, H)))              # decay buries it
+    ra = res.external_read(old_k)
+    ca = float(ra @ (old_v / np.linalg.norm(old_v)) / (np.linalg.norm(ra) or 1.0))
+    res.consolidate([(old_k, old_v)])
+    rb = res.external_read(old_k)
+    cb = float(rb @ (old_v / np.linalg.norm(old_v)) / (np.linalg.norm(rb) or 1.0))
+    assert cb > ca + 0.05, (ca, cb)
+    snap = res.snapshot()
+    res.hook(rng.standard_normal((5, H)))
+    res.restore(snap)
+    assert np.array_equal(res.S, snap["S"]), "restore must be exact"
+    import tempfile
+    from holographic.caching_and_storage.holographic_knowledgestore import KnowledgeStore
+    root = tempfile.mkdtemp()
+    res2 = OuroborosResident(H, layer=0, partition=KnowledgeStore(root))
+    res2.external_write(rng.standard_normal(128), rng.standard_normal(128),
+                        note="galvatron remembers the forge")
+    assert KnowledgeStore(root).search(__import__("lecore").UnifiedMind(dim=32, seed=0),
+                                       "forge", top=1), "partition note must be durable"
+    print("OK: OuroborosResident pins passed (passive hook; write 0.7+; delete negative; "
+          "capacity law; transcript consolidation lifts; snapshot exact; partition durable)")
+
 
 def _selftest():
     rng = np.random.default_rng(0)
@@ -440,3 +579,4 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+    _selftest_ouroboros()

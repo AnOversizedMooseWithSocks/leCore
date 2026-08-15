@@ -116,7 +116,164 @@ class _UnifiedPart16:
         return _u.functional_retention(ms[0], ms[1], _np.asarray(X), _np.asarray(y),
                                        predict=predict or _u.elm_predict)
 
-    def unicron_runtime(self, model, cfg):
+    def mesh_program_obj(self, machine, program, verts, faces, host_fallback=False):
+        """G10: compile a mesh-transform program, run it INSTALLED with the vertices as state,
+        return the OBJ as TEXT (the token stream is the output device -- no file I/O). Byte-exact
+        vs the live path. See holographic_compileinstall.mesh_program_obj."""
+        from holographic.agents_and_reasoning.holographic_compileinstall import mesh_program_obj
+        return mesh_program_obj(machine, program, verts, faces, host_fallback=host_fallback)
+
+    def model_library(self, dim, seed, programs, symbolic_functions=None, data=None, unitary=False):
+        """G14: many programs, ONE rule file -- members share one machine so certified ops are
+        shared by construction; load() re-bakes every member bit-identically. See
+        holographic_nativemodel.ModelLibrary."""
+        from holographic.agents_and_reasoning.holographic_nativemodel import ModelLibrary
+        return ModelLibrary(dim, seed, programs, symbolic_functions, data=data, unitary=unitary)
+
+    def float_pack_bytes(self, arr, preset=6):
+        """Lossless float compression via byte-plane transpose + lzma: 1.19x on real
+        embeddings where raw lzma gets 1.08x; byte-exact. float_unpack_bytes inverts.
+        See holographic_byteplane."""
+        from holographic.io_and_interop.holographic_byteplane import float_pack_bytes
+        return float_pack_bytes(arr, preset=preset)
+
+    def float_unpack_bytes(self, blob):
+        """Exact inverse of float_pack_bytes. See holographic_byteplane."""
+        from holographic.io_and_interop.holographic_byteplane import float_unpack_bytes
+        return float_unpack_bytes(blob)
+
+    def dispatch_roles(self, tasks, spec):
+        """H4: route task phrases ('texture the scene') to swarm roles via the engine's own
+        BM25 -- leCore staffing leCore. Ambiguity raises with names, never guesses. Returns
+        members for render_critique_loop. See holographic_innereye.dispatch_roles."""
+        from holographic.agents_and_reasoning.holographic_innereye import dispatch_roles
+        return dispatch_roles(self, tasks, spec)
+
+    def shared_workspace(self):
+        """H3: the swarm's shared scene workspace -- named slots roles read/write during
+        deliberation; buffered commits, lowest-index collision rule, every collision logged.
+        Pass to render_critique_loop(workspace=). See holographic_innereye.SharedWorkspace."""
+        from holographic.agents_and_reasoning.holographic_innereye import SharedWorkspace
+        return SharedWorkspace()
+
+    def image_op_library(self, height, width):
+        """The inner eye's TOOLSET: image tools as flattened-frame callables for FAC steps --
+        blur/unsharp/sobel certify, flips/rot90/warps are permutations, brightness/contrast
+        install; threshold/gamma refuse at image scale and ride HOST:APPLY. See
+        holographic_innereye.image_op_library."""
+        from holographic.agents_and_reasoning.holographic_innereye import image_op_library
+        return image_op_library(height, width)
+
+    def render_critique_loop(self, machine, formation_program, init_params, members, eye,
+                             target_embed, width, height, satisfy=0.99, max_rounds=32,
+                             host_fallback=False):
+        """H1: design -> INSTALLED render -> look with the (injectable) eye -> critique in EYE
+        SPACE -> iterate -> speak the PGM. Reference semantics for the on-laptop swarm+tower
+        loop. See holographic_innereye.render_critique_loop."""
+        from holographic.agents_and_reasoning.holographic_innereye import render_critique_loop
+        return render_critique_loop(machine, formation_program, init_params, members, eye,
+                                    target_embed, width, height, satisfy=satisfy,
+                                    max_rounds=max_rounds, host_fallback=host_fallback)
+
+    def drift_head(self, model):
+        """The installed view of a generative drift model: its (d+1) x D moment matrix --
+        certified dense at 0.0, so the model ships as ONE weight matrix. Adding heads IS
+        composing models (exact); subtracting ablates; transport acts on rows by a certified
+        linear operator. drift_head_load inverts. See holographic_hdrift.drift_head."""
+        from holographic.sampling_and_signal.holographic_hdrift import drift_head
+        return drift_head(model)
+
+    def drift_head_load(self, enc, H, n_train, bounds=None):
+        """Rebuild a DriftModel from its installed head (the head is the model file;
+        round trip exact). See holographic_hdrift.drift_from_head."""
+        from holographic.sampling_and_signal.holographic_hdrift import drift_from_head
+        return drift_from_head(enc, H, n_train, bounds=bounds)
+
+    def memory_mountain(self, sizes=None):
+        """Measure THIS box's cache hierarchy (streaming GB/s vs working set), detect the
+        tiers, and predict streaming wall-clock from the floor -- the fast-arbiter table
+        validated the predictions to ~15%. Returns (curve, tiers). Dispatch flank excluded:
+        a Python probe cannot see L1 and says so. See holographic_memorymountain."""
+        from holographic.caching_and_storage.holographic_memorymountain import (
+            measure_memory_mountain, detect_tiers)
+        curve = measure_memory_mountain(sizes=sizes)
+        return curve, detect_tiers(curve)
+
+    def time_machine(self):
+        """The unitary-recurrence toolkit: make_unitary_step (the rule), time_jump (random
+        access into time, t may be NEGATIVE -- exact reversal; non-unitary refuses WITH the
+        eig_min^t number), bundle_sims/read_member (K sims in one vector at the 1/sqrt(K)
+        law), evolve_functional (a PRECOMMITTED ensemble readout, exact). See
+        holographic_timemachine."""
+        from holographic.simulation_and_physics import holographic_timemachine as tm
+        return tm
+
+    def collapse_recurrence(self, machine, step_program, n_steps, host_fallback=False, tol=1e-9):
+        """THE HRNN COLLAPSE: n steps of a certified LINEAR recurrence become ONE affine
+        operator (the REPEAT lesson applied to time) -- measured 156x on endpoint queries at
+        ~1e-15 error, spectrum priced (eig_max^n in the certificate), host links refuse with
+        names. sim_program_run stays the referee + drift instrument. See
+        holographic_compileinstall.collapse_recurrence."""
+        from holographic.agents_and_reasoning.holographic_compileinstall import collapse_recurrence
+        return collapse_recurrence(machine, step_program, n_steps,
+                                   host_fallback=host_fallback, tol=tol)
+
+    def sim_program_run(self, machine, step_program, init, n_steps, host_fallback=True):
+        """G11: compile ONE physics step, iterate it installed with state fed back; returns
+        (trajectory, manifest, drift-vs-live curve). The drift curve is the honesty instrument.
+        See holographic_compileinstall.sim_program_run."""
+        from holographic.agents_and_reasoning.holographic_compileinstall import sim_program_run
+        return sim_program_run(machine, step_program, init, n_steps, host_fallback=host_fallback)
+
+    def raster_program_pgm(self, machine, program, params, width, height, host_fallback=False):
+        """G12: run an installed image-formation chain and emit the frame as PGM P2 TEXT --
+        the picture leaves through the mouth. See holographic_compileinstall.raster_program_pgm."""
+        from holographic.agents_and_reasoning.holographic_compileinstall import raster_program_pgm
+        return raster_program_pgm(machine, program, params, width, height, host_fallback=host_fallback)
+
+    def cleanup_as_attention(self, codebook, beta=64.0):
+        """G8: exact cleanup expressed as ONE attention head (codebook = keys AND values);
+        beta is the softmax temperature. Ties average by theorem -- see the certificate.
+        See holographic_projector.cleanup_as_attention."""
+        from holographic.io_and_interop.holographic_projector import cleanup_as_attention
+        return cleanup_as_attention(codebook, beta=beta)
+
+    def attention_read_certificate(self, codebook, queries, beta=64.0):
+        """G8: MEASURE the attention read against exact cleanup on the caller's own queries --
+        the honesty label for installing cleanup as a head (agreement rate at this beta).
+        See holographic_projector.attention_read_certificate."""
+        from holographic.io_and_interop.holographic_projector import attention_read_certificate
+        return attention_read_certificate(codebook, queries, beta=beta)
+
+    def native_model(self, dim, seed, program, symbolic_functions=None, data=None, unitary=False):
+        """F28 first landing -- the BAKED native micro-model: layers ARE the certified installed
+        parameterizations (circulant/permutation/dense), the register file is recurrent state,
+        forward() IS the compiled program. Rule-not-bytes at the model level: save() writes a
+        few-hundred-byte {dim, seed, program} file; load() re-bakes bit-identical weights.
+        to_dense(op) is the one-call bridge to host-framework weight surgery. See
+        holographic_nativemodel.NativeHoloModel."""
+        from holographic.agents_and_reasoning.holographic_nativemodel import NativeHoloModel
+        return NativeHoloModel(dim, seed, program, symbolic_functions, data=data, unitary=unitary)
+
+    def compile_program_installed(self, machine, program, tol=1e-8):
+        """F27 -- compile a symbolic HoloMachine program into certified installed matvecs + the
+        F26 manifest; REPEAT of a linear body collapses to ONE operator power (spectral for
+        circulants, exact). Returns (run_installed, manifest); save with
+        holographic_compileinstall.save_manifest. Conformance pinned: VM == installed == hand
+        truth on a REPEAT+STORE/RECALL program; nonlinear bodies refuse loudly."""
+        import holographic.agents_and_reasoning.holographic_compileinstall as _ci
+        return _ci.compile_installed(machine, program, tol=tol)
+
+    def project_faculty(self, f, dim, n_check=24, tol=1e-8, seed=0):
+        """MEASURE a callable into installed form or refuse (F34 T1): probe f with basis vectors,
+        certify on held-out inputs, detect structure most-specific-first (permutation -> circulant
+        -> dense; a roll is BOTH, so order matters -- caught by the selftest). The refusals ARE the
+        core/shell boundary, discovered by measurement. See holographic_projector.probe_project;
+        apply with holographic_projector.apply_projected."""
+        import holographic.io_and_interop.holographic_projector as _pj
+        return _pj.probe_project(f, dim, n_check=n_check, tol=tol, seed=seed)
+
+    def unicron_forward_runtime(self, model, cfg):
         """OWN the forward pass: a NumPy runtime for GDN-hybrid (Qwen3-Next / Qwen3.5
         class) models, VERIFIED against the reference implementation to 1.4e-7 relative
         logit error on a random model. Returns a GDNRuntime with .forward(ids, hooks=),
@@ -1336,7 +1493,7 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
             return parity(runtime, ids)
         return place(runtime, want=want)
 
-    def unicron_vm_install(self, unit=None, table=None, rule=None, A=None,
+    def unicron_vm_unit_install(self, unit=None, table=None, rule=None, A=None,
                            k=1, chain=None, U=None, V=None, step=None):
         """WHICH OF leCORE'S VIRTUAL MACHINE FITS INSIDE A MODEL, AND WHICH CANNOT.
         Moose asked for the virtual GPU and the L1/L2/L3/L4/RAM hierarchy installed INSIDE
@@ -2488,7 +2645,7 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
         fp = runtime_fingerprint(runtime) if runtime is not None else None
         return SessionStore(root, fingerprint=fp)
 
-    def unicron_imbue(self, model_dir, out_dir, corpus=(), probe_text=None,
+    def unicron_imbue_package(self, model_dir, out_dir, corpus=(), probe_text=None,
                       banned=(), bundle_engine=True, notes=""):
         """ONE CALL: ordinary checkpoint in, IMBUED GALVATRON out -- weights plus the
         resident roster, the CALIBRATION those residents need (healthy stream statistics

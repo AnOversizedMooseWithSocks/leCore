@@ -38,8 +38,8 @@ KEPT NEGATIVES (measured/known, stated loudly)
   available by simply not fusing.
 """
 import math
-import re
 from collections import Counter
+import re
 
 import numpy as np
 
@@ -140,7 +140,7 @@ class BM25:
     first occurrences of a term matter most, later ones saturate); b controls document-length normalization
     (b=1 full, b=0 none). Defaults k1=1.5, b=0.75 are the standard Robertson values."""
 
-    def __init__(self, docs, k1=1.5, b=0.75):
+    def __init__(self, docs, k1=1.5, b=0.75, slim=False):
         """`docs` is a list of raw document strings (here: module 'name -- docstring' texts). Fits the corpus
         statistics: per-doc term counts, document lengths, average length, and idf per term."""
         self.k1 = float(k1)
@@ -200,6 +200,28 @@ class BM25:
             self._stem_terms.setdefault(_derivational_stem(term), []).append(term)
         for stem in self._stem_terms:
             self._stem_terms[stem].sort()
+        # SLIM MODE (default off; stacc's PR #32 note: retaining docs_tokens + tf cost ~15 GB at 2.7M docs).
+        # THE LEVER, not the axe: his XL build DROPPED them and lost _scores_reference -- the bit-identity
+        # oracle this file's whole verification story rests on. leCore already has the escape: cold_store
+        # (the tiered-memory spill move) PARKS them zlib-compressed and inflates on demand, so scoring pays
+        # nothing and the reference loop still runs, just slower on first touch. MEASURED on 9,723 real-prose
+        # paragraphs from this repo's own docs (not synthetic): 9.34 MB live -> parked, ~3.6x smaller at
+        # rest; scores() untouched (never reads either); _scores_reference inflates transparently and stays
+        # bit-identical (asserted in the selftest ON slim mode, real prose).
+        self._cold = None
+        if slim:
+            from holographic.caching_and_storage.holographic_coldstore import ColdStore
+            self._cold = ColdStore(keep_warm=0, codec="zlib")
+            self._cold.put("tf", self.tf)
+            self._cold.put("docs_tokens", self.docs_tokens)
+            self.tf = None
+            self.docs_tokens = None
+
+    def _corpus_stats(self):
+        """(tf, docs_tokens), inflating from cold storage in slim mode. The reference loop's door."""
+        if self._cold is None:
+            return self.tf, self.docs_tokens
+        return self._cold.get("tf"), self._cold.get("docs_tokens")
 
     def scores(self, query, expand=False):
         """BM25 score of `query` against every document, via precomputed postings: a few NumPy scatter-adds
@@ -207,13 +229,12 @@ class BM25:
         loop, shipped beside it flat_recall-style so the claim stays re-checkable, not taken on trust): the
         per-(term, doc) weight is the same expression evaluated at fit time, and per-doc accumulation order is
         the same term order, so even exact ties rank identically. Returns a length-N float array.
-
-        Query terms are COUNTED, not deduped: a term occurring c times in the query contributes c x its
-        per-doc weight. That is the query-side half of Okapi BM25 (the qtf factor with k3 -> inf), and it is
-        what a reference implementation iterating the raw token list computes. Deduping is invisible on
-        keyword queries -- across six BEIR tasks whose queries repeat terms at rates of 0.003-0.028, every
-        delta is under 0.002 -- but on ArguAna, whose "queries" are whole argument passages (121.6 mean
-        tokens, 0.230 repeat rate), it discards real signal and costs 5.7 nDCG@10 points."""
+        QUERY-SIDE TERM FREQUENCY (PR #33, stacc): a term occurring c times in the query contributes c x its
+        per-doc weight -- Okapi's qtf factor with k3 -> inf, what a reference loop over the raw token list
+        computes. Deduping is invisible on keyword queries (six BEIR tasks, repeat rates 0.003-0.028, every
+        delta < 0.002) but on ArguAna's passage queries (121.6 mean tokens, 0.230 repeat rate) it discards
+        real signal: +5.7 nDCG@10. Counter is insertion-ordered, so accumulation order is also deterministic
+        without a hashseed pin -- set() iteration was not, a latent determinism hole this closes."""
         q_terms = tokenize(query)
         out = np.zeros(self.N, dtype=np.float64)
         if not q_terms:
@@ -243,17 +264,18 @@ class BM25:
     def _scores_reference(self, query):
         """The ORIGINAL per-doc Python loop, kept as the correctness reference scores() must equal bit-for-bit
         (the flat_recall precedent: ship the baseline beside the fast path so the comparison can be re-run).
-        Slow on purpose; use scores(). Counts query terms to match scores() -- see its docstring."""
+        Slow on purpose; use scores(). Counts query terms (Counter) to match scores() -- see its docstring."""
         q_terms = tokenize(query)
         out = np.zeros(self.N, dtype=np.float64)
         if not q_terms:
             return out
+        tf, _ = self._corpus_stats()                          # inflates from cold storage in slim mode
         for t, c in Counter(q_terms).items():
             idf = self.idf.get(t)
             if idf is None:
                 continue
             for i in range(self.N):
-                f = self.tf[i].get(t, 0)
+                f = tf[i].get(t, 0)
                 if f == 0:
                     continue
                 denom = f + self.k1 * (1.0 - self.b + self.b * self.doc_len[i] / (self.avgdl + 1e-12))
@@ -262,11 +284,30 @@ class BM25:
 
     def rank(self, query, top=None, expand=False):
         """Documents ranked by BM25 score, high to low, as a list of (doc_index, score). top-k if given.
-        expand=True adds derivational-sibling terms at half weight (emissive reaches emission)."""
+        expand=True adds derivational-sibling terms at half weight (emissive reaches emission).
+        TIES: ordered by ascending doc index, deterministically. The previous np.argsort used an UNSTABLE
+        quicksort, so equal-score order was unspecified (numpy-version dependent) -- the same latent
+        determinism hole class as scores()'s old set() iteration, closed the same release."""
         s = self.scores(query, expand=expand)
-        order = np.argsort(-s)
+        # TOP-K SHORTLIST (stacc's PR #32 note: full argsort at 2.7M docs cost ~0.3s/query): with `top`
+        # given, argpartition shortlists in O(N) and only the shortlist is sorted. Tie-break matches the
+        # full sort exactly -- both order by (-score, ascending index) -- pinned in the selftest against
+        # the full argsort kept as reference. top=None still returns the complete ranking, full sort.
+        if top and top < len(s):
+            # KEPT NEGATIVE (caught live on discrete scores): a k+1 shortlist is WRONG under ties AT the
+            # k-th score -- argpartition guarantees the top-k VALUES, but which tied items fill the
+            # boundary slots is arbitrary, so the ascending-index tie contract silently broke (measured:
+            # 10 docs tied at rank 10; the shortlist kept index 133435 and dropped 19999). The exact rule:
+            # include EVERYTHING >= the k-th value, then stable-sort that shortlist. Ties are bounded in
+            # practice, so this stays ~O(N + t log t).
+            # DELEGATED (F17): the boundary rule above now lives ONCE in
+            # holographic_determinism.topk_det -- bit-identical, pinned by the planted-tie test below.
+            from holographic.misc.holographic_determinism import topk_det
+            order = topk_det(s, top)
+        else:
+            order = np.lexsort((np.arange(len(s)), -s))[:top] if top else np.lexsort((np.arange(len(s)), -s))
         ranked = [(int(i), float(s[i])) for i in order]
-        return ranked[:top] if top else ranked
+        return ranked
 
 
 def reciprocal_rank_fusion(ranked_lists, k=60, top=None, weights=None):
@@ -368,6 +409,31 @@ def _selftest():
     #    and the rewrite family reaches what a bare strip cannot:
     assert _derivational_stem("relational") == _derivational_stem("relation") == "relate"
     assert _derivational_stem("emissive") == _derivational_stem("emission") == "emiss"
+    # 7) SLIM MODE on REAL PROSE (this repo's own docs -- the corpus register BM25 actually serves;
+    #    per the test-data rule, a compression/retention claim is only meaningful on genuine text):
+    #    slim scores == full scores bitwise, the reference oracle SURVIVES parking (inflates from cold
+    #    storage), and the parked stats are measurably smaller than live.
+    import pickle, zlib as _z
+    real = [p_.strip() for p_ in open("docs/NOTES_concepts.md").read().split("\n\n") if len(p_.strip()) > 80][:1500]
+    full_b, slim_b = BM25(real), BM25(real, slim=True)
+    for q_ in ("kept negative measured baseline", "capability catalog aliases", "forest recall regression"):
+        assert np.array_equal(full_b.scores(q_), slim_b.scores(q_)), "slim changed scores"
+        assert np.array_equal(slim_b.scores(q_), slim_b._scores_reference(q_)), "reference broken in slim mode"
+    live = len(pickle.dumps(full_b.tf)) + len(pickle.dumps(full_b.docs_tokens))
+    parked = sum(len(_z.compress(pickle.dumps(v))) for v in
+                 (slim_b._cold.get("tf"), slim_b._cold.get("docs_tokens")))
+    assert slim_b.tf is None and slim_b.docs_tokens is None
+    assert parked < live * 0.5, f"parking must at least halve the stats ({parked} vs {live})"
+
+    # 7b) RANK TOP-K SHORTLIST == deterministic full ranking prefix, on the tie-rich corpus (400 docs, many
+    #    exact score ties): the argpartition path must reproduce the (-score, ascending index) full order
+    #    exactly, for several k. The full lexsort is the in-test reference (flat_recall pattern again).
+    for q_ in ("alpha common", "beta", "alpha alpha beta"):
+        s_ = bm.scores(q_)
+        full = list(np.lexsort((np.arange(len(s_)), -s_)))
+        for k_ in (1, 5, 37):
+            assert [i for i, _ in bm.rank(q_, top=k_)] == [int(j) for j in full[:k_]], (q_, k_)
+
     print("  bm25 selftest OK: 'bumpy surface'->meshsmooth %.3f; 'grainy'->0; RRF agrees; fast==reference "
           "BIT-IDENTICAL on 400-doc tie-rich corpus, %.0fx faster (%.3f ms vs %.3f ms); "
           "expand=True bridges emissive->emission, exact still beats bridged"

@@ -113,25 +113,14 @@ def _selftest():
     out = generate_video(model, meta, n=12, n_frames=8, seed=1)
     P = out["points"]; half = P.shape[1] // 2
     # generated SPEED must stay in the corpus's velocity modes (delta carries center motion in
-    # normalised units; recover pixels via the frame height).
-    # WHY pooled over 12 seeds: the measured per-seed in-mode rate at n=12 is ~0.72 with
-    # spread 0.50-0.83 (10-seed sweep), so a single n=12 draw against 0.70 is a coin flip --
-    # it failed in CI at 0.67 on a different BLAS summation order. Pooling to n=144 gives
-    # SE ~= sqrt(0.72*0.28/144) ~= 0.037; the 0.60 bar sits ~3 sigma below the measured mean
-    # while still well above the ~0.6 uniform-chance coverage of the three tolerance windows
-    # only when combined with the coherence + memorisation asserts below.
-    speeds_all = []
-    for gseed in range(1, 13):
-        og = out if gseed == 1 else generate_video(model, meta, n=12, n_frames=8, seed=gseed)
-        dg = og["points"][:, half:half + 2]
-        sg = np.sqrt((dg ** 2).sum(1))
-        if sg.max() < 1.0:
-            sg = sg * H
-        speeds_all.append(sg)
-    speed = np.concatenate(speeds_all)
+    # normalised units; recover pixels via the frame height)
+    d = P[:, half:half + 2]
+    speed = np.sqrt((d ** 2).sum(1))
+    if speed.max() < 1.0:
+        speed = speed * H
     dm = np.abs(speed[:, None] - np.array([2.0, 5.0, 8.0])[None])
     in_mode = float((dm.min(1) < 1.2).mean())
-    assert in_mode >= 0.6, \
+    assert in_mode >= 0.7, \
         "generated speeds must stay in the corpus's modes -- the delta IS the joint structure " \
         "(in-mode %.2f, speeds %s)" % (in_mode, np.round(speed, 1))
     # temporal coherence: interpolated frames must move smoothly (no jump exceeds a fraction of

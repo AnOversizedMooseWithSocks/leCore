@@ -255,6 +255,26 @@ def _same_space(a, b):
 # H0.2 -- the bandwidth prober. The collapse is SILENT, so the guard cannot be optional.
 # ---------------------------------------------------------------------------------------------------
 
+def drift_head(model):
+    """THE INSTALLED VIEW OF A GENERATIVE MODEL: the (d+1) x D moment matrix [mu; nu_1..nu_d].
+    This matrix IS the model -- the field is dot products against its rows -- and it certifies
+    through the projector as a rectangular dense operator at 0.0 residual (measured), so a
+    drifting generative model ships as ONE certified weight matrix with a sha256, not a network.
+    The encoder stays the HOST-FEATURE lane: enc(x) is sinusoidal features (transformer-native
+    machinery); the head is the installed part. drift_from_head inverts."""
+    return np.vstack([model.mu, np.stack(model.nu)])
+
+
+def drift_from_head(enc, H, n_train, bounds=None):
+    """Rebuild the DriftModel from its installed head -- the head is the model file. Byte-exact
+    round trip pinned in _selftest; MODEL ARITHMETIC IN WEIGHT SPACE follows: adding two heads
+    IS composing the models (drift_compose == head add at exactly 0.0, measured), subtracting
+    ablates, and transport acts on rows by a CERTIFIED linear operator (the shift action
+    certified dense 3.6e-16). Task-arithmetic folklore, exact by construction here."""
+    H = np.asarray(H, float)
+    return DriftModel(enc, H[0].copy(), H[1:].copy(), n_train, bounds=bounds)
+
+
 def probe_bandwidth(points, dim=1024, seed=0, candidates=(2.0, 4.0, 6.0, 10.0, 16.0, 24.0),
                     holdout_frac=0.25):
     """Choose the bandwidth FROM THE DATA (the bake_field_nd discipline applied to drift fields):
@@ -615,8 +635,61 @@ def _selftest():
             _vaud["novelty_mean"], _vaud["memorised_frac"])
 
 
-    print("holographic_hdrift selftest OK -- field identity, kept negatives, algebra, images e2e, H0.4 anti-collapse, H1.4 verdict WIN")
+    # INSTALLED-HDRIFT PINS (the sweep's four measurements, kept as traps):
+    # (a) the head certifies rectangular DENSE at 0.0 through the projector -- the model IS a
+    #     certified weight matrix; (b) MODEL ARITHMETIC IN WEIGHT SPACE is exact: head add ==
+    #     compose, head subtract == ablate, at 0.0; (c) transport is a CERTIFIED linear action
+    #     on head rows; (d) the sampling recurrence is nonlinear and the projector REFUSES it
+    #     with a number -- generation stays host-shape, the head installs; both honest.
+    from holographic.io_and_interop.holographic_projector import probe_project as _pp
+    _r = np.random.default_rng(31)
+    _pA = _r.standard_normal((160, 2)) * 0.3 + np.array([0.8, 0.0])
+    _pB = _r.standard_normal((160, 2)) * 0.3 + np.array([-0.8, 0.4])
+    _e = VectorFunctionEncoder(2, dim=1024, bounds=[(-3, 3), (-3, 3)], bandwidth=6.0, seed=5)
+    _muA, _nuA = drift_moments(_pA, _e); _muB, _nuB = drift_moments(_pB, _e)
+    _mA = DriftModel(_e, _muA, _nuA, 160); _mB = DriftModel(_e, _muB, _nuB, 160)
+    _HA, _HB = drift_head(_mA), drift_head(_mB)
+    _pc = _pp(lambda v: _HA[:, :128] @ v, 128)
+    assert _pc["kind"] == "dense" and _pc["residual"] < 1e-12
+    assert np.max(np.abs(drift_head(drift_compose(_mA, _mB)) - (_HA + _HB))) == 0.0
+    assert np.max(np.abs(drift_head(drift_ablate(drift_compose(_mA, _mB), _mB)) - _HA)) < 1e-12
+    _rt = drift_from_head(_e, _HA, 160)
+    _q = np.array([0.5, 0.1])
+    assert np.max(np.abs(drift_field(_q, _rt.mu, _rt.nu, _e) - drift_field(_q, _mA.mu, _mA.nu, _e))) == 0.0
+    _d = np.array([0.2, -0.1])
+    _ps = _pp(lambda r: _e.shift(np.concatenate([r, np.zeros(1024 - 128)]), _d)[:128], 128)
+    assert _ps["kind"] in ("dense", "circulant") and _ps["residual"] < 1e-9
+    _pn = _pp(lambda v: np.concatenate([_q + 0.25 * drift_field(_q + 0.01 * v[:2], _mA.mu, _mA.nu, _e),
+                                        np.zeros(len(v) - 2)]), 8)
+    assert _pn["kind"] == "refused", "the sampling step must stay honestly nonlinear"
+    print("holographic_hdrift selftest OK -- field identity, kept negatives, algebra, images e2e, H0.4 anti-collapse, H1.4 verdict WIN, installed head (cert 0.0; algebra==weight arithmetic; transport certified; sampler refused)")
+
+
+def _selftest_head():
+    # INSTALLED-HDRIFT PINS: (a) head slice certifies dense 0.0; (b) weight-space model
+    # arithmetic EXACT (compose==add, ablate==subtract); (c) transport mu is the certified
+    # linear shift action on row 0. The nonlinear-sampler refusal is pinned in
+    # compileinstall's referee (residual 8.0e-02) -- different module, same truth.
+    from holographic.io_and_interop.holographic_projector import probe_project
+    rng = np.random.default_rng(0)
+    A = rng.standard_normal((200, 2)) * 0.4 + np.array([1.0, 0.0])
+    B = rng.standard_normal((200, 2)) * 0.4 + np.array([-1.0, 0.5])
+    enc = VectorFunctionEncoder(2, dim=1024, bounds=[(-3, 3), (-3, 3)], bandwidth=6.0, seed=1)
+    muA, nuA = drift_moments(A, enc)
+    muB, nuB = drift_moments(B, enc)
+    mA = DriftModel(enc, muA, nuA, len(A))
+    mB = DriftModel(enc, muB, nuB, len(B))
+    HA, HB = drift_head(mA), drift_head(mB)
+    p = probe_project(lambda e: HA[:, :128] @ e, 128)
+    assert p["kind"] == "dense" and p["residual"] < 1e-12
+    assert float(np.max(np.abs(drift_head(drift_compose(mA, mB)) - (HA + HB)))) == 0.0
+    assert float(np.max(np.abs(drift_head(drift_ablate(drift_compose(mA, mB), mB)) - HA))) < 1e-12
+    d = np.array([0.3, -0.2])
+    assert float(np.max(np.abs(drift_transport(mA, d).mu - enc.shift(mA.mu, d)))) == 0.0
+    print("OK: hdrift installed-head pins passed (head dense 0.0; compose==add EXACT; "
+          "ablate==subtract; transport row 0 == certified shift action)")
 
 
 if __name__ == "__main__":
     _selftest()
+    _selftest_head()

@@ -1033,16 +1033,9 @@ def main():
     ok = gate_top5 >= args.require_top5 and gate_median <= args.require_median
     _fm, _f5 = locals().get("fused_med_128"), locals().get("fused_top5_128")
     if _fm is not None:
-        # WHY the message is conditional: with --gate-shipped-row all three criteria judge the shipped
-        # row, and printing the old "two configurations, one verdict" line next to that verdict sent a
-        # reader chasing a mismatch that no longer exists (it did exactly that in a failing CI run).
-        if args.gate_shipped_row:
-            print(f"  [note] the SHIPPED row (fused, gamma=0.50, 128d) scores top-5 {_f5} | median {_fm:.1f} | "
-                  f"top-1 {locals().get('fused_top1_128')}. All three gate criteria judge this one row.")
-        else:
-            print(f"  [note] the SHIPPED row (fused, gamma=0.50, 128d) scores top-5 {_f5} | median {_fm:.1f} | "
-                  f"top-1 {locals().get('fused_top1_128')}. The gate takes top-5 and median from FLAT @768d and "
-                  f"top-1 from this row -- two configurations, one verdict.")
+        print(f"  [note] the SHIPPED row (fused, gamma=0.50, 128d) scores top-5 {_f5} | median {_fm:.1f} | "
+              f"top-1 {locals().get('fused_top1_128')}. The gate takes top-5 and median from FLAT @768d and "
+              f"top-1 from this row -- two configurations, one verdict.")
     fused_msg = ""
     if args.require_fused_top1 is not None:
         # the FUSED gate guards the production default (route_semantic gamma=0.5 on the 128d index). A bones

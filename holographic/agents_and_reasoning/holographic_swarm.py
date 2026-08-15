@@ -81,6 +81,35 @@ class SwarmResident:
         self.log = []
         self._n = 0
 
+    def compile_members(self, dim, tol=1e-8):
+        """G-ARC WIRED INTO THE SWARM: certify every member's fused per-layer hook through the
+        installed pipeline. A resident stack is N hook calls per layer per inner token; a stack
+        whose fused delta is LINEAR (constant steers, affine gates -- the common case) certifies
+        once and collapses to ONE apply_projected -- same three-referee discipline as any chain.
+        Nonlinear stacks REFUSE and stay on the live path, named in the report: the swarm never
+        trades honesty for speed silently. Returns {(member, layer): kind} -- the swarm's own
+        installability manifest. Call once; deliberate() uses certified ops automatically."""
+        from holographic.io_and_interop.holographic_projector import probe_project
+        self._compiled = {}
+        report = {}
+        for i, (residents, guards) in enumerate(self.members):
+            by_layer = {}
+            for r in residents:
+                by_layer.setdefault(r.layer, []).append(r)
+            for L, rs in by_layer.items():
+                def fused(h, rs=rs):
+                    tot = np.zeros_like(h)
+                    for r in rs:
+                        d = r.hook(h)
+                        if d is not None:
+                            tot = tot + d
+                    return tot
+                pr = probe_project(fused, dim, tol=tol)
+                report[(i, L)] = pr["kind"]
+                if pr["kind"] != "refused":
+                    self._compiled[(i, L)] = pr
+        return report
+
     def deliberate(self, state):
         """Run the inner agents from `state` and return (delta_vector, record).
         Returns (None, record) when the depth budget forbids recursing -- a hard
@@ -93,7 +122,17 @@ class SwarmResident:
             for r in residents:
                 by_layer.setdefault(r.layer, []).append(r)
 
-            def make(rs):
+            def make(rs, mi, L):
+                pr = getattr(self, "_compiled", {}).get((mi, L))
+                if pr is not None:
+                    # the CERTIFIED fast path: the whole resident stack is one installed operator
+                    # (compile_members proved it equals the live fused hook on held-out inputs);
+                    # zero-delta stays zero because the certificate includes the offset.
+                    from holographic.io_and_interop.holographic_projector import apply_projected
+                    def fn(h, p2=pr):
+                        d = apply_projected(p2, np.asarray(h, float))
+                        return d if float(np.max(np.abs(d))) > 0.0 else None
+                    return fn
                 def fn(h):
                     tot, any_ = np.zeros_like(h), False
                     for r in rs:
@@ -102,7 +141,7 @@ class SwarmResident:
                             tot, any_ = tot + d, True
                     return tot if any_ else None
                 return fn
-            hooks = {L: make(rs) for L, rs in by_layer.items()}
+            hooks = {L: make(rs, i, L) for L, rs in by_layer.items()}
             st = state.copy()
             logits = st.logits
             toks = []
@@ -402,6 +441,30 @@ class SwarmMind:
 
 
 def _selftest():
+    # COMPILED-MEMBER PINS (torch-free -- the certified fast path is pure leCore and must not
+    # hide behind the host): (a) a member whose resident stack fuses to a LINEAR delta certifies,
+    # and the compiled hook equals the live fused hook on held-out inputs; (b) a nonlinear
+    # member REFUSES and stays on the live path -- the report names both verdicts.
+    class _Stub:
+        def __init__(self, layer, fn):
+            self.layer, self.hook = layer, fn
+    class _FakeRT:
+        pass
+    lin_members = [([_Stub(0, lambda h: 0.1 * h + 0.02), _Stub(0, lambda h: 0.05 * h)], None)]
+    nl_members = [([_Stub(0, lambda h: np.clip(h, -0.1, 0.1))], None)]
+    sw = SwarmResident(_FakeRT(), lin_members + nl_members, layer=0)
+    rep = sw.compile_members(dim=16)
+    # scaled identity is trivially blockdiag (k=2 block = 0.15*I2): the CHEAPER rule wins, by
+    # design -- the pin's first draft listed only dense/circulant and the detector corrected it
+    assert rep[(0, 0)] in ("dense", "circulant", "blockdiag"), rep
+    assert rep[(1, 0)] == "refused", rep
+    from holographic.io_and_interop.holographic_projector import apply_projected
+    hh = np.random.default_rng(3).standard_normal(16)
+    live = 0.15 * hh + 0.02
+    assert np.allclose(apply_projected(sw._compiled[(0, 0)], hh), live, atol=1e-9), \
+        "compiled member hook must equal the live fused stack"
+    print("OK: swarm compiled-member pins passed (linear stack certified == live; nonlinear refused)")
+
     try:
         import torch
         from transformers import Qwen3NextConfig, Qwen3NextForCausalLM

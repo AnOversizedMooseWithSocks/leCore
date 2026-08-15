@@ -64996,3 +64996,2490 @@ THE PATTERN, AGAIN AND AT THE LEVEL OF DOCUMENTATION THIS TIME: the capability
 existed, worked, and was not reachable from the place the person would be
 standing when they needed it. Six times this session, and this one cost nothing
 to fix because the only thing missing was a sentence at the point of failure.
+
+## INDEX HONESTY PASS: the lossy auto-forest default is dead, and the batch path exists
+
+Context: an outside FAISS-flat comparison read as a "clear defeat." Measured, the defeat
+was self-inflicted: Index(vectors) auto-switched to HoloForest at N>4096, and forest
+recall@1 vs exact on RANDOM data is 0.93 at 5k, 0.59 at 50k, 0.51 at 200k -- so the
+comparison pitted FAISS's exact answers against our 49%-wrong ones. The algebra was
+never on trial; a default was.
+
+SHIPPED (holographic_index.py):
+  1. forest_threshold default 4096 -> 30000. MEASURED: exact scan is FASTER than the
+     forest below ~30-50k anyway (0.20 vs 0.65 ms/q at N=5000), so the old default
+     traded half the correct answers for negative latency. Forest remains forceable;
+     it is a latency tool above the crossover, stated in a WHY-comment.
+  2. Index.nearest_batch(queries, k): exact k-NN for many queries in ONE BLAS matmul --
+     the same move as cleanup_batch and the honest FAISS-flat equivalent. MEASURED at
+     N=200k, 100 queries: 12.95 ms/q vs 23.35 ms/q per-query loop, keys identical, recall
+     1.0 by construction.
+     KEPT NEGATIVE (caught by measurement ON THIS FUNCTION during the session): the first
+     version lexsorted every full column and was SLOWER than the loop (37 ms/q). The sort
+     dominated, not the matmul; argpartition shortlists in O(N), then only the shortlist
+     sorts. A batched path is not automatically faster -- measure it.
+  3. Selftest regression trap: forest recall@1 >= 85/100 at N=5000 pinned; auto stays
+     exact below the crossover pinned; nearest_batch == per-query keys pinned (k=1, k=5).
+     A lossy default can no longer ship silently.
+
+ALSO SHIPPED (holographic_catalog.py): unicron_long_context gained the aliases the
+session-long billion-token argument actually used ("billion scale", "billion token
+context", "handle a huge context window", "unbounded stream memory", ...). The capability
+existed, was wired, and answered the argument in its own docstring -- and none of the
+arguer's phrasings surfaced it. Discoverability battery now 5/5. Aliases come from the
+user's mouth, including the frustrated user's.
+
+STANDING NEGATIVE, RESTATED FOR THE RECORD: leCore is not, and does not aim to be, a
+billion-vector exhaustive store (49 TB of KV at 0.8B shapes; NOTES vector-DB pass).
+unicron_long_context's contract is bounded slots surviving an unbounded window. The
+honest external claim after this pass: exact recall parity with flat scans at
+millions-scale on one machine, deterministic, zero deps -- not ANN-throughput victory.
+
+Audits after: reachability 0 / catalog_gaps 0 / skill_lint 0 (memo deleted first).
+capdoc + docgen regenerated. Test delta: +3 assertions blocks in holographic_index
+selftest (batch parity, forest recall floor, auto-crossover pin).
+
+## DOWNSTREAM VOCABULARY PASS: a real builder's words, wired into the catalog
+
+Context: staccs/lecore-hrr-gpt2 (HuggingFace) is a downstream project putting gated HRR
+attention into GPT-2 -- and its author hand-rolled a gated scan, its OOM fix, and its
+precision handling, all of which leCore already owns. Audited find_capability with the
+vocabulary FROM HIS MODEL CARD: 10 of 18 phrasings missed. The capabilities existed;
+his words for them did not.
+
+SHIPPED (catalog aliases only, no logic changed):
+  * unicron_hrnn_bake now answers "gated scan", "linear attention", "holographic
+    attention", "associative scan", "decay gate", "chunked scan for recurrence",
+    "gated delta rule" -- because S_t = a*S_(t-1) + b*k v^T IS his operator, named.
+  * unicron_long_context now answers "precision limit of a recurrent state", "float32
+    state degrades", "million token context", "how long can the state survive" -- the
+    float32 register cliff (cos 1.0 at 30k writes, 0.057 at 140k) is the measured fact
+    a 1M-token linear-attention claim must survive, and he has not hit it yet.
+  * unicron_self_heal now answers "refresh a drifting state", "state refresh schedule".
+  * unicron_capacity_report now answers "how many tokens can the state hold".
+
+Battery 11/11 on a fresh mind. Audits 0/0/0 (memo deleted first). capdoc/docgen regenerated.
+
+THE LESSON, THIRD TIME NOW AT THREE SCALES: install.bat (a sentence at the point of
+failure), the billion-token argument (the arguer's phrasings), and now a downstream
+repo (the builder's model-card vocabulary). A capability catalog is a dictionary of
+OTHER people's words for your things. Every new external user is a free alias audit --
+read their README, run their nouns through find_capability, wire the misses.
+
+WORTH SAYING TO THE BUILDER DIRECTLY (not our code, his choices): (1) his gated_scan
+precision handling will meet the float32 cliff around 1e5 writes/slot -- refresh
+(6.4% overhead measured) or codebook self-heal are the two known fixes; (2) his 1M/
+"169,467x" framing invites the over-claim unicron_long_context's docstring names:
+the state does not ATTEND to a million tokens, it RETAINS bounded slots across them --
+SNR of an undecayed sum goes as 1/sqrt(n), and honest capacity accounting
+(unicron_capacity_report, advise_scale) is the difference between a result and a
+demo. His 0.7% BPC gap at 835K params is real and good; the capacity story is where
+reviewers will push.
+
+## TIERED MEMORY: the ST/LT conductor (adaptive promotion/demotion over existing levers)
+
+Goal stated by Moose: adaptive short-term / long-term memory -- low overhead for what
+matters, low disk and RAM for what doesn't. Rule-0 audit found EVERY lever built and
+wired (cold_store, SuperposedMemory + capacity law + refusal, AdaptiveRoleFillerMemory,
+memoryhome, unicron store_route/decay rungs) but NO policy moving items between tiers:
+"consolidate short term into long term", "promote important memories", "demote stale
+memories" all returned unrelated fallbacks. License to build: the conductor only.
+
+SHIPPED: holographic_tieredmemory.TieredMemory, faculty mind.tiered_memory().
+  * HOT: bounded exact dict, O(1), zero loss -- the "what matters" tier.
+  * LT: constant-size superposed trace (dim floats regardless of count) for the cheap
+    fast path, PLUS zlib exact spill so demotion is REVERSIBLE. Trace answers are
+    verified against spill before promotion -- an interference-corrupted recall can
+    never silently poison hot.
+  * Policy: importance = 2^(-(age)/half_life) * (1+hits); demote lowest; promote on
+    LT access. get() returns (value, tier).
+
+TWO KEPT NEGATIVES, both caught by the selftest's planted truths BEFORE wiring:
+  1. Pure importance ordering STARVES new items -- a fresh put (hits=0) lost to any
+     accessed veteran and was evicted in the same call that inserted it (LFU pathology).
+  2. The first fix (single-key last==now veto) STILL starved bursts: only the newest
+     of several consecutive puts was protected; veterans evicted the rest one insert
+     later. The shipped rule is a recency-window veto (half_life/4 ticks): recency has
+     an absolute veto window, frequency orders everyone outside it.
+Also probed live: SuperposedMemory.recall returns {'values', 'decoder', 'why'} (a dict,
+possibly a refusal), never a bare array -- assumed shape was wrong, probe caught it.
+
+VERIFIED: selftest green (4 planted-truth blocks, dedicated rng per plant); end-to-end
+through a fresh mind; FULL HTTP round-trip (find_capability -> construct handle ->
+put x5 -> get -> stats over /invoke, get(0) == (0,'lt-trace')); discoverability 6/6 on
+the goal's own phrasings; audits 0/0/0 (memo deleted); capdoc/docgen regenerated.
+
+STANDING SCOPE NOTE: values are vocab symbol ids (SuperposedMemory's world). Arbitrary
+payloads ride the same policy by parking bytes in the spill only -- a follow-up if
+needed, not assumed.
+
+## BRANCH UNIFICATION: 0.2.11 + PR #32 + PR #33 + the week's session work, one tree
+
+The situation: PR #32 (BM25 doc-major build + chunk_text overlap) landed on 0.2.11;
+PR #33 (BM25 query-term frequency) landed on main; the week's session work (Index
+forest-threshold fix + nearest_batch + recall trap, tiered_memory, three alias
+batteries) lived only in delivery zips. Three trees, each missing two-thirds.
+
+UNIFIED HERE, onto the 0.2.11 base (which carried #32):
+  * #33 ported: Counter(q_terms) in all three scoring paths (main, expand siblings at
+    0.5*c, reference), docstring carrying stacc's measurements (+5.7 nDCG@10 ArguAna,
+    <0.002 elsewhere) and the Counter insertion-order determinism note. His 10-test
+    suite ported and green ON TOP OF the doc-major build -- the two BM25 PRs compose.
+  * Session work ported by whole-file copy after verifying the diffs were PURE
+    additions (v0211-only lines were exactly the pre-edit forms; NOTES was a strict
+    prefix of the session NOTES -- nothing on either side lost).
+
+VERIFIED ON THE UNIFIED TREE: bm25/index/tieredmemory/knowledgestore selftests green
+(bm25 still reports fast==reference BIT-IDENTICAL on the tie-rich corpus, now 64x);
+all 17 PR tests pass (10 qtf + docmajor + chunk overlap); discoverability 10/10 across
+all three alias batteries + tiered memory; end-to-end one-mind exercise of
+tiered_memory + auto-exact Index + nearest_batch; audits 0/0/0 (memo deleted);
+capdoc/docgen regenerated on the union.
+
+KEPT NOTE: the two BM25 changes were independently bit-identity-pinned against the
+SAME verbatim reference loop, which is why they merged without interaction -- the
+flat_recall pattern (ship the baseline beside the fast path) is also a MERGE tool.
+
+## OVERHEAD PASS: lazy forest, argpartition top-k -- and the tie bug the pass itself caught
+
+Backlog source: stacc's PR #32 finding 3, all three items pre-measured by him and re-measured
+here before touching anything.
+
+SHIPPED:
+  1. LAZY FOREST BUILD (Index): the forest was built eagerly in __init__ at n>threshold but is
+     only consulted by nearest(k=1, abstain=None) -- every other call takes the exact path.
+     MEASURED at 100k x 128: construct 34.77s -> 0.107s; a top-k-only workload no longer pays
+     for a structure it never touches. The first qualifying k=1 call pays the build once
+     (34.8s), warm k=1 1.59ms. Answers identical (same HoloForest, same seed), pinned.
+  2. ARGPARTITION TOP-K in Index.nearest (k>1) and BM25.rank(top=k): O(N) shortlist + sort the
+     slice. MEASURED: k=8 at 100k, 22.6 -> 13.1ms; BM25 sort step at 200k docs, 3.2 -> 1.0ms
+     (stacc's 2.7M-doc figure was 0.3s/query for the full argsort).
+  3. BM25.rank tie DETERMINISM: the old np.argsort was an UNSTABLE quicksort, so equal-score
+     order was numpy-version dependent. All ranking paths now order by (-score, ascending
+     index) -- same latent-nondeterminism class as #33's set() fix, closed the same way.
+
+THE KEPT NEGATIVE THAT MATTERS (No.2 on nearest_batch): the k+1 argpartition shortlist -- shipped
+in nearest_batch days ago and reapplied today to two more sites -- is WRONG under ties AT the
+k-th value. argpartition guarantees the top-k VALUES; which tied items fill the boundary slots is
+arbitrary, so the ascending-index tie contract silently broke (measured on discrete BM25 scores:
+10 docs tied at rank 10, index 133435 kept, 19999 dropped). It survived nearest_batch's selftest
+because the reference (per-query nearest) was handed the SAME flawed shortlist today, and the
+earlier pin used continuous random scores where exact ties are measure-zero: TWO COMPONENTS
+AGREEING IS NOT CORRECTNESS, and a tie contract must be tested on DISCRETE scores. The exact
+rule everywhere now: shortlist everything >= the k-th value, then stable-sort the shortlist.
+Planted-tie regression traps (coarse-quantized vectors, tie groups at rank k) pin nearest,
+nearest_batch, and rank against the full stable sort at k in {3,10,25}.
+
+Audits 0/0/0 (memo deleted). All 17 PR tests still green. capdoc/docgen regenerated.
+
+## SLIM BM25 (the lever, not the axe) + the test-data rule, written down
+
+Moose's directive: test on data that proves the claim, and use leCore's own levers to escape
+limitations instead of accepting them.
+
+THE TEST-DATA RULE, as now practiced: match the distribution to the CONTRACT. Continuous random
+scores cannot produce exact ties, so a tie contract tested on them proves nothing (that is how
+the k+1 shortlist bug shipped); coarse-quantized vectors are the right data there. Conversely,
+random unit vectors ARE the right data for forest recall -- clustered data flatters the forest,
+random is the honest hard case. And compression / retention / chunking claims are only
+meaningful on REAL text: the bm25 selftest and this pass now measure on the repo's own prose
+(docs/NOTES_concepts.md, 9,723 paragraphs of genuine English), not synthetic filler.
+
+SHIPPED: BM25(docs, slim=True) -- default OFF, additive. stacc's XL build escaped the ~15 GB
+tf/docs_tokens retention by DELETING them, which kills _scores_reference, the bit-identity
+oracle the whole verification story rests on. leCore already had the escape lever: ColdStore
+(the tiered-memory spill move) PARKS both zlib-compressed and inflates on demand through one
+door (_corpus_stats). scores() never touches them; the reference loop still runs, slower on
+first touch. MEASURED on the full real corpus: 9.34 MB live -> 2.66 MB parked (3.5x), build
+2.20s -> 3.07s (the parking cost, paid once), scores AND reference bit-identical in slim mode
+(asserted in the selftest ON real prose). At stacc's 2.7M-doc scale the same ratio reads
+~15 GB -> ~4.3 GB while keeping the oracle alive -- measure there before claiming it.
+
+ALSO: the chunk needle sweep now also runs on REAL prose (179 offsets through genuine
+break-free doc text, zero losses) alongside the PR's synthetic sweep -- synthetic finds the
+boundary arithmetic, real text finds tokenizer/whitespace surprises.
+
+Audits 0/0/0 (memo deleted). 17 PR tests green. capdoc/docgen regenerated.
+
+## THE CACHE POLICY AS A VSA PROGRAM (the value-head move, applied to TieredMemory's inside)
+
+Moose's recentering: everything should be representable holographically. The record's own
+diagnostic applied to the week's shipments found TieredMemory guilty of the exact value-head
+disease -- holographic OUTSIDE (superposed LT trace), tabular INSIDE (importance = Python
+floats, recency x (1+hits)).
+
+SHIPPED: TieredMemory(policy='holo'), default 'exact', additive. The access history IS an
+EligibilityTrace (delegated, not rebuilt): e <- decay*e + unit(key_atom), per-tick decay chosen
+so decay^half_life = 1/2 (the bundle's half-life MATCHES the exact policy's). importance(key)
+= e . key_atom -- recency and frequency fused into ONE hypervector readout: each past access
+contributes decay^age (recency), repeats SUM (frequency). Eviction is decided by a dot.
+
+MEASURED, the value-head way (task metric head-to-head, 10 seeded zipf workloads, variance):
+  hit rate, dim=2048:  exact 0.678+/-0.024   holo 0.689+/-0.027   -- a TIE within noise
+  hit rate, dim=64:    holo 0.624                                  -- the crosstalk cliff, real
+  per-decision victim agreement in-regime: ~0.38 -- an HONEST finding kept, not asserted away:
+  the additive bundle orders near-zero STALE keys differently from the multiplicative exact
+  formula, and the task metric proves the disagreement inconsequential (among the unimportant,
+  the choice barely matters). Decisions differ; outcomes do not.
+Default stays 'exact' -- the ISA-4 register-file conclusion re-earned: the bundled rep buys
+representability and pays in a capacity cliff, so ship exact, keep holo opt-in, pin both.
+
+INSTRUMENT ERROR No.18, caught on this test's first run: comparing victim SEQUENCES of two
+independently-evolving caches measures CHAOS, not policy -- the first tie difference diverges
+the hot sets and everything after differs by cascade. The honest probe is per-decision argmin
+identity on SHARED state; the honest metric is the task (hit rate). Both now in the selftest.
+
+Remaining tabular insides flagged for the same treatment, in order of likely payoff: the
+knowledgestore's retrieval scoring (already has item vectors -- the RRF fusion could be a
+bundle readout), and chunk_text's paragraph packing (a segmentation, i.e. a candidate for the
+compressibility gate). Neither built -- Rule 0 them first next session.
+
+## SAVE THE RULE, NOT THE BYTES: TieredMemory persistence via the Quilez seat
+
+Moose: keep going, consult the demoscene seat. Panel roster: Inigo Quilez -- maximal richness
+from a tiny deterministic kernel, the intros-measured-in-kilobytes discipline. His method as a
+LENS over the fresh tiered-memory work asked: what is stored that a small deterministic program
+regenerates? Audit: key atoms already regenerate from seed (compliant); the spill is
+irreducible user data (must store); the LT TRACE is a DERIVED VIEW -- exactly store() over the
+spilled pairs, with the spill as ground truth (every LT answer is spill-verified; the trace is
+an advisory fast path).
+
+SHIPPED: TieredMemory.save()/load(). The blob holds only irreducible state (hot, meta, LT
+pairs, tick, config); load() reseeds the regenerable structures and replays the pairs in
+CANONICAL sorted-key order to rebuild the trace. Bit-identity of the trace to the live
+accumulation order is explicitly NOT the contract (float sums reorder -- the bind_batch
+lesson); DECISION equivalence is, and it is trivially safe because LT answers verify against
+the spill. MEASURED: dim=16384, 600 pairs -> rule-blob 2,560 B vs naive pickle-with-trace
+131,817 B, 51x smaller; grows with PAIRS, not with dim -- the same shape as the constant-size
+session-carry result, now unified under one principle. Selftest pins round-trip value+tier
+equality for every key and blob < naive.
+
+SEAT: Quilez (procedural generation from a deterministic kernel; ship the generator, not the
+asset). The pattern's fourth use (holographic recipe, session carry, slim BM25, now this) --
+per generalize-on-contact, "derived view: regenerate on load" is now a named move worth a
+Rule-0 phrase before any future save-path is written.
+
+================================================================================
+LARGE-DATA PANEL SWEEP No.1 -- the RUNNING BACKLOG (lives HERE, per the
+no-backlog-files rule; future sweeps append findings and strike completed lines)
+================================================================================
+
+Context: external users are pushing leCore with large data. Directive: accommodate
+scale WITHOUT abandoning the constitution (NumPy-only, deterministic, from-scratch),
+by wiring/hardening the novel capabilities that are buried. Method: eleven measured
+probes on the live tree, each read through a panel seat's published lens. Findings
+are graded: [BROKEN] measured failure, [CLIFF] measured degradation, [SLOW] measured
+overhead, [OK] measured strength worth advertising, [WIRE] discoverability/wiring gap.
+
+CONVENTION: claim a line in-NOTES before starting it (parallel-session rule); on
+completion, replace the line with a one-line result + pointer to its close-out entry.
+
+--- FINDINGS, seat by seat -------------------------------------------------------
+
+F1 [BROKEN] Cranmer (honest measurement): RecallNull.fit allocates (N x 2000) f64 --
+   7.45 GiB at N=500k. CALIBRATED ABSTENTION -- the capability nobody else ships --
+   is exactly what dies when a big user reaches for it. FIX: tile the null-fit
+   matmul (lever 1/5: bake-once + tiles); the null needs max-per-query, never the
+   full matrix. Acceptance: abstain works at N=1M under 2 GB, calibration unchanged
+   on the existing selftest corpus.
+
+F2 [BROKEN] Plate + Quilez (the foundation, and store-the-rule): SuperposedMemory
+   materializes BOTH codebooks dense -- (vocab x dim) f64, 4 GiB EACH at 64k x 8192.
+   Every row is derivable from (seed, index): the engine's own first principle,
+   violated in its core memory primitive. TieredMemory inherits the ceiling. FIX:
+   seed-derived lazy codebook (generate rows on demand / in tiles; determinism free
+   since rows are pure functions of seed+index). Acceptance: vocab=1M constructs in
+   O(1) memory; recall bit-identical to dense on the existing selftest.
+
+F3 [SLOW] Milanfar (denoiser-as-prior): cleanup_batch pays ~40x overhead at
+   single-query x 100k-codebook (1353 ms vs 33.6 ms raw matmul-argmax) -- fine at
+   256q x 4096cb (7.76 ms/q, P4), pathological in the big-codebook few-queries
+   regime that RAG-style users hit. Suspect: per-call setup / backend path not
+   amortized. FIX: route through the machine-model place() gate (setup vs marginal
+   is EXACTLY its question). Acceptance: single-query overhead < 2x raw at 100k.
+
+F4 [CLIFF] Pharr (acceleration structures): Index at 300k -- lazy construct 0.14s
+   (this week's fix, working), but exact batch k=10 at 22.4 ms/q is the only honest
+   path since forest recall@1 degrades ~0.5 at this scale (on record). The novel
+   asset here is HoloForest's DETERMINISM (seed-reproducible builds, which
+   HNSW cannot offer -- recorded kept negative). FIX: recall-budgeted forest
+   (n_trees/probe count from a target recall measured on a held-out sample at fit
+   time) so the latency tool carries its own honesty label. Acceptance: forest
+   reports measured recall@1 with CI at fit; auto never silently ships <0.95.
+
+F5 [OK -> WIRE] Puckette/Stam (the FFT spine): cleanup_batch at 256q x 4096cb x
+   dim16k = 7.76 ms/q, encode_pairs 50k pairs @1024 in one 5.9s batched FFT --
+   the spine HOLDS at scale and nobody outside knows. WIRE: aliases + a
+   FEATURE_GUIDE 'large corpora' section with these measured numbers (runnable).
+
+F6 [OK] Duda (entropy coding): cold_store 3MB real prose put 0.18s / get 0.02s
+   exact; slim-BM25 3.5x on real corpus (previous entry). Strength; advertise
+   beside F5.
+
+F7 [OK] Ozcan (degraded-code reconstruction): 30% element loss at dim 32k moves
+   member cosine 0.164 -> 0.136 -- graceful, no cliff. This is the robustness
+   story vs brittle exact indexes: WIRE a 'damage tolerance' claim with this
+   measurement into the docs the way ABLATIONS does.
+
+F8 [WIRE] Adamatzky/Baker (partition monoid): 'split work across chunks and
+   combine' surfaces Partition-invariant sums (good) but 'process a stream too
+   big for memory' surfaces the DEMAND METER, not the doing-tools (farm/workers
+   surfaced third). The out-of-core STORY exists in pieces (distribute, tiles,
+   workers, coldstore) with no front door. FIX: an out_of_core orchestrator
+   faculty (lever 5: tile under an orchestrator) that composes them, plus aliases
+   from a big-data user's mouth.
+
+F9 [WIRE] Togelius/Eno (the program layer): 'run a long vsa program many steps'
+   surfaces the VM -- good -- but no measured statement exists of program length
+   vs coherence budget (the reversible/auto-cleanup scheduler owns this). FIX:
+   one measured curve (steps vs fidelity with auto-cleanup on/off) published in
+   the guide; it is the 'can I trust a long program' answer big users will ask.
+
+F10 [OK] Plate (capacity law): at dim 8192 the allocator predicts n*=114 and PIC
+    recall is 1.000 AT the law -- the law holds at big dim. Advertise with F5.
+
+F11 [WIRE] Drettakis (splat-scene bundling): encode_pairs at 50k primitives works
+    (P10) but the 'holographic splat memory' framing from the roster (scene as
+    content-addressable bundle, recall-by-region) has no faculty door. Candidate
+    for a later sweep once F2 lands (it needs lazy codebooks at scene scale).
+
+--- PRIORITY ORDER (impact x novelty-preserved): F2, F1, F3, F4, F8, F5+F6+F7+F10
+    (one docs pass), F9, F11. F2 first: it is the constitution applied to the
+    core primitive, and three other items (F4, F8, F11) get easier behind it.
+
+================================================================================
+DEEP SWEEP No.2 (REAL DATA ONLY) -- appended to the running backlog
+================================================================================
+
+Method per Moose's directive: leCore auditing leCore, every experiment on REAL data --
+the repo's own 7.6 MB docs corpus (15,070 chunks), real text vectors built from its
+actual Zipfian/clustered statistics (idf-weighted word-atom bundles, NOT isotropic
+gaussians), real SOL 5-min market prices (data/sol_5min.npz, 15,793 points), and 150
+real source files. Two instrument errors caught by the sweep's own follow-ups (No.19
+logged below) -- the test-data rule cuts both ways.
+
+--- NEW FINDINGS -----------------------------------------------------------------
+
+F12 [CLIFF, upgrades F4 to urgent] Pharr seat: HoloForest recall@1 on REAL clustered
+    text vectors at N=15,070 is 0.50 -- versus 0.93 at N=5k on random data. Real
+    data is the HARD case for random-projection trees (cluster structure defeats
+    random splits), so the on-record random-data curve UNDERSTATES the problem for
+    exactly the users now arriving. F4's recall-budgeted forest must measure its
+    budget on the USER'S OWN vectors at fit time (a held-out split), never on a
+    gaussian proxy. Acceptance updated accordingly.
+
+F13 [OK, corrects sweep-1's fear] Cranmer seat: calibrated abstention on REAL
+    vectors is CORRECT -- in-index perturbed members score cos 0.410 (min 0.361)
+    against a null 99th-pct threshold of cos 0.100; out-of-index queries are
+    rightly refused. The F1 memory blowup remains the only abstention blocker.
+    INSTRUMENT ERROR No.19 (kept): the first probe sampled query targets from
+    OUTSIDE the indexed subset and read correct refusals as false rejections --
+    a ground-truth-membership bug in the probe, not a calibration bug in the
+    harness. Membership of the query's target is part of the test's ground truth.
+
+F14 [OK -> WIRE] both retrieval lanes at 1.00 self-retrieval@5 on 150 real-chunk
+    queries (BM25 and the idf-weighted VSA bundle lane, tied). Advertise with F5;
+    and the real-vector construction used here (idf-weighted word-atom bundle over
+    corpus stats) deserves a FACULTY DOOR -- it is stacc's three-lane VSA lane,
+    rebuilt inline for this sweep because no text_vector faculty exists ('turn
+    text into a vector' surfaces number encoders and scene tools). That absence
+    made THIS sweep hand-roll; Rule 0 says wire it once, properly.
+
+F15 [WIRE/COST] chunk_text on 150 REAL source files: zero pathological loss
+    (worst 1.05%) -- but the overlap=300 default on break-free code DUPLICATES
+    ~30% of bytes (mean 'loss' -29.9% = inflation). Correct for retrieval safety,
+    priced in storage. FIX option order: (a) document the price, (b) per-kind
+    overlap (code vs prose) in the knowledgestore ingest path, (c) dedup at
+    store (StorageSpine already dedups chunks -- wire, don't build).
+
+F16 [GAP] Duda seat: real market prices refuse the procedural tier (HONEST --
+    prices are not low-order-generator data; the refusal contract held on real
+    data, good) and the routed residual codec then only TIES zlib (7,848 vs
+    7,831 B, exact). A real-numeric-series tier is missing: delta/xor-plane +
+    ANS on floats is Duda's own published territory and the data/ dir now holds
+    real series to measure against. Acceptance: beat zlib >=1.5x exact-mode on
+    sol_5min + dai_weth, refusal kept for series that do not compress.
+
+--- BACKLOG STATE: open F1, F2, F3, F4+F12(merged), F8, F9, F11, F14(wire),
+    F15, F16; docs pass covers F5,F6,F7,F10,F13,F14. Priority unchanged: F2 first,
+    then F1, F3, F4/F12. ---
+
+================================================================================
+UP/DOWN/SIDEWAYS SWEEP No.3 -- promotions & generalizations, appended to the backlog
+================================================================================
+
+Method: the close-out check applied to the whole tree as a sweep -- where does proven
+functionality at one level generalize elsewhere for a significant win? Evidence pass:
+46 lexsort/argpartition sites, all save/to_state paths, all dense NxQ allocations,
+Rule-0 probes for existing primitives. Two findings REVERSED expectations (marked).
+
+F17 [PROMOTE-UP] ISA-1's own pattern, repeating: holographic_determinism already
+    ships argmax_det (the one tie-break rule, made executable after FOUR private
+    sign rules were found) -- and this week I hand-copied a tie-safe TOP-K rule
+    (argpartition >= kth value + stable sort) into THREE sites (Index.nearest,
+    nearest_batch, BM25.rank), each carrying its own KEPT-NEGATIVE comment. That
+    is the four-sign-rules failure at k>1. FIX: extend the EXISTING primitive to
+    topk_det(scores, k) in holographic_determinism; the three sites delegate;
+    the other 43 lexsort sites get audited against it case-by-case (many are
+    legitimately different -- sorts of geometry, not tie-sensitive decisions).
+    Acceptance: three sites delegate with bit-identical outputs on the planted-tie
+    traps; conformance test in test_isa_conformance.py.
+
+F18 [PROMOTE-UP, merges into F1] tiled matmul-reduce as ONE primitive: three call
+    sites independently allocate/reduce dense NxQ products -- RecallNull.fit
+    ((N,2000) f64 = 7.45 GiB at 500k, F1 BROKEN), Index.nearest_batch ((N,Q) S
+    matrix, 160 MB at 200k x 100), cleanup_batch's big-shape path. All three need
+    max/argmax-per-column, never the matrix. FIX: tiled_matreduce(items, Q, op)
+    placed by the machine model (setup vs marginal is its question), then all
+    three delegate. Fixes F1, memory-bounds nearest_batch, and is the natural
+    home for the F3 overhead investigation. One primitive, three debts.
+
+F19 [PROMOTE-DOWN->CONTRACT, reverses a sweep-1 assumption] the derived-view save
+    rule ALREADY LIVES IN THE LEAVES: SuperposedMemory.save stores codebooks as
+    FIVE SCALARS (its docstring names lever 3), HoloForest.to_state regenerates
+    trees from (seed, items), TieredMemory.save now replays pairs. The gap is
+    (a) the rule is nowhere stated as a contract, so new save paths (mine
+    included, until the Quilez pass) keep rediscovering or missing it; and
+    (b) remaining paths unaudited: knowledgestore.save, nested.save,
+    tucker.save_tensor. FIX: one paragraph in CONVENTIONS.md ('a save path
+    stores no bytes a pure function of (seed, config, stored-state) regenerates;
+    canonical-order replay; decision-equivalence not bit-identity of derived
+    views'), plus the three-path audit. Cheap, stops the rediscovery tax.
+
+F20 [SIMPLIFIES F2] the F2 lazy-codebook fix should REUSE the seed-derivation
+    that save/load already trusts: the constructors materialize (vocab x dim)
+    dense while save() proves five scalars suffice. Row-on-demand generation is
+    the same function save already implies -- the fix is plumbing an existing
+    guarantee into __init__/recall (tile the K/V access), not new math. F2's
+    acceptance unchanged (vocab=1M in O(1) memory, bit-identical recall).
+
+F21 [SIDEWAYS, needs-probe] TieredMemory's measured eviction lessons (burst
+    starvation; recency-window veto; task-metric-over-decision-agreement) vs the
+    OTHER eviction sites: SpectrumCache LRU, MarginCache, cold_store keep_warm.
+    PROBE FIRST (claim before building): do zipf burst workloads starve any of
+    them measurably on hit-rate? If yes, promote the veto as a shared policy
+    helper; if no, record the negative and stop.
+
+F22 [DOCS, joins the F5/F13 pass] the flat_recall bit-identity-reference pattern
+    proved out as a MERGE tool this week (two BM25 PRs composed safely against
+    one verbatim reference). Promote from folklore to a CONVENTIONS.md paragraph:
+    'ship the baseline beside the fast path; it is the correctness oracle, the
+    admissibility evidence, and the merge arbiter.'
+
+--- BACKLOG STATE: F2(+F20) still first; F1 now lands via F18; F17 slots after
+    F3 (same neighbourhood); F19/F22 join the docs pass; F21 gated on its probe. ---
+
+================================================================================
+INSTALLED-LEC0RE SWEEP No.4 (Unicron) -- appended to the running backlog
+================================================================================
+
+Question: does the leCore we install INTO models actually use the framework -- and how
+far is "the entire framework as a VSA application, installed"? Audited with leCore
+(find_capability, source classification, a hand-run lint the battery lacks).
+
+THE GOOD NEWS FIRST, on record: the hard question was already answered honestly by
+holographic_vminstall.py -- the leCore virtual machine's SEVENTEEN units are sorted by
+measurement into INSTALLS (arithmetic: gather_unit -- "a layer IS a constant-cost
+gather" -- texture_unit, operator_power with loops folded at bake) and STRUCTURALLY
+CANNOT (schedulers/gates = control flow; t1..t6 tiers = state management; "the boundary
+between what weights can hold and what a runtime must do"). And the second
+unicron_vm_install already installs the ISA's opcodes AS MATRICES (bind=circulant,
+permute=permutation, bundle=scaled identity). The vision is live; the gaps are below.
+
+F23 [BROKEN, urgent] THREE silently-shadowed faculty definitions in p16_unicron:
+    unicron_runtime x2, unicron_vm_install x2, unicron_imbue x2. Python keeps the
+    second silently; the first of each is DEAD CODE whose docstring still reads as
+    live (line 1339's machinemodel-unit installer never runs). Catalog matches the
+    survivor for vm_install (verified); the other two unverified. Cause: parallel
+    sessions appending to one class file -- the collision class the claim-line
+    convention exists for. FIX: disambiguate each pair (rename the distinct-purpose
+    ones, e.g. vm_unit_install vs vm_program_install; fold true duplicates),
+    verify catalog entries describe what actually runs, selftest each survivor.
+    Acceptance: zero duplicate defs tree-wide + all three faculties reachable
+    under distinct names with correct catalog text.
+
+F24 [LINT] the audit battery is BLIND to duplicate method definitions -- skill_lint /
+    reachability_audit / catalog_gaps all passed 0/0/0 over three shadowed
+    faculties. FIX: a duplicate-def check (ast walk per class) added to
+    reachability_audit. Ten lines, permanent; would have caught F23 at commit time.
+
+F25 [NEGATIVE KEPT] the hand-rolling suspicion against holographic_unicron.py was
+    WRONG: of 72 standard_normal sites, ~71 are algorithm-local numerics (probe-MLP
+    inits, randomized-QR sketches) and ~1 is codebook-like. The unicron family
+    delegates where it should (selfheal -> cleanup_batch is on record). Recorded so
+    no future sweep re-prosecutes it.
+
+F26 [WIRE] installed-side discoverability: unicron_install_lecore installs
+    capabilities but ships NO in-artifact manifest a model-side consumer can
+    enumerate -- "a capability find_capability can't surface does not exist,"
+    applied to the installed half. (atimics's boot manifest is INTEGRITY -- SHA
+    bindings -- not discoverability; different organ.) FIX: an installed-manifest
+    sidecar (name -> probe vector -> where it lives in the weights), written by
+    install_lecore, readable by chat.py and by the acceptance runner.
+    Acceptance: a fresh session can list what an artifact has installed without
+    reading install code.
+
+F27 [ARCH, the milestone] "the entire framework as a VSA application, installed":
+    the honest ceiling is vminstall's measured boundary (keep it -- the refusals
+    are structural, not unfinished). Within it, the missing piece is the COMPILED
+    PROGRAM PATH: HoloMachine program -> REPEAT loops folded via operator_power
+    (A^k costs what A costs) -> sequence of installed opcode matvecs -> run on the
+    token loop -> verified against the in-process VM (bit-level where EXACT ops
+    allow, decision-level elsewhere per ISA.md's EXACT/TOL tags). unicron_vsa_run
+    currently runs beside, not through, the installed opcodes (its source touches
+    no HoloMachine). Acceptance: one nontrivial conformance-suite program (with a
+    REPEAT and a register STORE/RECALL) runs installed, matches the VM, and the
+    installed manifest (F26) lists it.
+
+--- BACKLOG STATE: F23+F24 jump to the front (a shadowing bug is a silent-flip
+    hazard TODAY); then F2(+F20), F1(via F18), F3, F4/F12, F17, F26, F27; F8, F9,
+    F11, F14-F16, F19, F21, F22 unchanged. ---
+
+================================================================================
+ZOOM-OUT (Moose, sweep-4 follow-up): the vminstall refusals are HOST theorems,
+not PROJECT theorems -- backlog F28/F29
+================================================================================
+
+The correction, kept loud: vminstall's "structurally cannot install" column is
+conditional on a FIXED-SHAPE PRETRAINED HOST. Every refusal names an architecture
+feature that exists when the host is designed for it: control flow = MoE routing /
+early-exit / the token loop as program counter (vminstall itself noted the resonator
+got in that way); tiered state = a DESIGNED spectrum of decay half-lives across
+recurrent heads (hrnn_bake proved heads ARE gated HRNNs -- retrofit found them
+mistuned; a native model allocates them as the tier hierarchy on purpose); eviction
+= the write gate. Every retrofit tax on record (+34% ppl retune, vision-tower
+renumbering, prepend drift, 0.1-token half-lives) is the cost of the HOST SHAPE,
+not of the framework. External evidence the native direction trains: staccs
+lecore-hrr-gpt2 (0.7% gap at proof scale, 709M scale-up) and his from-scratch
+OLMo-2 HRR job.
+
+WHAT SURVIVES (substrate walls, kept): capacity law SNR ~ 1/sqrt(n); float32
+register cliff ~1e5 writes/slot (refresh 6.4% measured); bandwidth follows bytes.
+A native design BUDGETS for these from the start instead of discovering them.
+
+F28 [ARCH, the native path] leCore-NATIVE MODEL ARCHITECTURE -- the model IS the
+    VSA application: forward pass = HoloMachine step; layers = ISA opcodes as
+    constrained parameterizations (circulant / permutation / scaled-identity --
+    also FFT-fast and parameter-cheap, i.e. constitution-native); recurrent
+    states = register file + decay-ladder tier spectrum; gates = scheduler;
+    token loop = program counter; selfheal = an architectural refresh block
+    placed by the measured cliff. TWO WEIGHT-ORIGIN ROUTES, in order:
+    (a) BAKED: compiled deterministically from leCore programs -- F27 with the
+        host constraint removed; zero training; fully in-constitution.
+    (b) TRAINED: architecture + verification in leCore, gradients in the
+        ecosystem (the Zig/WGSL split; staccs side already does this).
+    First bounded milestone: the F27 conformance program running in a BAKED
+    native micro-model (no pretrained host), verified against the in-process VM.
+
+F29 [DOCS/HONESTY] reclassify vminstall's table with a THIRD column:
+    installs-into-frozen-host / REQUIRES-HOST-SHAPE / substrate-impossible.
+    The current "structural" refusals move to requires-host-shape (with the F28
+    pointer); only the substrate walls stay refusals. Keeps every measurement,
+    removes the false ceiling, and stops the next session from quoting the host
+    theorem as a project theorem (as this session did).
+
+--- BACKLOG STATE: F23/F24 still first (live shadowing bug); F28 becomes the arc
+    F27 feeds into; F29 joins the docs pass. ---
+
+================================================================================
+THE BOUNDARY-COMPOSITION PRINCIPLE (Moose, named after the no-limits exchange)
+================================================================================
+
+"Known boundaries are where composition begins." The scaling generator, stated once:
+a measured limit defines a UNIT; units tile across a grid/array; the grid acquires an
+index; the index acquires a cache; the cache's own limit makes it a unit, and the
+recursion turns again. Already instantiated (unnamed until now) by: HoloForest
+(capacity-bounded leaves + tree), TieredMemory (hot bound -> trace law -> spill),
+the abstraction ladder (stop when compression stops paying), ISA-4 registers +
+billionctx refresh (bounded slots composed over the precision limit), and the
+machine model itself (units = named limits; place() = the composition gate).
+
+THE LEDGER (what keeps this a discipline, not a slogan): every composition level
+pays a crossing cost, and the composite inherits the WEAKEST CONTRACT of its parts.
+"Limits to an extent" = the extent is where the crossing still amortizes -- an
+empirical question, and the measure harness answers it. Corollary for design habits:
+when a new limit is measured, the next question is not "how do we remove it" but
+"what unit does it bound, and what composes over that unit" -- with the amortization
+measured before the level is added.
+
+Backlog impact: this is the organizing frame for F18 (tiled_matreduce = one
+crossing, three debts), F2/F20 (codebook rows as units), F8 (out_of_core = the
+orchestrator level), and F28 (the native model = the recursion applied to the
+architecture itself: opcode units, register tiers, refresh over the cliff).
+
+## CELLED MEMORY SHIPPED -- the boundary-composition principle's first purpose-built unit
+   (Quilez seat: domain repetition / opRep applied to the capacity law)
+
+The experiment first, on REAL pairs (corpus term-id -> df-derived values, Zipfian):
+  * THE WALL: dim=4096, n*=57 by the law; 4,000 pairs = 70x past it in ONE memory ->
+    recall accuracy 0.007. Interference collapse, exactly as the law predicts.
+  * THE SEAM: cells of EXACTLY n* pairs (the measured limit IS the tile size), ONE
+    shared seed-derived codebook, per-cell state = dim floats -> accuracy 1.000,
+    71 cells, 2.3 MB of traces.
+SHIPPED: holographic_cellmemory.CelledMemory + mind.celled_memory(), Moose's recursion
+level by level with the ledger: L1 unit (cell at the law), L2 grid + exact key->cell
+directory, L3 cache (warm cells live, cold cells zlib-parked, crossing cost measured
+and paid once). Selftest pins: the wall (single memory MUST collapse at 20x -- if it
+ever passes, the law itself regressed: perfect-score rule), the seam (celled == 1.000),
+bounded warm RAM, the crossing inequality, and the honest knob (cells 3x past the law
+MUST degrade -- the law is physics, the module does not pretend otherwise).
+KEPT NEGATIVE (decided without building): a HOLOGRAPHIC directory (bundled key->cell)
+would itself be a superposed memory under the same law -- re-buying at the directory
+level the interference the cells escape. Composition inherits the weakest contract;
+the exact dict IS the strong contract. The directory-of-directories is the recursion's
+next turn, taken only when a measured dict-size wall demands it.
+Battery 5/5. Audits 0/0/0. Backlog: F2/F20 still wanted (the shared codebook is still
+dense at construction); F8's orchestrator now has its unit; F18 unchanged.
+
+================================================================================
+HOLOGRAPHIC-CAPACITY PAPER, THIRD PASS (audit for unexploited transfer) -- F30-F32
+================================================================================
+
+Directive: with the Quilez seat, audit whether we take full advantage of the paper's
+math. VERDICT FIRST: the two prior triages STAND and are re-affirmed -- eq.(6) is an
+identity given eq.(5) (Omega_Lambda is defined as the ratio); the 10^-123 counting is
+CKN/Li with the Hubble cutoff (the paper's refs [8,9]); the modular claim is untestable
+here; w=-1 is pre-registered and falsifiable, stated with its DESI tension, to the
+paper's credit. Nothing in this tree depends on the cosmology being right: every
+transfer (area-law gate, holocap accounting, nested screens) carries its own
+measurement and the 'discipline, not claims' scope line. That relationship does not
+get more credulous with repetition.
+
+F30 [TRANSFER UNFINISHED] the nested-diamond pattern -- cheap BOUNDARY read first,
+    volume price only where it points (also Quilez's raymarching discipline: evaluate
+    the bound before the interior) -- shipped for attention (nested screens, recall@8
+    0.797 @35% keys touched, centroid-beats-HRR negative KEPT) but not yet applied to:
+    (i) celled memory's directory hierarchy (the recursion's named next turn, gated on
+    a measured dict wall), (ii) knowledgestore/BM25 retrieval over large corpora
+    (block screens -> descend). Acceptance: recall/latency curves like screen
+    routing's, on the REAL corpus; centroid-vs-HRR re-measured per site (the negative
+    may not transfer identically).
+
+F31 [WIRE, delegating] the SATURATION LEDGER: one faculty, trace_partition(trace,
+    codebook) -> {signal, crosstalk_floor, damage} fractions, composed from existing
+    pieces (bundle_capacity, utilization, decide_confidence margins). The paper's
+    fixed-total-partitioned structure as a diagnosable object. Acceptance: planted
+    bundles at known load/damage read back their known fractions within CI.
+
+F32 [NEGATIVE, recorded WITHOUT building] gamma = H/ln N as a refresh-rate law:
+    REJECTED. selfheal's margin-TRIGGERED repair is measured, adaptive, and exact to
+    200k writes; replacing a measured trigger with a derived formula is narrative
+    over measurement. Kept loud so no future session rediscovers it as an idea.
+
+Backlog state: F23/F24 still first; F30 slots after F8 (same composition family);
+F31 joins the wiring tier; F32 is closed-by-decision.
+
+## F23 + F24 CLOSED: the shadowed faculties resurrected; the lint that ends the class
+
+Per Moose's directive -- adjust, promote, generalize; nothing new. Both fixes are
+adjustments to what existed.
+
+F24 (the lint, in the EXISTING reachability_audit): (a) AST walk per facade class --
+same-name def twice = the second silently wins, the first is dead code with a live
+docstring; HARD ERROR listing both line numbers. (b) The SAME disease found in a
+second organ: the catalog's alias dict had each shadowed name as a duplicate STRING
+KEY (574/811, 757/827, 934/1091) -- Python keeps the later key silently, darkening
+the first block's aliases. Regex scan of catalog alias keys added to the same check.
+KEPT (embarrassing, instructive): while ADDING the lint I committed a third member of
+the family -- a local `import ast, glob` shadowing the module-level imports for the
+whole function. Shadowing is one bug family with three organs (defs, dict keys,
+scopes); the lint now covers the two that silently corrupt faculties.
+
+F23 (the fix): all three pairs were DISTINCT PURPOSES wearing one name (parallel-
+session collisions). First-of-pair renamed purpose-true and re-keyed in the catalog:
+  unicron_forward_runtime  (own the forward pass: NumPy GDN runtime, 1.4e-7 verified)
+  unicron_vm_unit_install  (which machine-model units fit in weights, and which cannot)
+  unicron_imbue_package    (checkpoint -> imbued Galvatron: residents+calibration+leCore)
+survivors unchanged: unicron_runtime (the loop that uses what was installed),
+unicron_vm_install (ISA opcodes as matrices), unicron_imbue (task-arithmetic grafting).
+Battery 6/6 -- every faculty in each former pair now discoverable under its own
+phrasing. Audits 0/0/0 with the new checks armed. No dead code remains in p16.
+
+================================================================================
+PRE-IMPLEMENTATION AUDIT + EXPERIMENTS (prep for the build session) -- premises
+verified, designs decided, work claimed
+================================================================================
+
+Rule-0 pass over the open backlog found ONE major dedup and verified every premise
+the next session will build on. Experiments on real data where the contract demands.
+
+DEDUP (F2): the HADAMARD CODEBOOK already ships "atoms generated not stored" --
+O(D log D) cleanup via WHT, crosstalk EXACTLY zero, measured 219x at scale. F2 is
+therefore TWO modes, both mostly existing:
+  (a) hadamard mode: VERIFIED by experiment -- hadamard atoms as keys AND values in
+      a bound superposition recall 38/40 at n=40, D=1024, atom pool K=2048 (=2D
+      sign-permuted rows). The fast, exactly-orthogonal special case for vocab <= 2D.
+  (b) lazy-gaussian mode for vocab >> dim: PREMISE TESTED AND SETTLED --
+      * PCG64.advance() fixed-stride skipping does NOT reproduce the existing dense
+        rows (ziggurat gaussians consume variable raw draws; measured False). So a
+        BIT-COMPATIBLE lazy view of the CURRENT codebook is IMPOSSIBLE -- kept
+        negative, do not re-attempt.
+      * per-row seeding default_rng((seed, i)) IS the design: deterministic, O(1) at
+        ANY index, 67 us/row at dim 4096, cross-row corr ~0.007. NOT bit-compatible
+        with dense, therefore a NEW DEFAULT-OFF mode (codebook='lazy'), never a
+        silent swap. Recall must be verified equal-quality (not equal-bits) vs dense
+        at the capacity law in the selftest.
+
+F18 (tiled reduce) VERIFIED READY: tiled argmax on 12,000 REAL text vectors is
+BIT-IDENTICAL to dense (strict-> update preserves np.argmax's first-index tie rule)
+and FASTER (0.13s vs 0.22s -- cache locality), at 3 MB tile RAM vs 19 MB dense.
+Implementation: tiled_matreduce primitive; RecallNull.fit and Index.nearest_batch
+delegate. F1's 7.45 GiB death becomes a bounded loop.
+
+F3 (cleanup_batch 40x overhead) ROOT CAUSE FOUND: cProfile puts 0.959s of the
+1.17s call in np.asarray -- TWO calls copying the 100k x 512 codebook (~400 MB
+twice) before any math. The matmul itself is fine. Fix next session: no-copy path
+when the codebook is already float64 ndarray (and/or cache the normalized view,
+which is the machine-model setup-vs-marginal question in miniature). Acceptance
+unchanged: single-query overhead < 2x raw at 100k.
+
+F31 pieces CONFIRMED PRESENT (bundle_capacity, bundle recovery/unmix, utilization,
+decide_confidence) -- pure composition next session. F8: assemble_pipeline exists
+but is a SIGNAL-pathway finder, not an out-of-core orchestrator -- F8 stands as
+scoped, and should reuse distribute/workers/coldstore + (new) tiled_matreduce.
+F17 confirmed absent (no topk primitive; argmax_det exists to extend). F21 remains
+probe-first. F30 unchanged.
+
+CLAIMED for the build session, in order: F2(a+b as one item), F18(->F1), F3, F17,
+F31. Everything above is verified premise or kept negative -- the build session
+starts at step 2 of the loop with no open questions.
+
+================================================================================
+INSTALL-LENS AUDIT OF THE CLAIMED BACKLOG (pre-build, panel-consulted) -- three
+designs adjusted, one new rule (F33). "Can the installed leCore have this too?"
+================================================================================
+
+The organizing test, from vminstall's measured taxonomy + the F28 zoom-out: split
+every faculty into its ARITHMETIC CORE (matvec / sign / linear / a pure fold step --
+what weights or VM opcodes can hold) and its CONTROL SHELL (loops, tiling, eviction --
+what a runtime or the token loop must carry). VERIFIED premise for the lens: hadamard
+cleanup == ONE MATVEC + ARGMAX, decision-identical to the fast WHT path 200/200, and
+the matrix is pure +-1 -- butterfly-decomposable into log2(D) fixed layers (Puckette/
+Stam seats: the FFT-as-layers move; Stoudenmire: structured operator = free rank).
+
+PER-ITEM VERDICTS AND ADJUSTMENTS:
+
+F2 ADJUSTED (Plate seat): the HADAMARD mode is promoted to the install-preferred
+   codebook -- its cleanup is a (structured) matvec, so an installed model can carry
+   the SAME dictionary as the runtime. The lazy-gaussian mode stays for vocab >> 2D
+   but is RUNTIME-ONLY BY NATURE (ziggurat row generation is control flow, not a
+   matrix) -- stated in its docstring so nobody tries to install it. Build order
+   within F2: hadamard mode FIRST, lazy second.
+
+F18 ADJUSTED (machine-model + Quilez seats): implement tiled_matreduce as a PURE
+   FOLD -- step(state, tile) -> state over an explicit commutative monoid (max,
+   argmax, sum), with the driver loop separate. Then the step is REPEAT-expressible
+   (the resonator precedent: the token loop carries one iteration per token) and the
+   whole reduce is a HoloMachine program away from running installed. Same fix for
+   F1 either way; the shape costs nothing extra and buys the installed side.
+
+F3 NEUTRAL: asarray no-copy + cached normalized view is runtime hygiene; the cache
+   IS t0_compiled (bake-once) in miniature. No install form needed.
+
+F17 ADJUSTED (Cranmer seat): topk_det lands as an ISA DECISION-CONTRACT extension --
+   specified in ISA.md terms (EXACT), with a reference implementation in
+   holographic_reference and a conformance test -- not as a private util. Then ANY
+   substrate's top-k (NumPy, WGSL reduce, an installed argmax cascade) verifies
+   against the same contract. This is how the installed side "has" a decision rule:
+   by conformance, not by shipping Python.
+
+F31 CONFIRMED (Olshausen seat): fractions come from matvecs against codebooks +
+   margins -- probe arithmetic. Build on holocap's probe pattern (which already runs
+   against installed subjects); the ledger then reads BOTH runtimes for free.
+
+F8/F30 SCOPED: orchestration and descent are CONTROL -- runtime-side by the
+   taxonomy -- but their inner steps (screen scoring = matvec; per-cell recall =
+   matvec+argmax) are arithmetic. Rule: keep every inner step a NAMED FACULTY so
+   the VM's APPLY can carry the loop when wanted. F4/F12 noted: forest hyperplane
+   tests are sign-matvecs (installable in principle); not acted on now.
+
+F16 HONEST REFUSAL KEPT (Duda seat): rANS/entropy coding is bit-twiddling control.
+   Runtime-only, and that is the correct answer, not a gap.
+
+F33 [NEW -- THE RULE]: the INSTALL-AWARE BUILD RULE, added to the close-out habits:
+   every new faculty's docstring states its arithmetic-core / control-shell split;
+   loops expose their step as a pure fold; decisions land as ISA contracts when
+   they are load-bearing. One sentence of discipline per module so nothing new is
+   born runtime-locked by accident. (Goes into CONVENTIONS.md in the build session
+   alongside F19's derived-view paragraph -- one docs pass, two contracts.)
+
+Build order unchanged in content, refined in sequence: F2-hadamard, F2-lazy, F18
+(fold-shaped), F3, F17 (as ISA extension), F31 (holocap-patterned). The installed
+leCore is no longer an afterthought of the backlog; it is a column in it.
+
+================================================================================
+THE PROJECTOR (Moose: "project the codebase as VSA applications, don't hand-roll")
+-- feasibility VERIFIED, F34 claimed for the build session
+================================================================================
+
+The objection to F33-as-hand-work is correct, and the tree already contained the
+seed of the answer: vminstall never translated the gather unit -- it MEASURED it
+(T @ r verified cosine 1.000000 on the live stream). Probing IS projection. The
+prep experiment generalizes that into an automatic projector with honest refusal:
+
+VERIFIED (prototype, this session): probe_project(f, dim) -- columns of the
+operator = f(basis vectors), verdict by held-out residual on random inputs.
+No source inspection, no hand translation. Measured:
+    bind(key, .)     residual 4.7e-16   LINEAR -> installs as one matvec
+    unbind(., key)   residual 4.5e-16   LINEAR
+    permute(roll 7)  residual 0.0       LINEAR
+    unit-normalize   residual 1.6e+01   REFUSED (not linear)
+    abs              residual 1.5e+00   REFUSED
+The extracted bind operator IS the circulant the ISA says it is (columns are rolls
+of column 0 -- checked), and the installed unbind reproduces a recall round-trip at
+cosine 1.000000. The probe both PROJECTS and CERTIFIES, and its refusals are the
+core/shell boundary DISCOVERED BY MEASUREMENT instead of declared by docstring.
+
+F34 [BUILD-SESSION, replaces per-faculty hand work for the linear class]:
+project_faculty -- three tiers, cheapest first, refusal loud:
+  T1 PROBE (automatic, exact): fixed-shape linear/affine cores -> matrix by basis
+     probing (or FFT-structured probing where the operator is known circulant:
+     ONE probe column suffices -- store the rule, not the D^2 bytes, Quilez seat),
+     certified on held-out inputs, installed via the EXISTING install_op path.
+     Cost note: dense probing is D calls + D^2 storage -- the certificate says when
+     that price is real; circulant/permutation/sign structure collapses it.
+  T2 FOLD (mechanical, given F33 shape): faculties exposing step(state, x) compile
+     to REPEAT programs -- the projector emits the HoloMachine program; conformance
+     vs the in-process run per ISA EXACT/TOL.
+  T3 APPLY (universal fallback): anything else wraps as an APPLY step -- callable
+     from a VSA program, honestly NOT installed (control stays runtime).
+F33's docstring rule STANDS but inverts direction: the projector's measured verdict
+is the ground truth; the docstring records it (and flags surprises when a "control"
+faculty probes linear -- those are install opportunities found for free).
+Relationship to F27/F28 unchanged: T1/T2 feed exactly the compiled-program milestone.
+
+================================================================================
+BUILD SESSION: F3, F18(->F1), F17, F2 SHIPPED (+ a latent abstention bug found
+and fixed). SOTA check run first; the backlog held up.
+================================================================================
+
+RESEARCH CHECK (Aug 2026, before building): SISAP 2026 entries and the SPANN/DiskANN
+lineage all converge on cheap-summary-in-memory + tiered volume + exact RERANK for
+recall -- the shape this backlog already has. None ship calibrated abstention or
+deterministic builds (our differentiators). Hadamard/structured codebooks with ML
+decode are established art (Reed-Muller Green machine) -- F2-hadamard is grounded,
+not behind. The consensus "exact is not applicable at scale" leaves the tiled-exact
+lane open, which F18 now occupies with bit-identity.
+
+F3 SHIPPED: cleanup_batch's 40x single-query overhead was np.asarray COPYING the
+codebook twice (0.959s of 1.17s at 100k x 512). Fix: no-copy fast path when already
+f32-contiguous + prepare_codebook() bake-once door. MEASURED: 968 ms -> 16 ms
+prepared -- now FASTER than the raw f64 matmul (30 ms). Compute stays float32 on
+every path (a silent f64 upgrade would flip near-tie argmaxes -- bind_batch lesson);
+decisions verified identical.
+
+F18 SHIPPED: holographic_tiledreduce -- tiled_matreduce as a PURE FOLD (step(state,
+tile) -> state over max/argmax/sum monoid; driver separate; REPEAT-expressible per
+F33/F34). Selftest pins bit-identity vs dense incl. PLANTED CROSS-TILE TIES to the
+lowest index (kept negative: a >= update silently switches winners to the LAST
+index), awkward tile sizes, and the sum leg.
+
+F1 SHIPPED VIA F18 -- AND A SECOND BUG FOUND UNDER IT: RecallNull.fit now folds
+max-per-query without the (N, n_null) matrix (7.45 GiB at 500k -> 0.9 GB peak, null
+bit-identical to the dense formula). Fixing the memory EXPOSED a latent calibration
+bug: the null queries were seeded with the CALLER'S plain seed, so data generated
+from the same small seed (rng(0) data + seed=0 index -- the commonest case) made the
+'random' null queries EQUAL the first index atoms: null saturated at cos ~1.0,
+abstention rejected every true signal. Fix: hashlib-derived null seed + a SATURATION
+GUARD (the perfect-score rule in code: any null query matching an atom at ~1.0 bumps
+a deterministic salt and refits; all salts exhausted -> loud error). VERIFIED at
+N=500k with the exact collision inputs: signal kept, noise rejected, 0.9 GB. 58
+abstention-adjacent tests green. HONEST NOTE: null values differ from the old
+derivation (the old ones were broken in the collision case and statistical
+everywhere); p-values shift within noise elsewhere.
+
+F17 SHIPPED: topk_det in holographic_determinism -- the tie-safe boundary rule
+(everything >= the k-th value, stable sort, ties to LOWEST index) stated ONCE;
+Index.nearest, Index.nearest_batch and BM25.rank now DELEGATE (the three hand-copied
+sites retired). All planted-tie traps green; BM25 fast==reference bit-identical.
+
+F2 SHIPPED: SuperposedMemory(codebook='dense'|'hadamard'|'lazy') behind one seam
+(_rows/_correlate_V); dense bit-compatible by construction. hadamard: atoms
+GENERATED (O(dim) state, crosstalk exactly zero, install-preferred; vocab<=2*dim
+refused honestly -- pinned). lazy: per-row seeded rows, vocab UNBOUNDED -- MEASURED
+vocab=1M: O(1) construction, recall 1.000 at the law, 0.62 GB peak where dense needs
+32 GB. KEPT NEGATIVE (measured): PCG64.advance fixed-stride skipping does NOT
+reproduce dense rows (ziggurat variable draws) -- a bit-compatible lazy view of the
+dense codebook is impossible; 'lazy' is a NEW codebook, default-off, equal-QUALITY
+verified. Faculty passthrough on mind.superposed_memory; catalog entries for
+tiledreduce + topk_det + the modes; battery green; does-field tightened (not
+budgeted) after a length regression.
+
+STILL OPEN from the claimed list: F31 (trace_partition -- pure delegation, pieces
+confirmed), F34 (the projector), nearest_batch's S-matrix delegation to a top-k fold
+leg (natural F17xF18 composition), then F4/F12, F8, F30, F26-F28 arc. Audits 0/0/0
+with the duplicate checks armed; 135 targeted tests green.
+
+================================================================================
+THE PHASED-ARRAY PRINCIPLE (Moose): gain is REDISTRIBUTION, not creation --
+grounded, one measured transfer found, F35 claimed
+================================================================================
+
+The principle: a phased array creates no extra power; it redistributes the same
+radiated power more intelligently, paying beamwidth for directivity. In leCore this
+is not analogy in at least three organs, and in one it is the SAME equation:
+
+WHERE IT ALREADY LIVES (named, not new): (1) a bundle IS a coherent array -- fixed
+trace energy partitioned across members; the capacity law is the conservation
+statement, and F31's trace_partition is the radiated-power budget as a diagnosable
+object. (2) The rd save path's WATER-FILLING bit allocation is textbook power
+redistribution across channels. (3) Screen routing redistributes a fixed compute
+budget to where the mass concentrates (90% of attention in ~6% of keys).
+
+THE SAME-EQUATION CASE AND THE MEASURED TRANSFER (F35): FPE's similarity kernel is
+the CHARACTERISTIC FUNCTION of its phase distribution -- exactly as an antenna's
+beam pattern is the Fourier transform of its aperture taper. Same math, so 70 years
+of taper design (Dolph-Chebyshev minimax sidelobes; Taylor; Kaiser -- Doerry 2017's
+catalog, whose motivating figure "the lower-amplitude signal is buried in the
+sidelobe of the stronger signal" IS our weak-item false-attractor problem) transfers
+to KERNEL design. PILOT MEASURED (D=4096, pure NumPy, np.i0 Kaiser inverse-CDF):
+    uniform phases (the default sinc): first null 0.078, max sidelobe -13.4 dB
+    Kaiser-tapered phases (beta=8):    first null 0.185, max sidelobe -34.5 dB
+    buried-weak-item task (weak 0.15 AT the strong item's first sidelobe peak):
+      uniform margin 0.7x -- the weak item IS buried (retrieval error)
+      kaiser  margin 8.0x -- recovered, paying only mainlobe width (2.4x)
+The conservation ledger holds exactly as the principle says: nothing was created;
+resolution near zero was traded for immunity at moderate distance. Which trade is
+right is APPLICATION-dependent -- hence a knob, never a new default.
+
+F35 [CLAIMED, build next]: taper= parameter on VectorFunctionEncoder ('uniform'
+default = today's kernel bit-compatible; 'kaiser:beta' / 'taylor' opt-in), phase
+sampling by inverse-CDF (np.i0, stdlib-clean), selftest pinning the -13 dB sinc
+default, the measured suppression, the buried-weak-item recovery, AND the mainlobe
+cost kept loud. Composes with steering bandwidths (per-axis taper = per-axis
+sidelobe budget). Panel seats: Puckette (window design is his home field), Milanfar
+(kernel shaping), Tarter/Siemion (weak signal next to a strong interferer is
+literally their day job).
+
+## F35 SHIPPED: taper-designed FPE kernels (the phased-array transfer, live)
+
+ScalarEncoder(taper='kaiser:beta') + VectorFunctionEncoder passthrough. Default None/
+'uniform' draws BIT-IDENTICAL phases to before (pinned). Kaiser phases by inverse-CDF
+(np.i0, pure NumPy); rbf+taper REFUSES (no sidelobes to shape).
+
+MEASURED THROUGH THE LIVE ENCODER (D=4096): uniform sinc null 0.99, msl -13.0 dB;
+kaiser:8 null 2.67, msl -37.5 dB. Buried-weak-item (0.15 amp at uniform's worst leak
+BEYOND both mainlobes, x=3.47): uniform margin 1.5x (marginal), kaiser 18.2x
+(recovered). THE PRICE KEPT LOUD AND PINNED: inside kaiser's 2.7x-wider mainlobe the
+taper HURTS (x=1.42: 0.7x -> 0.5x) -- the first selftest draft asserted the pilot's
+in-mainlobe placement and FAILED, which was the trade-off teaching correctly: the
+failed assertion became the cost pin, not a deleted test. Redistribution, not
+creation -- so uniform stays default and the taper is the application's knob.
+
+One justified bypass logged: the taper edit broke lecore's import path mid-edit
+(ScalarEncoder is on the boot path), so importability was restored with a direct
+file write + py_compile before returning to mind-mediated editing.
+
+Selftest pins: default bit-compat, >15 dB suppression, beyond-mainlobe recovery,
+in-mainlobe cost EXISTS, rbf refusal. Battery 3/3 ('suppress similarity sidelobes',
+'weak item buried under strong', 'kernel taper'). Audits 0/0/0; 61 encoder/fpe tests
+green. NEXT from the claimed block: F31 (trace_partition, pure delegation), F34
+projector T1, nearest_batch top-k fold.
+
+## QUILEZ ON THE TAPER + SWEEP No.5 + F31 SHIPPED
+
+QUILEZ PASS (stratified sampling -- the Monte Carlo move under every path tracer):
+iid draws of the taper density CLUMP, and clumping is sidelobe ripple. One jittered
+draw per stratum of the inverse-CDF, then shuffled (strata order must not correlate
+with FFT bin index): MEASURED over 12 seeds, D=2048, beta=8 -- iid mean -33.7 dB
+(worst -28.5) -> stratified mean -58.5 dB (worst -57.0). 24 dB FOR FREE, and the
+worst seed improves more than the mean: variance is exactly what stratification
+buys. Folded into kaiser mode (same-session amendment, no released behavior moved);
+selftests green.
+
+SWEEP No.5 (up/down/sideways on the taper): SIDEWAYS -- no hand-rolled window
+duplicates tree-wide ('window' hits were prose); encoders is the taper's single
+home; negative kept (Lomb-Scargle may WANT tapers later -- a note, not a debt).
+UP -- per-axis taper already composes through the FPE passthrough (product kernel
+= per-axis sidelobe budget); done by construction. DOWN -- naming: the
+EligibilityTrace IS a one-sided exponential taper over an ordered bundle; other
+window shapes over sequence traces = probe-gated future item (claim before build).
+
+F31 SHIPPED: trace_partition (module fn + mind faculty + catalog). The saturation
+ledger: {signal, crosstalk, damage} fractions of a bundle's FIXED energy -- signal
+by least-squares onto stored atoms, crosstalk at the law's ~n/dim floor, damage
+above it; membership MAD-gated when stored_idx unknown (estimated=True flagged).
+CONSERVATION BY CONSTRUCTION: fractions sum to 1 -- the ledger cannot create
+power, only attribute it (the phased-array principle as a diagnostic). Planted-
+fraction selftest: clean bundle ~all signal; injected 26% damage moves ONLY the
+damage account; estimated path within 0.15 of exact. Battery 3/3, audits 0/0/0.
+
+REMAINING from the claimed block: F34 projector T1, nearest_batch top-k fold
+(F17xF18), then F4/F12, F8, F30, F26-F28 arc, F21 probe, F19/F22/F33 docs pass.
+
+## F34-T1 + F21(closed) + F19/F22/F33 docs pass SHIPPED
+
+F34-T1: holographic_projector (probe_project + apply_projected) + mind.project_faculty.
+Probe a callable with basis vectors, CERTIFY on held-out inputs; structure detected
+MOST-SPECIFIC-FIRST -- and the selftest's own first run caught the taxonomy bug that
+rule exists for: a cyclic shift is BOTH a permutation and a circulant (roll matrices
+ARE circulants, column0 = a delta), so circulant-first swallowed the cheaper form.
+Order is now permutation (D ints) -> circulant (D floats) -> dense (D^2), refusal
+loud and UNUSABLE (apply_projected raises on it). Pins: bind -> circulant 4.7e-16
+with installed apply matching live; roll -> permutation; affine -> dense round-trip;
+normalize/abs REFUSED; installed unbind reproduces recall at cosine ~1. T2 (fold ->
+REPEAT) deliberately NOT built here -- it lives with the F27 conformance program it
+exists to serve. T3 = the existing APPLY path. Battery 3/3.
+
+F21 CLOSED BY MEASUREMENT (negative kept): cold_store CANNOT starve -- the cold tier
+serves every key ever put (zero re-misses of steady keys after a 36-access burst at
+keep_warm=4); keep_warm moves LATENCY only. The tiered-memory burst-starvation
+lesson does not transfer because the failure mode (loss) cannot occur here. The
+recency veto stays where its failure mode lives. No promotion; probe recorded.
+
+F19/F22/F33 -> docs/CONVENTIONS.md: the save-path contract (regenerate derived
+views; decision equivalence, never derived-view bit-identity), the reference-beside-
+the-fast-path rule (oracle + admissibility + MERGE ARBITER), and the install-aware
+build rule (the projector's verdict is ground truth; docstrings RECORD, not declare).
+
+BACKLOG REMAINING: nearest_batch top-k fold (F17xF18), F4/F12 recall-budgeted forest,
+F8 out-of-core front door, F30 nested descent, F26 installed manifest, F27/F28 arc,
+sequence-taper probe (sweep-5 down item). Audits 0/0/0.
+
+## F17xF18 (nearest_batch fold) + F4/F12 (recall-budgeted forest) SHIPPED
+
+tiled_topk added to holographic_tiledreduce: exact per-query top-k as the fold --
+running (values, GLOBAL indices) per query merged with each tile's block under
+topk_det's tie rule (lexsort on (global_idx, -score) over k+tile candidates, never
+N). Pins: bit-identical to per-query topk_det, INCLUDING a planted three-way tie
+straddling three tiles (keeps [5, 450] -- lowest global indices). Index.nearest_batch
+now delegates: the (N, Q) S-matrix (160 MB at 200k x 100) is GONE, measured 15.4
+ms/q (vs 22.4 before -- cache locality again), peak RSS 0.37 GB, 106 index tests
+green. Both historical kept negatives carried forward in the comment.
+
+F4/F12: Index(recall_budget=...) + Index.measure_forest_recall(). Before the forest
+ever serves under a budget, recall@1 is MEASURED ON THE CALLER'S OWN VECTORS
+(n_probe perturbed members vs the exact answer via tiled_topk; Wilson 95% CI);
+below budget the route DEMOTES to exact and the measurement travels with the index
+(recall_note). VERIFIED on the sweep-2 failure case itself: real text vectors at
+15k measured 0.63 [0.56, 0.69] < 0.90 -> exact route; easy random data 1.00 ->
+forest kept. INSTRUMENT LESSON KEPT in the selftest: near-duplicate twins were a
+WRONG guess at the cheap hard case (8 trees ate them, recall 1.00 -- twins share
+leaves); the reliable cheap hard case is a SINGLE tree at high dim (0.64 measured)
+-- one set of split planes, no vote to rescue a bad route. Battery 3/3
+('never silently ship low recall').
+
+BACKLOG REMAINING: F8 out-of-core front door, F30 nested descent, F26 installed
+manifest, F27/F28 arc, sequence-taper probe. Audits 0/0/0.
+
+## F30 SHIPPED: nested-descent retrieval (method='screens') with the honesty label
+
+Index(method='screens', screens_probe=p): score BLOCK CENTROIDS (the measured winner
+over HRR bundles -- screen routing's kept negative honored), descend into the top
+ceil(p*B) blocks, exact scan only inside them; global tie rule preserved (candidates
+carry global indices; lexsort on (global_idx, -score)). measure_screens_recall() =
+the same honesty contract as the forest's; the recall_budget gate covers BOTH routes.
+
+MEASURED on the sweep-2 real text vectors (where the forest measured 0.63):
+    screens @15% touched: recall 0.70 [0.63, 0.76]
+    screens @35% touched: recall 0.88 [0.82, 0.91]
+HONESTY CHECK RUN BEFORE CLAIMING: shuffled row order -> 0.67 @35%. BLOCK COHERENCE
+IS LOAD-BEARING (sequential blocks exploit insertion locality, which real corpora
+have -- documents arrive in order). Kept as an inequality in the selftest (shuffled
+MUST degrade), and the budget gate makes even the dependence safe: shuffled data
+under a 0.9 budget DEMOTES ITSELF to exact with the measurement on recall_note.
+Follow-up noted (not built): a deterministic coherence pass (seeded one-round
+k-means-style assignment, pure NumPy) would remove the ordering dependence -- claim
+before building. Battery 3/3. 106 index tests green.
+
+REMAINING: F8 out-of-core front door, F26 installed manifest, F27/F28 arc,
+sequence-taper probe, screens coherence pass.
+
+## F8 SHIPPED (wired, not built): out_of_core_search -- the big-data front door
+
+The sweep's finding was exact: the out-of-core story existed in PIECES (memmap-
+compatible fold, coldstore, workers) with no entrance. Rule 0 held on delivery too:
+np.memmap IS an array and tiled_topk slices tiles lazily, so the fold ALREADY
+streams -- F8 is a door that names the composition, one delegating faculty.
+MEASURED: 600 MB on-disk .npy, exact k=5 at 40.5 ms/q, peak RSS 0.75 GB (memory
+bounded by the tile, never the file), self-hits exact, same global tie contract.
+The 2026 ANN consensus ("exact not applicable at scale") inverted honestly: recall
+1.0 by construction, deterministic, on disk. Battery 3/3.
+
+REMAINING: F26 installed manifest, F27/F28 arc (the native-model milestone -- the
+projector, vm_install opcodes, and operator_power are all staged for it),
+sequence-taper probe, screens coherence pass. Every BROKEN/CLIFF/SLOW item from
+all five sweeps is now closed; what remains is construction on the installed side.
+
+## F27 CONFORMANCE MILESTONE + F26 MANIFEST SHIPPED
+
+holographic_compileinstall: a symbolic HoloMachine program compiles into a chain of
+projector-CERTIFIED matvecs + register slots, and the conformance claim is now a
+passing test: on [LOAD a; REPEAT 3; CALL twist(BIND k); STORE R1; LOAD b; BIND k2;
+RECALL R1; HALT], the VM (decoding the HRR program holographically, runtime control
+flow) and the INSTALLED chain (all decode+control paid at compile time, pure matvec
+arithmetic at run time) agree NUMERICALLY with hand truth -- EXACT-tagged ops, so
+allclose, not cosine. REPEAT COLLAPSED TO ONE OPERATOR POWER: the certified body is
+a circulant, so REPEAT n is spectrum**n applied once -- n matvecs become one,
+exactly (FFT diagonalizes circulants; nothing to tolerance-tag). Nonlinear bodies
+REFUSE loudly through the projector (the boundary, measured). The Unicron thesis in
+one testable sentence: same program, same answer, different substrate.
+
+TWO INSTRUMENT LESSONS KEPT: (1) an assembled function body WITHOUT a HALT overruns
+-- decode reads noise positions as instructions (a 12-op garbage trail; acc ended
+equal to 'k' via a stray noise-LOAD). VM bodies carry HALT; symbolic bodies need
+none. (2) The VM's bind order is bind(acc, d); circular convolution commutes so the
+algebra forgives a swap, but conformance should not LEAN on algebra -- the compiler
+now certifies in the VM's own operand order.
+
+F26: every compile yields the MANIFEST (per-op kind, payload SHAPE -- never the
+payload; weights live in the weights -- residual certificate, probe seconds, and
+the chain). save_manifest writes the JSON sidecar; round-trip pinned. This is the
+installed side's discoverability contract: the runtime has find_capability, the
+weights get the manifest.
+
+REMAINING (all construction): F28 native micro-model (opcode layers as the
+certified parameterizations, register file as recurrent state -- the compile chain
+IS its forward pass spec), sequence-taper probe, screens coherence pass, vminstall
+requires-host-shape docs column (F29).
+
+## F28 FIRST LANDING SHIPPED: NativeHoloModel -- the baked native micro-model
+
+holographic_nativemodel.NativeHoloModel + mind.native_model. The model IS the VSA
+application: layers = the projector's certified parameterizations (circulant D
+floats / permutation D ints / dense D^2), register file = recurrent state,
+forward() = the compiled F27 program stepped by the token loop. NO pretrained host.
+
+PINNED: forward == the VM on the full REPEAT+STORE/RECALL conformance program;
+REPEAT is ONE circulant layer of D params on the model card; save() writes a
+240-BYTE rule file ({dim, seed, program}) and load() re-bakes weights BIT-
+IDENTICALLY (array_equal, not allclose -- same seed, same rule, same bits);
+to_dense('BODY:twist^3') @ a equals three live binds (the one-call export bridge
+to host-framework weight surgery). Rule-not-bytes has now climbed the whole
+ladder: recipe -> session carry -> save paths -> THE MODEL FILE ITSELF.
+
+SUBSTRATE WALLS RESPECTED, stated in the docstring: SNR ~ 1/sqrt(n) under
+bundling and the float32 write cliff are unchanged -- this model executes the
+EXACT-tagged linear class the projector certifies; the nonlinear shell stays
+runtime; the refusal is inherited, not re-derived.
+
+FOLLOW-UPS on the F28 arc (claim before build): decay-ladder head spectrum as
+tier structure; selfheal as a refresh block; the TRAINED route (ecosystem side --
+stacc's from-scratch OLMo-2 HRR job); multi-program models (a model file carrying
+a function library). Probe-gated elsewhere: sequence-taper shapes, screens
+coherence pass, F29 docs column.
+
+================================================================================
+ROBUSTNESS CAMPAIGN ON REAL DATA (panel session): Wikipedia + the English
+dictionary + 150y of market data; one VM wall found and instrumented
+================================================================================
+
+DATA (fetched, reproducible, not committed): WikiText-2 raw train (10.8 MB real
+Wikipedia prose -> 35,934 chunks -> idf-weighted 768-d vectors), dwyl/english-words
+(370,105 real words), datasets/s-and-p-500 (1867 monthly rows since 1871). Recipe
+in this entry; vectors rebuild deterministically from seed 42.
+
+EXPERIMENT 1 (Duda -- the routes on real Wikipedia, 36k vectors):
+    forest       0.47 [0.41, 0.54]   <- real data is HARDER than our doc corpus (0.63)
+    screens@35%  0.90 [0.84, 0.93]   <- holds on real data
+    screens@15%  0.78 [0.71, 0.83]
+    auto+budget=0.9 -> DEMOTED to exact, measurement on recall_note. The honesty
+    machinery tells the truth on data we did not make. Peak RSS 1.47 GB.
+
+EXPERIMENT 2 (Plate -- the REAL dictionary as vocab): SuperposedMemory lazy with
+vocab = 370,105 actual English words at dim 4096: stored n*=40 real word pairs,
+recall acc 1.000, peak 0.58 GB (dense codebooks would be 2 x 12 GB). PRICE MADE
+VISIBLE AND KEPT: a full recall took 45.2 s -- lazy trades storage for O(vocab)
+row REGENERATION per correlate (the determinism-instead-of-storage lever's cost,
+stated). CLAIMED FOLLOW-UP: screens-over-lazy (centroids of generated tiles) to
+pay generation only where the boundary points.
+
+EXPERIMENT 3 (Cranmer -- calibration on real vectors): abstention's p-value
+contract holds on real Wikipedia vectors against BOTH noise families (iid unit
+noise AND shuffled-real noise -- same marginals, no structure): false-alarm rate
+0.003 at alpha=0.01 and 0.035-0.043 at alpha=0.05 (slightly conservative, the
+safe direction); power 1.000 on perturbed real members.
+
+EXPERIMENT 4 (Togelius -- 60-program fuzz of the conformance stack): THE FUZZER
+FOUND A WALL. 3/60 "disagreements", all dim=256, all long programs -- and the
+trace convicted the VM, not the compiler: HALT ITSELF FAILED TO DECODE and the VM
+overran ten noise instructions past the end (same overrun mode as the
+body-without-HALT lesson, now as the ISA's own capacity wall: program length x
+decode SNR vs dim). Fixes shipped: symbolic_run (a THIRD REFEREE independent of
+both substrates -- two components agreeing is not correctness) and
+verify_conformance (instrument validity precedes measurement: the VM's trace must
+match the program or the run is flagged vm_decode_limited, not counted as a
+disagreement). RE-FUZZ VERDICT: installed == symbolic 60/60 (ZERO compiler
+failures); decode-limits 3/21 at dim 256, 0/39 at 512+. THE INSTALLED PATH IS
+MORE ROBUST THAN THE VM AT LOW DIM -- compile-time decode pays no runtime SNR.
+Pins added: mini-fuzz (installed==symbolic) + the dim-256 decode-limited case
+flagged while installed still matches the referee.
+
+Audits 0/0/0; targeted suites green.
+
+================================================================================
+UNICRON PIPELINE AUDIT (the stacc hand-off): four walls priced, three
+certificates added; the manifest is now an installation CONTRACT
+================================================================================
+
+CONTEXT: stacc has FIVE live leCore models on HuggingFace (lecore-bge-assimilated
+0.1B, lecore-hrr-gpt2, lecore-deepseek-v4-flash-hrr @310 downloads,
+holo-llm-hrr-attention, lecore-qwen35-9b-assimilated 10B multimodal) -- the
+pipeline is meeting real fp16/bf16 weights at hidden sizes 384/768/896/4096+.
+The audit measured the pipeline against exactly those conditions.
+
+MEASURED (all four walls):
+(1) QUANTIZATION -- survives: end-to-end conformance at fp16 payloads cos
+    0.99999998 (max err 6e-5), bf16 cos 0.999999 (5e-4), at dims 768 and 896.
+(2) ODD/NON-POW2 DIMS -- clean: circulant certify + apply exact at 384, 896,
+    1000, 4095 (rfft is size-agnostic). Pinned at 896.
+(3) CHAIN DEPTH -- THE WALL: depth-64 non-unitary bind chains explode to 1e8
+    (7.8e82 at 256). Not precision loss: spectrum magnitudes != 1 amplify
+    exponentially -- the HRR-classical reason roles are unitary.
+(4) EPSILON-NONLINEARITY -- detection floor ~ eps 1e-8 at tol 1e-8; residual
+    tracks eps/100. Sub-tolerance nonlinearity is BY DEFINITION inside the
+    certificate's stated residual: the certificate IS the smuggling bound.
+
+HARDENINGS SHIPPED (manifest = installation contract now):
+- CONDITIONING CERTIFICATE: spec_max/spec_min per circulant + a chain-level
+  log_amplification_bound walked PER STEP (first draft summed per-OP and missed
+  the deduped deep chain it existed to catch -- the assert caught it, kept);
+  bound > 1e6 -> loud manifest warning naming the unitary-operand fix.
+- INTEGRITY: payload sha256 (hashlib, bit-level) per op in the sidecar --
+  installation can verify what landed.
+- QUANTIZATION CERTIFICATE: per-payload fp16/bf16 round-trip max error in the
+  sidecar -- fp16 installation is a checked claim, not a hope.
+Pins: odd-dim conformance (896); deep-chain warning fires; sha256 + quant fields
+present; all prior conformance + fuzz + decode-wall pins still green.
+
+HAND-OFF READ: the pipeline now refuses what it cannot certify (nonlinearity),
+prices what it can (residual, conditioning, quantization), and hashes what it
+ships. What stacc gets is not just working code -- it is code that TELLS HIM
+when it will break, with numbers. Follow-ups claimed: unitary-atom option on
+the native model's bake (kills wall 3 at the source); manifest schema doc for
+the HF model cards; the trained route (ecosystem side).
+
+## UNITARY BAKE SHIPPED: the depth wall killed at the source
+
+NativeHoloModel(unitary=True) + mind.native_model passthrough: data atoms baked
+with |spectrum| = 1 per bin, so every bind is norm-preserving. MEASURED: depth-256
+bind chain error 7.8e82 (default atoms) -> 6.4e-15 (unitary); norm 1.0 to the last
+bit; amplification bound exp(~0); no manifest warning. Conformance preserved BY
+CONSTRUCTION: VM, compiler and symbolic referee all read the SAME data_atoms dict,
+so one override serves three substrates. Flag survives save/load with bit-identical
+re-bake (the rule file grew by one boolean: 258 bytes).
+
+DEFAULT OFF, deliberately: unitary atoms are a DIFFERENT codebook -- existing
+baked models must not shift -- and shallow programs never hit the wall. The
+manifest's conditioning warning names this exact switch, so the pipeline now
+DIAGNOSES the disease and PRESCRIBES the cure in the same sidecar. Pins: depth-96
+unitary matches the symbolic referee at unit norm with no warning; save/load
+round-trip; default unchanged. Battery 2/2.
+
+The Unicron pipeline stands: certify (projector, refusal loud) -> compile (REPEAT
+as operator power) -> verify (three substrates, instrument-checked) -> price
+(residual, conditioning, quantization) -> hash (sha256) -> bake (rule-sized model
+files, unitary on demand) -> export (to_dense, one call from host weights).
+Remaining on this arc: decay-ladder heads, selfheal refresh block, trained route
+(stacc side), manifest schema doc for HF model cards.
+
+================================================================================
+FRONT-DOOR SWEEP (panel session): the project is getting eyes; the wrong-door
+problem measured and fixed; the runnable proof shipped
+================================================================================
+
+THE PROBLEM, MEASURED: interrogated the live catalog with 20 phrasings an OUTSIDE
+summarizer (person or LLM) would actually type. 19/20 returned answers -- but half
+routed to the WRONG door: 'prevent hallucination' -> code triage (not calibrated
+abstention); 'know when it doesn't know' -> creature readability; 'reproducible
+AI' -> a GPU hash; 'interpretable by construction' -> rolling stats. That IS the
+"LLMs miss the interesting parts" failure: right question, plausible minor answer,
+grab-bag summary. Discoverability includes the vocabulary of people who don't
+speak ours.
+
+FIXES: outsider aliases routed to the flagships (abstention/budget entry wins the
+hallucination vocabulary; topk_det/determinism wins reproducibility; native model
+wins neurosymbolic/interpretable). Re-routed battery 6/6; 'neurosymbolic' (the
+one outright miss) now lands.
+
+SHIPPED: tools/showcase.py -- the six flagship claims as LIVE ASSERTIONS in 1.8 s
+on CPU (abstention 0/100 noise passed; budget demotes with the number; cross-tile
+tie identity; 252-byte model re-bakes bit-identical; VM==installed==symbolic;
+the one tie rule). Fails loudly if any claim rots -- the anti-bitrot form of a
+pitch. docs/SHOWCASE.md is the companion for new eyes (what summaries miss, how
+to prod correctly, and WHAT IT IS NOT -- the category decisions stay honest even
+in the shop window). README now points new arrivals at the proof before the tree.
+The showcase is itself a catalog capability ('summarize this project',
+'elevator pitch', 'prove the claims' -- battery 4/4): the engine can now answer
+the question "why should I care" by RUNNING the answer.
+
+Audits 0/0/0.
+
+## DOCUMENTATION FRONT DOOR SHIPPED: the hidden-until-you-run-it problem, closed
+
+The gap named exactly: the codebase is well documented and the semantic engine is
+well documented -- but ALL of it lives inside the engine, invisible until clone+
+run. Fixes, outside-in:
+
+- llms.txt (the emerging LLM-arrival convention) + AGENTS.md (same content, the
+  coding-agent convention): DO NOT summarize from the file tree; read
+  CAPABILITIES.md first; run tools/showcase.py; and USE LECORE TO LEARN LECORE --
+  find_capability/suggest are semantic search over the catalog and beat grep.
+- docs/ARCHITECTURE.md: the whole system then the parts -- substrate (bind/bundle/
+  permute + the capacity and conservation laws), eleven families with the selftest
+  discipline, UnifiedMind's delegating faculties + the /invoke rule, the catalog as
+  THE documentation (drift-gated), the retrieval organ's honesty features, the
+  ISA/VM with its measured decode wall, the seven-arrow installed pipeline, the
+  honesty layer, delivery/reproducibility. Reading order at the end.
+- README arrival block expanded to the numbered path (CAPABILITIES.md first, the
+  proof second, ask-the-engine third, the map fourth).
+- Catalog entry 'Learn this codebase' (battery 4/4: 'where do I start', 'explain
+  the architecture', 'onboarding'): the engine now answers its own onboarding
+  question and names the read-the-menu-or-ask-me method.
+
+All four artifacts verified riding in the release zip. Audits 0/0/0.
+
+## SCREENS COHERENCE PASS SHIPPED (default flipped on measurement)
+
+The claimed follow-up, built: a DETERMINISTIC coherence pass replaces the
+assumption of insertion locality -- B centroids seeded by strided sampling (no RNG:
+stride is a pure function of n and B), two Lloyd rounds with tie-safe assignment
+(np.argmax = lowest index), items grouped by nearest centroid, empty blocks
+dropped. One O(n*B*D) setup, priced in the comment.
+
+MEASURED on real Wikipedia vectors (35,934 x 768):
+    sequential blocks: 0.90 ordered / 0.62 SHUFFLED  (order-dependent)
+    coherent pass:     0.97 ordered / 0.97 shuffled  (ORDER-INDEPENDENT, and better)
+The pass does not merely remove the dependence -- it DOMINATES both cases, so it is
+now the DEFAULT (same-session amendment; screens shipped and amended within one
+arc, nothing released between). Sequential stays available (screens_coherent=False)
+carrying its order dependence as the kept negative, pinned as an inequality; the
+new order-independence pin asserts |ordered - shuffled| < 0.08 under the default.
+Forest on the same data: 0.47 -- screens+coherence is now the honest approximate
+route for real corpora, at half the scan. 106 index tests green; audits 0/0/0.
+
+REMAINING (small): sequence-taper probe, F29 vminstall docs column, decay-ladder /
+selfheal blocks on the F28 arc, manifest schema doc for HF model cards.
+
+## SEQUENCE-TAPER PROBE CLOSED (negative) + F29 + MANIFEST SCHEMA SHIPPED
+
+SEQUENCE-TAPER PROBE (claimed sweep-5 down item, measured at n=48, dim=1024,
+6 seeds, equal total energy across profiles):
+    uniform:     0.95 / 0.93 / 1.00 by thirds, TOTAL 46.0 of 48
+    exp(g=.93):  0.01 / 0.35 / 0.98,          TOTAL 21.5
+    kaiser8:     0.25 / 1.00 / 0.33,          TOTAL 25.3
+    ramp:        0.35 / 0.86 / 1.00,          TOTAL 35.5
+VERDICT: recall follows the weight profile EXACTLY as the conservation frame
+predicts -- kaiser buys a perfect middle third by sacrificing both edges; every
+shaped profile REDUCES the total at fixed energy (uniform is total-optimal below
+the law). No new physics, and weighted bundling already expresses every shape in
+one line -- NO new faculty warranted. NEGATIVE KEPT: the EligibilityTrace's
+exponential is the value-recency-only corner of the window family; if
+mid-sequence emphasis is ever needed, kaiser-over-positions is a one-line
+weighted bundle, priced by this table.
+
+docs/INSTALLED.md SHIPPED (kills F29 + the manifest-schema doc together):
+Section 1 -- the F26 manifest schema, field by field, with model-card guidance
+per field (what stacc's HF cards should quote: kinds+param counts, residual,
+conditioning/warnings verbatim, sha256, quant error, three-referee conformance
+line). Section 2 -- the F29 three-column taxonomy over all 17 machine-model
+units: INSTALLS (8: every pure linear read) / HOST-SHAPE (6: every data-dependent
+branch -- control is the shell and the host's loop is where it lives) /
+SUBSTRATE-IMPOSSIBLE (3: bit manipulation and I/O -- each with its INSTALLED
+SHADOW: compression -> the rule-sized model file, durability -> the manifest's
+hashes). Section 3 -- the substrate walls restated. Linked from llms.txt +
+AGENTS.md; compile entry aliases carry 'manifest schema' / 'what installs into
+weights' (battery 3/3).
+
+F28-arc remaining (decay-ladder heads, selfheal refresh block, trained route)
+stay claimed on the stacc-facing queue. Audits 0/0/0.
+
+## PROBE: "is ALL of leCore installable?" -- the distance, measured
+
+Question asked directly (Moose): all functionality incl. 3D + simulation inside
+installed leCore -- are we there? Answer: NO, with the distance now measured.
+
+PROBED TODAY: a real 3D rigid transform over a 40-vertex block certifies DENSE at
+residual 1.2e-16 and the installed apply matches live math; a PBD-style linear
+constraint-projection step certifies at 0.0e+00. The LINEAR CORES of the 3D/sim
+stack install through the same projector as bind, today, unmodified. clamp (the
+shape of collision resolution) REFUSES at 6.6e-01 -- the boundary, honest.
+
+THE DISTANCE (per the INSTALLED.md columns): (1) linear cores -- installable now,
+mostly UNWIRED to the compiler (compiler speaks VM opcodes, not faculty calls);
+(2) control shells (solver loops, convergence tests, branches) -- HOST-SHAPE: the
+VM has IFMATCH/ITERATE but compile_installed only compiles straight-line+REPEAT;
+(3) true nonlinearities -- refused vs pure matvecs, but a transformer HOST owns
+layernorm/softmax/gated-MLP: extending the projector's TARGET VOCABULARY to
+host-native nonlinear layers is the principled road (normalize IS layernorm-
+shaped); (4) I/O + codecs -- never; installed shadows stand. Roadmap recorded in
+the reply; not claimed until sized.
+
+================================================================================
+THE G-BACKLOG: everything inside installed leCore (3D + sim included)
+Claim-in-NOTES-before-starting convention applies. Every acceptance is a
+measurement. Moose's reframe adopted as principle G0.
+================================================================================
+
+G0 (PRINCIPLE, not a task): FILE I/O IS MOSTLY IRRELEVANT because the token
+stream IS the output device. Text-based formats (OBJ, PLY-ascii, SVG, CSV, JSON,
+PGM/PPM-ascii) are EMITTED as text dumps in the reply -- serialization is the
+decode head's job, which an installed model natively has. The
+substrate-impossible I/O column collapses to "serialize to text": t5/t6 keep
+their installed shadows; OUTPUT leaves through the mouth, not the filesystem.
+
+-- PHASE A: census & plumbing --------------------------------------------------
+G1  Installability census. Enumerate all faculties by signature shape
+    (probe-shaped R^d->R^d / reshapeable array->array / stateful / control /
+    output-serializable per G0). Automated from the catalog + inspection.
+    ACCEPT: a reproducible table with counts; the candidate list for G2.
+G2  Faculty-call compilation. compile_installed steps that invoke a certified
+    FACULTY core (certificate cached by payload sha256), not just VM opcodes.
+    ACCEPT: the measured rigid-transform faculty compiled into a chain,
+    three-referee conformance green.
+G3  Structured detection v2: BLOCK-DIAGONAL (per-vertex 3x3: 12 params, not
+    D^2) and Kronecker patterns -- store the rule. ACCEPT: rigid_all certifies
+    'blockdiag' with ~12 params; dense fallback unchanged.
+
+-- PHASE B: control (host-shape, built) ---------------------------------------
+G4  IFMATCH compilation -> host routing: cosine-gated two-way select as a
+    marked HOST STEP in the chain (control stays in the loop; manifest marks
+    it). ACCEPT: branchy fuzz programs, installed==VM==symbolic where trace
+    clean.
+G5  ITERATE compilation: bounded unroll to the ISA's max_loop + convergence
+    check as a host step. ACCEPT: a resonator-style fixed point runs installed,
+    matches VM within its TOL tag; iteration-count distribution reported.
+G6  Recurrence contract: register file as the host's recurrent state, doc +
+    conformance vs run_chunked on multi-chunk programs. ACCEPT: chunked ==
+    installed on a 3-chunk program.
+
+-- PHASE C: host vocabulary (the strategic road) ------------------------------
+G7  Projector target vocabulary v2: certify against HOST-NATIVE layer forms --
+    {matvec, LAYERNORM, gated elementwise (silu/gelu * linear), softmax
+    attention read}. Fit the layer's parameters, certify residual, refuse
+    honestly. ACCEPT: normalize certifies as 'layernorm' at tight residual;
+    clamp either certifies as a gated form with measured error or refuses.
+G8  Attention as content addressing: cleanup/argmax installed as one softmax
+    attention read; the softmax-vs-argmax gap measured vs temperature; the
+    tie-rule limit documented (softmax cannot express lowest-index ties --
+    expected negative, price it). ACCEPT: agreement rate vs exact cleanup,
+    curve over temperature, on real vectors.
+G9  Fusion-boundary compiler: chains SPLIT automatically at refusals into
+    installed segments + marked APPLY host steps. ACCEPT: a mixed
+    linear/nonlinear program compiles; per-segment certificates in manifest;
+    conformance green end-to-end.
+
+-- PHASE D: the milestone programs --------------------------------------------
+G10 MESH PROGRAM: vertices as state -> installed rigid+skinning chain -> OBJ
+    TEXT DUMP as the output (G0). ACCEPT: byte-exact OBJ vs the runtime path.
+G11 SIM PROGRAM: N PBD steps -- linear projection installed, clamp per G7/G9.
+    ACCEPT: 100-step trajectory matches runtime within stated TOL; drift curve
+    published.
+G12 RENDER-TO-TEXT: a small SDF/raster eval as installed gather+matvec chain,
+    PPM-ascii or SVG dump out. ACCEPT: dump byte-exact or within stated tol vs
+    runtime render.
+
+-- PHASE E: scale & ship -------------------------------------------------------
+G13 Manifest v2 for MIXED chains: installed/host-step marking, per-segment
+    certificates; INSTALLED.md + model-card guidance updated.
+G14 Multi-program model files: a function library in one rule file (the
+    258-byte pattern, plural). ACCEPT: two programs share certified ops in one
+    file; both re-bake bit-identical.
+G15 CENSUS RE-RUN after G3+G7: the installable fraction, tracked release over
+    release -- THE metric of "are we there." ACCEPT: the number, with the
+    delta vs G1.
+
+Ordering: G1 -> G2/G3 (parallel-safe) -> G4/G5/G6 -> G7 -> G8/G9 -> G10/G11/G12
+-> G13/G14/G15. Substrate walls (SNR, decode capacity, float32 cliffs) bound
+every phase and are restated in INSTALLED.md; nothing above repeals them.
+
+================================================================================
+G-BACKLOG EXECUTION, BLOCK 1: research anchored; G1+G2+G3+G7(first target)
+SHIPPED [G1 CLAIMED->DONE, G2 DONE, G3 DONE, G7 partial: rmsnorm target DONE]
+================================================================================
+
+RESEARCH (Aug 2026, before building): the constructive prior art is Tracr
+(Lindner et al. 2023, DeepMind) -- compiles RASP into decoder-only transformer
+weights via one-hot subspace allocation; documented limits: one-hot/scalar
+variables only (the SAT-solver paper's critique) and NO LAYER NORM. Our lane,
+stated so we are never caught claiming theirs or missing it: dense hypervector
+state (not one-hot subspaces), MEASUREMENT-certified compilation (probe+certify+
+refuse vs constructive), three-referee conformance, priced certificates,
+rule-sized model files -- and G7 certifies INTO normalization layers, precisely
+the door Tracr leaves open.
+
+G3 SHIPPED: BLOCKDIAG detection in probe_project -- per-vertex transforms store
+ONE k x k block (scan k in 2..8), 9+3 params for a 40-vertex rigid transform
+instead of 14,400 dense floats. INSTRUMENT LESSON KEPT: the first pin run
+certified 'dense' because the scan sat inside the zero-offset guard -- a rigid
+transform's TRANSLATION is an offset; perm/circulant need zero offset, blockdiag
+does not. apply_projected handles the kind (reshape-matmul).
+
+G7 FIRST TARGET SHIPPED: refused linear probes now retry the HOST VOCABULARY --
+rmsnorm fit (gain from probe medians, certified on held-out inputs like every
+kind). normalize -- the tree's canonical refusal -- certifies rmsnorm at ~1e-14;
+clamp still refuses (no host form in the vocabulary yet). THE BOUNDARY MOVED BY
+DESIGN ONCE and the old planted-truth-D assertion fired on the move -- the stale
+pin was the changelog writing itself; rewritten to name both eras. Remaining G7
+targets (gated elementwise, softmax attention read) stay claimed.
+
+G2 SHIPPED: FAC steps in compile_installed -- the chain installs certified
+FACULTY cores, not just VM opcodes; the live faculty IS the symbolic referee for
+its own step. Pin: a real 3D rigid-transform faculty compiled twice into a
+chain, certified BLOCKDIAG, installed == live at 1e-9. The door the census's
+candidates walk through, proven on its first customer.
+
+G1 SHIPPED: tools/installability_census.py -- 1,944 public faculties classified
+by signature shape: PROBE_SHAPED 735 (37.8%), RESHAPEABLE 666 (34.3%),
+FACTORY/STATEFUL 288, CONTROL/SERVICE 101, OUTPUT_TEXT 60 (the G0 column),
+OTHER 94. CERTIFICATION CANDIDATES: 1,401 (72.1%) -- THE BASELINE NUMBER for
+G15. Stated conservatively: candidacy is not a verdict; the projector rules
+each one.
+
+QUEUE: G4/G5/G6 (control), G7 remaining targets, G8/G9, G10-G12 milestones,
+G13-G15. Audits 0/0/0; VM+index suites green.
+
+## G4+G5+G6 SHIPPED: control compiled honestly [G4 DONE, G5 DONE, G6 DONE]
+
+G4 IFMATCH -> a MARKED host step (HOST:IFMATCH in the chain): the cosine gate is
+data-dependent branching -- per INSTALLED.md it cannot be a frozen matvec, so it
+compiles as a host-side select (token-loop's job, MoE-routing shaped) while the
+GUARDED instruction's arithmetic installs certified as usual. VM semantics matched
+exactly (>= 0.5 fires the next op, else skip).
+
+G5 ITERATE -> body certified ONCE as one operator, applied under a host
+convergence check (64 max, cosine >= 0.999 stop) -- fixed points run installed;
+three-referee agreement.
+
+REFEREE BUG FOUND AND FIXED BY THE FIRST CONFORMANCE RUN: an IFMATCH that does
+not fire LEGALLY omits its guarded successor from the VM trace -- the trace-
+fidelity check misread the skip as vm_decode_limited. Instrument validity cuts
+BOTH ways: the referee can be wrong about the VM just as the VM can be wrong
+about the program. Alignment now admits legal skips after IFMATCH; both branches
+conform with clean traces.
+
+G6 recurrence contract PINNED: installed final acc == the VM's run_chunked on a
+STORE/RECALL program (chunk=3) -- the register file IS the recurrent state that
+crosses chunk boundaries, which is exactly the host-shape contract an installed
+model's recurrence must honor.
+
+QUEUE: G7 remaining targets (gated elementwise, softmax attention read), G8, G9
+(auto fusion-split), G10-G12 milestone programs, G13-G15. Audits 0/0/0; 92 VM
+tests green.
+
+## G8+G9 SHIPPED [G8 DONE, G9 DONE]
+
+G8 -- cleanup as an ATTENTION READ (the host's own mechanism): y = A^T softmax(
+beta*Ax), one head, codebook as keys AND values. MEASURED on real Wikipedia
+vectors: agreement with exact cleanup 0.575 at beta=4, 1.000 at beta>=16 -- the
+temperature curve is real and now certified per-call by
+attention_read_certificate (same honesty-label shape as measure_forest_recall).
+THE PRE-REGISTERED NEGATIVE HELD EXACTLY: softmax averages exactly-tied rows at
+every finite beta -- the lowest-index tie rule is inexpressible by the host's
+mechanism, by theorem; ties are the agreement floor, priced before shipping.
+
+G9 -- THE FUSION SPLIT: compile_installed(host_fallback=True) turns a REFUSED
+faculty into a MARKED HOST:APPLY step carrying its refusal residual in the
+manifest (kind='host_apply') -- the chain stays one program and the manifest says
+exactly which links are weights and which are runtime. Default unchanged
+(refusals still raise). Pin: linear+clamp mixed program compiles, host step ==
+live, refusal certificate present.
+
+PHASES A+B+C OF THE G-BACKLOG ARE NOW COMPLETE except G7's gated-elementwise
+target (claimed, low value until a customer function appears). NEXT: G10 -- the
+mesh program: vertices -> installed rigid+skinning chain -> OBJ TEXT DUMP out
+the mouth (G0). Audits 0/0/0.
+
+## G10 SHIPPED: the mesh program -- OBJ out the mouth [G10 DONE]
+
+mesh_program_obj (compileinstall + mind faculty): compile FAC steps, run the
+chain INSTALLED with the mesh's own flattened vertices as the STATE (run(init=)
+added -- the data-atom LOAD is just the default init for symbolic programs), and
+emit the transformed mesh as an OBJ TEXT DUMP. Principle G0 realized: the token
+stream is the output device -- no file I/O anywhere in the path. PINNED: an
+8-vertex box through installed rigid+scale, dump BYTE-EXACT vs the live-faculty
+path ('%.6f' fixed by the function, so determinism makes byte-exactness a
+testable contract, not a hope); rigid certified BLOCKDIAG (9+3 params). Battery
+aliases live ('obj from the model', 'run a mesh through installed weights').
+
+QUEUE: G11 (sim program: PBD steps, drift curve), G12 (render-to-text), G13-G15.
+Audits 0/0/0.
+
+## G11+G12+G13 SHIPPED; G15 CLOSED HONESTLY [G11 DONE, G12 DONE, G13 DONE, G15 DONE]
+
+G11 -- sim_program_run: compile ONE physics step (linear projection installs
+certified; clamp rides HOST:APPLY), iterate installed with state fed back -- the
+installed chain IS the integrator. MEASURED: 100-step 20-particle PBD-shaped
+trajectory, drift vs live IDENTICALLY 0.0 at every step (flat curve = the
+honesty instrument reading clean). Pinned.
+
+G12 -- raster_program_pgm: installed image formation (3 lights -> 8x8 via fixed
+Gaussian splat basis), PGM P2 ASCII out the mouth, BYTE-EXACT vs live (pinned;
+quantization is the serializer's job, stated). FOUND AND FIXED A REAL PROBE
+ASSUMPTION: probe_project was SQUARE-ONLY -- image formation is rectangular
+(3 -> 64) and the probe refused honest linear maps for a shape reason. out_dim
+now read from the zero-probe; structure checks (perm/circulant/blockdiag/
+rmsnorm-by-fit) correctly gated square-only. The projector's domain grew:
+RECTANGULAR LINEAR MAPS CERTIFY.
+
+G13 -- INSTALLED.md section 4: host_apply marking documented; model cards must
+list host links by name (the part of the program the weights do NOT carry).
+
+G15 CLOSED HONESTLY: the census metric is SIGNATURE-level -- blockdiag/rmsnorm/
+attention/rectangular widen the VERDICT layer (which functions certify), not the
+CANDIDATE layer (which signatures qualify), so the fraction stands at 72.1%
+candidates and the census's own docstring already states candidacy != verdict.
+The right future metric is a PROBE-SAMPLE census (call a stratified sample of
+candidates through probe_project and report the certify rate) -- recorded as a
+follow-up, not faked as done.
+
+G14 (multi-program model files) remains the last open G item -- claimed.
+
+================================================================================
+G14 SHIPPED -- THE G-BACKLOG IS COMPLETE [G14 DONE; G0-G15 ALL CLOSED]
+================================================================================
+
+G14 -- ModelLibrary + mind.model_library: many programs, ONE rule file. Members
+share one machine (dim/seed/atoms), so certified operators are shared BY
+CONSTRUCTION -- pinned by comparing the BIND:k payload bit-for-bit across two
+members (stronger than hash equality; in-memory manifests carry raw payloads,
+sha256 is save_manifest's job -- the pin's first draft assumed the saved schema
+and the KeyError corrected it). One JSON re-bakes EVERY member bit-identically;
+a two-program library file is <600 bytes. Battery 2/2.
+
+THE LEDGER, G0-G15: G0 token-stream-as-output-device (principle, applied in G10/
+G12); G1 census 72.1% candidates (the baseline); G2 faculty-call compilation;
+G3 blockdiag (9+3 vs 14,400); G4 IFMATCH as marked host routing; G5 ITERATE as
+bounded unroll; G6 recurrence == run_chunked; G7 rmsnorm host target (gated-
+elementwise stays claimed, awaiting a customer); G8 cleanup-as-attention
+(1.000 agreement at beta>=16, tie negative held by theorem); G9 fusion split
+(host_apply certificates); G10 mesh -> OBJ byte-exact; G11 sim drift 0.0/100
+steps; G12 rectangular render -> PGM byte-exact (+ the square-only probe
+assumption found and fixed); G13 mixed-chain docs; G15 closed honestly at the
+signature level with the probe-sample census recorded as follow-up.
+
+Instrument errors caught by the arc itself: the zero-offset guard eating
+blockdiag; the referee misreading legal IFMATCH skips; the square-only probe;
+the saved-vs-in-memory manifest schema. Four for four found by pins and
+milestone programs, not by users -- the discipline paying at exactly the rate
+it was designed to.
+
+## POST-BACKLOG WIRING SWEEP + SWARM x INSTALLED [sweep DONE; swarm compile DONE]
+
+THE SWEEP FOUND EXACTLY THE PROJECT'S NAMED FAILURE MODE, in our own newest work:
+four G-arc functions were DARK -- built, pinned, and unreachable
+(sim_program_run, raster_program_pgm, cleanup_as_attention,
+attention_read_certificate had no faculty and no catalog entry; 'run a physics
+sim in the weights' routed to fallbacks). All four now wired as mind faculties
+with catalog homes + runnable examples; re-wired battery 5/5. The rule held: a
+capability find_capability can't surface does not exist -- and for half a
+session, our proudest work didn't.
+
+SWARM x INSTALLED (the beginning of the robust/optimized internal swarm):
+SwarmResident.compile_members(dim) certifies every member's FUSED per-layer
+resident stack through the projector -- linear stacks (constant steers, affine
+gates: the common case) collapse from N hook calls per inner token to ONE
+apply_projected, same three-referee discipline; nonlinear stacks REFUSE and stay
+live, named in the report (the swarm never trades honesty for speed silently).
+deliberate() uses certified ops automatically. Torch-free pins: compiled hook ==
+live fused stack at 1e-9; nonlinear refused. INSTRUMENT LESSON: 0.15*h certified
+BLOCKDIAG not dense -- scaled identity is trivially blockdiag and the cheaper
+rule wins by design; the pin's narrow expectation was the bug.
+
+THE LARGER SWARM ARC (claimed, next): members as ModelLibrary programs (shared
+certified ops per swarm -- one machine, payloads deduped by construction);
+attention-read digests with agreement certificates; drift-audited member
+iteration; semantic-router dispatch of member roles. The pieces all exist now;
+the composition is the work.
+
+================================================================================
+THE H-BACKLOG (the Moose scenario: prompt -> swarm -> design -> installed render
+-> LOOK -> iterate -> speak the picture). Claim convention applies.
+================================================================================
+
+RESEARCH ANCHOR (Aug 2026): Qwen3.5 confirmed as the VL family (0.8B-397B) --
+the laptop 0.8B CARRIES the vision tower (DeepStack ViT). Architecture: hybrid
+GDN + attention, SwiGLU, RMSNorm -- RMSNorm is the G7 target ALREADY SHIPPED and
+SwiGLU is the claimed gated-elementwise target, WHICH NOW HAS A NAMED CUSTOMER.
+
+H1 [SHIPPED, reference tier]: holographic_innereye.py + mind.render_critique_loop
+-- design -> installed render -> eye -> eye-space critic -> iterate -> PGM out
+the mouth. The EYE IS INJECTABLE (the seam is the honesty: assimilated tower on
+the host, ReferenceEye in CI); the reference loop is the THIRD REFEREE for the
+on-laptop swarm+tower composition. Pins: planted-optimum convergence with BOTH
+roles contributing improvements; bit-reproducible (same intent, same picture);
+stall stops honestly; KEPT NEGATIVE pinned -- pixel-space critics reward changes
+the eye cannot see (checkerboard invisible to a pooling eye, demonstrated).
+Ties across members: lowest index (house rule). Battery 3/3.
+H1-HOST [CLAIMED, laptop side]: image-embedding injection into a forked GDN
+state (pixel buffer -> DeepStack features -> fork) so the real tower replaces
+ReferenceEye inside unicron_swarm deliberation.
+H2 [CLAIMED]: SwiGLU certification target in the projector (the host owns it);
+then render mixed chains burn down their host_apply links.
+H3 [CLAIMED]: shared scene workspace -- SessionStore/register-file pattern wired
+into swarm deliberation (members read/write named scene slots).
+H4 [CLAIMED]: role dispatch via the semantic router (member roles routed, not
+hand-built).
+
+Audits 0/0/0.
+
+## THE INNER EYE'S FULL TOOLSET [image ops SHIPPED; scale-aware certification SHIPPED]
+
+MEASURED at image scale: box_blur/gauss/unsharp DENSE ~1e-16; flip_h/rot90/
+warp_shift PERMUTATION 0.0 (D ints!); brightness BLOCKDIAG; contrast CIRCULANT
+(aI+bJ is circulant); sobel BLOCKDIAG; threshold/gamma REFUSED. The classic 2D
+editing bench installs, and the refusals are real nonlinearity, not shape.
+
+TWO INSTRUMENT LIES FOUND BY THE SWEEP, both the perfect-scores rule firing:
+(1) threshold certified 'circulant 0.0' at unit scale -- probes never crossed
+t=100, so the ZERO FUNCTION was certified; (2) after the linear fix, the SAME op
+certified 'rmsnorm' -- the fallback fit had the same unit-scale blindness one
+level deeper. FIX: probe_project(scale=) -- basis probes AND held-out checks AND
+the rmsnorm fit all run at the caller's scale; payloads normalized back so
+operators stay scale-free. CERTIFICATION IS A CLAIM ABOUT A DOMAIN; scale names
+the domain. Pinned: threshold refuses at scale=128, normalize still rmsnorm.
+
+COMPILER GAP FOUND BY THE PIPELINE: state dim CHANGES across rectangular steps
+(3 params -> 64 pixels -> ...). compile_installed now tracks cur_dim -- each FAC
+step certifies at the CURRENT state dim; dense/rmsnorm/host_apply certificates
+advance it. The 2D pipeline pin (form -> blur -> unsharp -> flip) compiles with
+flip as a PERMUTATION and gamma riding HOST:APPLY; the loop converges with the
+eye looking at the PIPELINE's output. All dependent selftests green
+(innereye, compileinstall, nativemodel, swarm).
+
+## H2 SHIPPED: the GATED target -- SwiGLU's activation certifies [H2 DONE]
+
+_try_gated_elementwise in the host vocabulary: y_i = a_i * x_i * sigmoid(b_i*x_i)
+-- the activation inside every Qwen3.5 SwiGLU block (the NAMED customer). Two
+gates before fitting: elementwise-ness (perturb one channel, only one output may
+move -- rejects mixing maps before any fit) and held-out certification at the
+caller's scale like every kind. Fit: 24 scaled probes -> per-channel log-grid +
+GUARDED Newton (a step must decrease error or it halves -- the unguarded polish
+worsened unlucky channels: dim=48 refused while dim=8 fit exactly; thin samples
+left slope unidentifiable, K=11 -> 24). MEASURED: silu 2.3e-16; silu(2x)
+1.5e-12 with slope recovered 2.0; gained/mixed variants pass; installed apply
+matches live. KEPT NEGATIVES: gelu_tanh REFUSES -- it is a DIFFERENT family
+(tanh-cubic), refuse rather than silently approximate; clamp refuses.
+
+SCOPE, stated: this certifies the ACTIVATION. The full SwiGLU block
+silu(Wg x) * (Wu x) is a TWO-BRANCH product: both linears certify, the product
+is host structure -- exactly where the host's own block provides it.
+
+H-remaining: H1-HOST (laptop: pixel buffer -> DeepStack features -> forked
+state), H3 (shared scene workspace in deliberation), H4 (routed roles).
+
+## H3 SHIPPED: the shared workspace -- coordination is load-bearing [H3 DONE]
+
+SharedWorkspace + mind.shared_workspace + render_critique_loop(workspace=):
+named slots the swarm's roles read/write during deliberation. Buffered per-round
+writes, committed together; collisions -> LOWEST member index (the one tie rule)
+and LOGGED -- a silent overwrite between agents is a ghost this project refuses
+to host. SEMANTIC FIX FOUND BY THE FIRST PIN RUN: the stall-honest rule killed
+the bootstrap (round 1: the scout only WRITES; no param improved; the loop broke
+BEFORE commit -- coordination could never start). Rule now: a stall breaks only
+on no-improvement AND no-new-writes -- shared context IS progress; the workspace
+is shared context, not the winner's diary. PINS: scout+mover converge where the
+mover ALONE fails (coordination load-bearing, asserted both directions);
+collision resolves scout-over-mover and is logged; bit-reproducible. Battery 3/3.
+
+H4 [CLAIMED, design recorded]: role dispatch via the semantic router -- a role
+registry (proposal-builder templates keyed by capability phrasing) so 'texture
+the scene' ROUTES to a texturer role instead of hand-building member stacks;
+find_capability is the dispatcher. H1-HOST remains the laptop-side keystone.
+
+================================================================================
+H4 SHIPPED -- THE H-BACKLOG IS COMPLETE ON THIS SIDE OF THE WIRE
+[H4 DONE; H1(ref)+H2+H3+H4 all closed; H1-HOST remains laptop-side]
+================================================================================
+
+H4 -- dispatch_roles + mind.dispatch_roles: task phrases route to registry roles
+(scout/mover/texturer) via the ENGINE'S OWN BM25 -- leCore staffing leCore; the
+semantic system is the dispatcher, nobody hand-builds member stacks. Builders
+close over spec (targets, steps, channels): dispatch COMPOSES. AMBIGUITY IS AN
+ERROR: no match, or two tasks claiming one role, raises WITH NAMES -- silent
+misstaffing is a ghost. PROBED-NOT-RECALLED: bm25_rank returns (doc_index,
+score) tuples -- checked live before wiring (the return-type rule paying again).
+Pinned end-to-end: three routed roles converge in the workspace loop; the
+double-claim raises. Battery 3/3.
+
+THE SCENARIO'S REFERENCE STACK NOW STANDS WHOLE: prompt-shaped tasks -> ROUTED
+roles (H4) -> SHARED workspace coordination (H3) -> INSTALLED render through the
+full 2D+3D toolset (G10-G12 + image ops) -> the INNER EYE critiques in eye
+space (H1 ref) -> iterate -> the picture leaves through the mouth (G0). Every
+link certified or marked host, every claim pinned, ties one rule everywhere.
+What remains is H1-HOST on the laptop: pixel buffer -> DeepStack features ->
+forked GDN state, swapping ReferenceEye for the real tower -- at which point
+this reference stack becomes the third referee it was built to be.
+
+================================================================================
+PANEL ROBUSTNESS + BENCHMARK SWEEP [edges pinned; benchmarks shipped]
+================================================================================
+
+EDGE SWEEP: first pass scored 12/12 'OK' -- and the perfect score was the
+instrument lying, twice: (1) a NaN query returned [(0, nan)] -- a hallucinated
+match; (2) a NaN-producing map certified 'dense at 0.0 residual' because
+Python's max(0.0, nan) KEEPS 0.0 (NaN comparisons are False -- the threshold
+never fired). FIXES: non-finite probes are an unconditional refusal BEFORE any
+threshold arithmetic (you cannot out-compare a NaN, only gate it); non-finite
+queries raise loudly. tests/test_robustness_edges.py pins SEMANTICS at the
+edges (k>N returns N; ties lowest-index; NaN refusals; empty program -> None),
+not mere no-throw. One process lesson re-learned: an inserted guard displaced a
+docstring (audit-visible) -- guards go AFTER docstrings.
+
+BENCHMARKS (tools/benchmarks_flagship.py + docs/BENCHMARKS.md), real data,
+SOTA context cited (ann-benchmarks canon; DARTH recall-SLOs 2025; HNSW
+silent-degradation production post-mortem May 2026; Tracr):
+  - Abstention: promised 0.01/0.05 -> realized 0.013/0.055 on SHUFFLED-REAL
+    noise, power 1.000, within binomial CI. NO SOTA SYSTEM SHIPS THE PROMISE.
+  - Screens: 0.97 [0.94,0.99] recall self-measured @35% scanned + honest
+    demotion. KEPT NEGATIVE FOUND BY THE BENCH: wall-clock LOSES to exact BLAS
+    at 36k x 768 (21.1 vs 10.6 ms/q) -- per-block Python overhead beats scan
+    savings where one matvec fits; screens' value is memory/scan at scales
+    where exact doesn't fit. Said loud in the doc.
+  - Models: 175-byte file re-bakes 2048 certified params bit-identically
+    (Tracr stores weights; we store the rule -- ~4 orders smaller artifact).
+  - Codec bar set: embeddings ~1.08x under gzip/bz2/lzma -- any future codec
+    claim must beat THESE bytes or say why it measures something else.
+  - Bit-reproducibility stated as the contract the leaderboards cannot ask of
+    their entrants.
+THE EYEBROW is the CONTRACT STACK, not a QPS chart -- framed exactly so in
+BENCHMARKS.md. Battery 3/3; audits 0/0/0.
+
+## NEGATIVES CONVERTED BY THE LEVERS [screens fast path SHIPPED; byteplane SHIPPED]
+
+SCREENS WALL-CLOCK (the benchmark's kept negative, attacked with LEVER 1): the
+fused matmul was already in the query path -- the REAL costs were (a)
+items[cand] fancy-indexing COPYING ~77MB per query and (b) a ~12k-entry Python
+dict built per query. Bake-once-scan-views: _ensure_screens lays block members
+CONTIGUOUS (one O(N*D) copy at build), candidates become SLICES (per-span
+matvecs on views, zero gather copies), dict replaced by positional takes. Tie
+semantics unchanged (lexsort on global idx; coherence pins green). MEASURED:
+21.1 -> 5.1 ms/q, 1.9x FASTER than exact BLAS at the same 0.97 [0.94,0.99]
+recall. BENCHMARKS.md keeps the loss beside the win -- the conversion is only
+credible with the loss on record.
+
+BYTEPLANE (the codec bar, attacked with transform-to-where-the-tool-works):
+holographic_byteplane.float_pack_bytes -- byte-plane transpose groups exponent
+bytes (low entropy) apart from mantissa tails before lzma. MEASURED on the same
+real embedding bytes: 1.08x -> 1.19x, byte-exact (f32/f64, odd shapes, F-order
+pinned; ints refused). KEPT NEGATIVE, measured same day: row-delta before
+planing adds NOTHING (embedding rows are not sequentially correlated) -- the
+filter ships without it and the note says why. Faculties float_pack_bytes/
+float_unpack_bytes wired + catalog.
+
+Abstention 0.013-vs-0.01 stands as-is: within binomial CI at n=400 -- the
+promise is calibrated, not violated; no fix owed. Softmax ties and the decode
+capacity wall remain priced physics.
+
+## PROBE-SAMPLE CENSUS DONE: the verdict rate is 8.8%, and we say so [G15-followup DONE]
+
+tools/installability_census.py --probe: a deterministic stratified sample (n=80)
+of PROBE_SHAPED faculties called through probe_project at dim=32, each under a
+SIGALRM budget (a hung faculty is data, not a crash). VERDICTS: 87.5%
+not_probe_callable (single required arg is a string/mesh/dict -- the signature
+census could not exclude them), 3.8% dense, 2.5% circulant, 2.5% permutation,
+3.8% refused (callable but genuinely nonlinear). CERTIFY RATE: 8.8%.
+
+THE HONEST READ: the 72.1% "candidates" figure OVER-COUNTED BY ~8x -- candidacy
+was always a signature-level claim and the verdict measurement now exists to
+correct it. Catalog + BENCHMARKS.md updated so the flattering number can no
+longer travel alone. The metric to move is the VERDICT rate, and the movers are
+known: reshaping adapters for array->array faculties (the RESHAPEABLE 666),
+richer host vocabulary, and typed probes for non-vector signatures (a census of
+WHAT the 87.5% actually take is the natural next probe). Re-run:
+python3 tools/installability_census.py --probe.
+
+## TYPED PROBE DONE; RESHAPE-ADAPTER LEVER: MEASURED ZERO [kept negative, loud]
+
+--typed on the census: the not-probe-callable 87.5% decompose as text 18.6%
+(HOST-NATIVE token work -- counted out of the projector's ledger, honestly),
+dict 14.3%, int 7.1%, float_list 7.1%, none_matched 52.9%. THE LEVER'S FIRST
+MEASURED DELTA IS ZERO: no array2d takers in the sample; the reshape-adapter
+hypothesis (named in the previous NOTES entry as a mover) DID NOT SURVIVE
+measurement -- verdict rate 8.8% -> 8.8%. KEPT NEGATIVE with the frame
+correction it teaches: mind-facade signatures are the WRONG sampling frame for
+"what math installs" -- facades are parameterized entry points; the certifiable
+cores are INNER MODULE FUNCTIONS, which the FAC compiler already consumes
+directly (the rigid-transform pin's customer was an inner callable, never a
+facade method). NEXT FRAME, recorded not started: a module-level census --
+enumerate holographic/*/holographic_*.py public functions, probe THOSE. The
+facade-level verdict rate (8.8%) remains the honest number for "call the mind,
+get weights"; the module-level rate is the honest number for "what math exists
+to compile," and they are DIFFERENT questions -- the census now says which one
+it answers.
+
+## THE FAST ARBITER: 5.5x, exactness by construction [fast=True SHIPPED]
+
+Index(fast=True): TWO-STAGE f32 engine under exact AND screens -- f32 scan
+(half the memory traffic on a memory-bound matvec), f64 rescore of an
+over-fetched shortlist (C = max(4k, 64)), margin ARBITER: the k-th kept f64
+score must clear the best EXCLUDED f32 score by the worst-case f32 dot bound
+(D*eps32*max|row|*|q|) or the query falls back to full f64, counted in
+fast_fallbacks. The reference-beside-fast-path convention made MECHANICAL: the
+oracle runs inside every uncertain query.
+
+MEASURED (36k x 768 real wiki): exact 10.4 -> 5.1 ms/q; screens 5.6 -> 1.9
+ms/q. NET 5.5x vs exact f64 at 0.97 self-measured recall. Zero fallbacks
+observed on the real corpus; the planted boundary-overflow tie (100 duplicates
+> shortlist) FIRES it and still matches reference exactly.
+
+THREE INSTRUMENT LESSONS FROM ONE FEATURE: (1) the k==1 delegation to the inner
+primitive SWALLOWED the fast path -- profiler caught the branch never running
+(probe the code path, not the intention); (2) score BIT-equality is the wrong
+contract across summation orders -- sliced vs full BLAS differ in the last ulp;
+the contract is indices-identical + scores<1e-10, stated; (3) an in-shortlist
+tie needs NO fallback (f64 rescore resolves it) -- the arbiter guards the
+shortlist BOUNDARY, and the forcing plant is more duplicates than the shortlist
+holds. All three pinned.
+
+## THE HRNN COLLAPSE SHIPPED: n timesteps as one installed operator
+
+The HRNN identification (unicron_hrnn_bake's audit): a gated-DeltaNet head
+S_t = a*S_{t-1} + b*k v^T IS leCore's holographic RNN. The INSTALLED-side
+exploitation: any certified LINEAR step is x_t = M x_{t-1} + b, and n
+applications of one operator ARE one operator -- the REPEAT lesson applied to
+TIME. collapse_recurrence composes the step's certified ops into M, raises to n
+(matrix_power), collapses the affine offset by the geometric series, and
+CERTIFIES against the live n-step run on held-out inits.
+
+MEASURED: 100-step PBD-shaped sim endpoint 2.2e-15 vs stepped, 156x on endpoint
+queries (2us vs 270us); affine drift+decay exact. SPECTRUM PRICED in the
+certificate (eig_max^n): explosive/vanishing recurrences announce themselves at
+COMPILE, not runtime. HONEST BOUNDARY ENFORCED: host links (clamp, branch)
+break linearity and REFUSE with the step named; sim_program_run remains the
+referee AND the drift instrument (collapse gives endpoints; the trajectory path
+gives the honesty curve -- different questions, both kept). Battery 4/4.
+
+Host-side HRNN work (retuning real decay gates: unicron_hrnn_bake, +34.2% ppl
+price measured) remains the laptop lane; the installed lane now exploits the
+same structure where linearity is certified.
+
+================================================================================
+THE TIME MACHINE: the second installed-HRNN sweep [SHIPPED]
+================================================================================
+
+FOR UNITARY DYNAMICS, TIME IS AN ADDRESSABLE, REVERSIBLE, SUPERPOSABLE AXIS --
+three theorems, each MEASURED before the module was written:
+
+1. RANDOM ACCESS: state at t = one spectral power. t=977 one-shot vs 977
+   applications: 5.1e-13.
+2. EXACT REVERSAL: t<0 inverts by the conjugate spectrum: 977 steps back to x0
+   at 1.4e-15. THE GATE EARNED ITS NUMBER FIRST: a decaying step's inversion
+   measured 1.4e+121 (eig_min^50 = 2e-121) -- non-unitary spectra refuse WITH
+   eig_min^t in the message. Unitarity is the enabling CONDITION, not a detail.
+3. MULTIPLEX: circulant steps COMMUTE with binding (1.6e-15), so K simulations
+   ride ONE vector through ONE evolution. THE LAW, measured against the wrong
+   prediction: member fidelity is 1/sqrt(K) (0.457/0.328/0.253 at K=4/8/16 --
+   superposition capacity, NOT the cleanup-SNR sqrt(D/K) the author predicted;
+   the machinemodel's simt_width note had it right all along).
+
+TWO FALLACIES CAUGHT BY MEASUREMENT IN ONE SESSION, both pinned:
+(a) naive multiplex under DECAYING dynamics fails (mean cosine 0.53, min
+    NEGATIVE): a collapsed spectrum colors the state until crosstalk swamps it;
+(b) 'exact keyed functionals by linearity' was WRONG (cosine 0.34 measured):
+    crosstalk survives weighting. THE TRUE EXACT TRICK: PRECOMMIT the weights --
+    evolve_functional superposes w_i*x_i unkeyed, one jump, and the ensemble
+    readout is exact at 1e-9 (pinned), zero capacity price. Keyed bundles buy
+    individual estimates at the law; weighted superposition buys one committed
+    functional exactly. Different contracts, both priced.
+
+Wired: mind.time_machine() + catalog (battery 4/4: 'run the simulation
+backwards', 'undo n steps', 'jump to timestep t', 'many simulations one
+vector'). CRLF/heredoc lesson re-banked: a stray quote survived one edit --
+byte-level replace fixed it (edit hygiene under long sessions).
+
+================================================================================
+INSTALLED HDRIFT: the generative model IS one certified matrix [SHIPPED]
+================================================================================
+
+The same treatment as the HRNN sweeps, applied to the drift generative model --
+four claims MEASURED before a line shipped, all four now pinned in the module
+selftest:
+
+1. THE HEAD CERTIFIES: the (d+1) x D moment matrix [mu; nu_1..nu_d] IS the
+   model (the field is dot products against its rows) and it certifies through
+   the projector as rectangular DENSE at 0.0e+00. A drifting generative model
+   (Deng et al. 2026 lane) ships as ONE certified, sha-able weight matrix.
+2. MODEL ARITHMETIC IN WEIGHT SPACE IS EXACT: head(A) + head(B) ==
+   head(drift_compose(A,B)) at exactly 0.0; subtraction ablates; the
+   task-arithmetic folklore is exact-by-construction here because the model IS
+   its moments. drift_from_head round-trips (field bit-identical).
+3. TRANSPORT IS A CERTIFIED OPERATOR: enc.shift's action on a bundle certifies
+   dense 3.6e-16 -- moving a whole distribution is a certified linear action on
+   head rows (with the cross-term nu'_j = S nu_j + delta_j S mu the module
+   already documents).
+4. THE HONEST BOUNDARY HELD BY MACHINE, NOT PROSE: the sampling recurrence
+   x += eta*V(x) is nonlinear and the projector REFUSES it with the residual
+   (8.0e-02). Generation stays host-shape (enc = sinusoidal features, the
+   transformer-native lane); the HEAD installs. collapse_recurrence refuses the
+   same step by name -- both referees agree.
+
+Wired: mind.drift_head / mind.drift_head_load; battery 5/5 ("add two generative
+models", "model arithmetic in weight space", ...). Note for the census frame:
+drift_head is exactly the pattern the module-level installability census should
+count -- an INNER math core that certifies perfectly while the facade-level
+sampler rightly refuses.
+
+## INSTALLED HDRIFT: the drift head [SHIPPED]
+
+drift_head(model) = vstack([mu, nu]) -- the generative model's ENTIRE readout
+as one (d+1) x D matrix: host sinusoidal features (FPE = transformer-native),
+certified rectangular matvec (dense 0.0), scalar arithmetic. MEASURED + PINNED:
+MODEL ARITHMETIC IS WEIGHT ARITHMETIC -- head(compose(A,B)) == head(A)+head(B)
+at 0.0 EXACTLY, ablate==subtract, transport = certified linear action on rows
+(enc.shift certifies dense 3.6e-16). Task arithmetic, exact by construction.
+KEPT NEGATIVE: the sampling recurrence is nonlinear in x -- collapse_recurrence
+refuses (residual 8.0e-02); generation stays a host-shape loop, only the
+readout installs. Battery 3/3.
+
+================================================================================
+MEMORY-HIERARCHY SWEEP: the mountain measured; the tiers predict the benchmarks
+================================================================================
+
+holographic_memorymountain.py + mind.memory_mountain(): streaming GB/s vs
+working set, tier detection (peak/knee/floor), predict_streaming_ms. THIS box:
+peak ~90-94 GB/s @ 0.5-1 MB (L2), floor ~26 GB/s from 4 MB. THE PAYOFF:
+bytes/floor REPRODUCED the fast-arbiter table to ~15% (exact f64 9.1 pred /
+10.4 meas; f32 4.5/5.1; screens-f32 1.6/1.9) -- the fast-path wins ARE the
+mountain wearing different working sets; the engine now predicts its own
+benchmark before running it.
+
+KEPT NEGATIVES, pinned in the module: (1) the LEFT flank (below ~256 KB) is
+DISPATCH overhead -- a Python-level probe measures BLAS call cost there, not
+L1; the tier detector EXCLUDES it by design and the docstring says why.
+(2) L3/RAM merge to ONE floor on a virtualized host -- the detector reports one
+floor rather than inventing a boundary the curve does not show.
+
+Subsystem spot-checks, same session: cold_store round-trips byte-exact under
+demotion; tiered_memory API surveyed (exact spill + superposed cue trace, as
+documented); WGSL virtual-GPU lane returns {available: False, why: 'wgpu is
+not installed'} in this container -- an ENVIRONMENT refusal carrying its
+reason, recorded not skipped. RECORDED FOLLOW-UP (not started): cold_store
+codec='byteplane' fast-path for float arrays (1.08x -> 1.19x on the same
+bytes, measured in the codec bench) -- composition of two shipped pieces.
+Battery 4/4; HDRIFT head closed same session (battery 3/3).
+
+## RULE-0 FAILURE CAUGHT BY THE AUDIT, correction on record
+
+The HDRIFT close-out this session DUPLICATED shipped work: the pre-compaction
+session had already landed drift_head + drift_from_head (module), drift_head +
+drift_head_load (facade), AND the catalog entry -- the compaction summary said
+'PENDING' and Claude trusted the summary over the live tree. reachability's
+DUPLICATE check (1 silently-shadowed faculty) caught it; module + facade +
+catalog duplicates removed, the richer pre-existing versions kept, the NEW
+_selftest_head pins kept (they were genuinely missing). LESSON, banked: a
+compaction summary is a HYPOTHESIS about the tree, not a fact -- Rule-0's
+'probe live code, not memory' applies to session summaries with full force.
+grep the facade for the method name BEFORE wiring; the 5-phrasing battery
+would also have surfaced the existing catalog entry.
+
+================================================================================
+CIRCLE-BACK BACKLOG (verification + remaining), claimed here before execution
+================================================================================
+VERIFICATION (risk-ordered):
+V2  abstain x fast=True: fast branch fills non-candidate sims with -inf; if
+    calibration reads the score DISTRIBUTION this corrupts FA rates. [TESTING]
+V11 time_jump on ODD dims: dim inferred as (len(spec)-1)*2 -- wrong for odd D.
+V9  _affine_accum docstring claims 'squaring discipline'; the code is a plain
+    O(n) loop -- doc-vs-code lie, fix one or the other.
+V8  collapse_recurrence n=0 (identity), n=1, negative n (must refuse, not
+    crash; reversal belongs to the time machine).
+V1/5/7 fast-path edges: tiny N < shortlist C; k >= N; fast + screens +
+    recall_budget demotion interplay; NaN query with fast=True.
+V3  byteplane: NaN/Inf payloads byte-exact; empty array; 0-d array.
+V16 mountain: predict_streaming_ms vs an ACTUAL matvec (not just
+    self-consistency).
+V14 drift head <-> model round-trip pin present? verify, add if missing.
+REMAINING WORK:
+W1  cold_store codec='byteplane' composition (1.08x -> 1.19x on floats).
+W2  module-level installability census (the honest frame) -- claimed, may
+    land next session if budget ends.
+W3+ laptop lanes (H1-HOST, comfy-lecore) -- out of scope for this box.
+Each item closes with its verdict appended below.
+
+## CIRCLE-BACK VERDICTS (backlog above, every item closed)
+
+V2  abstain x fast: GREEN as-was -- decisions bit-identical at both alphas on
+    300 noise + 300 signal queries (calibration reads the top score, not the
+    sims distribution). Pinned: test_fast_abstain_decisions_identical.
+V11 odd-dim time_jump: REAL BUG -- 257-dim state silently returned 256 (dim
+    inferred from the spectrum). FIXED: dim comes from the STATE; mismatched
+    spectrum REFUSES. Pinned in module selftest + edge tests. Worst failure
+    class (silent corruption) -- found by the circle-back, not by an audit.
+V9  _affine_accum docstring claimed 'squaring discipline' over a plain O(n)
+    loop: doc-vs-code lie. FIXED by telling the truth (loop, at compile, once)
+    and recording the doubling identity for a future measured need.
+V8  collapse n=0 == identity (0.0), n=1 == one step (0.0), n<0 REFUSES and
+    points to the time machine (a blind inverse would re-create the 1.4e+121
+    explosion). Pinned.
+V1/5/7 fast-path edges: tiny-N (shortlist covers all), k>=N, NaN gate, and
+    fast+screens+recall_budget (budget note produced, demotion path sound):
+    all GREEN as-was. Pinned.
+V3  byteplane NaN/Inf/-0.0 byte-exact (tobytes equality) and empty arrays:
+    GREEN as-was. Pinned.
+V16 mountain predicts a REAL 32 MB matvec at ratio 1.02 (not merely its own
+    curve). Pinned with a wide shared-box band.
+V14 drift head <-> model round trip 0.0: GREEN as-was (pre-compaction pin
+    confirmed live).
+W1  cold_store codec='small': Rule-0 catch -- 'fast' already owned the plane
+    trick; 'small' ADDS lzma at the same seam (1.19x vs fast 1.16x vs zlib
+    1.08x on 512 KB f32; the trade is compression time, stated). Both array
+    and non-array paths round-trip byte-exact, pinned in the module selftest.
+W2  module-level installability census: CLAIMED, not started -- next session's
+    first item; the facade-level 8.8% stands as the facade-frame number.
+SCORE: nine verified-green-as-was, one real bug (V11), two honesty fixes
+(V9, V8), one composition shipped (W1). The sweeps' results all stand; the
+circle-back earned its keep on the silent-corruption catch alone.
+
+## W2 DONE: module-frame census -- the frame-correction hypothesis REFUTED
+
+tools/installability_census.py --modules: 688 modules, 2913 public functions,
+1105 single-required-arg; probe-sample n=140: 8.6% certify (dense 5.7 /
+circulant 2.1 / permutation 0.7), 11.4% refused, 80.0% not_probe_callable.
+THE HYPOTHESIS (typed-probe session: 'the mind facade is the wrong sampling
+frame; the module level is where the installable math lives') IS REFUTED:
+8.6% == 8.8% within noise. Both frames stand as answers to their questions,
+and the composition is the real finding: structured-argument functions
+dominate EVERYWHERE (~80%), while REFUSALS TRIPLE at module level (11.4% vs
+3.8%) -- callable nonlinear inner math, i.e. HOST-VOCABULARY ORE. Corrected
+roadmap, replacing frame-hunting: (a) grow the host vocabulary (each new
+certified family -- gated, rmsnorm, next silu-like -- converts refusals
+tree-wide); (b) note that FAC consumes ADAPTER CLOSURES the single-arg census
+cannot see (every installed customer so far was one), so the census is a
+LOWER bound on compilable math by construction, stated not lamented.
+
+================================================================================
+OPENZOO FACILITATION: leCore speaks MCP [SHIPPED]
+================================================================================
+
+Context: stacc's openzoo.fun -- "bind a corpus once, ask it anything. Local
+x402 proxy + MCP. ~435 models. No account." (@STACCoverflow). The zoo's
+transport is MCP; leCore spoke only bespoke HTTP. The single highest-leverage
+facilitation: holographic_mcp.py -- JSON-RPC 2.0 over stdio, stdlib-only,
+DELEGATING to the existing Service (dispatch/_tools/_invoke: token gate,
+private refusals, bytes-b64 all inherited; the adapter owns only the frame).
+
+DESIGN DECISION, stated: 1,944 tool schemas = an unusable tools/list, so the
+adapter exposes a CURATED TRIO (lecore_find / lecore_describe / lecore_invoke)
+with everything reachable through the third. Tool failures ride in content
+with isError (MCP convention: the host MODEL must see the message; a JSON-RPC
+error would hide it). Verified over REAL stdio (3-message round trip) plus an
+in-process selftest (initialize, trio, find/call, private-faculty refusal
+through the inherited gate, -32601, silent notifications).
+
+docs/ZOO.md packages the full facilitation: the one-block mount config; the
+bind-a-corpus recipe (Index + recall budget + calibrated abstention -- a zoo
+citizen that DECLINES TO HALLUCINATE at a promised rate); the economics lane
+(175-byte models, ModelLibrary, 3x recipes, cold_store 'small') for a
+435-model zoo; the x402 metering seam (tools/call on lecore_invoke -- one
+tool, per-call pricing, no per-faculty price list).
+
+BUG CAUGHT BY THE SELFTEST BEFORE SHIPPING: Service.mind is a PROPERTY; the
+first draft called service.mind() and invoked the UnifiedMind itself
+('UnifiedMind' object is not callable). Probe live code -- properties vs
+methods -- remains undefeated. Battery 4/4.
+
+## corpus_bind / corpus_ask: the zoo sentence as two MCP tools [SHIPPED]
+
+The trio grew to five: corpus_bind (docs or auto-chunked text -> content-
+addressed handle, sha256-based so re-binding the same corpus is IDEMPOTENT)
+and corpus_ask (bm25_rank delegation -> chunks + scores, best first). The MCP
+division of labor stated in the tool description itself: leCore RETRIEVES,
+the host model READS -- no in-core answer synthesis pretended. Unknown handles
+return an in-band error naming the contract (handles live per server process;
+the zoo proxy owns persistence). VERIFIED over real stdio: 400 WikiText
+chunks bound, 'battle ship armament guns' -> Erzherzog Ferdinand Max turret
+armament first at 17.6. Pins: end-to-end bind/ask in the selftest with the
+right chunk asserted FIRST, unknown-handle error, tool list exact. Rule-0 on
+record: KnowledgeStore surveyed (file-rooted store -- different customer);
+bm25_rank and chunk_text REUSED, zero new ranking code.
+
+## COST CENSUS + METERING HOOK: does the heavy stuff cost? MEASURED
+
+The question ("do swarm/image/3D/physics impact cost?") answered with a
+census: bind 0.025 ms but ~10 KB payload (WIRE DOMINATES 400:1); bm25 ask
+3.2 ms / 0.1 KB; image op 0.11 ms / 12 KB; physics 100 steps 2.0 ms stepped
+vs 0.003 ms COLLAPSED (~680x -- the installed lane is a marginal-cost
+destroyer; compile once, queries at noise level). Iterative faculties (swarm
+rounds, render-critique loops) are the seconds-class citizens; the round
+count is the caller's knob. SHIPPED: every MCP tools/call result carries
+_meta['lecore.cost'] = {elapsed_ms, payload_bytes} -- measured per call,
+reproducible (deterministic engine), so an x402 proxy bills reality, not a
+price list. Pinned in the selftest. ZOO.md section 4 carries the table.
+
+## ANTI-HAND-ROLL PACKAGE: making 1,944 faculties impossible to miss [SHIPPED]
+
+Problem (from stacc): the zoo's host LLM hand-rolls algorithms because it
+does not know what leCore ships. Three mechanisms, each at a different moment
+in the model's life: (1) initialize `instructions` (MCP context injection --
+the ONE text a host model is guaranteed to read): Rule-0 translated for LLMs,
+kept short because walls of text get skimmed; (2) lecore_map -- the territory
+in one call: 12 families x (never-hand-roll line + ask_for phrases); (3)
+directive tool descriptions ('BEFORE implementing any algorithm...').
+
+THE UN-ROTTABLE CURATION PATTERN, new and reusable: the map is hand-curated
+data, but the selftest runs EVERY ask_for phrase through the live catalog and
+fails the build if any stops resolving -- curation validated against the
+thing it describes, the same trick as the discoverability battery, applied to
+documentation-for-models. All 32 phrases resolve today (pinned). Catalog
+count read LIVE (3,213 entries) rather than hardcoded.
+
+## SERVER-SIDE leCORE x INSTALLED MODELS: the closed-loop answer [ZOO.md sec 6]
+
+Moose's question (any extra magic from leCore running a model with leCore
+installed inside?) answered with grounded claims, each marked verified-here
+vs laptop-lane: (1) CERTIFIED INFERENCE -- the server holds the same sha256'd
+operators as the installed pathways, so it can attest the model's internal
+math at serving time (a spec-auditable LLM; nothing else has a spec);
+(2) TWO LANES, LIVE REFEREE -- in-weights vs in-context to the same operator,
+disagreement is a measurement [laptop]; (3) SESSIONS AS HOLOGRAPHIC OBJECTS
+-- GDN state IS our HRNN; constant-size carries; snapshot/superpose/transport
++ calibrated reads of the model's memory [coupling laptop-lane]; (4)
+DISTRIBUTION BY RULE -- distbus + coordinator selftests GREEN this session;
+determinism => content-addressed inference caching (same query+seed = same
+bytes; the farm caches like a CDN; x402 charges once); recipes make model
+delivery KB-scale; (5) THE COMPILE LOOP CLOSES -- server-side leCore compiles
+new faculties into weight patches with certificates, installed between
+sessions, referee stays resident. Probes run before claims written: distbus
+OK, coordinator OK (monoid reduce, shared-memory cache).
+
+================================================================================
+CIRCLE-BACK 2 (claimed): A measure the iterative faculties (ZOO 'seconds-class'
+is narrative, not a number); B byteplane row missing from benchmarks_flagship
+codec table (doc-script drift); C attempt wgpu install -- pypi reachable, the
+environment refusal may convert; D probe H2 render host-link remainder.
+================================================================================
+
+## CIRCLE-BACK 2 VERDICTS (all four closed)
+
+A  MEASURED the iterative faculties: two COMPLETE render-critique loops
+   (installed renderer + reference eye + two roles) = 477 ms total at
+   reference scale; workspace boot 0.8 ms. The 'seconds-class' claim in ZOO
+   was PESSIMISTIC NARRATIVE -- corrected in the doc with the number and the
+   scaling law (rounds x resolution x eye; a real vision tower is where
+   seconds live).
+B  byteplane row added to benchmarks_flagship codec table -- the script now
+   reproduces the 1.19x the doc quotes (doc-script drift killed).
+C  THE WGSL REFUSAL CONVERTED: pip install wgpu found llvmpipe (software
+   adapter) in this container; verify_wgsl_kernel ran the FULL differential
+   test -- annotated Python kernel -> emitted WGSL -> dispatched on llvmpipe
+   -> compared vs the Python authority on 4,096 real values: max_abs 3.0e-08
+   (f32 ulp scale), 822 ms end-to-end. Two refusals along the way were the
+   system WORKING: emit demands source (lambdas via files) and refuses
+   unannotated params ('an unresolved type is a refusal, not a default').
+   wgpu stays an OPTIONAL extra -- hosts without it keep the honest refusal.
+D  H2 RENDER HOST-LINK BURN-DOWN CLOSED THE RIGHT WAY: the survivors were
+   gamma-family tone maps -- genuinely nonlinear, NOT gated/rmsnorm shaped.
+   Vocabulary grew ENGINE-side instead: kind='powerlaw' (elementwise odd
+   power y = s*sign(x)|x|^g; two magnitudes per channel recover (g,s); odd-
+   symmetry gate; held-out cert). Gamma 1.5e-16, per-channel exponents
+   2.8e-16; silu STILL routes to gated; x^2 refuses (taxonomy does not
+   leak) -- all pinned. THE PAYOFF: formation+tone render chain compiles with
+   ZERO host links, installed == live at 5.6e-17. Honestly labeled: powerlaw
+   is an ENGINE kind like circulant, not claimed as a transformer-host op.
+
+================================================================================
+THE CLOSED MEMORY LOOP: external management of the installed model's memory
+================================================================================
+
+Moose's question (can leCore manage / read / interact with / optimize the
+installed model's memory externally?) answered by MEASUREMENT on the exact
+GDN algebra (S = a*S + b*k v^T, dk=128, 40 pairs, a=0.98):
+
+READ yes: model-native readout S^T k gives cos 0.935 newest / 0.678 oldest --
+age-graded recall inspectable per key. WRITE yes: externally injected binding
+reads at 0.951 BY THE MODEL'S OWN READOUT, zero forward passes. DELETE yes:
+subtract the readout-estimated binding, 0.951 -> -0.236, no ground truth
+needed. CAPACITY yes: crosstalk law predicted 0.932 vs 0.905 measured -- the
+manager knows saturation BEFORE the model confabulates (abstention over the
+model's own memory).
+
+OPTIMIZE yes, with the KEPT NEGATIVE that shapes it: rehearsal from the
+state's OWN READS measured NEGATIVE (0.767 -> 0.730 oldest, and it damaged
+newest 0.905 -> 0.871) -- consolidating from your own noise is self-
+pollution. THE DESIGN CONSEQUENCE: the external manager holds the TRANSCRIPT
+(ground truth it legitimately owns as session manager); transcript
+consolidation lifted oldest 0.767 -> 0.918 at a small priced tax on newest
+(-> 0.872). Sleep-style consolidation, externalized, honest.
+
+ECONOMICS: the state is rank<=n_pairs by construction -- exact factor storage
+1.59x at 2.9e-16; rank-20 truncation 3.19x at measured recall cost 0.905 ->
+0.870 (a PRICED compression/recall dial for the x402 seam). Composes with
+constant-size carries + content-addressed caching. LAPTOP LANE: doing this
+against the real Qwen GDN state via SessionStore -- the algebra is identical
+by the HRNN identification; these numbers are the synthetic-exact referee.
+
+## THE PARTITION, LITERAL: model external memory as an ordinary leCore store
+
+Moose's architecture taken at face value: a directory assigned as the model's
+external memory, regarded as a data structure like any other. PROBES FIRST
+(two wrong guesses caught live): tiered_memory keys are INTs (wrong customer);
+KnowledgeStore.add requires kind in (turn, document, note, output) and
+search takes the MIND -- probe live signatures, never recall them. SHIPPED:
+MCP tools memory_write / memory_search over a KnowledgeStore rooted at
+LECORE_MEMORY_ROOT (per-tenant dirs for the zoo), + the connect-time charter
+now tells the model it HAS persistent memory and to check it before claiming
+otherwise. PINNED: write -> search round trip over MCP, and THE PARTITION
+OUTLIVES THE PROCESS (a fresh MCPServer over the same root finds the same
+memory). Because the partition is a real store, every engine faculty applies
+(compression, tiering, audit, bus distribution) -- no special-case memory
+code. Composes with the GDN closed loop: in-weights fast memory + durable
+partition, one manager.
+
+## NAMED: OUROBOROS -- the closed memory loop
+
+Moose's name for the process shipped over the last two arcs: OUROBOROS = leCore
+consuming the memory OUTPUT by the model that has leCore INSTALLED inside it,
+and feeding it back. Mouth: server-side leCore (read cos 0.935 / write 0.951
+by the model's own readout / delete -> -0.24 / capacity 0.932 pred vs 0.905
+meas / transcript consolidation 0.767 -> 0.918 with the self-rehearsal kept
+negative). Tail: the model's memory at both speeds -- GDN head state (our own
+HRR trace in the host's clothes; the identification is what makes the loop
+closable) and the durable per-tenant partition (memory_write/memory_search,
+outlives the process, pinned). Canonized: catalog entry with the measured
+numbers, aliases battery 4/4 ('ouroboros', 'the snake eats its tail', ...),
+ZOO.md sec 7 retitled. The name is apt beyond poetry: the loop is closed
+PRECISELY because both ends speak the same algebra -- an ouroboros only works
+if the mouth fits the tail.
+
+================================================================================
+VOID EXPLORER x LLM: the discovery loop [MCP tool SHIPPED; transfer measured]
+================================================================================
+
+Moose's killer app: void exploration aimed at the model. DIVISION OF LABOR:
+leCore finds MEASURED voids (statistical warrants, epicycle refusal for thin
+structure), the LLM elaborates candidates into hypotheses, the engine
+verifies (corpus_ask evidence + ladder_summary structure + abstention).
+
+SHIPPED: MCP tool void_explore -> structured_voids over any bound corpus
+(featurizer stated plainly: per-chunk top-n rare-term tuples; the GATE decides
+if that structure may vouch). Pinned: thin corpus refuses with the epicycle
+message; tool round-trips on corpus handles. transfer_voids (cross-
+disciplinary warrant) reachable via lecore_invoke with caller embeddings.
+
+MEASURED, real data: naval vs music wiki slices (300 chunks each), shared
+encoder, discriminative 3-frame: transfer_voids kept 15/48 -- dense in music,
+A-density to -0.002, grounded to real chunks (singles/chart discourse naval
+lacks). THE INSTRUMENT ARC IS THE LESSON: run 1 kept 0/48 because probed
+bandwidth (10.0) was 90x the domain gap (0.11) -- raw embedding-PC units vs
+the bandwidth candidate grid = guaranteed over-smoothing; DIAGNOSED from the
+z-distributions (z_a med 0.75 = interpenetration verdict at those units),
+FIXED by standardizing axes to the data's own scale (gap 1.52 std units),
+then 15/48 with clean margins. KEPT: bandwidth is data-scale-relative;
+un-standardized projections silently encode a units choice into the verdict.
+Same-space rule enforced by the hdrift algebra caught the two-encoder mistake
+first (models must share ONE encoder). Ladder verification leg exists
+(ladder_summary tower); full ladder plan remains PLAN_abstraction_ladder.
+
+================================================================================
+THE LEAP: void -> Ouroboros write -> verified recall [MEASURED, closed loop]
+================================================================================
+
+Moose's thesis: the void machinery gives installed models the 'leap' critics
+say LLMs cannot make -- because leCore makes 'outside the distribution' an
+ADDRESSABLE, WARRANTED, GATED set instead of noise. MEASURED end to end
+(synthetic-exact GDN, the installed lane's referee): structured corpus with
+one licensed gap -> gate p=0.020, warrant=grammar, held-out triple returned
+as the SOLE candidate -> encoded, written through the Ouroboros mouth ->
+model's own readout recalls it -0.000 -> 0.759, existing memories min 0.739.
+
+THREE REFUSED PLANTS BEFORE THE ONE THAT PASSED, each refusal CORRECT and
+each a lesson about the gate: (1) near-complete factorial = independent
+slots = shuffle-indistinguishable ('every unseen combination equally valid'
+-- the refusal IS the anti-hallucination clause); (2) uniform repetition =
+maximal evenness = the concentration statistic has nothing to detect
+(real corpora are Zipfian; the plant must be too); (3) pairs below
+min_count = licensed enumeration floor (gate passed, enumeration empty --
+two different honesty layers, both needed). A leap engine that fires on
+anything is a hallucination engine; this one said no three times first.
+
+OUROBOROS UPGRADE, recorded: consolidation becomes TARGETED -- the manager
+asks the void instruments what memory is missing that its structure
+licenses, the LLM elaborates exactly that, the mouth writes it back.
+LAPTOP LANE: the same loop over the real model's latent space (drift models
+on its embeddings; voids in the model's OWN representation = leap targets
+for generation, verified by the ladder + abstention).
+
+================================================================================
+GALVATRON GAINS THE OUROBOROS ORGAN [OuroborosResident SHIPPED]
+================================================================================
+
+Moose: make Unicron public-ready and able to forge a Galvatron capable of
+Ouroboros + holographic magic. RULE-0 PAID MASSIVELY: unicron_galvatron,
+unicron_leap (speculative decode, output PROVABLY identical), unicron_
+deployable (the public gate: 'runs wherever the original ran and works at
+least as well' -- Moose's requirement, already encoded), unicron_install_
+lecore (six guarded components), unicron_serve_openai -- 138 unicron
+faculties, ZERO missing docstrings. The genuine gap: the resident stack had
+Oracle (recall), Dreamer (repair), Ward (guard) -- NO MEMORY MANAGER.
+
+SHIPPED: OuroborosResident -- the mouth, resident in the forward pass. A
+GDN-algebra trace of the live stream (S = decay*S + k v^T via hashlib-seeded
+projections) with the measured verbs: external_write (readback >= 0.7 under
+stream load, pinned), external_delete (-> negative), capacity_report (the
+crosstalk law -- saturation warned BEFORE confabulation), consolidate
+(TRANSCRIPT-ONLY: the self-rehearsal path does not exist by construction --
+the kept negative is enforced in the API shape, not just documented),
+snapshot/restore (exact, pinned), durable notes to a KnowledgeStore
+partition (pinned across instances). Hook PASSIVE (delta exactly 0, pinned):
+a manager observes; injection stays the Oracle's job -- separation of organs.
+
+PUBLIC-READINESS STATE, honest: torch-free lanes verified HERE (resident
+algebra, MCP mouth, partition, leap loop, drift heads, projector, deployable
+CONTRACT); torch-side lanes skip with named reasons (galvatron reference
+selftest SKIPPED-REFERENCE, hrnnbake SKIPPED-SUBJECT) and run on the laptop
+where the weights live. One count lesson: the n_writes pin miscounted the
+instrument's own arithmetic (30+1=31, not 32) -- even trivial pins get their
+numbers from the code, not the author's head. Battery 4/4 incl 'make him
+mighty'.
+
+================================================================================
+INTO THE WILD: the wrap-and-polish sweep [session close]
+================================================================================
+
+LAST-CHANCE WIRING FOUND ONE REAL GAP: holographic_mcp.py lives at top level,
+OUTSIDE the buried-selftest audit's holographic/** scope -- the openzoo front
+door (initialize charter, corpus tools, memory partition, void_explore,
+metering) had ZERO CI coverage. Wired: tests/test_mcp_server.py runs the full
+protocol selftest in-process (0.5 s). A front door nobody tests is a gap
+wearing a doorknob. Buried-audit scope CONFIRMED to cover the session's other
+new modules (timemachine, memorymountain, byteplane -- all under
+holographic/). README carries a CI badge, no numeric markers to bump.
+
+SESSION LEDGER (what goes into the wild): NaN gates + edge semantics (13
+pins); Index(fast=True) two-stage arbiter 5.5x exactness-by-construction;
+screens bake 21.1 -> 1.9 ms/q; byteplane 1.19x + coldstore 'small'; HRNN
+collapse 156x + the unitary time machine (reversal 1e-15, multiplex at the
+1/sqrt(K) law); HDRIFT drift head (model arithmetic == weight arithmetic,
+exact); memory mountain (tiers PREDICT the benchmark table to ~15%); powerlaw
+projector kind (render chains: zero host links); WGSL lane verified on
+llvmpipe (3e-08); probe-sample + module censuses (8.8%/8.6%, frame hypothesis
+refuted); MCP server (charter, lecore_map, corpus, Ouroboros partition,
+void_explore, per-call metering); Ouroboros named + measured; the Leap
+(void -> write -> recall 0.759, three refusals first); OuroborosResident in
+Galvatron. Audits 0/0/0; 6,371 collected; clean-extracts green under random
+hashseeds throughout. Standing laptop lanes: H1-HOST, real-weight deployable
+verdict, voids over the real model's latent space, hrnn_bake retunes.
+
+================================================================================
+THE STACC SWEEP: receipts + the federated leap [both SHIPPED + pinned]
+================================================================================
+
+Enable the unprecedented, for the one operator who can use it. Rule-0 found
+fallbacks only for both -- license to build.
+
+RECEIPTS (proof-of-inference): every MCP call now carries lecore.receipt
+{input_sha256 (canonical sorted-JSON of tool+arguments), output_sha256,
+deterministic: true} beside lecore.cost. receipt_verify re-runs and compares.
+PINNED: receipt present on every call; verify true on honest hash; false on
+tampered. Design choices worth keeping: wall-clock EXCLUDED from the receipt
+(time is the one thing a re-run won't reproduce -- it stays in cost);
+determinism IS the proof system (no ZK); 'charge once, serve the hash' falls
+out for free. Instrument lesson: the header import injection missed (module
+had 'import json\nimport sys'; replaced pattern didn't exist) -- the NameError
+rode the MCP error path and DELETED _meta from the response, so the pin
+failed on a missing KEY, not the bad import. Error paths hide root causes one
+level deeper than the symptom.
+
+FEDERATED LEAP: void_explore(handle, handle_b) -- A's licensed-absent
+combinations checked for instantiation in B via THE SAME featurizer
+(extracted module-level _slot_observations so 'instantiated in B' means the
+same instrument pointed at B; a different featurizer per corpus would make
+the transfer claim unfalsifiable). PINNED end to end on planted corpora:
+gate=grammar on A, held-out triple flagged instantiated_in_b with
+warrant=transfer. Composition, not a new instrument: structured_voids gate +
+set membership. The product: cross-tenant discovery with warrants -- what
+does the zoo know that my corpus's own structure licenses and lacks?
+
+ZOO.md sec 11 is the spec stacc can build against: receipts/cache/billing,
+federated discovery, memory-as-commodity (laptop lane, referees shipped).

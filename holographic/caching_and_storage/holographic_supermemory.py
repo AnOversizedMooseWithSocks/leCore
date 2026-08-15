@@ -118,24 +118,84 @@ class SuperposedMemory:
     `precision` quantizes the MEMORY (the thing q(d) counts): 'f64', 'int8' (measured
     decision-free), or 'bin' (sign; ~70% capacity at 1/64 the bits)."""
 
-    def __init__(self, dim, vocab, seed=0, precision="f64"):
+    def __init__(self, dim, vocab, seed=0, precision="f64", codebook="dense"):
         self.dim, self.vocab, self.precision = int(dim), int(vocab), precision
         self.seed_ = int(seed)
-        rng_k = np.random.default_rng(seed * 2 + 1)
-        rng_v = np.random.default_rng(seed * 2 + 2)
-        self.K = rng_k.standard_normal((vocab, dim)) / np.sqrt(dim)
-        self.K /= np.linalg.norm(self.K, axis=1, keepdims=True)
-        self.V = rng_v.standard_normal((vocab, dim)) / np.sqrt(dim)
-        self.V /= np.linalg.norm(self.V, axis=1, keepdims=True)
+        # F2 (the sweep's 4-GiB finding): dense (vocab x dim) f64 codebooks cost 4 GiB EACH at
+        # 64k x 8192, when every row is a pure function of (seed, index) -- the engine's own first
+        # principle violated at its core primitive. Three modes behind one seam, dense the default
+        # and BIT-IDENTICAL to before (same rng, same arrays):
+        #   codebook='dense'    -- the original arrays; zero behavior change.
+        #   codebook='hadamard' -- rows are sign-permuted Hadamard rows, GENERATED not stored
+        #                          (O(dim) state; crosstalk exactly zero; correlate is a matvec --
+        #                          the install-preferred mode: an installed model can carry the SAME
+        #                          dictionary). Requires vocab <= 2*dim. VERIFIED premise: hadamard
+        #                          atoms as keys AND values recall 38/40 at n=40, D=1024.
+        #   codebook='lazy'     -- per-row seeded gaussian rows (default_rng((seed, i)), 67 us/row
+        #                          at dim 4096, ANY index O(1)); vocab unbounded, O(1) construction
+        #                          memory. KEPT NEGATIVE (measured): PCG64.advance() fixed-stride
+        #                          skipping does NOT reproduce the dense rows (ziggurat consumes a
+        #                          variable number of raw draws), so a bit-compatible lazy view of
+        #                          the DENSE codebook is impossible -- this mode is a DIFFERENT
+        #                          codebook, default-off, equal-QUALITY verified at the law, and
+        #                          RUNTIME-ONLY by nature (row generation is control flow).
+        self.codebook = str(codebook)
+        if self.codebook == "dense":
+            rng_k = np.random.default_rng(seed * 2 + 1)
+            rng_v = np.random.default_rng(seed * 2 + 2)
+            self.K = rng_k.standard_normal((vocab, dim)) / np.sqrt(dim)
+            self.K /= np.linalg.norm(self.K, axis=1, keepdims=True)
+            self.V = rng_v.standard_normal((vocab, dim)) / np.sqrt(dim)
+            self.V /= np.linalg.norm(self.V, axis=1, keepdims=True)
+        elif self.codebook == "hadamard":
+            if vocab > 2 * dim:
+                raise ValueError("hadamard codebook holds at most 2*dim atoms (%d > %d)" % (vocab, 2 * dim))
+            from holographic.caching_and_storage.holographic_htcodebook import HadamardCodebook
+            self._hk = HadamardCodebook(dim, seed=seed * 2 + 1)
+            self._hv = HadamardCodebook(dim, seed=seed * 2 + 2)
+            self.K = self.V = None
+        elif self.codebook == "lazy":
+            self.K = self.V = None
+        else:
+            raise ValueError("codebook must be 'dense', 'hadamard' or 'lazy'")
         self.mem = np.zeros(dim)
         self.n_stored = 0
+
+    def _rows(self, which, idx):
+        """Row gather behind the codebook seam: dense indexing, hadamard atom generation, or
+        per-row-seeded lazy rows -- all unit-normalized, all pure functions of (seed, index)."""
+        idx = np.atleast_1d(np.asarray(idx, dtype=int))
+        if self.codebook == "dense":
+            return (self.K if which == "K" else self.V)[idx]
+        if self.codebook == "hadamard":
+            cb = self._hk if which == "K" else self._hv
+            out = np.stack([cb.atom(int(i)) for i in idx]).astype(float)
+            return out / np.sqrt(self.dim)                    # hadamard rows are +-1; unit-normalize
+        base = (self.seed_ * 2 + (1 if which == "K" else 2), )
+        out = np.stack([np.random.default_rng(base + (int(i),)).standard_normal(self.dim) for i in idx])
+        return out / (np.linalg.norm(out, axis=1, keepdims=True) + 1e-12)
+
+    def _correlate_V(self, est):
+        """est @ V.T behind the seam. Dense: one matmul (bit-identical to before). Hadamard:
+        correlate against generated atoms (a matvec -- the installed form, per the projector's
+        verdict). Lazy: TILED generate-and-score, so vocab never materializes (the F18 shape)."""
+        if self.codebook == "dense":
+            return est @ self.V.T
+        if self.codebook == "hadamard":
+            A = self._rows("V", np.arange(self.vocab))
+            return est @ A.T
+        out = np.empty((est.shape[0], self.vocab))
+        tile = 4096
+        for s in range(0, self.vocab, tile):
+            out[:, s:s + tile] = est @ self._rows("V", np.arange(s, min(s + tile, self.vocab))).T
+        return out
 
     def store(self, keys, values):
         """Superpose bind(key_i, value_i) for parallel id arrays -- one batched FFT."""
         keys = np.asarray(keys, dtype=int)
         values = np.asarray(values, dtype=int)
-        kf = _RFFT(self.K[keys], axis=1)
-        vf = _RFFT(self.V[values], axis=1)
+        kf = _RFFT(self._rows("K", keys), axis=1)
+        vf = _RFFT(self._rows("V", values), axis=1)
         self.mem = self.mem + _IRFFT((kf * vf).sum(0), n=self.dim)
         self.n_stored += len(keys)
         return self
@@ -210,9 +270,9 @@ class SuperposedMemory:
             # 1.5x more information per stored bit. Float rows are NOT quoted as
             # utilization -- 64 bits/dim is a different ceiling (claim-type rule).
             m = np.sign(m) + (m == 0)
-        kf = _RFFT(self.K[keys], axis=1)
+        kf = _RFFT(self._rows("K", keys), axis=1)
         est = _IRFFT(np.conj(kf) * _RFFT(m)[None, :], n=self.dim, axis=1)
-        vhat = np.argmax(est @ self.V.T, axis=1)
+        vhat = np.argmax(self._correlate_V(est), axis=1)
         if decoder != "pic":
             return {"values": vhat, "decoder": "one-shot", "why": "matched filter"}
         limit = pic_transition(self.dim, self.vocab)
@@ -225,12 +285,12 @@ class SuperposedMemory:
         # term added back. WHY damping: undamped Jacobi updates overshoot near the
         # transition; averaging the residual halves the spectral radius of the error map.
         for _ in range(int(sweeps)):
-            B = _IRFFT(kf * _RFFT(self.V[vhat], axis=1), n=self.dim, axis=1)
+            B = _IRFFT(kf * _RFFT(self._rows("V", vhat), axis=1), n=self.dim, axis=1)
             resid = m - B.sum(0)
             look = _IRFFT(np.conj(kf) * _RFFT(resid[None, :] + B, axis=1), n=self.dim, axis=1)
             mixed = damping * look + (1.0 - damping) * est
             est = mixed
-            vhat = np.argmax(mixed @ self.V.T, axis=1)
+            vhat = np.argmax(self._correlate_V(mixed), axis=1)
         return {"values": vhat, "decoder": "pic",
                 "why": "damped PIC, load %d <= transition %d" % (self.n_stored, limit)}
 
@@ -623,6 +683,24 @@ def _selftest():
     a_one = float(np.mean(memb.recall(kb2, state_bits=1)["values"] == vb2))
     a_pic = float(np.mean(memb.recall(kb2, decoder="pic", state_bits=1)["values"] == vb2))
     assert a_pic > a_one and a_pic >= 0.9, (a_one, a_pic)
+
+    # F2 MODE PINS (dedicated RNG per plant): hadamard exact at the law with NO stored codebooks;
+    # lazy at vocab ONE MILLION -- O(1) construction, recall 1.0 at the law (dense would be 2x16GB);
+    # the vocab>2*dim hadamard refusal is pinned as the honest boundary.
+    _ns2 = 20
+    _rng_h = np.random.default_rng(7701)
+    _sh = SuperposedMemory(1024, 2048, seed=0, codebook="hadamard")
+    _kh = _rng_h.choice(2048, _ns2, replace=False); _vh = (_kh * 13 + 5) % 2048
+    assert float((_sh.store(_kh, _vh).recall(_kh)["values"] == _vh).mean()) == 1.0, "hadamard at the law"
+    assert _sh.K is None and _sh.V is None, "hadamard must store no codebook arrays"
+    _rng_l = np.random.default_rng(7702)
+    _sl = SuperposedMemory(1024, 1_000_000, seed=0, codebook="lazy")
+    _kl = _rng_l.choice(1_000_000, _ns2, replace=False); _vl = (_kl * 31 + 7) % 1_000_000
+    assert float((_sl.store(_kl, _vl).recall(_kl)["values"] == _vl).mean()) == 1.0, "lazy vocab=1M at the law"
+    try:
+        SuperposedMemory(256, 4096, codebook="hadamard"); raise AssertionError("must refuse vocab > 2*dim")
+    except ValueError:
+        pass
 
     print("holographic_superposed selftest OK -- law n*=%d holds (acc %.3f), int8 free, "
           "allocator hit D=%d for n=%d (acc %.3f), PIC %.3f>=%.3f in basin, gate fires"

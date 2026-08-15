@@ -804,14 +804,35 @@ class _UnifiedPart14:
         import holographic.mesh_and_geometry.holographic_creatureidle as _ci
         return _ci.idle_report(creature, n_frames=n_frames, amplitude=amplitude, period=period, seed=seed)
 
-    def superposed_memory(self, dim=None, vocab=256, seed=0, precision="f64"):
+    def tiered_memory(self, hot_capacity=64, half_life=32.0, vocab=256, dim=None, seed=0,
+                      policy="exact"):
+        """Adaptive SHORT/LONG-term key->value memory: exact bounded hot dict, constant-size
+        superposed LT trace + compressed exact spill, importance-driven demotion (recency-window
+        veto) and access-driven promotion. Low overhead for what matters, low disk for what
+        doesn't. See holographic_tieredmemory.TieredMemory."""
+        import holographic.caching_and_storage.holographic_tieredmemory as _tm
+        return _tm.TieredMemory(self, hot_capacity=hot_capacity, half_life=half_life,
+                                vocab=vocab, dim=dim, seed=seed, policy=policy)
+
+    def celled_memory(self, dim=4096, vocab=8192, seed=0, cell_pairs=None, keep_warm=8):
+        """Unbounded pairs over BOUNDED superposed cells -- Quilez domain repetition (opRep)
+        applied to the capacity law: the measured limit IS the tile size. One shared seed-derived
+        codebook; cells of n* pairs; warm/cold cell tiers; exact key->cell directory. MEASURED:
+        one memory 70x past the law recalls at 0.007; celled recalls 1.000. See
+        holographic_cellmemory.CelledMemory (kept negative there: a holographic directory would
+        re-buy the interference the cells escape)."""
+        import holographic.caching_and_storage.holographic_cellmemory as _cm
+        return _cm.CelledMemory(self, dim=dim, vocab=vocab, seed=seed,
+                                cell_pairs=cell_pairs, keep_warm=keep_warm)
+
+    def superposed_memory(self, dim=None, vocab=256, seed=0, precision="f64", codebook="dense"):
         """One-vector key-value store (memory = sum of bind(key, value)) with a closed-form
         capacity law, decision-free int8, and a load-GATED resonator-style PIC decoder that
         refuses past its phase transition instead of silently degrading. See
         holographic_superposed.SuperposedMemory; law/allocator: mind.memory_capacity_law /
         mind.allocate_memory_dim."""
         from holographic.caching_and_storage.holographic_supermemory import SuperposedMemory
-        return SuperposedMemory(dim or self.dim, vocab, seed=seed, precision=precision)
+        return SuperposedMemory(dim or self.dim, vocab, seed=seed, precision=precision, codebook=codebook)
 
     def memory_capacity_law(self, dim=None, vocab=256, alpha=0.90):
         """Predicted one-shot capacity n* of a superposed pair memory -- closed form with the
