@@ -1,0 +1,7 @@
+commit e92382ff2a5e8714466533a160f6609b4ef9cee8
+Author:     atimics <atimics@ratimics.com>
+AuthorDate: Sat Aug 8 12:46:56 2026 -0700
+Commit:     atimics <atimics@ratimics.com>
+CommitDate: Sat Aug 8 12:46:56 2026 -0700
+
+    Publish EXP-006 experiment evidence

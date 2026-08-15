@@ -32,14 +32,21 @@ def test_route_semantic_with_shipped_artifact():
     # free text must NEVER raise, artifact or not (embedder may be absent -> honest None)
     assert m.route_semantic("smooth a mesh") is None or isinstance(m.route_semantic("smooth a mesh"), list)
     if os.path.isfile(idx):
-        # vector path: a document's own (dequantized) vector must route to that module, fusion default on
+        # Vector path: a document's own (dequantized) vector must route to that
+        # module at the best score, fusion default on.  Quantization can make
+        # two module vectors identical, in which case the router's stable name
+        # tie-break decides display order; top-score membership is the contract.
         z = np.load(idx)
         names = [str(n) for n in z["names"]]
         i = names.index("holographic_meshsmooth")
         v = (z["q"][i].astype(np.float64) / 255.0
              * (z["hi"][i].astype(np.float64) - z["lo"][i].astype(np.float64)) + z["lo"][i].astype(np.float64))
         hits = m.route_semantic("", query_vec=v, k=3)
-        assert hits and hits[0][0] == "holographic_meshsmooth", hits
+        assert hits, hits
+        scores = dict(hits)
+        assert "holographic_meshsmooth" in scores, hits
+        assert np.isclose(scores["holographic_meshsmooth"], hits[0][1],
+                          rtol=0.0, atol=1e-12), hits
 
 
 def test_embedding_router_helper_exists_and_caches():
@@ -49,3 +56,28 @@ def test_embedding_router_helper_exists_and_caches():
     r1 = m._embedding_router()
     r2 = m._embedding_router()                                # second call must hit the cache, not re-scan
     assert r1 is r2 or (r1 is None and r2 is None)
+
+
+def test_embedding_router_collapses_duplicate_module_vectors(tmp_path):
+    """The artifact may hold several descriptions for one basename, but callers receive module names.  Rank
+    the name once by its strongest vector and collapse workflow-bone endpoints to that same identity."""
+    import numpy as np
+    from holographic.semantic_router.holographic_router import EmbeddingRouter
+
+    docs = np.eye(3, 4, dtype=np.float64)
+    lo = docs.min(1, keepdims=True)
+    hi = docs.max(1, keepdims=True)
+    q = np.round((docs - lo) / (hi - lo + 1e-12) * 255).astype(np.uint8)
+    path = tmp_path / "duplicate-index.npz"
+    np.savez(path, names=np.array(["dup", "dup", "other"]), q=q,
+             lo=lo.astype(np.float16), hi=hi.astype(np.float16),
+             mu=np.zeros(4, dtype=np.float16), pc=np.zeros((1, 4), dtype=np.float16),
+             bone_src=np.array([0], dtype=np.int32), bone_dst=np.array([2], dtype=np.int32),
+             bone_w=np.array([1.0], dtype=np.float32))
+
+    router = EmbeddingRouter(path)
+    dense = router.route(docs[1], k=3)
+    fused = router.route(docs[1], k=3, gamma=0.5)
+    assert dense[0][0] == "dup"
+    assert [name for name, _ in dense].count("dup") == 1
+    assert len({name for name, _ in fused}) == len(fused)

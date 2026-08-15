@@ -1,0 +1,12 @@
+{
+  "evaluation": {
+    "bytes": 1213410,
+    "path": "/opt/qwen35-acceptance-v6/inputs/federalist-papers.txt",
+    "sha256": "a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94"
+  },
+  "installation": {
+    "bytes": 2305300,
+    "path": "/opt/qwen35-acceptance-v6/lecore/REFERENCE.md",
+    "sha256": "0215736e206074878767647d2c4320457f958475630eeae4743dacb5d7ed8a6b"
+  }
+}

@@ -54,6 +54,13 @@ _INERT_NAMES = {"LICENSE", "NOTICE", ".gitignore", ".gitattributes"}
 _BUILD_ARTIFACT_NAMES = {"holographic_vsa_complete.zip"}
 _BUILD_DIR_PREFIXES = ("dist/", "build/", "build_pkg/")
 
+# Immutable experiment records are inputs to their contract test, not executable
+# project data. Keep these mappings narrow: an unknown artifact anywhere else must
+# still take the conservative ALL path.
+_SCOPED_DATA_PREFIXES = {
+    "experiments/qwen35_acceptance/": "tests/test_qwen_acceptance.py",
+}
+
 
 def _is_build_artifact(path):
     """True for the repo's own build outputs (the packaging zip, dist/, build/, *.egg-info/). Regenerated files, never
@@ -237,6 +244,14 @@ def affected_tests(changed_files, root="."):
             else:
                 return "ALL"                                    # a .py we can't place in the map -> don't risk it
         else:
+            scoped_test = next((test for prefix, test in _SCOPED_DATA_PREFIXES.items()
+                                if f.startswith(prefix)), None)
+            if scoped_test is not None:
+                test_module = _path_to_module(scoped_test)
+                if test_module not in modules:
+                    return "ALL"                                # mapping drifted -> fail safe
+                data_tests.add(test_module)
+                continue
             data_hits = _data_file_dependents(f, root, modules, direct, _data_cache)
             if data_hits is None:
                 return "ALL"                                    # genuinely unplaceable -> run the whole suite

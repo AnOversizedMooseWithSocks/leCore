@@ -1,0 +1,5 @@
+{
+  "ledger_mode": "single_writer",
+  "object_hash": "sha256",
+  "schema": "ilxyr.workspace.v1"
+}

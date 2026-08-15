@@ -21,9 +21,14 @@ maintenance without a measured win. If a profile ever shows the gap matters, mea
 
 import ctypes
 import hashlib
+import json
 import os
+import platform
 import shutil
 import subprocess
+import sys
+import tempfile
+import time
 
 import numpy as np
 
@@ -33,6 +38,41 @@ from holographic.io_and_interop.holographic_emit import EmitError, _as_node_and_
 CACHE_DIR = os.environ.get("LECORE_CC_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "lecore_cc"))
 
 
+def compiler_environment(cc, temp_dir=None):
+    """Minimal deterministic environment required by a system compiler.
+
+    ilxyr deliberately executes admitted experiments with ``env_clear()``.
+    GCC/Clang can still be located through Python's default search path, but
+    their driver processes need ``PATH`` to locate the linker and assembler.
+    Reconstruct that toolchain path here instead of weakening ilxyr's clean
+    execution boundary or inheriting unrelated host variables.
+    """
+    compiler_dir = os.path.dirname(os.path.realpath(cc))
+    inherited_path = os.environ.get("PATH") or os.defpath
+    path_entries = []
+    for entry in [compiler_dir] + inherited_path.split(os.pathsep):
+        if entry and entry not in path_entries:
+            path_entries.append(entry)
+    environment = {
+        "PATH": os.pathsep.join(path_entries),
+        "LC_ALL": "C",
+        "LANG": "C",
+    }
+    # These are OS runtime locations, not user configuration.  MSVC and
+    # temporary-file creation may require them on platforms that define them.
+    for name in ("SYSTEMROOT", "WINDIR"):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
+    if temp_dir is not None:
+        # An env-cleared macOS process cannot recover DARWIN_USER_TEMP_DIR.
+        # The content-addressed cache is already writable and private to this
+        # compile, so it is also a safe compiler scratch location.
+        for name in ("TMPDIR", "TEMP", "TMP"):
+            environment[name] = os.path.abspath(temp_dir)
+    return environment
+
+
 def cc_available():
     """Path of a usable C compiler, or None. Order: $CC, cc, gcc, clang -- $CC first because the person who
     set it knows their container better than we do."""
@@ -40,6 +80,67 @@ def cc_available():
         if cand and shutil.which(cand):
             return shutil.which(cand)
     return None
+
+
+def compiler_flags(opt):
+    """Deterministic supported flags for one cache/precision policy."""
+    flags = {"fast": ["-O3", "-ffp-contract=off"],
+             "safe": ["-O2", "-ffp-contract=off"]}.get(opt)
+    if flags is None:
+        raise EmitError("opt must be 'fast' or 'safe'")
+    return flags
+
+
+def compiler_identity(cc=None):
+    """JSON-able compiler/target identity bound into native cache keys."""
+    cc = cc or cc_available()
+    if cc is None:
+        raise EmitError("no C compiler found")
+    execution_environment = compiler_environment(cc)
+
+    def capture(*args):
+        try:
+            completed = subprocess.run(
+                [cc, *args], capture_output=True, text=True, check=False,
+                timeout=30, env=execution_environment)
+            return (completed.stdout + completed.stderr).strip()[:4000]
+        except (OSError, subprocess.SubprocessError) as exc:
+            # Identity probing must not turn an otherwise usable compiler into
+            # a hard failure.  The failure text still enters the cache key and
+            # evidence, so it cannot alias a successful probe.
+            return "%s: %s" % (type(exc).__name__, exc)
+
+    resolved = os.path.realpath(cc)
+    try:
+        stat = os.stat(resolved)
+        file_identity = {"bytes": int(stat.st_size),
+                         "mtime_ns": int(stat.st_mtime_ns),
+                         "inode": int(stat.st_ino)}
+    except OSError:
+        file_identity = None
+    return {
+        "path": resolved,
+        "file_identity": file_identity,
+        "version": capture("--version"),
+        "target": capture("-dumpmachine"),
+        "host_system": platform.system(),
+        "host_machine": platform.machine(),
+        "pointer_bits": ctypes.sizeof(ctypes.c_void_p) * 8,
+        "byteorder": sys.byteorder,
+        "execution_environment": execution_environment,
+    }
+
+
+def _compiler_failure(completed, command):
+    """Create a bounded diagnostic that survives the native fallback path."""
+    def bounded(value):
+        value = (value or "").strip()
+        return value if len(value) <= 8000 else value[-8000:]
+
+    return EmitError(
+        "C compiler failed with exit code %d\ncommand: %s\nstdout:\n%s\nstderr:\n%s" %
+        (completed.returncode, " ".join(command), bounded(completed.stdout),
+         bounded(completed.stderr)))
 
 
 def build_batch_source(kernel, dtype="f64"):
@@ -63,32 +164,123 @@ def build_batch_source(kernel, dtype="f64"):
     return "#include <math.h>\n#include <stddef.h>\n" + body + loop, name + "_batch", n_params
 
 
-def compile_cached(source, opt="fast", timeout=300):
-    """Compile `source` to a shared library, content-addressed under CACHE_DIR. Returns the .so path.
+def compile_cached_details(source, opt="fast", timeout=300):
+    """Compile source and return its cache/toolchain provenance.
 
-    Key is sha256(source + opt + compiler path) -- hashlib, never hash(): the cache must mean the same thing
-    across processes, and a different compiler is a different artifact. Temp-then-rename so a killed compile
-    never leaves a half-written .so behind (same discipline as zigrun)."""
+    The key binds source, flags, compiler version/binary identity, target and
+    host ABI.  Private temporary paths plus atomic publication make concurrent
+    first use safe; a reader can observe either no library or a complete one,
+    never a partially linked file.
+    """
     cc = cc_available()
     if cc is None:
         raise EmitError("no C compiler found (tried $CC, cc, gcc, clang); "
                         "install one or use holographic_zigrun where Zig exists")
-    flags = {"fast": ["-O3"], "safe": ["-O2"]}.get(opt)
-    if flags is None:
-        raise EmitError("opt must be 'fast' or 'safe'")
-    key = hashlib.sha256(("%s|%s|%s" % (source, opt, cc)).encode()).hexdigest()[:24]
+    # C permits contraction at these optimization levels even without
+    # ``-ffast-math``.  Disable it so the accelerator cannot silently change
+    # the registered operation order; throughput work must pass parity first.
+    flags = compiler_flags(opt)
+    identity = compiler_identity(cc)
+    full_key = hashlib.sha256(
+        json.dumps({"source": source, "opt": opt, "flags": flags,
+                    "compiler": identity}, sort_keys=True,
+                   separators=(",", ":")).encode()
+    ).hexdigest()
+    key = full_key[:24]
     os.makedirs(CACHE_DIR, exist_ok=True)
     so = os.path.join(CACHE_DIR, "k_%s.so" % key)
     if os.path.exists(so):
-        return so
-    csrc = os.path.join(CACHE_DIR, "k_%s.c" % key)
-    with open(csrc, "w") as fh:
-        fh.write(source)
-    tmp = so + ".tmp"
-    subprocess.run([cc] + flags + ["-shared", "-fPIC", csrc, "-o", tmp, "-lm"],
-                   check=True, capture_output=True, timeout=timeout, cwd=CACHE_DIR)
-    os.replace(tmp, so)
-    return so
+        return _cache_details(so, full_key, True, identity, flags, opt)
+
+    # Atomic replace protects readers from partial output, but it does not stop
+    # two cold compilers from publishing different byte-level builds (Mach-O
+    # UUIDs and embedded temporary paths can differ).  An atomic directory is a
+    # portable cross-process owner token.  Waiters reuse the one published
+    # artifact, making its reported digest stable as well as its contents valid.
+    lock = so + ".lock"
+    deadline = time.monotonic() + float(timeout) + 60.0
+    owner = False
+    while not owner:
+        try:
+            os.mkdir(lock)
+            owner = True
+        except FileExistsError:
+            if os.path.exists(so):
+                return _cache_details(so, full_key, True, identity, flags, opt)
+            # Recover a lock orphaned by a killed compiler only after longer
+            # than the compiler's own timeout.  Removal races are harmless.
+            try:
+                if time.time() - os.stat(lock).st_mtime > float(timeout) + 30.0:
+                    os.rmdir(lock)
+                    continue
+            except (FileNotFoundError, OSError):
+                pass
+            if time.monotonic() >= deadline:
+                raise TimeoutError("timed out waiting for C cache key %s" % key)
+            time.sleep(0.05)
+
+    try:
+        # The file may have appeared after our first check but before we won a
+        # stale lock race.  Never rebuild an already complete cache entry.
+        if os.path.exists(so):
+            return _cache_details(so, full_key, True, identity, flags, opt)
+        descriptor, csrc = tempfile.mkstemp(
+            prefix="k_%s." % key, suffix=".c", dir=CACHE_DIR)
+        os.close(descriptor)
+        tmp = csrc[:-2] + ".so.tmp"
+        try:
+            with open(csrc, "w") as fh:
+                fh.write(source)
+            command = ([cc] + flags +
+                       ["-shared", "-fPIC", csrc, "-o", tmp, "-lm"])
+            try:
+                completed = subprocess.run(
+                    command, check=False, capture_output=True, text=True,
+                    timeout=timeout, cwd=CACHE_DIR,
+                    env=compiler_environment(cc, temp_dir=CACHE_DIR))
+            except subprocess.TimeoutExpired as exc:
+                raise EmitError(
+                    "C compiler timed out after %s seconds: %s" %
+                    (timeout, " ".join(command))) from exc
+            except OSError as exc:
+                raise EmitError("could not execute C compiler %s: %s" %
+                                (cc, exc)) from exc
+            if completed.returncode != 0:
+                raise _compiler_failure(completed, command)
+            os.replace(tmp, so)
+        finally:
+            for path in (csrc, tmp):
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+        return _cache_details(so, full_key, False, identity, flags, opt)
+    finally:
+        if owner:
+            try:
+                os.rmdir(lock)
+            except FileNotFoundError:
+                pass
+
+
+def _cache_details(path, full_key, cache_hit, identity, flags, opt):
+    return {"path": path, "cache_key_sha256": full_key,
+            "cache_hit": bool(cache_hit), "compiler": identity,
+            "flags": list(flags), "opt": opt,
+            "library_sha256": _sha256_file(path)}
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def compile_cached(source, opt="fast", timeout=300):
+    """Backward-compatible path-only wrapper over ``compile_cached_details``."""
+    return compile_cached_details(source, opt=opt, timeout=timeout)["path"]
 
 
 class CKernel:

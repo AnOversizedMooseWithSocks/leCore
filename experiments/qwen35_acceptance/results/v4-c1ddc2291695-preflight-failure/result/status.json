@@ -1,0 +1,10 @@
+{
+  "exit_code": 1,
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.c1ddc2291695.5773fd8e17e2.v4.acceptance",
+  "experiment_version": 4,
+  "formal_run_started": false,
+  "schema": "lecore.qwen35-runner-status.v4",
+  "source_commit": "c1ddc22916957238c00890bec13fd0609b01b521",
+  "stage": "preflight_failure",
+  "updated_at": "2026-08-14T07:54:11.341038+00:00"
+}

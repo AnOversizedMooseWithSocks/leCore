@@ -1,0 +1,29 @@
+[load] /opt/qwen35-acceptance-v2/model
+      sanity: perplexity 16.2 on plain English (chance ~248320) -- looks correct
+      hidden 1024 | 24 layers | vocab 248320 | BF16, F32
+      inferred from tensors alone: 24 layers, hidden 1024, tied=True (confidence 1.00)
+      tokenizer: model tokenizer
+      corpus: /opt/qwen35-acceptance-v2/lecore/REFERENCE.md (2300 KB)
+      memory: 128 registers (of 1024 dimensions) and 0 searchable passages
+      NOTE: this tokenizer uses every vocabulary row, so there is nowhere to put a search index -- skipping it. Registers and everything else still install.
+
+[install] leCore into the weights
+      hardware: cpu (disabled)
+      prepend        ok    2 layers added, drift 0.000e+00 (relative 0.000e+00, first at token 0) -- bit-identical
+      registers      ok    128 reserved slots, 896 dims left to the model
+      hrnn_channel   FAIL  ValueError: cannot reshape array of size 524288 into shape (64,20,512) [heads k=16 v=16, kdim=128 vdim=128, hidden=1024, 26 layers -- the ladder is optional, continuing without it]
+      nullspace_guard ok    994 of 1024 dims safe to write (true null space)
+      router         ok    layer 0, held-out accuracy 92%
+      self_write     FAIL  novelty readout r=0.726, finds 40% of the top decile
+      state_track    ok    4 of 128 registers reserved as no-decay state slots
+      improvement    FAIL  no step improved perplexity without making generation more repetitive
+      boot_record    ok    row 248319, perplexity +0.000%
+
+[wrote] /opt/qwen35-acceptance-v2/installed-checkpoint  (2104.2 MB, BF16, F32)
+
+[verify] reloading from disk
+      sanity: perplexity 16.2 on plain English (chance ~248320) -- looks correct
+      26 layers | perplexity 20.3023 (was 20.3023) | boots as 'leCore'
+      verdict WORSE (+0.000%) | repetition 0.96 -> 0.96
+
+Next:  assess.bat        (or: python assimilation/galvatron.py /opt/qwen35-acceptance-v2/installed-checkpoint --assess out.npz)

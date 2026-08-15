@@ -27,6 +27,70 @@ stop claiming small wins. Both are fine; pretending is not.
 import numpy as np
 
 
+def _block_shape(values):
+    """Estimate a moving-block bootstrap shape from serial correlation.
+
+    Language-model token losses are a sequence, not independent draws.  Use the
+    same rule for one-model intervals and paired model deltas so a comparison
+    cannot become more confident merely by going through ``better_than``.
+    """
+    values = np.asarray(values, np.float64).reshape(-1)
+    n = len(values)
+    if n < 2:
+        return 1.0, 1
+    x = values - values.mean()
+    denom = float(x @ x)
+    if not np.isfinite(denom) or denom <= 0:
+        return 1.0, 1
+    ac = []
+    for lag in range(1, min(64, n)):
+        rho = float((x[:-lag] @ x[lag:]) / denom)
+        if not np.isfinite(rho) or rho <= 0:
+            break
+        ac.append(rho)
+    tau = max(1.0, 1.0 + 2.0 * sum(ac))
+    return tau, max(1, min(n, int(round(2.0 * tau))))
+
+
+def _bootstrap_means(values, rng, resamples, block):
+    """Moving-block bootstrap means, truncated back to the original length."""
+    values = np.asarray(values, np.float64).reshape(-1)
+    n = len(values)
+    if block <= 1:
+        return np.asarray([
+            rng.choice(values, n, replace=True).mean()
+            for _ in range(int(resamples))
+        ])
+    n_blocks = int(np.ceil(n / float(block)))
+    out = np.empty(int(resamples), np.float64)
+    for i in range(int(resamples)):
+        starts = rng.integers(0, n - block + 1, n_blocks)
+        sample = np.concatenate([values[s:s + block] for s in starts])[:n]
+        out[i] = sample.mean()
+    return out
+
+
+def summarize_nll(nll, resamples=200, alpha=0.05, seed=0):
+    """Build the standard measurement record from precomputed token NLLs.
+
+    Long-model evaluators can stream logits in bounded chunks and pass the NLLs
+    here instead of materializing ``tokens x vocabulary`` for the whole corpus.
+    """
+    nll = np.asarray(nll, np.float64).reshape(-1)
+    if len(nll) < 1:
+        raise ValueError("summarize_nll needs at least one token loss")
+    rng = np.random.default_rng(int(seed))
+    tau, block = _block_shape(nll)
+    boots = np.exp(_bootstrap_means(nll, rng, resamples, block))
+    lo = float(np.percentile(boots, 100 * alpha / 2))
+    hi = float(np.percentile(boots, 100 * (1 - alpha / 2)))
+    ppl = float(np.exp(nll.mean()))
+    return {"perplexity": ppl, "lo": lo, "hi": hi, "n_tokens": len(nll),
+            "nll": nll, "autocorr_time": float(tau), "block": int(block),
+            "effective_n": int(len(nll) / max(tau, 1.0)),
+            "half_width_pct": 100.0 * (hi - lo) / 2.0 / max(ppl, 1e-9)}
+
+
 def measure(runtime, token_ids, resamples=200, alpha=0.05, seed=0):
     """Perplexity AND its uncertainty, from the per-token likelihoods.
 
@@ -51,35 +115,13 @@ def measure(runtime, token_ids, resamples=200, alpha=0.05, seed=0):
     # TOO NARROW (half-width 10.5% against 15.2% at block 32), and every
     # confidence interval this arc quoted was overconfident by that much.
     # The block length is derived from the measured tau rather than picked.
-    rng = np.random.default_rng(int(seed))
-    x = nll - nll.mean()
-    denom = float(x @ x) or 1.0
-    ac = [float((x[:-k] @ x[k:]) / denom) for k in range(1, min(16, len(x)))]
-    tau = 1.0 + 2.0 * sum(a for a in ac if a > 0)
-    block = max(1, int(round(2.0 * tau)))
-    n = len(nll)
-    if block <= 1 or n <= 2 * block:
-        boots = np.array([np.exp(rng.choice(nll, n, replace=True).mean())
-                          for _ in range(int(resamples))])
-    else:
-        k = max(1, n // block)
-        boots = np.empty(int(resamples))
-        for i in range(int(resamples)):
-            starts = rng.integers(0, n - block, k)
-            boots[i] = np.exp(np.concatenate(
-                [nll[s:s + block] for s in starts]).mean())
-    lo = float(np.percentile(boots, 100 * alpha / 2))
-    hi = float(np.percentile(boots, 100 * (1 - alpha / 2)))
-    ppl = float(np.exp(nll.mean()))
-    return {"perplexity": ppl, "lo": lo, "hi": hi, "n_tokens": len(nll),
-            "nll": nll, "autocorr_time": float(tau), "block": int(block),
-            "effective_n": int(len(nll) / max(tau, 1.0)), "half_width_pct": 100.0 * (hi - lo) / 2.0 / max(ppl, 1e-9)}
+    return summarize_nll(nll, resamples=resamples, alpha=alpha, seed=seed)
 
 
 def better_than(a, b, alpha=0.05, seed=0, resamples=400):
     """Is model A better than model B, or is the difference undecidable?
 
-    PAIRED bootstrap over the same positions -- the two models saw the same
+    PAIRED MOVING-BLOCK bootstrap over the same positions -- the two models saw the same
     tokens, so the difference per position is the statistic, and pairing removes
     the probe-choice variance that swamps everything otherwise. This is why a
     paired test can call a 2% difference while the unpaired intervals overlap by
@@ -90,8 +132,8 @@ def better_than(a, b, alpha=0.05, seed=0, resamples=400):
                          % (len(na), len(nb)))
     d = na - nb
     rng = np.random.default_rng(int(seed))
-    boots = np.array([rng.choice(d, len(d), replace=True).mean()
-                      for _ in range(int(resamples))])
+    tau, block = _block_shape(d)
+    boots = _bootstrap_means(d, rng, resamples, block)
     lo = float(np.percentile(boots, 100 * alpha / 2))
     hi = float(np.percentile(boots, 100 * (1 - alpha / 2)))
     pct = 100.0 * (a["perplexity"] - b["perplexity"]) / max(b["perplexity"], 1e-9)
@@ -107,7 +149,9 @@ def better_than(a, b, alpha=0.05, seed=0, resamples=400):
     else:
         verdict = "WORSE"
     return {"verdict": verdict, "delta_pct": pct, "ci_lo_nats": lo,
-            "ci_hi_nats": hi, "n_tokens": len(d)}
+            "ci_hi_nats": hi, "n_tokens": len(d),
+            "autocorr_time": float(tau), "block": int(block),
+            "effective_n": int(len(d) / max(tau, 1.0))}
 
 
 def tokens_needed(reference, effect_pct, alpha=0.05):

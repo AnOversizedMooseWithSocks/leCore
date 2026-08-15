@@ -1,20 +1,20 @@
 """install.py -- put leCore into a real model, in one pass, and verify it.
 
-    python assimilation/install.py MODEL_DIR OUT_DIR [--doc FILE] [--registers N]
+    python assimilation/install.py --experimental MODEL_DIR OUT_DIR [--doc FILE]
 
 THIS REPLACES assimilate -> repair -> imbue. That pipeline changed 18 of 265
 tensors, repair reverted 12 of them as harmful, and the surviving difference sat
-inside the measurement noise -- 149 seconds to demonstrate nothing. Nothing here
-edits the original tensors at all: two blank layers go in FRONT, everything
-leCore adds lives in them, in unused vocabulary rows, or in reserved directions
-of the recurrent state.
+inside the measurement noise -- 149 seconds to demonstrate nothing. The default
+treatment preserves every trained tensor: blank layers go in FRONT, zero-output
+memory channels are appended, and searchable data plus the manifest live in
+sidecars. Weight-resident metadata is a separate research-only opt-in.
 
 WHAT GETS INSTALLED, each step measured and REVERTED if it regresses:
     prepend       2 blank layers, output BIT-IDENTICAL (verified, not assumed)
-    boot_record   one embedding row, scaled and clamped, 4 bits per slot
+    boot_record   sidecar manifest (weight-resident low bits are research-only)
     registers     reserved key directions -- permanent memory in the state
     router        a discriminant on layer 0 that decides when to use a capability
-    memory_index  passage addresses in rows the tokenizer never emits
+    memory_index  passage addresses in a content-addressed sidecar
     improvement   a closed-form correction, step chosen by measuring
 
 THE ARTIFACT is an ordinary checkpoint: same tensor names, same dtype, a config
@@ -23,6 +23,7 @@ converts and runs anywhere a normal model does.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -70,6 +71,9 @@ def _free_rows(model_dir, n_vocab, need):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--experimental", action="store_true",
+                    help="acknowledge that the layer-prepending installer has "
+                         "not yet completed the full Qwen3.5-0.8B acceptance run")
     ap.add_argument("model_dir", nargs="?", default="work/original",
                     help="the model to assimilate (default: work/original, "
                          "resolved from where you are standing)")
@@ -92,7 +96,15 @@ def main():
                     help="blank layers to add (default: ~8%% of depth, so the "
                          "intervention is proportionate on a 4-layer fixture "
                          "and on a 61-layer model alike)")
+    ap.add_argument(
+        "--weight-resident-metadata", action="store_true",
+        help="RESEARCH ONLY: write search addresses and the boot manifest into "
+             "vocabulary/output rows and low weight bits. The default keeps "
+             "metadata in sidecars so the base model's logits remain unchanged.")
     a = ap.parse_args()
+    if not a.experimental:
+        ap.error("the layer-prepending installer is experimental; pass "
+                 "--experimental after reviewing assimilation/README.md")
 
     from holographic.io_and_interop.holographic_gdnruntime import (
         GDNRuntime, load_runtime, load_weights_dir)
@@ -229,22 +241,31 @@ def main():
     # CHOOSE BOTH NUMBERS FROM THE MODEL, because they are properties of the
     # model and not decisions a user should have to make. REGISTERS cost one
     # hidden dimension each and 120 of 128 still worked, so an eighth is
-    # generous and safe. PASSAGES are limited by the vocabulary rows the
-    # tokenizer never emits -- there is no reason to use fewer than exist.
-    all_free, top = _free_rows(a.model_dir, V, 100000)
+    # generous and safe. PASSAGES use the width-derived sidecar byte budget;
+    # vocabulary capacity matters only for the explicit research-only mode.
+    all_free = (_free_rows(a.model_dir, V, 100000)[0]
+                if a.weight_resident_metadata else [])
     n_reg = int(a.registers) or max(8, int(cfg["hidden"]) // 8)
     # DO NOT LET THE ROW COUNT CAP THE PASSAGE COUNT. This read
     # min(len(all_free), len(passages)) -- so a tokenizer with no free rows gave
     # ZERO passages, and the sidecar index that needs no rows at all was handed
     # an empty list and dutifully built nothing. THE CONSTRAINT OF ONE STORAGE
     # SCHEME WAS SILENTLY LIMITING A DIFFERENT ONE.
-    n_pass = int(a.passages) or (len(passages) if not all_free
-                                 else min(len(all_free), len(passages)))
+    n_pass = int(a.passages) or len(passages)
     passages = passages[:n_pass]
-    rows = all_free[:len(passages)] if all_free else []
+    rows = (all_free[:len(passages)]
+            if a.weight_resident_metadata else None)
     print("      memory: %d registers (of %d dimensions) and %d searchable "
           "passages" % (n_reg, cfg["hidden"], len(passages)))
-    if not rows:
+    if a.weight_resident_metadata and len(rows) < len(passages):
+        raise SystemExit(
+            "--weight-resident-metadata needs %d tokenizer-undefined rows, but "
+            "only %d are available" % (len(passages), len(rows)))
+    if not a.weight_resident_metadata:
+        print("      NOTE: searchable memory and the boot manifest will be "
+              "stored beside the checkpoint. No vocabulary embedding, output "
+              "logit, or low-bit weight surface will be changed.")
+    elif not rows:
         # THE INDEX DOES NOT HAVE TO LIVE IN THE WEIGHTS. Baking passages into
         # unused vocabulary rows is one way to store an index, and on a
         # tokenizer that uses every row it is NO way -- which is how a real
@@ -266,8 +287,9 @@ def main():
         rows = None
 
     def show(s):
-        print("      %-14s %-5s %s" % (s["step"], "ok" if s["ok"] else "FAIL",
-                                       s["detail"]))
+        status = ("skip" if s.get("skipped") else
+                  "ok" if s["ok"] else "FAIL")
+        print("      %-14s %-5s %s" % (s["step"], status, s["detail"]))
 
     print("\n[install] leCore into the weights")
     # RUN THE INSTALL THROUGH leCore ITSELF. Unicron assimilating a model should
@@ -288,7 +310,8 @@ def main():
                           passages=passages, router_positive=pos,
                           router_negative=neg, n_registers=n_reg,
                           prepend=a.prepend,       # None -> derived from depth
-                          progress=show, mind=mind)
+                          progress=show, mind=mind, memory_rows=rows,
+                          weight_resident_metadata=a.weight_resident_metadata)
     if rep.get("aborted"):
         raise SystemExit("[install] ABORTED: %s" % rep["aborted"])
 
@@ -351,6 +374,9 @@ def main():
                    "memory_index": rep.get("memory_index"),
                    "improvement": rep.get("improvement"),
                    "boot_row": rep.get("boot_row"),
+                   "boot_record": rep.get("boot_record"),
+                   "weight_resident_metadata":
+                       rep.get("weight_resident_metadata", False),
                    "baseline_perplexity": rep.get("baseline_perplexity"),
                    "final": rep.get("final")}, f, indent=2)
 
@@ -393,19 +419,34 @@ def main():
                 _v = _cap["x"].astype(_np.float32)
                 _V.append(_v / (_np.linalg.norm(_v) + 1e-30))
             _M = _np.stack(_V)
-            _np.savez_compressed(os.path.join(a.out_dir, "lecore_index.npz"),
-                                 vectors=_M,
-                                 passages=_np.array(passages, dtype=object),
-                                 allow_pickle=True)
+            _index_path = os.path.join(a.out_dir, "lecore_index.npz")
+            _np.savez_compressed(_index_path, vectors=_M,
+                                 passages=_np.asarray(passages, dtype=_np.str_))
+            with open(_index_path, "rb") as _fh:
+                _index_sha = hashlib.sha256(_fh.read()).hexdigest()
             rep["sidecar_index"] = {"passages": len(passages),
                                     "megabytes": round(_M.nbytes / 1e6, 2),
-                                    "file": "lecore_index.npz"}
+                                    "file": "lecore_index.npz",
+                                    "sha256": _index_sha}
+            if isinstance(rep.get("memory_index"), dict):
+                rep["memory_index"].update(
+                    {"file": "lecore_index.npz", "sha256": _index_sha})
+            # The index is built after checkpoint export so its digest cannot
+            # be known by the first manifest write. Amend the manifest now;
+            # otherwise lecore.json claims a sidecar without binding its bytes.
+            _manifest_path = os.path.join(a.out_dir, "lecore.json")
+            with open(_manifest_path, encoding="utf-8") as _fh:
+                _manifest = json.load(_fh)
+            _manifest["memory_index"] = rep.get("memory_index")
+            _manifest["sidecar_index"] = rep["sidecar_index"]
+            with open(_manifest_path, "w", encoding="utf-8") as _fh:
+                json.dump(_manifest, _fh, indent=2)
             print("      index         ok    %d passages beside the model "
                   "(%.2f MB, lecore_index.npz)"
                   % (len(passages), _M.nbytes / 1e6))
         except Exception as _exc:
-            print("      index         FAIL  %s: %s"
-                  % (type(_exc).__name__, str(_exc)[:60]))
+            raise RuntimeError("sidecar index emission failed: %s: %s" %
+                               (type(_exc).__name__, str(_exc)[:300])) from _exc
 
 
     print("\n[verify] reloading from disk")
@@ -432,10 +473,13 @@ def main():
     rt3, c3 = load_runtime(a.out_dir)
     w3 = load_weights_dir(a.out_dir)
     m3 = measure(rt3, eval_ids)
-    try:
-        seed = boot(w3)["record"].seed
-    except Exception as exc:
-        seed = "FAILED (%s)" % exc
+    if a.weight_resident_metadata:
+        try:
+            seed = boot(w3)["record"].seed
+        except Exception as exc:
+            seed = "FAILED (%s)" % exc
+    else:
+        seed = "leCore (lecore.json sidecar)"
     print("      %d layers | perplexity %.4f (was %.4f) | boots as %r"
           % (c3["n_layers"], m3["perplexity"],
              rep["baseline_perplexity"], seed))

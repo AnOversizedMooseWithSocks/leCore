@@ -101,12 +101,29 @@ def _imports(path):
         elif isinstance(node, ast.ImportFrom):
             if node.module:
                 names.add(node.module.split(".")[-1])
+            # ``from package import module`` names BOTH the package and the
+            # imported child module.  Counting only node.module made a real
+            # UnifiedMind door such as
+            # ``from holographic.io_and_interop import holographic_vsaroles``
+            # invisible to this audit.  Engine modules use the
+            # ``holographic_*`` prefix, which distinguishes them from imported
+            # functions and classes without needing the module table here.
+            for alias in node.names:
+                imported = alias.name.split(".")[-1]
+                if imported.startswith("holographic_"):
+                    names.add(imported)
     return names
 
 
 def analyse(root="."):
     """Returns (dark, catalog_only, kept_negative): each a sorted list of module basenames."""
-    modules = {}                                          # basename -> path, engine modules only
+    # Several historical modules share a basename in different packages.  A
+    # basename->single-path dict made the audit depend on os.walk insertion
+    # order: one checkout saw misc/holographic_measure (the real ablation
+    # caller), another saw io_and_interop/holographic_measure and called
+    # holographic_ablate dark.  Aggregate every path for the coarse basename
+    # graph the report intentionally uses.
+    modules = {}                                          # basename -> [paths], engine modules only
     for dotted, rel in discover_modules(root).items():
         rel_slash = rel.replace("\\", "/")
         base = dotted.split(".")[-1]
@@ -114,21 +131,26 @@ def analyse(root="."):
             continue
         if rel_slash.endswith("__init__.py"):             # a package, not a module -- nothing "imports" it by name
             continue
-        modules[base] = os.path.join(root, rel)
+        modules.setdefault(base, []).append(os.path.join(root, rel))
 
     importers = {b: set() for b in modules}
-    for base, path in modules.items():
-        for target in _imports(path):
-            if target in importers and target != base:
-                importers[target].add(base)
+    for base, paths in modules.items():
+        for path in paths:
+            for target in _imports(path):
+                if target in importers and target != base:
+                    importers[target].add(base)
 
     dark, catalog_only, kept_negative = [], [], []
     for base in sorted(modules):
         if base in EXEMPT:
             continue
         who = importers[base]
-        doc = _module_docstring(modules[base]).upper()
-        if any(mark in doc for mark in _NEGATIVE_MARKERS):
+        docs = [_module_docstring(path).upper() for path in modules[base]]
+        # A shared basename is a documented dead end only when EVERY module
+        # behind it says so.  One negative sibling must not hide another live,
+        # unwired capability.
+        if docs and all(any(mark in doc for mark in _NEGATIVE_MARKERS)
+                        for doc in docs):
             if not who:
                 kept_negative.append(base)                # documented dead end -- fine, but keep it visible
             continue

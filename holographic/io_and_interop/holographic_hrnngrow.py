@@ -45,8 +45,15 @@ def grow_channel(weights, cfg, a_log=-4.0, gain=0.0, layers=None, seed=0):
     r = Vh // Kh
     rng = np.random.default_rng(int(seed))
     grown = []
-    for L in range(int(c["n_layers"])):
-        pre = "model.layers.%d.linear_attn." % L
+    emb = next((key for key in weights
+                if key.endswith("embed_tokens.weight")), None)
+    if emb is None:
+        raise ValueError("cannot locate the language-model tensor root")
+    root = emb[:-len("embed_tokens.weight")]
+    selected = (range(int(c["n_layers"])) if layers is None
+                else [int(layer) for layer in layers])
+    for L in selected:
+        pre = "%slayers.%d.linear_attn." % (root, L)
         if pre + "A_log" not in w:
             continue
 
@@ -73,8 +80,25 @@ def grow_channel(weights, cfg, a_log=-4.0, gain=0.0, layers=None, seed=0):
         else:
             A = np.asarray(w[pre + "in_proj_qkv.weight"], np.float64)
             s = float(np.std(A)) * 0.5
-            block = np.vstack([_rows(dk, s), _rows(dk, s), _rows(r * dv, s)])
-            w[pre + "in_proj_qkv.weight"] = np.vstack([A, block]).astype(
+            # Split checkpoints exist in two layouts. The common Qwen layout
+            # groups [q,k,v...] per key head; some converted checkpoints use
+            # flat [all q][all k][all v] blocks. Growing under the wrong order
+            # preserves the total shape but silently reassigns trained rows.
+            if str(c.get("qkv_order", "grouped")) == "flat":
+                q_end = Kh * dk
+                k_end = q_end + Kh * dk
+                grown_qkv = np.vstack([
+                    A[:q_end], _rows(dk, s),
+                    A[q_end:k_end], _rows(dk, s),
+                    A[k_end:], _rows(r * dv, s),
+                ])
+            else:
+                grown_qkv = np.vstack([
+                    A.reshape(Kh, 2 * dk + r * dv, hidden),
+                    np.vstack([_rows(dk, s), _rows(dk, s),
+                               _rows(r * dv, s)])[None, :, :],
+                ]).reshape(-1, hidden)
+            w[pre + "in_proj_qkv.weight"] = grown_qkv.astype(
                 np.asarray(weights[pre + "in_proj_qkv.weight"]).dtype)
             Z = np.asarray(w[pre + "in_proj_z.weight"], np.float64)
             w[pre + "in_proj_z.weight"] = np.vstack(
@@ -112,6 +136,14 @@ def grow_channel(weights, cfg, a_log=-4.0, gain=0.0, layers=None, seed=0):
                         cw[k_end:], _ident(r * dv)])
         w[pre + "conv1d.weight"] = cw.astype(
             np.asarray(weights[pre + "conv1d.weight"]).dtype)
+        bias_key = pre + "conv1d.bias"
+        if bias_key in w:
+            cb = np.asarray(w[bias_key])
+            w[bias_key] = np.concatenate([
+                cb[:q_end], np.zeros(dk, cb.dtype),
+                cb[q_end:k_end], np.zeros(dk, cb.dtype),
+                cb[k_end:], np.zeros(r * dv, cb.dtype),
+            ])
 
         # --- THE SLOW DECAY: this is what makes it an HRNN channel ---
         for key, fill in ((pre + "A_log", float(a_log)),
@@ -130,8 +162,9 @@ def grow_channel(weights, cfg, a_log=-4.0, gain=0.0, layers=None, seed=0):
             np.asarray(weights[pre + "out_proj.weight"]).dtype)
         grown.append(L)
 
-    c["linear_num_key_heads"] = Kh + 1
-    c["linear_num_value_heads"] = Vh + r
+    if grown:
+        c["linear_num_key_heads"] = Kh + 1
+        c["linear_num_value_heads"] = Vh + r
     return w, c, {"layers": grown, "a_log": float(a_log), "gain": float(gain),
                   "new_value_heads": r, "off_by_default": gain == 0.0}
 

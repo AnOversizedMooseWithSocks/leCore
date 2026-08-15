@@ -43,6 +43,9 @@ class EmbeddingRouter:
     def __init__(self, index_path):
         z = np.load(index_path, allow_pickle=False)
         self.names = [str(n) for n in z["names"]]
+        self._rows_by_name = {}
+        for i, name in enumerate(self.names):
+            self._rows_by_name.setdefault(name, []).append(i)
         q = z["q"].astype(np.float64)
         lo, hi = z["lo"].astype(np.float64), z["hi"].astype(np.float64)
         vecs = q / 255.0 * (hi - lo) + lo                 # undo per-row q8
@@ -55,10 +58,17 @@ class EmbeddingRouter:
         # index without bones loads fine -- route(gamma>0) then just returns the plain dense ranking.
         self._bones = None
         if "bone_src" in z.files:
-            nbrs = [[] for _ in self.names]               # 'both' direction, max weight per pair
+            # Bones are a LOGICAL-MODULE graph while the index may carry several document vectors for one
+            # basename (same module name in different families).  Collapse endpoints by name here.  The old
+            # row-level graph attached every edge to whichever duplicate export_index's dict saw last, so a
+            # strong earlier description received no structural rank and was silently demoted.
+            nbrs = {name: [] for name in self._rows_by_name}   # 'both' direction, max weight per pair
             best = {}
             for s, d, w in zip(z["bone_src"], z["bone_dst"], z["bone_w"].astype(np.float64)):
-                for a, b in ((int(s), int(d)), (int(d), int(s))):
+                sn, dn = self.names[int(s)], self.names[int(d)]
+                if sn == dn:
+                    continue
+                for a, b in ((sn, dn), (dn, sn)):
                     k = (a, b)
                     if w > best.get(k, 0.0):
                         best[k] = w
@@ -89,29 +99,35 @@ class EmbeddingRouter:
             raise ValueError(f"query dim {q.shape[1]} != index dim {self.dim}")
         qn = self._unit(self._correct(q))[0]
         sims = self.docs @ qn
+        # One output identity per module name, with max-sim over its document vectors (late interaction).
+        # Returning duplicate basenames is not merely untidy: downstream cannot distinguish them, and the
+        # old workflow join arbitrarily gave only the last duplicate a structural score.
+        name_sims = {name: max(float(sims[i]) for i in rows)
+                     for name, rows in self._rows_by_name.items()}
         if gamma > 0.0 and self._bones is not None:
             # one-hop propagation of CLAMPED sims (negative cosine = 'not relevant'; bones carry evidence
             # FOR, never against), then rank-level fusion -- ranks, not raw scores, because cosine and
             # propagated mass are not on a common scale (the same reason the exam fuses by RRF).
-            seed = np.maximum(sims, 0.0)
-            prop = np.zeros_like(seed)
-            for i, lst in enumerate(self._bones):
+            seed = {name: max(score, 0.0) for name, score in name_sims.items()}
+            prop = {}
+            for name, lst in self._bones.items():
                 if lst:
                     wsum = sum(w for _, w in lst) + 1e-12
-                    prop[i] = sum(seed[j] * w for j, w in lst) / wsum
-            struct = 0.5 * seed + 0.5 * prop              # wf-alpha=0.5, the measured setting
-            dense_order = sorted(range(len(sims)), key=lambda i: (-sims[i], self.names[i]))
-            struct_order = sorted(range(len(sims)), key=lambda i: (-struct[i], self.names[i]))
+                    prop[name] = sum(seed.get(other, 0.0) * w for other, w in lst) / wsum
+                else:
+                    prop[name] = 0.0
+            struct = {name: 0.5 * seed[name] + 0.5 * prop.get(name, 0.0)
+                      for name in name_sims}                # wf-alpha=0.5, the measured setting
+            dense_order = sorted(name_sims, key=lambda name: (-name_sims[name], name))
+            struct_order = sorted(struct, key=lambda name: (-struct[name], name))
             fused = {}
             for wgt, order_ in ((1.0, dense_order), (gamma, struct_order)):
-                for rank, i in enumerate(order_, start=1):
-                    fused[i] = fused.get(i, 0.0) + wgt / (60.0 + rank)
-            top = sorted(fused, key=lambda i: (-fused[i], self.names[i]))[:k]
-            return [(self.names[i], float(fused[i])) for i in top]
-        order = np.argsort(-sims)[:k]
-        # deterministic tie-break by name, matching the catalog's convention
-        order = sorted(order, key=lambda i: (-sims[i], self.names[i]))
-        return [(self.names[i], float(sims[i])) for i in order]
+                for rank, name in enumerate(order_, start=1):
+                    fused[name] = fused.get(name, 0.0) + wgt / (60.0 + rank)
+            top = sorted(fused, key=lambda name: (-fused[name], name))[:k]
+            return [(name, float(fused[name])) for name in top]
+        order = sorted(name_sims, key=lambda name: (-name_sims[name], name))[:k]
+        return [(name, name_sims[name]) for name in order]
 
     def route_cached(self, query_text, cache, k=5):
         """Route a query whose vector is in the embedding cache (build-time asks, fixed app vocabulary).

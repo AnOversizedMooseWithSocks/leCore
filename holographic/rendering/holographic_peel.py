@@ -1,4 +1,5 @@
-"""B8 -- denoised structure decoding: per-peel cleanup pushes the decode depth cliff.
+"""B8 -- iterative structure decomposition: recover a bound composite's constituent items one at a time,
+with per-peel cleanup pushing the decode depth cliff.
 
 A composed holographic structure is decoded by ITERATED unbinding. Take a linked list
     M = superpose_i bind(node_i, node_{i+1})

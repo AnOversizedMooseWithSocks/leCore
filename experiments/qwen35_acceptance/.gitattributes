@@ -1,0 +1,2 @@
+# Preserve terminal output byte-for-byte without treating progress padding as errors.
+results/**/result/*.log -whitespace

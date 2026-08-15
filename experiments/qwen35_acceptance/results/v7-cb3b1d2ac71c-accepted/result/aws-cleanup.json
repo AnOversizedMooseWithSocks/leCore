@@ -1,0 +1,9 @@
+{
+  "schema": "lecore.qwen35-aws-cleanup.v7",
+  "verified_at": "2026-08-15T01:46:00Z",
+  "region": "us-east-1",
+  "instance": {"id": "i-096225051167ef900", "state": "terminated", "describe_result": null},
+  "root_volume": {"id": "vol-087fdcb57d5c79c09", "deleted": true, "describe_result": []},
+  "security_group": {"id": "sg-0a11cb364009ae8d7", "deleted": true, "delete_api_return": true},
+  "additional_instances_launched": 0
+}

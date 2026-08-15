@@ -1,0 +1,10 @@
+{
+  "schema": "lecore.qwen35-evidence-bundle.v1",
+  "original_name": "qwen35-evidence.tgz",
+  "bytes": 1331849,
+  "sha256": "29d4b28aa0be9896f8993ead3a93a741c831346f64356c35dc7e73bd6f8243de",
+  "arweave_parts": 15,
+  "part_size_bytes": 90000,
+  "contains_model_weights": false,
+  "reconstruction": "Concatenate bundle-parts/qwen35-evidence.tgz.part-000 through part-014 in lexical order, then verify SHA-256."
+}

@@ -175,6 +175,38 @@ def test_a_parse_failure_is_recorded_loudly_and_not_swallowed():
     del wr.PARSE_FAILURES[before:]                        # leave the module-level list as we found it
 
 
+def test_from_package_import_records_the_imported_module():
+    """A real ``from package import module`` door must count as a module edge."""
+    import sys
+
+    REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.join(REPO, "tools"))
+    import wiring_report as wr
+
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "caller.py")
+        open(path, "w").write(
+            "from holographic.io_and_interop import holographic_vsaroles as roles\n")
+        imported = wr._imports(path)
+    assert "io_and_interop" in imported
+    assert "holographic_vsaroles" in imported
+
+
+def test_live_wiring_report_sees_vsa_roles_and_ablation_doors():
+    """Pin the two doors that exposed import-form and duplicate-basename bugs."""
+    import sys
+
+    REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.join(REPO, "tools"))
+    import wiring_report as wr
+
+    dark, catalog_only, _kept = wr.analyse(REPO)
+    assert "holographic_vsaroles" not in dark
+    assert "holographic_ablate" not in dark
+    assert "holographic_vsaroles" not in catalog_only
+    assert "holographic_ablate" not in catalog_only
+
+
 def test_the_live_tree_parses_so_the_dark_report_can_be_trusted():
     """The condition under which every other assertion in this file means anything."""
     import os

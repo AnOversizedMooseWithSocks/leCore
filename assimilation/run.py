@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Download Qwen3.5-0.8B, assimilate it with Unicron, and (optionally) MEASURE.
+"""Download Qwen3.5-0.8B and optionally run the research-only spectral study.
 
 Run this on your own machine (needs internet access to huggingface.co):
 
-    python3 tools/run_qwen_assimilation.py                    # download + assimilate
-    python3 tools/run_qwen_assimilation.py --eval             # ...and measure perplexity
-    python3 tools/run_qwen_assimilation.py --model Qwen/Qwen3.5-2B   # other sizes work too
+    python3 assimilation/run.py                              # download only
+    python3 assimilation/run.py --research-spectral --eval   # filter + measure
+    python3 assimilation/run.py --model Qwen/Qwen3.5-2B       # other sizes work too
 
 Requirements:
     pip install numpy huggingface_hub            # download + assimilate (always)
     pip install torch transformers               # only for --eval
 
-What happens, in order:
+With --research-spectral, what happens in order:
   1. DOWNLOAD  the safetensors shard(s) from huggingface.co (resumable; skips
      files already present in --workdir).
   2. ASSIMILATE each shard: Marchenko-Pastur filter per projection (keep learned
@@ -27,6 +27,9 @@ What happens, in order:
      output is an UNVERIFIED claim -- the report says so in as many words.
 
 Honesty notes baked in:
+  * Spectral filtering is a research control, not a supported optimization. The
+    first real Qwen run changed 18/265 tensors, regressed perplexity, and repair
+    reverted most changes; no statistically powered benefit has been observed.
   * No accuracy is promised. The spectral cut is principled (Staats/Thamm/Rosenow
     measured accuracy surviving it on their networks), but Qwen3.5's hybrid
     DeltaNet layers are new territory -- that is exactly why step 4 exists.
@@ -286,10 +289,14 @@ def evaluate(orig_dir, out_dir):
 
 # -------------------------------------------------------------------------- main
 
-def main():
-    ap = argparse.ArgumentParser(description="download + assimilate + measure")
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="download Qwen; optionally run a research-only spectral experiment")
     ap.add_argument("--model", default="Qwen/Qwen3.5-0.8B")
     ap.add_argument("--workdir", default="qwen_assimilation")
+    ap.add_argument("--research-spectral", action="store_true",
+                    help="opt in to the spectral filtering/repair/imbue study. "
+                         "Off by default because no statistically powered Qwen "
+                         "benefit has been demonstrated")
     ap.add_argument("--eval", action="store_true",
                     help="measure perplexity before vs after (needs torch+transformers)")
     ap.add_argument("--imbue", nargs="?", const="galvatron", default="galvatron",
@@ -355,10 +362,20 @@ def main():
             print("Build a bundle first:")
             print("    galvatron.bat MODEL_DIR --imbue work/galvatron")
         raise SystemExit(2)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     os.makedirs(args.workdir, exist_ok=True)
 
     orig_dir, shards = download(args.model, args.workdir)
+    if not args.research_spectral:
+        print("\n[research-only] spectral filtering is disabled by default.")
+        print("The real Qwen run did not demonstrate a statistically powered "
+              "benefit, so the untouched checkpoint remains the output:")
+        print("  %s" % os.path.abspath(orig_dir))
+        print("To reproduce the negative/control experiment explicitly, add "
+              "--research-spectral. To test the new layer-prepending design, "
+              "use install.sh --experimental or generate the ilxyr acceptance "
+              "project in experiments/qwen35_acceptance.")
+        return 0
     out_dir = assimilate(orig_dir, shards, os.path.join(args.workdir, "assimilated"),
                          force=args.force)
     # IMBUE BY DEFAULT. Assimilation alone yields a checkpoint that has LOST

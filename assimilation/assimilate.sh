@@ -1,10 +1,10 @@
 #!/bin/sh
 # ============================================================================
-#  assimilation/assimilate.sh -- download Qwen3.5-0.8B, run Unicron's pass,
-#  and (optionally) measure the result. One command, self-contained.
+#  assimilation/assimilate.sh -- download Qwen3.5-0.8B. Spectral filtering is
+#  retained only as an explicit research control.
 #
-#      ./assimilation/assimilate.sh                 # download + assimilate
-#      ./assimilation/assimilate.sh --eval          # ...and measure perplexity
+#      ./assimilation/assimilate.sh                 # download untouched weights
+#      ./assimilation/assimilate.sh --research-spectral --eval
 #      ./assimilation/assimilate.sh --model Qwen/Qwen3.5-2B    # other sizes
 #
 #  Everything installs into a private virtual environment at
@@ -12,7 +12,7 @@
 #  touched, and NO Hugging Face account or token is needed: the weights are
 #  public and the download is anonymous by construction (token=False).
 #
-#  When it finishes, chat with the result:   ./assimilation/chat.sh
+#  See assimilation/README.md before running either experimental path.
 # ============================================================================
 set -e
 cd "$(dirname "$0")/.."                    # repo root, same convention as serve.sh

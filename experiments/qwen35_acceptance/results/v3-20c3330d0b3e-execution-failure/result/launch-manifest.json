@@ -1,0 +1,107 @@
+{
+  "schema": "lecore.qwen35-launch.v1",
+  "state": "authorized",
+  "attempt": {
+    "experiment_version": 3,
+    "maximum_formal_runs": 1,
+    "retry_after_admission": false,
+    "seed": 0,
+    "authorized_at": "2026-08-13T18:49:00Z",
+    "predecessor": {
+      "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.2f32151c6d44.v2.acceptance",
+      "outcome": "execution_failure",
+      "scientific_result": false,
+      "corrective_change": "emit official Qwen projection names and shapes, preserve fixed MLP width, add strict official reload gate"
+    }
+  },
+  "source": {
+    "repository": "https://github.com/atimics/holostuff.git",
+    "commit": "f399cd6bc7f24383a792fdcf32c43a4e1197d4f1"
+  },
+  "ilxyr": {
+    "repository": "https://github.com/cenetex/ilXyr.git",
+    "commit": "e92382ff2a5e8714466533a160f6609b4ef9cee8"
+  },
+  "model": {
+    "repository": "Qwen/Qwen3.5-0.8B",
+    "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+    "license": "Apache-2.0",
+    "critical_files": [
+      {
+        "path": "model.safetensors-00001-of-00001.safetensors",
+        "bytes": 1746942600,
+        "sha256": "04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696"
+      },
+      {
+        "path": "tokenizer.json",
+        "bytes": 12807982,
+        "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"
+      }
+    ],
+    "complete_manifest": "generated and frozen before ilxyr admission"
+  },
+  "corpora": {
+    "installation": {
+      "handle": "git:f399cd6bc7f24383a792fdcf32c43a4e1197d4f1:REFERENCE.md",
+      "license": "MIT",
+      "bytes": 2303549,
+      "sha256": "59f551d452cfb0664deeb6dfbe5b98598abb1633cc38a5bb020ec100ac3cd33a"
+    },
+    "evaluation": {
+      "handle": "https://www.gutenberg.org/ebooks/18",
+      "retrieved_at": "2026-08-12T21:32:31Z",
+      "last_modified": "2026-08-01T07:33:54Z",
+      "copyright": "Public domain in the USA",
+      "bytes": 1213410,
+      "sha256": "a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94"
+    }
+  },
+  "method": {
+    "minimum_paired_positions": 4096,
+    "reference_logit_relative_tolerance": 0.001,
+    "maximum_regression": 0.01,
+    "confidence": 0.95,
+    "bootstrap": "paired moving block",
+    "spectral_filtering": false,
+    "installer_experimental": true,
+    "official_transformers_strict_reload": true
+  },
+  "dependencies": {
+    "python": "3.12",
+    "numpy": "2.4.6",
+    "pillow": "12.3.0",
+    "torch": "2.11.0+cpu",
+    "transformers": "5.14.0",
+    "resolved_environment": "recorded before ilxyr admission"
+  },
+  "aws": {
+    "region": "us-east-1",
+    "availability_zone": "us-east-1a",
+    "ami": "ami-07a5b367e8dc8bd92",
+    "ami_name": "al2023-ami-2023.12.20260803.3-kernel-6.1-x86_64",
+    "instance_type": "r7i.4xlarge",
+    "vcpu": 16,
+    "memory_gib": 128,
+    "market": "on-demand",
+    "hourly_compute_usd": 1.0584,
+    "root_volume": {
+      "type": "gp3",
+      "size_gib": 100,
+      "encrypted": true,
+      "delete_on_termination": true
+    },
+    "inbound_ports": [],
+    "experiment_timeout_seconds": 21600,
+    "instance_lifetime_seconds": 28800,
+    "instance_initiated_shutdown_behavior": "terminate",
+    "maximum_compute_usd": 8.4672,
+    "total_ceiling_usd": 10.0
+  },
+  "publication": {
+    "temporary_staging": "s3://zero-training-022118847419/qwen35-acceptance/f399cd6-2fc06364-a6c9d113/v3-formal/",
+    "review_index": "https://github.com/atimics/holostuff/pull/3",
+    "permanent_transport": "Arweave",
+    "publish_all_outcomes": true,
+    "exclude_model_weights": true
+  }
+}

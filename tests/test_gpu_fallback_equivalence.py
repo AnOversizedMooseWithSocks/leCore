@@ -52,7 +52,7 @@ def test_to_device_and_back_is_identity_without_a_device():
 
 
 # --------------------------------------------------------------------------------------
-# The four modules that genuinely import the backend, each exercised through its faculty.
+# Every module that genuinely imports the backend, each exercised below.
 # --------------------------------------------------------------------------------------
 
 def test_the_wired_module_list_is_what_these_tests_cover():
@@ -67,6 +67,45 @@ def test_the_wired_module_list_is_what_these_tests_cover():
     actual = set(gpu_report()["wired_modules"])
     assert actual == covered, ("the set of backend-wired modules changed: %r. Add a fallback-equivalence "
                                "test for the new one." % sorted(actual ^ covered))
+
+
+def test_devicerun_cpu_placement_and_parity_are_explicit():
+    from holographic.io_and_interop.holographic_devicerun import parity, place
+
+    class Runtime:
+        def __init__(self):
+            self.enabled = False
+
+        def to_device(self, enabled):
+            self.enabled = bool(enabled and backend.gpu_available())
+            return {"device": "gpu" if self.enabled else "cpu",
+                    "resident": int(self.enabled)}
+
+        def forward(self, ids):
+            return np.asarray(ids, np.float64)[:, None] * 2.0
+
+    runtime = Runtime()
+    assert place(runtime, "cpu")["device"] == "cpu"
+    report = parity(runtime, [1, 2, 3])
+    assert report["placement"]["device"] == "cpu"
+    assert report["agrees"] and report["max_abs_diff"] == 0.0
+
+
+def test_qwen_runtime_device_fallback_is_bit_identical(tmp_path):
+    from tools.build_mini_qwen import build
+    from holographic.io_and_interop.holographic_gdnruntime import load_runtime
+
+    model_dir = tmp_path / "mini-qwen"
+    build(model_dir, layers=2, vocab=512)
+    runtime, _ = load_runtime(model_dir)
+    ids = list(range(32, 48))
+    before = runtime.forward(ids)
+    placement = runtime.to_device(True)
+    after = runtime.forward(ids)
+
+    assert placement["device"] == "cpu"
+    assert placement["resident"] == 0
+    assert np.array_equal(after, before)
 
 
 def test_fluid_solver_runs_and_conserves_shape_on_the_fallback(mind):

@@ -1,0 +1,22 @@
+{
+  "actor": {
+    "id": "model://codex/lecore-qwen/experiment-designer",
+    "kind": "model",
+    "model_ref": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/experiment-designer"
+  },
+  "body": "Execute once against the content-bound public checkpoint, installation corpus, and separate held-out evaluation corpus. Do not tune thresholds or replace either corpus after admission. Resolve accepted only when source cleanliness, tokenizer parity, reference-logit parity, the paired statistical gate, disk reload, official text generation, and official vision smoke all pass. A cleanly executed no-go is preserved as rejected evidence.",
+  "claims": [
+    "Accepted and rejected are exhaustive for a valid metrics envelope.",
+    "Runtime or dependency failure resolves separately as execution_failure."
+  ],
+  "confidence": 0.95,
+  "id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.2f32151c6d44.v2.experiment-design",
+  "input_refs": [
+    "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.2f32151c6d44.v2.hypothesis",
+    "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.2f32151c6d44.v2.foundation",
+    "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.2f32151c6d44.v2.engineering-review"
+  ],
+  "schema": "ilxyr.contribution.v1",
+  "stage": "experiment_design",
+  "title": "One-shot Qwen3.5 installation acceptance run"
+}

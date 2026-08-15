@@ -1,0 +1,26 @@
+{
+  "schema": "lecore.qwen35-v4-preflight-aws-cleanup.v1",
+  "confirmed_at": "2026-08-14T01:19:24Z",
+  "region": "us-east-1",
+  "formal_run_started": false,
+  "estimated_total_compute_usd_upper_bound": 0.12,
+  "attempts": [
+    {
+      "instance_id": "i-056acaa4153e31371",
+      "instance_state": "terminated",
+      "root_volume_id": "vol-0edee3056e8b47cd0",
+      "root_volume_state": "deleted_not_found",
+      "security_group_id": "sg-0afc001ab142457f5",
+      "security_group_state": "deleted_not_found"
+    },
+    {
+      "instance_id": "i-06ad0837226fe5d33",
+      "instance_state": "terminated",
+      "root_volume_id": "vol-042c6334730fff86f",
+      "root_volume_state": "deleted_not_found",
+      "security_group_id": "sg-026b4df90398b9d1b",
+      "security_group_state": "deleted_not_found"
+    }
+  ],
+  "completion_monitor": "deleted"
+}

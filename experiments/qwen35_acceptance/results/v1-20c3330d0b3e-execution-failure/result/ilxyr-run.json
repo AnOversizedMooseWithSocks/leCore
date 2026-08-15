@@ -1,0 +1,94 @@
+{
+  "run": {
+    "schema": "ilxyr.run.v1",
+    "id": "run:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance:1786571246690",
+    "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+    "started_at_ms": 1786571246690,
+    "completed_at_ms": 1786571246741,
+    "exit_code": 1,
+    "timed_out": false,
+    "stdout": "",
+    "stderr": "Traceback (most recent call last):\n  File \"/opt/qwen35-acceptance/lecore/experiments/qwen35_acceptance/run.py\", line 17, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'\n",
+    "output_truncated": false,
+    "metrics": {}
+  },
+  "evidence": {
+    "schema": "ilxyr.evidence.v1",
+    "id": "evidence:run:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance:1786571246690",
+    "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+    "run_ref": "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731",
+    "resolved_outcome": "execution_failure",
+    "metrics": {},
+    "recorded_at_ms": 1786571246771,
+    "authority": {
+      "level": "corpus_proxy",
+      "scope": {
+        "seeds": [
+          0
+        ],
+        "eval_set": "dataset://lecore/qwen-evaluation/a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94",
+        "coverage": 1.0
+      },
+      "provenance": {
+        "artifact_hashes": [
+          "artifact://sha256/04bed9185d0a9647fea419ac6cb2f671a106ae60bc82c23b172aacff6dbcaf0b",
+          "artifact://sha256/3b4c72fe06906bda15e22dac5fd12f9d1b1347f687f3656bbaa6ff3c3d11cbd1",
+          "artifact://sha256/50519e75792a64ca250e673ed7b05be888419d53969be5ec4c074fb50ed8ebb7",
+          "artifact://sha256/826a9741b544257f3658ecb4014abc4bcaee45a33be7e5e467dc1cb2786fc17e",
+          "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731"
+        ],
+        "model_lineage": "model://Qwen/Qwen3.5-0.8B/20c3330d0b3e00c98b38e7813202b12952f37d6a4415a30da103c9bfe994d680",
+        "checker": "checker://lecore/qwen35-acceptance/v1"
+      }
+    },
+    "lane": "promoted"
+  },
+  "settlements": [
+    {
+      "schema": "ilxyr.forecast_settlement.v1",
+      "forecast_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast.empirical",
+      "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+      "resolved_outcome": "execution_failure",
+      "brier_score": 1.185,
+      "stake": 5
+    },
+    {
+      "schema": "ilxyr.forecast_settlement.v1",
+      "forecast_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast-mechanistic",
+      "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+      "resolved_outcome": "execution_failure",
+      "brier_score": 0.815,
+      "stake": 5
+    }
+  ],
+  "calibrations": [
+    {
+      "schema": "ilxyr.calibration_record.v1",
+      "handle": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/forecaster-empirical",
+      "forecasts_settled": 1,
+      "reliability": 1.185,
+      "resolution": 0.0,
+      "brier_score": 1.185,
+      "uncertainty": 0.0,
+      "probationary": true,
+      "last_settlement_at_ms": 1786571246828,
+      "forecast_ids": [
+        "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast.empirical"
+      ]
+    },
+    {
+      "schema": "ilxyr.calibration_record.v1",
+      "handle": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/forecaster-mechanistic",
+      "forecasts_settled": 1,
+      "reliability": 0.815,
+      "resolution": 0.0,
+      "brier_score": 0.815,
+      "uncertainty": 0.0,
+      "probationary": true,
+      "last_settlement_at_ms": 1786571246900,
+      "forecast_ids": [
+        "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast-mechanistic"
+      ]
+    }
+  ]
+}

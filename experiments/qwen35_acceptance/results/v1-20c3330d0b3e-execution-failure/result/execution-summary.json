@@ -1,0 +1,8 @@
+{
+  "completed_at": "2026-08-12T21:47:27.702547+00:00",
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+  "run_exit_code": 0,
+  "schema": "lecore.qwen35-execution-summary.v1",
+  "status_exit_code": 0,
+  "verify_exit_code": 0
+}

@@ -1,0 +1,16 @@
+{
+  "schema": "lecore.qwen35-aws-cleanup-receipt.v1",
+  "checked_at": "2026-08-13T21:27:39Z",
+  "region": "us-east-1",
+  "instance": {
+    "id": "i-0f57dba006efd2f32",
+    "state": "terminated"
+  },
+  "security_group": {
+    "id": "sg-08e840b4749a47406",
+    "network_interfaces_before_delete": 0,
+    "delete_return": true,
+    "post_delete_lookup": "InvalidGroup.NotFound"
+  },
+  "retry_launched": false
+}

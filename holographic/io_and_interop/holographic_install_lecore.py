@@ -55,7 +55,8 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
             passages=(), router_positive=(), router_negative=(),
             n_registers=None, prepend=None, seed=0, progress=None, mind=None,
             target_tokens=None, scales=4, n_state_slots=4,
-            vm_program=None, exit_floor=0.999):
+            vm_program=None, exit_floor=0.999, memory_rows=None,
+            weight_resident_metadata=False):
     """Install leCore into a model, THROUGH leCore. Returns (weights, cfg, report).
 
     Pass `mind` and every step routes through UnifiedMind faculties rather than
@@ -95,6 +96,14 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
         if progress:
             progress(rep["steps"][-1])
 
+    def _skip(name, detail):
+        step = {"step": name, "ok": True, "skipped": True, "detail": detail}
+        rep["steps"].append(step)
+        if progress:
+            progress(step)
+
+    rep["weight_resident_metadata"] = bool(weight_resident_metadata)
+
     # SAY HOW MUCH ROOM THERE IS BEFORE SPENDING IT. Every optional step below
     # allocates against the model's WIDTH and VOCABULARY, and on a real
     # Qwen3.5-0.8B four of them died with MemoryError -- 36 MiB, 970 MiB,
@@ -102,12 +111,11 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
     # constraint rather than the code. A number here turns "FAIL MemoryError"
     # into "of course, that model needs more than this box has".
     try:
-        import shutil as _sh
-        _V = int(np.asarray(w[next(k for k in w
+        _V = int(np.asarray(weights[next(k for k in weights
                                    if k.endswith("embed_tokens.weight"))]
                             ).shape[0])
-        _need = _V * int(c["hidden"]) * 4 / 1e9
-        rep["memory"] = {"vocab": _V, "hidden": int(c["hidden"]),
+        _need = _V * int(cfg["hidden"]) * 4 / 1e9
+        rep["memory"] = {"vocab": _V, "hidden": int(cfg["hidden"]),
                          "head_matrix_gb_f32": round(_need, 2),
                          "note": "each vocab-sized working array costs about "
                                  "this much; several steps need two or three"}
@@ -345,23 +353,35 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
         except Exception as exc:
             _note("router", False, "%s: %s" % (type(exc).__name__, exc))
 
-    # ---- 5. MEMORY INDEX in rows the eval text never uses ----
+    # ---- 5. MEMORY INDEX. Never infer writable rows from a small text sample.
+    # A token absent from one calibration slice is still a real token, and even
+    # genuinely undefined rows remain in the output softmax. V3 overwrote 200
+    # such rows and looked 1.8% better on its internal slice while regressing
+    # 31% on held-out Federalist text. The safe default is a sidecar index,
+    # which is content-addressed by the installed manifest and cannot perturb a
+    # logit. Weight-resident rows require an explicit research opt-in plus an
+    # externally proven list of rows.
     if passages and tokenize is not None:
-        from holographic.agents_and_reasoning.holographic_memsearch import (
-            build_index, install_index, search)
         try:
-            rtn = GDNRuntime(w, c)
-            idx = build_index(rtn, c, list(passages), tokenize)
-            used = set(int(t) for t in ids)
-            free = [i for i in range(int(np.asarray(
-                w[next(k for k in w if k.endswith("embed_tokens.weight"))]
-            ).shape[0])) if i not in used]
-            rows = free[:len(passages)]
-            if len(rows) < len(passages):
-                _note("memory_index", False,
-                      "only %d rows are unused by the eval text, need %d"
-                      % (len(rows), len(passages)))
+            rows = ([int(row) for row in memory_rows]
+                    if memory_rows is not None else [])
+            if not weight_resident_metadata:
+                rep["memory_index"] = {
+                    "mode": "sidecar", "passages": len(passages),
+                    "reason": "preserve every input embedding and output logit",
+                }
+                _note("memory_index", True,
+                      "%d passages staged for sidecar index; no vocabulary or "
+                    "output-head row changed" % len(passages))
+            elif len(rows) < len(passages):
+                raise ValueError(
+                    "weight-resident memory requested with %d proven rows for "
+                    "%d passages" % (len(rows), len(passages)))
             else:
+                from holographic.agents_and_reasoning.holographic_memsearch import (
+                    build_index, install_index)
+                rtn = GDNRuntime(w, c)
+                idx = build_index(rtn, c, list(passages), tokenize)
                 w3, irep = install_index(w, idx, rows)
                 m = measure(GDNRuntime(w3, c), ids)
                 ok = m["perplexity"] <= base["perplexity"] * 1.005
@@ -389,12 +409,18 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
             from holographic.caching_and_storage.holographic_selfwrite import (
                 fit_novelty)
             nov = fit_novelty(GDNRuntime(w, c), w, c, list(fit_ids)[:1400])
-            rep["self_write"] = {"mode": nov["mode"],
-                                 "correlation": nov["correlation"],
-                                 "top_decile_hit": nov["top_decile_hit"]}
-            _note("self_write", nov["top_decile_hit"] > 0.4,
-                  "novelty readout r=%.3f, finds %.0f%% of the top decile"
-                  % (nov["correlation"], 100 * nov["top_decile_hit"]))
+            if nov["top_decile_hit"] > 0.4:
+                rep["self_write"] = {"mode": nov["mode"],
+                                     "correlation": nov["correlation"],
+                                     "top_decile_hit": nov["top_decile_hit"]}
+                _note("self_write", True,
+                      "novelty readout r=%.3f, finds %.0f%% of the top decile"
+                      % (nov["correlation"], 100 * nov["top_decile_hit"]))
+            else:
+                _skip("self_write",
+                      "candidate did not clear its install threshold: r=%.3f, "
+                      "%.0f%% top-decile hit" %
+                      (nov["correlation"], 100 * nov["top_decile_hit"]))
         except Exception as exc:
             _note("self_write", False, "%s: %s" % (type(exc).__name__, exc))
 
@@ -488,14 +514,16 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
     #         correction fitted on late states put in front gave 7.27 -> 36.78.
     try:
         w4, irep = install_improvement(w, c, GDNRuntime(w, c), list(fit_ids),
-                                       ids, projector=_guard_P)
+                                       ids, projector=_guard_P,
+                                       preserve_shape=("intermediate" in c))
         if irep.get("installed"):
             w = w4
             rep["improvement"] = {"step": irep["step"],
                                   "delta_pct": irep["delta_pct"]}
-        _note("improvement", bool(irep.get("installed")),
-              ("step %g, %+.3f%%" % (irep["step"], irep["delta_pct"]))
-              if irep.get("installed") else irep.get("why", "no step accepted"))
+            _note("improvement", True,
+                  "step %g, %+.3f%%" % (irep["step"], irep["delta_pct"]))
+        else:
+            _skip("improvement", irep.get("why", "no step accepted"))
     except Exception as exc:
         _note("improvement", False, "%s: %s" % (type(exc).__name__, exc))
 
@@ -516,10 +544,19 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
     #      record made boot() fail with "substrate hash mismatch", and the
     #      install reported the model as booting NONE while every other step
     #      passed. Whatever writes across the whole surface must go last.
-    try:
-        w2, brep = write_boot({k: np.array(v, copy=True) for k, v in w.items()},
-                              BootRecord(
-                          seed="leCore", dim=int(c["hidden"]),
+    if not weight_resident_metadata:
+        rep["boot_record"] = {
+            "mode": "sidecar", "seed": "leCore",
+            "reason": "preserve every input embedding and output logit",
+        }
+        _note("boot_record", True,
+              "manifest staged for lecore.json sidecar; no embedding, output "
+              "head, or low-bit weight surface changed")
+    else:
+        try:
+            w2, brep = write_boot(
+                {k: np.array(v, copy=True) for k, v in w.items()},
+                BootRecord(seed="leCore", dim=int(c["hidden"]),
                           # THE MODEL DESCRIBES ITSELF. BootRecord has carried
                           # `capabilities` and `data_rows` all along -- it calls
                           # itself "the seed and manifest from which the whole
@@ -535,26 +572,27 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
                           # is built it is not yet installed. Recording it would
                           # be a claim about the future. A reader who finds a
                           # boot record knows one exists by having read it.
-                          capabilities=tuple(sorted(
-                              set(rep.get("installed", ())) - {"boot_record"})),
-                          data_rows=tuple(int(r) for r in
-                                          (rep.get("memory_index", {}) or {})
-                                          .get("rows", ())[:32])))
-        m = measure(GDNRuntime(w2, c), ids)
-        ok = m["perplexity"] <= base["perplexity"] * 1.005
-        if ok:
-            w = w2
-            rep["boot_row"] = int(brep["row"])
-        _note("boot_record", ok, "row %d, perplexity %+.3f%%"
-              % (brep["row"], 100 * (m["perplexity"] - base["perplexity"])
-                 / base["perplexity"]))
-    except Exception as exc:
-        # NOT FATAL. A model that installed registers, a router and state slots
-        # is worth shipping without its manifest -- the manifest is a
-        # convenience, and lecore.json beside the file still records everything.
-        _note("boot_record", False,
-              "%s: %s [the model still works; only the in-weights manifest is "
-              "missing]" % (type(exc).__name__, str(exc)[:70]))
+                           capabilities=tuple(sorted(
+                               set(rep.get("installed", ())) - {"boot_record"})),
+                           data_rows=tuple(int(r) for r in
+                                           (rep.get("memory_index", {}) or {})
+                                           .get("rows", ())[:32])))
+            m = measure(GDNRuntime(w2, c), ids)
+            ok = m["perplexity"] <= base["perplexity"] * 1.005
+            if ok:
+                w = w2
+                rep["boot_row"] = int(brep["row"])
+            _note("boot_record", ok, "row %d, perplexity %+.3f%%"
+                  % (brep["row"],
+                     100 * (m["perplexity"] - base["perplexity"])
+                     / base["perplexity"]))
+        except Exception as exc:
+            # NOT FATAL. A model that installed registers, a router and state
+            # slots is worth shipping without its manifest -- the manifest is a
+            # convenience, and lecore.json still records everything.
+            _note("boot_record", False,
+                  "%s: %s [the model still works; only the in-weights manifest "
+                  "is missing]" % (type(exc).__name__, str(exc)[:70]))
 
     # ---- FINAL VERDICT, measured on the assembled model ----
     final = GDNRuntime(w, c)

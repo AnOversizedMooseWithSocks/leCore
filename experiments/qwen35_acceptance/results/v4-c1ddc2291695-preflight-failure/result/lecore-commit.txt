@@ -1,0 +1,7 @@
+commit c1ddc22916957238c00890bec13fd0609b01b521
+Author:     atimics <atimics@ratimics.com>
+AuthorDate: Thu Aug 13 17:32:40 2026 -0700
+Commit:     atimics <atimics@ratimics.com>
+CommitDate: Thu Aug 13 17:32:40 2026 -0700
+
+    test(qwen): share portable logit gate

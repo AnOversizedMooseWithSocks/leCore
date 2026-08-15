@@ -1,0 +1,10 @@
+{
+  "exit_code": 0,
+  "experiment_id": "lecore.qwen35.install.20c3330d0b3e.0215736e2060.a6c9d1135a04.3e130ddc1500.ed018efbbb3a.v6.acceptance",
+  "experiment_version": 6,
+  "formal_run_started": true,
+  "schema": "lecore.qwen35-runner-status.v6",
+  "source_commit": "3e130ddc1500af084eb7a7fe94a5da647b0ff3ef",
+  "stage": "complete",
+  "updated_at": "2026-08-14T16:47:43.361871+00:00"
+}

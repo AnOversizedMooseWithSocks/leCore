@@ -1,0 +1,45 @@
+{
+  "schema": "lecore.qwen35-v4-preflight-repair-validation.v1",
+  "recorded_at": "2026-08-14T01:19:24Z",
+  "candidate_source_commit": "c1ddc22916957238c00890bec13fd0609b01b521",
+  "fix_commits": [
+    "ffa1634",
+    "c1ddc22"
+  ],
+  "portable_identity_gate": {
+    "embedding_bytes_exact": true,
+    "logits_rtol": 1e-6,
+    "logits_atol": 1e-6,
+    "frozen_reference_logit_threshold": 0.001
+  },
+  "official_dependencies": {
+    "numpy": "2.4.6",
+    "Pillow": "12.3.0",
+    "safetensors": "0.8.0",
+    "torch": "2.11.0",
+    "torchvision": "0.26.0",
+    "transformers": "5.14.0"
+  },
+  "validation": [
+    {
+      "environment": "lightweight local suite",
+      "result": "47 passed, 1 skipped",
+      "note": "The skip was the optional official-Transformers budget gate."
+    },
+    {
+      "environment": "pinned official macOS environment",
+      "result": "47 passed, 1 skipped",
+      "note": "The official test exceeded the default 15-second unit-test budget."
+    },
+    {
+      "environment": "pinned official macOS environment with LECORE_RUN_SLOW=1",
+      "result": "1 passed in 23.52s",
+      "test": "test_installed_mini_qwen_reloads_and_generates_with_transformers"
+    },
+    {
+      "environment": "clean Python 3.12 Linux container with LECORE_RUN_SLOW=1",
+      "result": "1 passed in 10.96s",
+      "test": "test_installed_mini_qwen_reloads_and_generates_with_transformers"
+    }
+  ]
+}

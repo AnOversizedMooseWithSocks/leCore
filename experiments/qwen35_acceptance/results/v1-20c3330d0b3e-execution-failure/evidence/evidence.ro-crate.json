@@ -1,0 +1,286 @@
+{
+  "@context": [
+    "https://w3id.org/ro/crate/1.3/context",
+    {
+      "ilxyr": "https://ilxyr.dev/ns#",
+      "prov": "http://www.w3.org/ns/prov#"
+    }
+  ],
+  "@graph": [
+    {
+      "@id": "ro-crate-metadata.json",
+      "@type": "CreativeWork",
+      "about": {
+        "@id": "./"
+      },
+      "conformsTo": {
+        "@id": "https://w3id.org/ro/crate/1.3"
+      }
+    },
+    {
+      "@id": "./",
+      "@type": [
+        "Dataset",
+        "prov:Entity"
+      ],
+      "description": "A ledger-verified ilXyr evidence bundle exported for discovery, preservation, and reuse.",
+      "hasPart": [
+        {
+          "@id": "artifact://sha256/22fc1c29c182563c80d9188e4e2d077e6fbb72dcdc0c1d046e7d7e22dd3c00e1"
+        },
+        {
+          "@id": "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731"
+        },
+        {
+          "@id": "artifact://sha256/3d4c5b79be266085e4a3495a83cbfe3c4c8434c230bef81e7b6a19ed7eeb3ff6"
+        },
+        {
+          "@id": "urn:ilxyr:forecast:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast-mechanistic"
+        },
+        {
+          "@id": "urn:ilxyr:forecast:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast.empirical"
+        },
+        {
+          "@id": "urn:ilxyr:settlement:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast-mechanistic"
+        },
+        {
+          "@id": "urn:ilxyr:settlement:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast.empirical"
+        },
+        {
+          "@id": "artifact://sha256/04bed9185d0a9647fea419ac6cb2f671a106ae60bc82c23b172aacff6dbcaf0b"
+        },
+        {
+          "@id": "artifact://sha256/3b4c72fe06906bda15e22dac5fd12f9d1b1347f687f3656bbaa6ff3c3d11cbd1"
+        },
+        {
+          "@id": "artifact://sha256/50519e75792a64ca250e673ed7b05be888419d53969be5ec4c074fb50ed8ebb7"
+        },
+        {
+          "@id": "artifact://sha256/826a9741b544257f3658ecb4014abc4bcaee45a33be7e5e467dc1cb2786fc17e"
+        },
+        {
+          "@id": "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731"
+        }
+      ],
+      "ilxyr:ledgerHead": "2ab7e993f5ebef3f6635b08fb4a7f9f067de2e254668f12378f7882ba1b0907f",
+      "mainEntity": {
+        "@id": "artifact://sha256/22fc1c29c182563c80d9188e4e2d077e6fbb72dcdc0c1d046e7d7e22dd3c00e1"
+      },
+      "name": "ilXyr evidence bundle — Qwen3.5 leCore layer-prepending acceptance"
+    },
+    {
+      "@id": "artifact://sha256/3d4c5b79be266085e4a3495a83cbfe3c4c8434c230bef81e7b6a19ed7eeb3ff6",
+      "@type": [
+        "CreativeWork",
+        "prov:Plan"
+      ],
+      "author": {
+        "@id": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/research-director",
+        "@type": "SoftwareApplication",
+        "identifier": "model://codex/lecore-qwen/research-director"
+      },
+      "description": "The experimental layer-prepending installer can emit an ordinary Qwen3.5 checkpoint while preserving reference behavior within a preregistered paired confidence bound and retaining official text and vision-language execution.",
+      "identifier": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+      "ilxyr:sharedTask": null,
+      "ilxyr:sourceDigest": "8eaaa021df860a5ab62ef3847c0d0fc857a25ce571cba8f5492b81937d8cc030",
+      "isBasedOn": [
+        {
+          "@id": "artifact://sha256/04bed9185d0a9647fea419ac6cb2f671a106ae60bc82c23b172aacff6dbcaf0b"
+        },
+        {
+          "@id": "artifact://sha256/3b4c72fe06906bda15e22dac5fd12f9d1b1347f687f3656bbaa6ff3c3d11cbd1"
+        },
+        {
+          "@id": "artifact://sha256/50519e75792a64ca250e673ed7b05be888419d53969be5ec4c074fb50ed8ebb7"
+        },
+        {
+          "@id": "artifact://sha256/826a9741b544257f3658ecb4014abc4bcaee45a33be7e5e467dc1cb2786fc17e"
+        }
+      ],
+      "name": "Qwen3.5 leCore layer-prepending acceptance"
+    },
+    {
+      "@id": "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731",
+      "@type": [
+        "CreateAction",
+        "prov:Activity"
+      ],
+      "actionStatus": "CompletedActionStatus",
+      "ilxyr:run": {
+        "completed_at_ms": 1786571246741,
+        "exit_code": 1,
+        "experiment_id": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+        "id": "run:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance:1786571246690",
+        "metrics": {},
+        "output_truncated": false,
+        "schema": "ilxyr.run.v1",
+        "started_at_ms": 1786571246690,
+        "stderr": "Traceback (most recent call last):\n  File \"/opt/qwen35-acceptance/lecore/experiments/qwen35_acceptance/run.py\", line 17, in <module>\n    import numpy as np\nModuleNotFoundError: No module named 'numpy'\n",
+        "stdout": "",
+        "timed_out": false
+      },
+      "ilxyr:sourceAttested": false,
+      "name": "Execution for lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance",
+      "object": {
+        "@id": "artifact://sha256/3d4c5b79be266085e4a3495a83cbfe3c4c8434c230bef81e7b6a19ed7eeb3ff6"
+      },
+      "result": {
+        "@id": "artifact://sha256/22fc1c29c182563c80d9188e4e2d077e6fbb72dcdc0c1d046e7d7e22dd3c00e1"
+      }
+    },
+    {
+      "@id": "artifact://sha256/22fc1c29c182563c80d9188e4e2d077e6fbb72dcdc0c1d046e7d7e22dd3c00e1",
+      "@type": [
+        "Dataset",
+        "prov:Entity"
+      ],
+      "additionalProperty": [],
+      "description": "Resolved outcome: execution_failure",
+      "identifier": "evidence:run:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance:1786571246690",
+      "ilxyr:authority": {
+        "level": "corpus_proxy",
+        "provenance": {
+          "artifact_hashes": [
+            "artifact://sha256/04bed9185d0a9647fea419ac6cb2f671a106ae60bc82c23b172aacff6dbcaf0b",
+            "artifact://sha256/3b4c72fe06906bda15e22dac5fd12f9d1b1347f687f3656bbaa6ff3c3d11cbd1",
+            "artifact://sha256/50519e75792a64ca250e673ed7b05be888419d53969be5ec4c074fb50ed8ebb7",
+            "artifact://sha256/826a9741b544257f3658ecb4014abc4bcaee45a33be7e5e467dc1cb2786fc17e",
+            "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731"
+          ],
+          "checker": "checker://lecore/qwen35-acceptance/v1",
+          "model_lineage": "model://Qwen/Qwen3.5-0.8B/20c3330d0b3e00c98b38e7813202b12952f37d6a4415a30da103c9bfe994d680"
+        },
+        "scope": {
+          "coverage": 1.0,
+          "eval_set": "dataset://lecore/qwen-evaluation/a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94",
+          "seeds": [
+            0
+          ]
+        }
+      },
+      "ilxyr:coldReplayable": false,
+      "ilxyr:evidenceEventHash": "f20843ffca03b8df2cacc86f57dcdd0b48aa839114c16953be8d9719063eaee4",
+      "ilxyr:evidenceLane": "promoted",
+      "ilxyr:executorAttested": false,
+      "ilxyr:externallyPreregistered": false,
+      "ilxyr:forecastRisked": true,
+      "isBasedOn": {
+        "@id": "artifact://sha256/3d4c5b79be266085e4a3495a83cbfe3c4c8434c230bef81e7b6a19ed7eeb3ff6"
+      },
+      "name": "Evidence for Qwen3.5 leCore layer-prepending acceptance",
+      "prov:wasGeneratedBy": {
+        "@id": "artifact://sha256/cfabbc3d6aaa06b860e8126e0a2a9c2ab9e1151cd1ad8af7d9cfaf804c5eb731"
+      }
+    },
+    {
+      "@id": "urn:ilxyr:forecast:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast-mechanistic",
+      "@type": [
+        "CreativeWork",
+        "prov:Entity"
+      ],
+      "about": {
+        "@id": "artifact://sha256/3d4c5b79be266085e4a3495a83cbfe3c4c8434c230bef81e7b6a19ed7eeb3ff6"
+      },
+      "author": {
+        "@id": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/forecaster-mechanistic",
+        "@type": "SoftwareApplication",
+        "identifier": "model://codex/lecore-qwen/forecaster-mechanistic"
+      },
+      "identifier": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast-mechanistic",
+      "ilxyr:probabilities": {
+        "accepted": 0.15,
+        "execution_failure": 0.3,
+        "rejected": 0.55
+      },
+      "ilxyr:stake": 5,
+      "name": "Forecast for lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance"
+    },
+    {
+      "@id": "urn:ilxyr:forecast:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast.empirical",
+      "@type": [
+        "CreativeWork",
+        "prov:Entity"
+      ],
+      "about": {
+        "@id": "artifact://sha256/3d4c5b79be266085e4a3495a83cbfe3c4c8434c230bef81e7b6a19ed7eeb3ff6"
+      },
+      "author": {
+        "@id": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/forecaster-empirical",
+        "@type": "SoftwareApplication",
+        "identifier": "model://codex/lecore-qwen/forecaster-empirical"
+      },
+      "identifier": "lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast.empirical",
+      "ilxyr:probabilities": {
+        "accepted": 0.2,
+        "execution_failure": 0.15,
+        "rejected": 0.65
+      },
+      "ilxyr:stake": 5,
+      "name": "Forecast for lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.acceptance"
+    },
+    {
+      "@id": "urn:ilxyr:settlement:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast-mechanistic",
+      "@type": [
+        "CreateAction",
+        "prov:Activity"
+      ],
+      "ilxyr:brierScore": 0.815,
+      "ilxyr:resolvedOutcome": "execution_failure",
+      "name": "Forecast settlement for lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast-mechanistic",
+      "object": {
+        "@id": "urn:ilxyr:forecast:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast-mechanistic"
+      },
+      "result": {
+        "@id": "artifact://sha256/22fc1c29c182563c80d9188e4e2d077e6fbb72dcdc0c1d046e7d7e22dd3c00e1"
+      }
+    },
+    {
+      "@id": "urn:ilxyr:settlement:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast.empirical",
+      "@type": [
+        "CreateAction",
+        "prov:Activity"
+      ],
+      "ilxyr:brierScore": 1.185,
+      "ilxyr:resolvedOutcome": "execution_failure",
+      "name": "Forecast settlement for lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast.empirical",
+      "object": {
+        "@id": "urn:ilxyr:forecast:lecore.qwen35.install.20c3330d0b3e.d6905f043e78.a6c9d1135a04.a04ab5692be3.v1.forecast.empirical"
+      },
+      "result": {
+        "@id": "artifact://sha256/22fc1c29c182563c80d9188e4e2d077e6fbb72dcdc0c1d046e7d7e22dd3c00e1"
+      }
+    },
+    {
+      "@id": "artifact://sha256/04bed9185d0a9647fea419ac6cb2f671a106ae60bc82c23b172aacff6dbcaf0b",
+      "@type": [
+        "MediaObject",
+        "prov:Entity"
+      ],
+      "sha256": "04bed9185d0a9647fea419ac6cb2f671a106ae60bc82c23b172aacff6dbcaf0b"
+    },
+    {
+      "@id": "artifact://sha256/3b4c72fe06906bda15e22dac5fd12f9d1b1347f687f3656bbaa6ff3c3d11cbd1",
+      "@type": [
+        "MediaObject",
+        "prov:Entity"
+      ],
+      "sha256": "3b4c72fe06906bda15e22dac5fd12f9d1b1347f687f3656bbaa6ff3c3d11cbd1"
+    },
+    {
+      "@id": "artifact://sha256/50519e75792a64ca250e673ed7b05be888419d53969be5ec4c074fb50ed8ebb7",
+      "@type": [
+        "MediaObject",
+        "prov:Entity"
+      ],
+      "sha256": "50519e75792a64ca250e673ed7b05be888419d53969be5ec4c074fb50ed8ebb7"
+    },
+    {
+      "@id": "artifact://sha256/826a9741b544257f3658ecb4014abc4bcaee45a33be7e5e467dc1cb2786fc17e",
+      "@type": [
+        "MediaObject",
+        "prov:Entity"
+      ],
+      "sha256": "826a9741b544257f3658ecb4014abc4bcaee45a33be7e5e467dc1cb2786fc17e"
+    }
+  ]
+}

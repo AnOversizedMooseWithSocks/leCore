@@ -45,7 +45,8 @@ WHAT GOES WHERE, from the measurements:
 import numpy as np
 
 
-def blank_layer(cfg, root, index, intermediate=128):
+def blank_layer(cfg, root, index, intermediate=None, layout="packed",
+                conv_bias=True):
     """A transformer layer that outputs EXACTLY ZERO.
 
     Every projection is zeros and the gate decays to nothing, so the residual
@@ -53,6 +54,8 @@ def blank_layer(cfg, root, index, intermediate=128):
     the adapter literature insists on, taken to its limit: not near-identity,
     IDENTITY, verified as a bit-for-bit match rather than a small delta."""
     H = int(cfg["hidden"])
+    intermediate = int(intermediate if intermediate is not None
+                       else cfg.get("intermediate", 128))
     nkv = int(cfg.get("linear_num_key_heads", 1))
     nv = int(cfg.get("linear_num_value_heads", 1))
     kd = int(cfg.get("linear_key_head_dim", H))
@@ -60,25 +63,44 @@ def blank_layer(cfg, root, index, intermediate=128):
     conv = nkv * kd * 2 + nv * vd
     p = "%slayers.%d." % (root, int(index))
     z = lambda *s: np.zeros(s, np.float32)
-    return {
-        p + "input_layernorm.weight": np.ones(H, np.float32),
-        p + "post_attention_layernorm.weight": np.ones(H, np.float32),
+    layer = {
+        # Qwen3.5's decoder RMSNorm is zero-centred: the official forward is
+        # norm(x) * (1 + weight), and a newly constructed layer starts at 0.
+        p + "input_layernorm.weight": z(H),
+        p + "post_attention_layernorm.weight": z(H),
         p + "linear_attn.A_log": np.full(nv, -9.0, np.float32),
         p + "linear_attn.dt_bias": z(nv),
-        p + "linear_attn.in_proj_qkvz.weight": z(2 * nkv * kd + 2 * nv * vd, H),
-        p + "linear_attn.in_proj_ba.weight": z(2 * nv, H),
         p + "linear_attn.conv1d.weight": z(conv, 1,
                                            int(cfg.get("conv_kernel", 4))),
-        p + "linear_attn.conv1d.bias": z(conv),
         p + "linear_attn.norm.weight": np.ones(vd, np.float32),
         p + "linear_attn.out_proj.weight": z(H, nv * vd),
-        p + "mlp.gate_proj.weight": z(int(intermediate), H),
-        p + "mlp.up_proj.weight": z(int(intermediate), H),
-        p + "mlp.down_proj.weight": z(H, int(intermediate)),
+        p + "mlp.gate_proj.weight": z(intermediate, H),
+        p + "mlp.up_proj.weight": z(intermediate, H),
+        p + "mlp.down_proj.weight": z(H, intermediate),
     }
+    if str(layout) == "split":
+        # This is the schema emitted and loaded by official Transformers
+        # Qwen3.5.  The earlier installer invented packed qkvz/ba tensors; the
+        # leCore runtime accepted those aliases, but the official model quite
+        # correctly reported them as unexpected and its real tensors missing.
+        layer.update({
+            p + "linear_attn.in_proj_qkv.weight": z(2 * nkv * kd + nv * vd, H),
+            p + "linear_attn.in_proj_z.weight": z(nv * vd, H),
+            p + "linear_attn.in_proj_b.weight": z(nv, H),
+            p + "linear_attn.in_proj_a.weight": z(nv, H),
+        })
+    else:
+        layer.update({
+            p + "linear_attn.in_proj_qkvz.weight": z(
+                2 * nkv * kd + 2 * nv * vd, H),
+            p + "linear_attn.in_proj_ba.weight": z(2 * nv, H),
+        })
+    if conv_bias:
+        layer[p + "linear_attn.conv1d.bias"] = z(conv)
+    return layer
 
 
-def prepend_layers(weights, cfg, n=2, intermediate=128):
+def prepend_layers(weights, cfg, n=2, intermediate=None):
     """Insert `n` blank layers at the FRONT. The model is unchanged until used.
 
     Existing layers are renumbered upward -- the only surgery involved, and the
@@ -103,6 +125,17 @@ def prepend_layers(weights, cfg, n=2, intermediate=128):
         root = next(k.split("layers.")[0] for k in weights if "layers." in k)
     lp = "%slayers." % root
 
+    # MIRROR THE CHECKPOINT'S PUBLIC SCHEMA.  The runtime deliberately accepts
+    # old packed and current split GDN projection names, but a portable emitted
+    # checkpoint has to satisfy the model's official loader too.  Infer the
+    # naming and bias convention from a real source GDN layer before renaming
+    # it; this also preserves the older packed fixture format.
+    linear_keys = [k for k in weights
+                   if k.startswith(lp) and ".linear_attn." in k]
+    layout = ("split" if any(k.endswith("linear_attn.in_proj_qkv.weight")
+                             for k in linear_keys) else "packed")
+    conv_bias = any(k.endswith("linear_attn.conv1d.bias") for k in linear_keys)
+
     # RENAME, DO NOT COPY. This used to `np.array(v, copy=True)` EVERY tensor,
     # which materialises the ENTIRE MODEL in RAM to perform an operation that
     # changes no values at all -- renumbering is a DICTIONARY operation, and the
@@ -122,7 +155,8 @@ def prepend_layers(weights, cfg, n=2, intermediate=128):
         else:
             out[k] = v
     for j in range(int(n)):
-        out.update(blank_layer(cfg, root, j, intermediate))
+        out.update(blank_layer(cfg, root, j, intermediate,
+                               layout=layout, conv_bias=conv_bias))
     c = dict(cfg)
     c["n_layers"] = int(cfg["n_layers"]) + int(n)
     return out, c

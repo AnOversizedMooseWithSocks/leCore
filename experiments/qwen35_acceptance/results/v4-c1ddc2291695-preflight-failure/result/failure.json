@@ -1,0 +1,9 @@
+{
+  "schema": "lecore.qwen35-v4-preflight-failure.v1",
+  "stage": "ilxyr_compile",
+  "formal_run_started": false,
+  "scientific_result_admitted": false,
+  "resolved_outcome": "preflight_failure",
+  "error": "JSON error: unknown field `runner_policy` in experiment.json",
+  "classification": "generator_ilxyr_schema_mismatch"
+}

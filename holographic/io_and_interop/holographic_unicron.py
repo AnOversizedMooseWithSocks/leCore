@@ -36,10 +36,7 @@ KEPT NEGATIVES (do not reinvent):
 """
 
 import os
-import json
-import struct
 import hashlib
-import zipfile
 
 import zlib
 import tempfile
@@ -48,214 +45,10 @@ import numpy as np
 
 # Delegations -- Rule 0 said these exist; do not reimplement.
 from holographic.sampling_and_signal.holographic_quantumstats import level_statistics
-
-
-# --------------------------------------------------------------------------- loading
-
-# safetensors dtype strings -> (numpy dtype used to read raw bytes, post-decode)
-# bf16 has no numpy dtype: read as uint16, shift into the high half of a float32.
-_ST_DTYPES = {
-    "F64": np.float64, "F32": np.float32, "F16": np.float16,
-    "I64": np.int64, "I32": np.int32, "I16": np.int16, "I8": np.int8,
-    "U8": np.uint8, "BOOL": np.bool_,
-}
-
-
-def _decode_bf16(raw_u16):
-    """bfloat16 -> float32 exactly: bf16 IS the top 16 bits of an IEEE float32,
-    so a left shift into a uint32 reinterpreted as float32 is a lossless decode."""
-    u32 = raw_u16.astype(np.uint32) << 16
-    return u32.view(np.float32)
-
-
-def load_safetensors(path, return_dtypes=False):
-    """Parse a .safetensors file into {name: ndarray} with stdlib + NumPy only.
-    return_dtypes=True additionally returns {name: on-disk dtype string}, so a
-    caller can hand it back to save_safetensors and keep the file size honest.
-
-    Format: first 8 bytes = little-endian uint64 length N of the JSON header;
-    next N bytes = JSON mapping tensor name -> {dtype, shape, data_offsets};
-    the rest = the concatenated raw tensor bytes the offsets index into.
-    bf16 tensors are decoded losslessly to float32 (see _decode_bf16)."""
-    # MEMORY-MAP THE PAYLOAD, DO NOT READ IT. `blob = f.read()` pulls the whole
-    # checkpoint into RAM before a single tensor is touched, which is precisely
-    # the anti-pattern safetensors was designed to avoid -- the format exists so
-    # the OS can page bytes in on demand rather than duplicating the file.
-    # Field-caught on a real 2.1 GB model: the install finished, the file wrote
-    # correctly, and reading it back for VERIFICATION died with MemoryError
-    # while the installed and original copies were still held.
-    # np.memmap is numpy-only, needs no dependency, and gives the same zero-copy
-    # behaviour the safetensors library gets from mmap.
-    with open(path, "rb") as f:
-        (hdr_len,) = struct.unpack("<Q", f.read(8))
-        header = json.loads(f.read(hdr_len).decode("utf-8"))
-        data_start = 8 + hdr_len
-    try:
-        blob = np.memmap(path, dtype=np.uint8, mode="r", offset=data_start)
-    except Exception:
-        # a filesystem that cannot map (some network shares) falls back to the
-        # old behaviour rather than failing -- slower and hungrier, but correct
-        with open(path, "rb") as f:
-            f.seek(data_start)
-            blob = f.read()
-    out = {}
-    for name, meta in header.items():
-        if name == "__metadata__":
-            continue
-        a, b = meta["data_offsets"]
-        raw = blob[a:b]
-        shape = tuple(meta["shape"])
-        dt = meta["dtype"]
-        # DO NOT MATERIALISE. The previous line ended in `.copy()` on EVERY
-        # tensor, which pages in the whole mapping and defeats the memmap that
-        # was just set up -- and for a BF16 checkpoint the eager _decode_bf16
-        # DOUBLED it again, because bf16 decodes to float32. A 2.1 GB bf16 model
-        # therefore cost 4.2 GB before anything was computed.
-        # llama.cpp's streaming PR names this exact trap: enabling streaming
-        # AUTO-DISABLES mmap because "mmap prefetch would page the whole model
-        # into RAM and defeat streaming". A copy is the same defeat.
-        # A _LazyTensor holds the OFFSET, not the bytes, and decodes the one
-        # tensor a caller actually touches. Every consumer here goes through
-        # np.asarray(), which triggers __array__ -- so nothing else changes.
-        if dt not in _ST_DTYPES and dt != "BF16":
-            raise ValueError("unsupported safetensors dtype: %s" % dt)
-        out[name] = _LazyTensor(blob, a, b, shape, dt)
-    if return_dtypes:
-        return out, {k: header[k]["dtype"] for k in out}
-    return out
-
-
-class _LazyTensor:
-    """A tensor that is an OFFSET until someone asks for its values.
-
-    numpy calls __array__ on any np.asarray/np.array, so this behaves as an
-    ndarray everywhere in this codebase without a single call site changing.
-    `.shape` and `.dtype` answer from the header, so the many places that only
-    inspect geometry -- the architecture inference, the layer-type detection,
-    the size reports -- never touch a byte of the payload."""
-
-    __slots__ = ("_blob", "_a", "_b", "shape", "_dt", "_cache")
-
-    def __init__(self, blob, a, b, shape, dt):
-        self._blob = blob
-        self._a = int(a)
-        self._b = int(b)
-        self.shape = tuple(shape)
-        self._dt = dt
-        self._cache = None
-
-    @property
-    def dtype(self):
-        return np.dtype(np.float32) if self._dt == "BF16" \
-            else np.dtype(_ST_DTYPES[self._dt])
-
-    @property
-    def size(self):
-        n = 1
-        for d in self.shape:
-            n *= int(d)
-        return n
-
-    @property
-    def nbytes(self):
-        return self.size * self.dtype.itemsize
-
-    @property
-    def ndim(self):
-        return len(self.shape)
-
-    def __array__(self, dtype=None, copy=None):
-        if self._cache is None:
-            raw = bytes(self._blob[self._a:self._b])
-            if self._dt == "BF16":
-                arr = _decode_bf16(np.frombuffer(raw, dtype=np.uint16))
-            else:
-                arr = np.frombuffer(raw, dtype=_ST_DTYPES[self._dt])
-            self._cache = arr.reshape(self.shape)
-        return (self._cache if dtype is None
-                else self._cache.astype(dtype, copy=False))
-
-    def __getattr__(self, name):
-        # ANYTHING ELSE AN NDARRAY HAS, materialise and delegate. Enumerating
-        # the surface by hand fails on the first attribute nobody thought of --
-        # this hit `.T` immediately. A lazy value must be INDISTINGUISHABLE from
-        # the real one or it is a trap rather than an optimisation.
-        # THE UNDERSCORE GUARD IS LOAD-BEARING: without it, __getattr__ is
-        # reached for `_cache` before __init__ has set it, calls np.asarray,
-        # which reads `_cache`, which calls __getattr__ -- RecursionError in
-        # every module at once. A fallback that can invoke itself is not a
-        # fallback.
-        if name.startswith("_"):
-            raise AttributeError(name)
-        return getattr(np.asarray(self), name)
-
-    def __getitem__(self, k):
-        return np.asarray(self)[k]
-
-    def __len__(self):
-        return int(self.shape[0]) if self.shape else 0
-
-
-def _encode_bf16(f32):
-    """float32 -> bfloat16 raw uint16, round-to-nearest-EVEN on the dropped 16 bits
-    (plain truncation biases every value toward zero; RNE is what hardware does).
-    Values already representable in bf16 round-trip exactly through decode."""
-    u32 = np.ascontiguousarray(f32, np.float32).view(np.uint32)
-    return ((u32 + 0x7FFF + ((u32 >> 16) & 1)) >> 16).astype(np.uint16)
-
-
-def save_safetensors(path, tensors, dtypes=None):
-    """Write {name: ndarray} as .safetensors. `dtypes` maps name -> safetensors
-    dtype string ("BF16", "F16", "F32", ...) to OVERRIDE the array's own dtype on
-    disk -- the round-trip fidelity fix: our loader decodes BF16 to float32
-    losslessly, so without this override a load->save cycle silently DOUBLES the
-    file (measured live on Qwen3.5: 2x size, kept negative). Exists so the
-    selftest can round-trip WITHOUT any external model file."""
-    inv = {v: k for k, v in _ST_DTYPES.items()}
-    dtypes = dtypes or {}
-    header, blobs, off = {}, [], 0
-    for name in sorted(tensors):  # sorted: byte-deterministic output
-        arr = np.ascontiguousarray(tensors[name])
-        want = dtypes.get(name)
-        if want == "BF16":
-            raw = _encode_bf16(arr).tobytes()
-            dt = "BF16"
-        elif want is not None and want in _ST_DTYPES:
-            arr = arr.astype(_ST_DTYPES[want])
-            raw = arr.tobytes()
-            dt = want
-        else:
-            dt = inv.get(arr.dtype.type)
-            if dt is None:
-                raise ValueError("unsupported dtype for save: %r" % (arr.dtype,))
-            raw = arr.tobytes()
-        header[name] = {"dtype": dt, "shape": list(arr.shape),
-                        "data_offsets": [off, off + len(raw)]}
-        blobs.append(raw)
-        off += len(raw)
-    hj = json.dumps(header, sort_keys=True).encode("utf-8")
-    with open(path, "wb") as f:
-        f.write(struct.pack("<Q", len(hj)))
-        f.write(hj)
-        for b in blobs:
-            f.write(b)
-
-
-def load_model(path):
-    """Front door: .safetensors or .npz -> {name: ndarray}. torch pickle files are
-    refused on purpose (arbitrary-code-execution surface; see module negatives)."""
-    p = str(path)
-    if p.endswith(".safetensors"):
-        return load_safetensors(p)
-    if p.endswith(".gguf"):
-        return load_gguf(p)
-    if p.endswith(".npz"):
-        with np.load(p) as z:
-            return {k: z[k] for k in z.files}
-    if p.endswith((".pt", ".bin", ".pth")) or zipfile.is_zipfile(p):
-        raise ValueError("torch pickle checkpoints are refused (unpickling is an "
-                         "ACE surface); convert to .safetensors or .npz first")
-    raise ValueError("unknown model format: %s" % p)
+from holographic.io_and_interop.holographic_checkpointio import (
+    SafetensorWeights, _ST_DTYPES, _decode_bf16, load_gguf, load_model,
+    load_safetensors, save_gguf, save_safetensors,
+)
 
 
 # --------------------------------------------------------------------------- spectra
@@ -423,140 +216,6 @@ def compare_models(analysis_a, analysis_b):
 
 
 
-
-# ------------------------------------------------------------------------------ gguf
-
-# ggml tensor type ids we DEQUANTIZE (llama.cpp convention). Everything else is
-# refused BY NAME so the caller knows exactly which quant to convert upstream --
-# implementing every k-quant here would be a maintenance tax with no RMT payoff
-# (the spectrum of a heavily quantized matrix is the quantizer's, not training's).
-_GGML_F32, _GGML_F16, _GGML_Q8_0, _GGML_BF16 = 0, 1, 8, 30
-_GGUF_MAGIC = 0x46554747  # "GGUF" little-endian
-
-def _gguf_read_str(f):
-    """GGUF string: u64 length + raw utf-8 bytes (no terminator)."""
-    (n,) = struct.unpack("<Q", f.read(8))
-    return f.read(n).decode("utf-8")
-
-# kv value readers by GGUF type id; arrays (9) recurse on the element type.
-_GGUF_SCALARS = {0: ("<B", 1), 1: ("<b", 1), 2: ("<H", 2), 3: ("<h", 2),
-                 4: ("<I", 4), 5: ("<i", 4), 6: ("<f", 4), 7: ("<?", 1),
-                 10: ("<Q", 8), 11: ("<q", 8), 12: ("<d", 8)}
-
-def _gguf_read_value(f, t):
-    if t in _GGUF_SCALARS:
-        fmt, size = _GGUF_SCALARS[t]
-        return struct.unpack(fmt, f.read(size))[0]
-    if t == 8:
-        return _gguf_read_str(f)
-    if t == 9:                               # array: elem type + count + values
-        (et,) = struct.unpack("<I", f.read(4))
-        (n,) = struct.unpack("<Q", f.read(8))
-        return [_gguf_read_value(f, et) for _ in range(n)]
-    raise ValueError("unknown GGUF kv type: %d" % t)
-
-def _dequant_q8_0(raw, count):
-    """Q8_0: blocks of 32 values, each block = f16 scale + 32 int8; value = scale*q.
-    Vectorized: view the interleaved block layout with a structured dtype."""
-    blk = np.dtype([("d", "<f2"), ("q", "i1", (32,))])
-    b = np.frombuffer(raw, dtype=blk, count=(count + 31) // 32)
-    out = (b["d"].astype(np.float32)[:, None] * b["q"].astype(np.float32)).reshape(-1)
-    return out[:count]
-
-def load_gguf(path):
-    """Parse a GGUF file (llama.cpp models) into {name: ndarray} -- stdlib+NumPy.
-    Layout: magic+version, tensor_count, kv metadata, tensor infos (name/dims/type/
-    offset), then the data section aligned to general.alignment (default 32).
-    F32/F16/BF16 read directly; Q8_0 dequantized; other quants refused by name
-    (see the WHY-comment above _GGML_F32). NOTE: GGUF stores dims INNERMOST-FIRST
-    (ne[0] = fastest-moving), so the numpy shape is the dims REVERSED -- getting
-    this backwards silently transposes every matrix and poisons the RMT q ratio."""
-    with open(path, "rb") as f:
-        magic, version = struct.unpack("<II", f.read(8))
-        if magic != _GGUF_MAGIC:
-            raise ValueError("not a GGUF file (bad magic)")
-        if version < 2:
-            raise ValueError("GGUF v1 uses u32 counts; only v2+ supported")
-        n_tensors, n_kv = struct.unpack("<QQ", f.read(16))
-        meta = {}
-        for _ in range(n_kv):
-            key = _gguf_read_str(f)
-            (t,) = struct.unpack("<I", f.read(4))
-            meta[key] = _gguf_read_value(f, t)
-        infos = []
-        for _ in range(n_tensors):
-            name = _gguf_read_str(f)
-            (nd,) = struct.unpack("<I", f.read(4))
-            dims = struct.unpack("<%dQ" % nd, f.read(8 * nd))
-            gtype, off = struct.unpack("<IQ", f.read(12))
-            infos.append((name, dims, gtype, off))
-        align = int(meta.get("general.alignment", 32))
-        pos = f.tell()
-        data_start = ((pos + align - 1) // align) * align
-        f.seek(0, 2); end = f.tell()
-        out = {}
-        for name, dims, gtype, off in infos:
-            count = 1
-            for d in dims:
-                count *= int(d)
-            shape = tuple(int(d) for d in reversed(dims))   # innermost-first!
-            f.seek(data_start + off)
-            if gtype == _GGML_F32:
-                arr = np.frombuffer(f.read(4 * count), dtype=np.float32)
-            elif gtype == _GGML_F16:
-                arr = np.frombuffer(f.read(2 * count), dtype=np.float16).astype(np.float32)
-            elif gtype == _GGML_BF16:
-                arr = _decode_bf16(np.frombuffer(f.read(2 * count), dtype=np.uint16))
-            elif gtype == _GGML_Q8_0:
-                nbytes = ((count + 31) // 32) * 34          # 2 (f16 d) + 32 (i8)
-                arr = _dequant_q8_0(f.read(nbytes), count)
-            else:
-                raise ValueError("GGUF tensor %r has unsupported ggml type %d; "
-                                 "convert this quant to f16/f32 upstream" % (name, gtype))
-            out[name] = arr.reshape(shape).copy()
-        if end < data_start:
-            raise ValueError("truncated GGUF data section")
-    return out
-
-def save_gguf(path, tensors, quant=None):
-    """Minimal GGUF v3 writer (F32, or Q8_0 for names listed in `quant`). Exists for
-    the same reason save_safetensors does: the loader's test must round-trip with no
-    external download. Not a general exporter -- kv metadata is just alignment."""
-    quant = set(quant or ())
-    infos, blobs, off = [], [], 0
-    for name in sorted(tensors):
-        arr = np.ascontiguousarray(np.asarray(tensors[name], dtype=np.float32))
-        dims = tuple(reversed(arr.shape))                   # innermost-first on disk
-        if name in quant:
-            flat = arr.reshape(-1)
-            pad = (-flat.size) % 32
-            fp = np.concatenate([flat, np.zeros(pad, np.float32)]).reshape(-1, 32)
-            d = np.max(np.abs(fp), axis=1) / 127.0
-            d[d == 0] = 1.0
-            q = np.clip(np.round(fp / d[:, None]), -127, 127).astype(np.int8)
-            blk = np.empty(fp.shape[0], dtype=np.dtype([("d", "<f2"), ("q", "i1", (32,))]))
-            blk["d"] = d.astype(np.float16); blk["q"] = q
-            raw, gt = blk.tobytes(), _GGML_Q8_0
-        else:
-            raw, gt = arr.tobytes(), _GGML_F32
-        infos.append((name, dims, gt, off)); blobs.append(raw)
-        off += len(raw) + ((-len(raw)) % 32)                # tensor data 32-aligned
-    with open(path, "wb") as f:
-        f.write(struct.pack("<IIQQ", _GGUF_MAGIC, 3, len(infos), 1))
-        k = b"general.alignment"
-        f.write(struct.pack("<Q", len(k))); f.write(k)
-        f.write(struct.pack("<II", 4, 32))                  # type u32, value 32
-        for name, dims, gt, o in infos:
-            nb = name.encode("utf-8")
-            f.write(struct.pack("<Q", len(nb))); f.write(nb)
-            f.write(struct.pack("<I", len(dims)))
-            f.write(struct.pack("<%dQ" % len(dims), *dims))
-            f.write(struct.pack("<IQ", gt, o))
-        pad = (-f.tell()) % 32
-        f.write(b"\x00" * pad)
-        for raw in blobs:
-            f.write(raw)
-            f.write(b"\x00" * ((-len(raw)) % 32))
 
 # -------------------------------------------------------------------- subspace overlap
 
@@ -825,11 +484,14 @@ def rsvd(W, k, seed=0, oversample=10, power=2):
     ~1e12 flops under exact SVD just to LOOK at it. Deterministic under the seed.
     WHY power iterations: weight spectra decay slowly through the MP bulk; without
     q>=1 the probe subspace leaks bulk energy and the top singular values bias low."""
-    W = np.asarray(W, np.float64)
+    source = np.asarray(W)
+    dtype = np.float64 if source.dtype == np.float64 else np.float32
+    W = np.asarray(source, dtype=dtype)
     m, n = W.shape
     k = min(k, min(m, n))
     rng = np.random.default_rng(seed)
-    Q = np.linalg.qr(W @ rng.standard_normal((n, min(k + oversample, n))))[0]
+    Q = np.linalg.qr(W @ rng.standard_normal(
+        (n, min(k + oversample, n)), dtype=dtype))[0]
     for _ in range(power):
         Q = np.linalg.qr(W @ (W.T @ Q))[0]
     U_s, sv, Vt = np.linalg.svd(Q.T @ W, full_matrices=False)
