@@ -1,0 +1,600 @@
+{
+  "created_at_utc": "2026-08-14T23:16:58.623616+00:00",
+  "environment": {
+    "cpu_model": "Intel(R) Xeon(R) Platinum 8488C",
+    "logical_cpus": 8,
+    "numpy": "2.4.6",
+    "platform": "Linux-6.1.177-224.371.amzn2023.x86_64-x86_64-with-glibc2.34",
+    "python": "3.12.13",
+    "thread_environment_in_workers": {
+      "MKL_NUM_THREADS": "8",
+      "NUMEXPR_NUM_THREADS": "8",
+      "OMP_NUM_THREADS": "8",
+      "OPENBLAS_NUM_THREADS": "8",
+      "VECLIB_MAXIMUM_THREADS": "8"
+    },
+    "total_memory_bytes": 66337230848
+  },
+  "inputs": {
+    "corpus": {
+      "bytes": 1213410,
+      "path": "/opt/qwen35-acceptance-v7/inputs/federalist-papers.txt",
+      "sha256": "a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94"
+    },
+    "model_dir": "/opt/qwen35-acceptance-v7/model",
+    "model_files": [
+      {
+        "bytes": 2907,
+        "name": "config.json",
+        "sha256": "b90b86f35c8e6925ef74ee04d0e758f0a845c83a42089ad82bbaa948de9b4204"
+      },
+      {
+        "bytes": 1746942600,
+        "name": "model.safetensors-00001-of-00001.safetensors",
+        "sha256": "04b1c301231dd422b8860db31311ab2721511346a32cb1e079c4c4e5f1fe4696"
+      },
+      {
+        "bytes": 50900,
+        "name": "model.safetensors.index.json",
+        "sha256": "d8a08838a613b025eb7952ed9db11696213e57e76a375661ef5c12f9dd5dcf4e"
+      },
+      {
+        "bytes": 12807982,
+        "name": "tokenizer.json",
+        "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"
+      },
+      {
+        "bytes": 16709,
+        "name": "tokenizer_config.json",
+        "sha256": "49e2b6e395f959f077f1e992b338919c0d4a9732fc6e613995e06557f843500c"
+      }
+    ],
+    "weight_hashes_included": true
+  },
+  "limitations": [
+    "Peak RSS is process RSS, conservatively multiplied for concurrent runtimes; shared file-backed pages are not discounted.",
+    "Use the larger of this projection and a full acceptance run's observed peak before downsizing.",
+    "Duration and cost are extrapolations from a short run; validate the selected configuration with a miniature end-to-end run."
+  ],
+  "memory_recommendation": {
+    "class_decisions": [
+      {
+        "fits": true,
+        "margin_gib": 6.12213134765625,
+        "ram_gib": 32
+      },
+      {
+        "fits": true,
+        "margin_gib": 38.12213134765625,
+        "ram_gib": 64
+      },
+      {
+        "fits": true,
+        "margin_gib": 102.12213134765625,
+        "ram_gib": 128
+      }
+    ],
+    "concurrent_evaluation_runtimes": 2,
+    "headroom_factor": 1.25,
+    "max_observed_trial_peak_bytes": 4436746240,
+    "measured_single_runtime_peak_bytes": 4435529728,
+    "observed_full_run_peak_bytes": 20510932992,
+    "planning_peak_bytes": 20510932992,
+    "projected_parallel_evaluation_peak_bytes": 8871059456,
+    "recommended_ram_gib": 32,
+    "required_capacity_bytes": 27786149888,
+    "scope": "evaluation RSS plus optional observed full-run peak",
+    "selected_chunk_size": 512,
+    "status": "ok",
+    "system_reserve_gib": 2.0
+  },
+  "results": [
+    {
+      "acceleration": {
+        "cached_step_gdn_recurrence": {
+          "active": "numpy",
+          "calls": 0,
+          "native_available": false,
+          "scope": "single_token_cached_step"
+        },
+        "full_sequence_gdn_recurrence": {
+          "active": "c",
+          "direct_numpy_calls": 0,
+          "direct_numpy_tokens": 0,
+          "fallback_calls": 0,
+          "fallback_tokens": 0,
+          "fresh_and_resumed_parity_complete": true,
+          "native_attempt_tokens": 10692,
+          "native_attempts": 162,
+          "native_calls": 162,
+          "native_libraries": [
+            {
+              "cache_hit_on_load": true,
+              "cache_key_sha256": "5f2df83c80bd14689119a8aa88037ce4b079e32f161a6b9a5d432e197d531c3b",
+              "compiler": {
+                "byteorder": "little",
+                "execution_environment": {
+                  "LANG": "C",
+                  "LC_ALL": "C",
+                  "PATH": "/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin"
+                },
+                "file_identity": {
+                  "bytes": 1068296,
+                  "inode": 674814,
+                  "mtime_ns": 1753994902000000000
+                },
+                "host_machine": "x86_64",
+                "host_system": "Linux",
+                "path": "/usr/bin/gcc",
+                "pointer_bits": 64,
+                "target": "x86_64-amazon-linux",
+                "version": "cc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-5)\nCopyright (C) 2021 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+              },
+              "dtype": "float32",
+              "flags": [
+                "-O2",
+                "-ffp-contract=off"
+              ],
+              "library_sha256": "80f56df68324d5dc5ee638c04d16f3479714158e0f60b529410dc39c48f87b45",
+              "optimization_policy": "safe"
+            },
+            {
+              "cache_hit_on_load": true,
+              "cache_key_sha256": "5f2df83c80bd14689119a8aa88037ce4b079e32f161a6b9a5d432e197d531c3b",
+              "compiler": {
+                "byteorder": "little",
+                "execution_environment": {
+                  "LANG": "C",
+                  "LC_ALL": "C",
+                  "PATH": "/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin"
+                },
+                "file_identity": {
+                  "bytes": 1068296,
+                  "inode": 674814,
+                  "mtime_ns": 1753994902000000000
+                },
+                "host_machine": "x86_64",
+                "host_system": "Linux",
+                "path": "/usr/bin/gcc",
+                "pointer_bits": 64,
+                "target": "x86_64-amazon-linux",
+                "version": "cc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-5)\nCopyright (C) 2021 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+              },
+              "dtype": "float64",
+              "flags": [
+                "-O2",
+                "-ffp-contract=off"
+              ],
+              "library_sha256": "80f56df68324d5dc5ee638c04d16f3479714158e0f60b529410dc39c48f87b45",
+              "optimization_policy": "safe"
+            }
+          ],
+          "native_tokens": 10692,
+          "numpy_calls": 0,
+          "numpy_tokens": 0,
+          "refused": null,
+          "requested": "c",
+          "scope": "full_sequence_gdn_recurrence",
+          "validated_regimes": [
+            {
+              "dtype": "float32",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 5.960464477539063e-08,
+              "max_relative_error": 5.2332139951213887e-08,
+              "passed": true,
+              "resumed": false,
+              "value_dim": 128
+            },
+            {
+              "dtype": "float64",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 2.220446049250313e-16,
+              "max_relative_error": 1.243539769478559e-16,
+              "passed": true,
+              "resumed": false,
+              "value_dim": 128
+            },
+            {
+              "dtype": "float32",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 1.9073486328125e-06,
+              "max_relative_error": 4.673791550298994e-07,
+              "passed": true,
+              "resumed": true,
+              "value_dim": 128
+            },
+            {
+              "dtype": "float64",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 1.4210854715202004e-14,
+              "max_relative_error": 1.1461571869860072e-15,
+              "passed": true,
+              "resumed": true,
+              "value_dim": 128
+            }
+          ]
+        }
+      },
+      "chunk_size": 128,
+      "evaluation_seconds": 50.742281195000004,
+      "load_seconds": 26.298035478000003,
+      "loaded_peak_rss_bytes": 3304886272,
+      "loss_mean_nats": 1.559145236811716,
+      "losses_sha256_float64": "defc96cfd3e97e6c7e56b59a5d07c760bc74c2b40ad148e1a733ed9ab23531ec",
+      "max_abs_loss_delta_vs_smallest_chunk": 0.0,
+      "numerical_parity": true,
+      "peak_rss_bytes": 4174524416,
+      "prediction_tokens": 512,
+      "status": "ok",
+      "tokens_per_second": 10.090204617179312,
+      "wall_seconds": 86.10505843800001
+    },
+    {
+      "acceleration": {
+        "cached_step_gdn_recurrence": {
+          "active": "numpy",
+          "calls": 0,
+          "native_available": false,
+          "scope": "single_token_cached_step"
+        },
+        "full_sequence_gdn_recurrence": {
+          "active": "c",
+          "direct_numpy_calls": 0,
+          "direct_numpy_tokens": 0,
+          "fallback_calls": 0,
+          "fallback_tokens": 0,
+          "fresh_and_resumed_parity_complete": true,
+          "native_attempt_tokens": 9900,
+          "native_attempts": 90,
+          "native_calls": 90,
+          "native_libraries": [
+            {
+              "cache_hit_on_load": true,
+              "cache_key_sha256": "5f2df83c80bd14689119a8aa88037ce4b079e32f161a6b9a5d432e197d531c3b",
+              "compiler": {
+                "byteorder": "little",
+                "execution_environment": {
+                  "LANG": "C",
+                  "LC_ALL": "C",
+                  "PATH": "/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin"
+                },
+                "file_identity": {
+                  "bytes": 1068296,
+                  "inode": 674814,
+                  "mtime_ns": 1753994902000000000
+                },
+                "host_machine": "x86_64",
+                "host_system": "Linux",
+                "path": "/usr/bin/gcc",
+                "pointer_bits": 64,
+                "target": "x86_64-amazon-linux",
+                "version": "cc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-5)\nCopyright (C) 2021 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+              },
+              "dtype": "float32",
+              "flags": [
+                "-O2",
+                "-ffp-contract=off"
+              ],
+              "library_sha256": "80f56df68324d5dc5ee638c04d16f3479714158e0f60b529410dc39c48f87b45",
+              "optimization_policy": "safe"
+            },
+            {
+              "cache_hit_on_load": true,
+              "cache_key_sha256": "5f2df83c80bd14689119a8aa88037ce4b079e32f161a6b9a5d432e197d531c3b",
+              "compiler": {
+                "byteorder": "little",
+                "execution_environment": {
+                  "LANG": "C",
+                  "LC_ALL": "C",
+                  "PATH": "/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin"
+                },
+                "file_identity": {
+                  "bytes": 1068296,
+                  "inode": 674814,
+                  "mtime_ns": 1753994902000000000
+                },
+                "host_machine": "x86_64",
+                "host_system": "Linux",
+                "path": "/usr/bin/gcc",
+                "pointer_bits": 64,
+                "target": "x86_64-amazon-linux",
+                "version": "cc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-5)\nCopyright (C) 2021 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+              },
+              "dtype": "float64",
+              "flags": [
+                "-O2",
+                "-ffp-contract=off"
+              ],
+              "library_sha256": "80f56df68324d5dc5ee638c04d16f3479714158e0f60b529410dc39c48f87b45",
+              "optimization_policy": "safe"
+            }
+          ],
+          "native_tokens": 9900,
+          "numpy_calls": 0,
+          "numpy_tokens": 0,
+          "refused": null,
+          "requested": "c",
+          "scope": "full_sequence_gdn_recurrence",
+          "validated_regimes": [
+            {
+              "dtype": "float32",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 4.76837158203125e-07,
+              "max_relative_error": 1.845358581775497e-07,
+              "passed": true,
+              "resumed": false,
+              "value_dim": 128
+            },
+            {
+              "dtype": "float64",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 1.7763568394002505e-15,
+              "max_relative_error": 1.49465434253473e-16,
+              "passed": true,
+              "resumed": false,
+              "value_dim": 128
+            },
+            {
+              "dtype": "float32",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 1.9073486328125e-06,
+              "max_relative_error": 4.734570508170922e-07,
+              "passed": true,
+              "resumed": true,
+              "value_dim": 128
+            },
+            {
+              "dtype": "float64",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 3.730349362740526e-14,
+              "max_relative_error": 2.9505352216893134e-15,
+              "passed": true,
+              "resumed": true,
+              "value_dim": 128
+            }
+          ]
+        }
+      },
+      "chunk_size": 256,
+      "evaluation_seconds": 35.185997223999976,
+      "load_seconds": 9.422633967999985,
+      "loaded_peak_rss_bytes": 3298701312,
+      "loss_mean_nats": 1.559145236811716,
+      "losses_sha256_float64": "defc96cfd3e97e6c7e56b59a5d07c760bc74c2b40ad148e1a733ed9ab23531ec",
+      "max_abs_loss_delta_vs_smallest_chunk": 0.0,
+      "numerical_parity": true,
+      "peak_rss_bytes": 4436746240,
+      "prediction_tokens": 512,
+      "status": "ok",
+      "tokens_per_second": 14.551243119259116,
+      "wall_seconds": 53.83469913599998
+    },
+    {
+      "acceleration": {
+        "cached_step_gdn_recurrence": {
+          "active": "numpy",
+          "calls": 0,
+          "native_available": false,
+          "scope": "single_token_cached_step"
+        },
+        "full_sequence_gdn_recurrence": {
+          "active": "c",
+          "direct_numpy_calls": 0,
+          "direct_numpy_tokens": 0,
+          "fallback_calls": 0,
+          "fallback_tokens": 0,
+          "fresh_and_resumed_parity_complete": true,
+          "native_attempt_tokens": 9900,
+          "native_attempts": 72,
+          "native_calls": 72,
+          "native_libraries": [
+            {
+              "cache_hit_on_load": true,
+              "cache_key_sha256": "5f2df83c80bd14689119a8aa88037ce4b079e32f161a6b9a5d432e197d531c3b",
+              "compiler": {
+                "byteorder": "little",
+                "execution_environment": {
+                  "LANG": "C",
+                  "LC_ALL": "C",
+                  "PATH": "/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin"
+                },
+                "file_identity": {
+                  "bytes": 1068296,
+                  "inode": 674814,
+                  "mtime_ns": 1753994902000000000
+                },
+                "host_machine": "x86_64",
+                "host_system": "Linux",
+                "path": "/usr/bin/gcc",
+                "pointer_bits": 64,
+                "target": "x86_64-amazon-linux",
+                "version": "cc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-5)\nCopyright (C) 2021 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+              },
+              "dtype": "float32",
+              "flags": [
+                "-O2",
+                "-ffp-contract=off"
+              ],
+              "library_sha256": "80f56df68324d5dc5ee638c04d16f3479714158e0f60b529410dc39c48f87b45",
+              "optimization_policy": "safe"
+            },
+            {
+              "cache_hit_on_load": true,
+              "cache_key_sha256": "5f2df83c80bd14689119a8aa88037ce4b079e32f161a6b9a5d432e197d531c3b",
+              "compiler": {
+                "byteorder": "little",
+                "execution_environment": {
+                  "LANG": "C",
+                  "LC_ALL": "C",
+                  "PATH": "/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin"
+                },
+                "file_identity": {
+                  "bytes": 1068296,
+                  "inode": 674814,
+                  "mtime_ns": 1753994902000000000
+                },
+                "host_machine": "x86_64",
+                "host_system": "Linux",
+                "path": "/usr/bin/gcc",
+                "pointer_bits": 64,
+                "target": "x86_64-amazon-linux",
+                "version": "cc (GCC) 11.5.0 20240719 (Red Hat 11.5.0-5)\nCopyright (C) 2021 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE."
+              },
+              "dtype": "float64",
+              "flags": [
+                "-O2",
+                "-ffp-contract=off"
+              ],
+              "library_sha256": "80f56df68324d5dc5ee638c04d16f3479714158e0f60b529410dc39c48f87b45",
+              "optimization_policy": "safe"
+            }
+          ],
+          "native_tokens": 9900,
+          "numpy_calls": 0,
+          "numpy_tokens": 0,
+          "refused": null,
+          "requested": "c",
+          "scope": "full_sequence_gdn_recurrence",
+          "validated_regimes": [
+            {
+              "dtype": "float32",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 4.76837158203125e-07,
+              "max_relative_error": 1.845358581775497e-07,
+              "passed": true,
+              "resumed": false,
+              "value_dim": 128
+            },
+            {
+              "dtype": "float64",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 1.7763568394002505e-15,
+              "max_relative_error": 1.49465434253473e-16,
+              "passed": true,
+              "resumed": false,
+              "value_dim": 128
+            },
+            {
+              "dtype": "float32",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 1.1920928955078125e-07,
+              "max_relative_error": 2.973034458539667e-08,
+              "passed": true,
+              "resumed": true,
+              "value_dim": 128
+            },
+            {
+              "dtype": "float64",
+              "heads": 16,
+              "key_dim": 128,
+              "max_abs_error": 1.7763568394002505e-15,
+              "max_relative_error": 1.403977760133697e-16,
+              "passed": true,
+              "resumed": true,
+              "value_dim": 128
+            }
+          ]
+        }
+      },
+      "chunk_size": 512,
+      "evaluation_seconds": 26.243269986999962,
+      "load_seconds": 9.236170567999977,
+      "loaded_peak_rss_bytes": 3298689024,
+      "loss_mean_nats": 1.559145236811716,
+      "losses_sha256_float64": "defc96cfd3e97e6c7e56b59a5d07c760bc74c2b40ad148e1a733ed9ab23531ec",
+      "max_abs_loss_delta_vs_smallest_chunk": 0.0,
+      "numerical_parity": true,
+      "peak_rss_bytes": 4435529728,
+      "prediction_tokens": 512,
+      "status": "ok",
+      "tokens_per_second": 19.509763846259542,
+      "wall_seconds": 44.49154022799996
+    }
+  ],
+  "schema": "lecore.qwen_runtime_benchmark.v1",
+  "scope": "Qwen leCore evaluation runtime; not an acceptance decision",
+  "settings": {
+    "chunk_sizes": [
+      128,
+      256,
+      512
+    ],
+    "gdn_recurrence_backend_requested": "c",
+    "loss_reference_chunk_size": 128,
+    "parity_atol": 1e-06,
+    "prediction_tokens_per_trial": 512,
+    "threads_per_runtime": 8,
+    "warmup_tokens": 16
+  },
+  "source": {
+    "commit": "cb3b1d2ac71c183bf9307ca7145a2a619ff30c30",
+    "source_files": [
+      {
+        "path": "tools/benchmark_qwen_runtime.py",
+        "sha256": "512bfd054fa4eb2d3dc4136fee1feda10cd4b515d25170be9a2241847b2ce87a"
+      },
+      {
+        "path": "holographic/io_and_interop/holographic_gdnruntime.py",
+        "sha256": "68ea12b71931d7095c36668b958faceba93296f4bf025a1b438ce15ff86c385c"
+      },
+      {
+        "path": "holographic/io_and_interop/holographic_gdnaccel.py",
+        "sha256": "0205809bf9b5e1c3e9f8160164e0a6d8f2790e48412319b08a4f5bca9da4e368"
+      },
+      {
+        "path": "holographic/io_and_interop/holographic_ccrun.py",
+        "sha256": "393f5d633c5cdbf6f9d575662c46773e9abd7ce81e7a2639f5b762b6228cc4a6"
+      },
+      {
+        "path": "holographic/io_and_interop/holographic_emit.py",
+        "sha256": "bd0e09f9c6c459ad2258b9e267df0994a5d136b869777341146a186ab0760fc9"
+      }
+    ],
+    "tracked_checkout_dirty": false
+  },
+  "speed_and_cost_projection": {
+    "concurrent_evaluation_runtimes": 2,
+    "cost_estimates": [
+      {
+        "estimated_compute_usd": 0.21388104275235598,
+        "fits_memory_projection": true,
+        "hourly_usd": 0.2646,
+        "ram_gib": 32
+      },
+      {
+        "estimated_compute_usd": 0.42776208550471195,
+        "fits_memory_projection": true,
+        "hourly_usd": 0.5292,
+        "ram_gib": 64
+      },
+      {
+        "estimated_compute_usd": 0.8555241710094239,
+        "fits_memory_projection": true,
+        "hourly_usd": 1.0584,
+        "ram_gib": 128
+      }
+    ],
+    "cost_note": "Rates are caller-supplied and exclude storage, transfer, and taxes.",
+    "estimated_total_seconds": 2909.9461598959997,
+    "eval_tokens_per_runtime": 4096,
+    "evaluation_passes": 2,
+    "execution_waves": 1,
+    "fixed_overhead_minutes": 45.0,
+    "least_estimated_cost_fitting_class_gib": 32,
+    "measured_tokens_per_second": 19.509763846259542,
+    "parity_atol": 1e-06,
+    "recommended_chunk_size": 512,
+    "status": "ok"
+  }
+}

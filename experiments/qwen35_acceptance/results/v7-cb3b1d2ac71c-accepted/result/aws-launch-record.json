@@ -1,0 +1,59 @@
+{
+  "schema": "lecore.qwen35-aws-launch.v7",
+  "authorized": true,
+  "maximum_formal_runs": 1,
+  "retry_after_admission": false,
+  "launched_at": "2026-08-14T23:11:20Z",
+  "account": "022118847419",
+  "region": "us-east-1",
+  "instance": {
+    "id": "i-096225051167ef900",
+    "type": "r7i.2xlarge",
+    "availability_zone": "us-east-1a",
+    "ami": "ami-07a5b367e8dc8bd92",
+    "instance_profile": "zero-training-ec2",
+    "instance_initiated_shutdown_behavior": "terminate",
+    "metadata_tokens": "required",
+    "client_token": "qwen35-v7-cb3b1d2-9863b88a-20260814"
+  },
+  "network": {
+    "vpc": "vpc-50cd4a29",
+    "subnet": "subnet-eb3e2f8e",
+    "security_group": "sg-0a11cb364009ae8d7",
+    "inbound_rules": []
+  },
+  "root_volume": {
+    "id": "vol-087fdcb57d5c79c09",
+    "size_gib": 100,
+    "type": "gp3",
+    "encrypted": true,
+    "delete_on_termination": true
+  },
+  "source": {
+    "commit": "cb3b1d2ac71c183bf9307ca7145a2a619ff30c30"
+  },
+  "inputs": {
+    "evaluation_corpus_sha256": "a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94",
+    "launch_manifest_sha256": "9863b88a92448769de0b68162e7e9485aad836f522dd9dc56e6558ed82835a6c",
+    "runner_sha256": "705bfcf15653eab1996d94b480fb7cb097a1b0ef5c0da38de9266458075798ed",
+    "bootstrap_sha256": "fe852054995d9ca3bf00a31177a2b0328f74a06f3231406b62b82450701fc58f"
+  },
+  "predecessor": {
+    "experiment_version": 6,
+    "outcome": "accepted",
+    "formal_run_started": true,
+    "scientific_result": true,
+    "evidence_bundle_sha256": "546edc88a01842c6d606590af5468699382dd4facd056761b958baacbe7fe872",
+    "estimated_cumulative_compute_usd": 5.54,
+    "native_gdn_acceleration_active": false
+  },
+  "budget": {
+    "hourly_compute_usd": 0.5292,
+    "lifetime_guard_seconds": 18000,
+    "maximum_v7_compute_usd": 2.646,
+    "prior_attempt_estimate_usd": 5.54,
+    "maximum_cumulative_compute_usd": 8.186,
+    "total_ceiling_usd": 10.0
+  },
+  "staging_prefix": "s3://zero-training-022118847419/qwen35-acceptance/cb3b1d2-2fc06364-a6c9d113/v7-formal/"
+}

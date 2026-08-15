@@ -1,0 +1,216 @@
+{
+  "run": {
+    "schema": "ilxyr.run.v1",
+    "id": "run:lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.cb3b1d2ac71c.5a73ec7002a4.v7.acceptance:1786749425022",
+    "experiment_id": "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.cb3b1d2ac71c.5a73ec7002a4.v7.acceptance",
+    "started_at_ms": 1786749425022,
+    "completed_at_ms": 1786758054069,
+    "exit_code": 0,
+    "timed_out": false,
+    "stdout": "{\"metrics\": {\"acceptance_pass\": 1.0, \"emitted_checkpoint_mb\": 2112.911655, \"eval_tokens\": 4096.0, \"evaluation_wall_seconds\": 525.3544390850002, \"experimental_installer_used\": 1.0, \"full_evaluation_pass\": 1.0, \"installed_perplexity\": 7.906224720549084, \"native_gdn_acceleration_active\": 1.0, \"official_reload_pass\": 1.0, \"original_perplexity\": 7.906224720549084, \"paired_block_length\": 1.0, \"paired_ci_hi_nats\": 0.0, \"paired_ci_lo_nats\": 0.0, \"paired_effective_tokens\": 4096.0, \"parallel_evaluation_used\": 1.0, \"peak_gpu_mb\": 0.0, \"peak_rss_mb\": 19503.8359375, \"perplexity_delta_pct\": 0.0, \"reference_logit_parity_pass\": 1.0, \"reference_logit_relative_error\": 6.787656774900957e-07, \"reload_pass\": 1.0, \"sequential_early_rejection\": 0.0, \"sequential_looks_completed\": 4.0, \"source_clean\": 1.0, \"spectral_filtering_enabled\": 0.0, \"statistical_gate_pass\": 1.0, \"text_generation_pass\": 1.0, \"tokenizer_parity_pass\": 1.0, \"vision_smoke_pass\": 1.0}, \"source\": {\"artifacts\": [{\"path\": \"experiments/qwen35_acceptance/run.py\", \"sha256\": \"edcf1ecdf30dcd1400a8924415d5fe3400f41ab184de7ddc3347a201e7bfa0aa\"}, {\"path\": \"experiments/qwen35_acceptance/contract.py\", \"sha256\": \"6662d7efe374a3889224196147aa248ba57a881fda391fa9149ec4bf4e0b8f80\"}, {\"path\": \"experiments/qwen35_acceptance/generate.py\", \"sha256\": \"b870524aae3a0c80a2aafc5be98edb89478cbffcacc2c78c30dfe92c845e971d\"}, {\"path\": \"assimilation/install.py\", \"sha256\": \"2e18342e9053357fc184512a04a53c8437db182b07fc19dba76f76a3fbc6d336\"}, {\"path\": \"holographic/io_and_interop/holographic_install_lecore.py\", \"sha256\": \"68c27fab97df5c9c3ffed809a52e1541edf73df0774692b19e28f52a47d778ac\"}, {\"path\": \"holographic/io_and_interop/holographic_hrnngrow.py\", \"sha256\": \"d57766dec2376545fce60c437017ccd2953ed3220b8df09249715266204647e6\"}, {\"path\": \"holographic/agents_and_reasoning/holographic_memsearch.py\", \"sha256\": \"9ccae7def8d9e357145c82d43888a997916f130d565c71c75858b2c07717f6af\"}, {\"path\": \"holographic/io_and_interop/holographic_measure.py\", \"sha256\": \"91822b681ec33c80cf169bd82c4da922bb6abb871ca6e914be294568c3e928d2\"}, {\"path\": \"holographic/io_and_interop/holographic_gdnruntime.py\", \"sha256\": \"68ea12b71931d7095c36668b958faceba93296f4bf025a1b438ce15ff86c385c\"}, {\"path\": \"holographic/io_and_interop/holographic_gdnaccel.py\", \"sha256\": \"0205809bf9b5e1c3e9f8160164e0a6d8f2790e48412319b08a4f5bca9da4e368\"}, {\"path\": \"holographic/io_and_interop/holographic_ccrun.py\", \"sha256\": \"393f5d633c5cdbf6f9d575662c46773e9abd7ce81e7a2639f5b762b6228cc4a6\"}, {\"path\": \"holographic/io_and_interop/holographic_emit.py\", \"sha256\": \"bd0e09f9c6c459ad2258b9e267df0994a5d136b869777341146a186ab0760fc9\"}, {\"path\": \"experiments/qwen35_acceptance/requirements-cpu.txt\", \"sha256\": \"91193feb4e831e25ec3d4988c22fd78f9d3e770409a8d7cafda2cf50b6189b78\"}, {\"path\": \"/opt/qwen35-acceptance-v7/installed-checkpoint.acceptance/runtime-provenance.json\", \"sha256\": \"841379a1b970bcca8861ba6226fe6d6468b22bc55f39b106b8848cef789dbed1\"}], \"commit\": \"cb3b1d2ac71c183bf9307ca7145a2a619ff30c30\", \"repository\": \"https://github.com/atimics/holostuff.git\"}}\n",
+    "stderr": "PROGRESS {\"allow_early_acceptance\":false,\"allow_early_rejection\":true,\"evaluation_mode\":\"auto\",\"gdn_backend\":\"c\",\"initial_chunk_size\":128,\"installation_backend\":\"numpy\",\"kind\":\"run_policy\",\"max_chunk_size\":512,\"memory_budget_fraction\":0.2,\"min_tokens\":4096,\"monotonic_seconds\":0.000151640000012776,\"progress_upload_uri\":\"s3://zero-training-022118847419/qwen35-acceptance/cb3b1d2-2fc06364-a6c9d113/v7-formal/progress.jsonl\",\"reference_backend\":\"numpy\",\"require_native_gdn\":true,\"sequential_family_alpha\":0.05,\"sequential_looks\":[1024,2048,3072,4096]}\nPROGRESS {\"kind\":\"stage_start\",\"monotonic_seconds\":0.00132234900002004,\"stage\":\"official_dependency_preflight\"}\nPROGRESS {\"elapsed_seconds\":1.3004495829999883,\"kind\":\"stage_complete\",\"monotonic_seconds\":1.301772743000015,\"stage\":\"official_dependency_preflight\"}\nPROGRESS {\"kind\":\"official_dependencies\",\"monotonic_seconds\":1.3032396120000271,\"versions\":{\"Pillow\":\"12.3.0\",\"torch\":\"2.11.0+cpu\",\"torchvision\":\"0.26.0+cpu\",\"transformers\":\"5.14.0\"}}\nPROGRESS {\"kind\":\"stage_start\",\"monotonic_seconds\":1.3043277250000074,\"stage\":\"frozen_input_identity\"}\nPROGRESS {\"elapsed_seconds\":1.2204211419999638,\"kind\":\"stage_complete\",\"monotonic_seconds\":2.5247509999999806,\"stage\":\"frozen_input_identity\"}\nPROGRESS {\"kind\":\"stage_start\",\"monotonic_seconds\":3.6049270120000187,\"stage\":\"source_snapshot\"}\nPROGRESS {\"elapsed_seconds\":0.007031320000010055,\"kind\":\"stage_complete\",\"monotonic_seconds\":3.6119567839999718,\"stage\":\"source_snapshot\"}\nPROGRESS {\"kind\":\"stage_start\",\"monotonic_seconds\":3.613187618999973,\"stage\":\"reference_parity\"}\n      sanity: perplexity 16.2 on plain English (chance ~248320) -- looks correct\n[transformers] `torch_dtype` is deprecated! Use `dtype` instead!\n[transformers] The fast path is not available because one of the required library is not installed. Falling back to torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation and https://github.com/Dao-AILab/causal-conv1d\n\rLoading weights:   0%|          | 0/320 [00:00<?, ?it/s]\rLoading weights:   0%|          | 1/320 [00:00<00:34,  9.32it/s]\rLoading weights: 100%|██████████| 320/320 [00:00<00:00, 1779.48it/s]\nPROGRESS {\"elapsed_seconds\":20.616965365,\"kind\":\"stage_complete\",\"monotonic_seconds\":24.230156280000017,\"stage\":\"reference_parity\"}\nPROGRESS {\"kind\":\"stage_start\",\"monotonic_seconds\":24.231822926999996,\"stage\":\"experimental_installation\"}\nrunning experimental installer; transcript: /opt/qwen35-acceptance-v7/installed-checkpoint.acceptance/install.log\nPROGRESS {\"elapsed_seconds\":8056.599620748,\"kind\":\"stage_complete\",\"monotonic_seconds\":8080.831447582,\"stage\":\"experimental_installation\"}\nPROGRESS {\"kind\":\"stage_start\",\"monotonic_seconds\":8080.835083751,\"stage\":\"lecore_reload\"}\n      sanity: perplexity 16.2 on plain English (chance ~248320) -- looks correct\nPROGRESS {\"elapsed_seconds\":18.02381148400127,\"kind\":\"stage_complete\",\"monotonic_seconds\":8098.858901224,\"stage\":\"lecore_reload\"}\nPROGRESS {\"auto_parallel_feasible\":true,\"available_memory_mb\":60219.57421875,\"installed_checkpoint_mb\":2112.911655,\"kind\":\"evaluation_admission\",\"model_checkpoint_mb\":1746.9426,\"monotonic_seconds\":8098.862080275,\"parallel\":true,\"requested_mode\":\"auto\"}\nPROGRESS {\"kind\":\"stage_start\",\"monotonic_seconds\":8098.864003575,\"stage\":\"paired_evaluation\"}\n      sanity: perplexity 16.2 on plain English (chance ~248320) -- looks correct\nPROGRESS {\"available_memory_mb\":59252.04296875,\"budget_fraction\":0.2,\"estimated_bytes_per_token\":2093056,\"estimated_chunk_working_mb\":1071.644672,\"kind\":\"evaluation_chunk_plan\",\"max_chunk_size\":512,\"monotonic_seconds\":8108.147417334,\"requested_chunk_size\":128,\"selected_chunk_size\":512,\"workers\":2}\n      sanity: perplexity 16.2 on plain English (chance ~248320) -- looks correct\n      sanity: perplexity 16.2 on plain English (chance ~248320) -- looks correct\nPROGRESS {\"chunk_index\":0,\"chunk_size\":128,\"elapsed_seconds\":42.402596167999945,\"eval_start\":0,\"eval_stop\":128,\"eval_tokens_complete\":128,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8188.132880663,\"peak_rss_mb\":5968.58984375,\"phase\":\"original\",\"selected_chunk_size\":512,\"tokens_per_second\":3.0186830894236145}\nPROGRESS {\"chunk_index\":0,\"chunk_size\":128,\"elapsed_seconds\":44.98842761599917,\"eval_start\":0,\"eval_stop\":128,\"eval_tokens_complete\":128,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8191.877987843999,\"peak_rss_mb\":5968.58984375,\"phase\":\"installed\",\"selected_chunk_size\":512,\"tokens_per_second\":2.8451761215695286}\nPROGRESS {\"chunk_index\":1,\"chunk_size\":512,\"elapsed_seconds\":86.75082099800056,\"eval_start\":128,\"eval_stop\":640,\"eval_tokens_complete\":640,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8232.480931709,\"peak_rss_mb\":5968.58984375,\"phase\":\"original\",\"selected_chunk_size\":512,\"tokens_per_second\":7.377451793969198}\nPROGRESS {\"chunk_index\":1,\"chunk_size\":512,\"elapsed_seconds\":91.08308788199975,\"eval_start\":128,\"eval_stop\":640,\"eval_tokens_complete\":640,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8237.952476283,\"peak_rss_mb\":5968.58984375,\"phase\":\"installed\",\"selected_chunk_size\":512,\"tokens_per_second\":7.026551414562656}\nPROGRESS {\"chunk_index\":2,\"chunk_size\":512,\"elapsed_seconds\":131.99455404400032,\"eval_start\":640,\"eval_stop\":1152,\"eval_tokens_complete\":1152,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8277.725811530001,\"peak_rss_mb\":6248.83984375,\"phase\":\"original\",\"selected_chunk_size\":512,\"tokens_per_second\":8.727632805335146}\nPROGRESS {\"chunk_index\":2,\"chunk_size\":512,\"elapsed_seconds\":137.19128794899916,\"eval_start\":640,\"eval_stop\":1152,\"eval_tokens_complete\":1152,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8284.062164257,\"peak_rss_mb\":6231.05859375,\"phase\":\"installed\",\"selected_chunk_size\":512,\"tokens_per_second\":8.3970346603077}\nPROGRESS {\"alpha_spent\":0.0125,\"block\":1,\"effective_n\":1024,\"eval_tokens\":1024,\"kind\":\"sequential_look\",\"look_index\":0,\"lower_bound_nats\":0.0,\"monotonic_seconds\":8284.475628211001,\"regression_limit_nats\":0.009950330853168083,\"reject\":false,\"skipped\":false}\nPROGRESS {\"chunk_index\":3,\"chunk_size\":512,\"elapsed_seconds\":179.16665795600056,\"eval_start\":1152,\"eval_stop\":1664,\"eval_tokens_complete\":1664,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8324.898171896,\"peak_rss_mb\":6272.875,\"phase\":\"original\",\"selected_chunk_size\":512,\"tokens_per_second\":9.287442311998934}\nPROGRESS {\"chunk_index\":3,\"chunk_size\":512,\"elapsed_seconds\":187.18519064799875,\"eval_start\":1152,\"eval_stop\":1664,\"eval_tokens_complete\":1664,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8334.056143559,\"peak_rss_mb\":6231.05859375,\"phase\":\"installed\",\"selected_chunk_size\":512,\"tokens_per_second\":8.889592142623865}\nPROGRESS {\"chunk_index\":4,\"chunk_size\":512,\"elapsed_seconds\":228.63171563499964,\"eval_start\":1664,\"eval_stop\":2176,\"eval_tokens_complete\":2176,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8374.363268101,\"peak_rss_mb\":6358.7734375,\"phase\":\"original\",\"selected_chunk_size\":512,\"tokens_per_second\":9.51748970590715}\nPROGRESS {\"chunk_index\":4,\"chunk_size\":512,\"elapsed_seconds\":239.62000598799932,\"eval_start\":1664,\"eval_stop\":2176,\"eval_tokens_complete\":2176,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8386.490583088,\"peak_rss_mb\":6316.2109375,\"phase\":\"installed\",\"selected_chunk_size\":512,\"tokens_per_second\":9.081044760966156}\nPROGRESS {\"alpha_spent\":0.0125,\"block\":1,\"effective_n\":2048,\"eval_tokens\":2048,\"kind\":\"sequential_look\",\"look_index\":1,\"lower_bound_nats\":0.0,\"monotonic_seconds\":8386.845028259,\"regression_limit_nats\":0.009950330853168083,\"reject\":false,\"skipped\":false}\nPROGRESS {\"chunk_index\":5,\"chunk_size\":512,\"elapsed_seconds\":283.9026641149994,\"eval_start\":2176,\"eval_stop\":2688,\"eval_tokens_complete\":2688,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8429.634408251,\"peak_rss_mb\":6385.328125,\"phase\":\"original\",\"selected_chunk_size\":512,\"tokens_per_second\":9.46803373043087}\nPROGRESS {\"chunk_index\":5,\"chunk_size\":512,\"elapsed_seconds\":297.8598849159989,\"eval_start\":2176,\"eval_stop\":2688,\"eval_tokens_complete\":2688,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8444.730580765001,\"peak_rss_mb\":6375.71484375,\"phase\":\"installed\",\"selected_chunk_size\":512,\"tokens_per_second\":9.024377353660958}\nPROGRESS {\"chunk_index\":6,\"chunk_size\":512,\"elapsed_seconds\":344.4461681440007,\"eval_start\":2688,\"eval_stop\":3200,\"eval_tokens_complete\":3200,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8490.177726184,\"peak_rss_mb\":6403.796875,\"phase\":\"original\",\"selected_chunk_size\":512,\"tokens_per_second\":9.290276089418402}\nPROGRESS {\"chunk_index\":6,\"chunk_size\":512,\"elapsed_seconds\":358.18553268899996,\"eval_start\":2688,\"eval_stop\":3200,\"eval_tokens_complete\":3200,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8505.056158752,\"peak_rss_mb\":6427.234375,\"phase\":\"installed\",\"selected_chunk_size\":512,\"tokens_per_second\":8.933917503525885}\nPROGRESS {\"alpha_spent\":0.0125,\"block\":1,\"effective_n\":3072,\"eval_tokens\":3072,\"kind\":\"sequential_look\",\"look_index\":2,\"lower_bound_nats\":0.0,\"monotonic_seconds\":8505.538084288,\"regression_limit_nats\":0.009950330853168083,\"reject\":false,\"skipped\":false}\nPROGRESS {\"chunk_index\":7,\"chunk_size\":512,\"elapsed_seconds\":409.7979296449994,\"eval_start\":3200,\"eval_stop\":3712,\"eval_tokens_complete\":3712,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8555.529460333,\"peak_rss_mb\":6462.87109375,\"phase\":\"original\",\"selected_chunk_size\":512,\"tokens_per_second\":9.058122873426031}\nPROGRESS {\"chunk_index\":7,\"chunk_size\":512,\"elapsed_seconds\":426.8233300439988,\"eval_start\":3200,\"eval_stop\":3712,\"eval_tokens_complete\":3712,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8573.694161977,\"peak_rss_mb\":6493.3671875,\"phase\":\"installed\",\"selected_chunk_size\":512,\"tokens_per_second\":8.696806708333753}\nPROGRESS {\"chunk_index\":8,\"chunk_size\":384,\"elapsed_seconds\":465.1462470429997,\"eval_start\":3712,\"eval_stop\":4096,\"eval_tokens_complete\":4096,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8610.882601896,\"peak_rss_mb\":6462.87109375,\"phase\":\"original\",\"selected_chunk_size\":512,\"tokens_per_second\":8.805832630143422}\nPROGRESS {\"chunk_index\":8,\"chunk_size\":384,\"elapsed_seconds\":477.003862431,\"eval_start\":3712,\"eval_stop\":4096,\"eval_tokens_complete\":4096,\"eval_tokens_total\":4096,\"kind\":\"evaluation_chunk\",\"monotonic_seconds\":8623.881491544,\"peak_rss_mb\":6493.3671875,\"phase\":\"installed\",\"selected_chunk_size\":512,\"tokens_per_second\":8.586932565126762}\nPROGRESS {\"alpha_spent\":0.0125,\"block\":1,\"effective_n\":4096,\"eval_tokens\":4096,\"kind\":\"sequential_look\",\"look_index\":3,\"lower_bound_nats\":0.0,\"monotonic_seconds\":8624.124898474001,\"regression_limit_nats\":0.009950330853168083,\"reject\":false,\"skipped\":false}\nPROGRESS {\"elapsed_seconds\":525.3544390850002,\"kind\":\"stage_complete\",\"monotonic_seconds\":8624.218443458001,\"stage\":\"paired_evaluation\"}\nPROGRESS {\"kind\":\"stage_start\",\"monotonic_seconds\":8624.249806967,\"stage\":\"official_output_smokes\"}\n\rLoading weights:   0%|          | 0/501 [00:00<?, ?it/s]\rLoading weights:   0%|          | 1/501 [00:00<00:57,  8.77it/s]\rLoading weights: 100%|██████████| 501/501 [00:00<00:00, 2659.75it/s]\nPROGRESS {\"elapsed_seconds\":2.348759609998524,\"kind\":\"stage_complete\",\"monotonic_seconds\":8626.598569653,\"stage\":\"official_output_smokes\"}\nPROGRESS {\"acceptance_pass\":1.0,\"eval_tokens\":4096.0,\"kind\":\"run_complete\",\"monotonic_seconds\":8628.0613488}\n",
+    "output_truncated": false,
+    "metrics": {
+      "acceptance_pass": 1.0,
+      "emitted_checkpoint_mb": 2112.911655,
+      "eval_tokens": 4096.0,
+      "evaluation_wall_seconds": 525.3544390850002,
+      "experimental_installer_used": 1.0,
+      "full_evaluation_pass": 1.0,
+      "installed_perplexity": 7.906224720549084,
+      "native_gdn_acceleration_active": 1.0,
+      "official_reload_pass": 1.0,
+      "original_perplexity": 7.906224720549084,
+      "paired_block_length": 1.0,
+      "paired_ci_hi_nats": 0.0,
+      "paired_ci_lo_nats": 0.0,
+      "paired_effective_tokens": 4096.0,
+      "parallel_evaluation_used": 1.0,
+      "peak_gpu_mb": 0.0,
+      "peak_rss_mb": 19503.8359375,
+      "perplexity_delta_pct": 0.0,
+      "reference_logit_parity_pass": 1.0,
+      "reference_logit_relative_error": 6.787656774900957e-7,
+      "reload_pass": 1.0,
+      "sequential_early_rejection": 0.0,
+      "sequential_looks_completed": 4.0,
+      "source_clean": 1.0,
+      "spectral_filtering_enabled": 0.0,
+      "statistical_gate_pass": 1.0,
+      "text_generation_pass": 1.0,
+      "tokenizer_parity_pass": 1.0,
+      "vision_smoke_pass": 1.0
+    },
+    "source_attestation": {
+      "repository": "https://github.com/atimics/holostuff.git",
+      "commit": "cb3b1d2ac71c183bf9307ca7145a2a619ff30c30",
+      "artifacts": [
+        {
+          "path": "experiments/qwen35_acceptance/run.py",
+          "sha256": "edcf1ecdf30dcd1400a8924415d5fe3400f41ab184de7ddc3347a201e7bfa0aa"
+        },
+        {
+          "path": "experiments/qwen35_acceptance/contract.py",
+          "sha256": "6662d7efe374a3889224196147aa248ba57a881fda391fa9149ec4bf4e0b8f80"
+        },
+        {
+          "path": "experiments/qwen35_acceptance/generate.py",
+          "sha256": "b870524aae3a0c80a2aafc5be98edb89478cbffcacc2c78c30dfe92c845e971d"
+        },
+        {
+          "path": "assimilation/install.py",
+          "sha256": "2e18342e9053357fc184512a04a53c8437db182b07fc19dba76f76a3fbc6d336"
+        },
+        {
+          "path": "holographic/io_and_interop/holographic_install_lecore.py",
+          "sha256": "68c27fab97df5c9c3ffed809a52e1541edf73df0774692b19e28f52a47d778ac"
+        },
+        {
+          "path": "holographic/io_and_interop/holographic_hrnngrow.py",
+          "sha256": "d57766dec2376545fce60c437017ccd2953ed3220b8df09249715266204647e6"
+        },
+        {
+          "path": "holographic/agents_and_reasoning/holographic_memsearch.py",
+          "sha256": "9ccae7def8d9e357145c82d43888a997916f130d565c71c75858b2c07717f6af"
+        },
+        {
+          "path": "holographic/io_and_interop/holographic_measure.py",
+          "sha256": "91822b681ec33c80cf169bd82c4da922bb6abb871ca6e914be294568c3e928d2"
+        },
+        {
+          "path": "holographic/io_and_interop/holographic_gdnruntime.py",
+          "sha256": "68ea12b71931d7095c36668b958faceba93296f4bf025a1b438ce15ff86c385c"
+        },
+        {
+          "path": "holographic/io_and_interop/holographic_gdnaccel.py",
+          "sha256": "0205809bf9b5e1c3e9f8160164e0a6d8f2790e48412319b08a4f5bca9da4e368"
+        },
+        {
+          "path": "holographic/io_and_interop/holographic_ccrun.py",
+          "sha256": "393f5d633c5cdbf6f9d575662c46773e9abd7ce81e7a2639f5b762b6228cc4a6"
+        },
+        {
+          "path": "holographic/io_and_interop/holographic_emit.py",
+          "sha256": "bd0e09f9c6c459ad2258b9e267df0994a5d136b869777341146a186ab0760fc9"
+        },
+        {
+          "path": "experiments/qwen35_acceptance/requirements-cpu.txt",
+          "sha256": "91193feb4e831e25ec3d4988c22fd78f9d3e770409a8d7cafda2cf50b6189b78"
+        },
+        {
+          "path": "/opt/qwen35-acceptance-v7/installed-checkpoint.acceptance/runtime-provenance.json",
+          "sha256": "841379a1b970bcca8861ba6226fe6d6468b22bc55f39b106b8848cef789dbed1"
+        }
+      ]
+    }
+  },
+  "evidence": {
+    "schema": "ilxyr.evidence.v1",
+    "id": "evidence:run:lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.cb3b1d2ac71c.5a73ec7002a4.v7.acceptance:1786749425022",
+    "experiment_id": "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.cb3b1d2ac71c.5a73ec7002a4.v7.acceptance",
+    "run_ref": "artifact://sha256/7e23bc82dc969ae730460e417e8e3095a3ed05d68c8dd6e7ffb98209d2efa90b",
+    "resolved_outcome": "accepted",
+    "metrics": {
+      "acceptance_pass": 1.0,
+      "emitted_checkpoint_mb": 2112.911655,
+      "eval_tokens": 4096.0,
+      "evaluation_wall_seconds": 525.3544390850002,
+      "experimental_installer_used": 1.0,
+      "full_evaluation_pass": 1.0,
+      "installed_perplexity": 7.906224720549084,
+      "native_gdn_acceleration_active": 1.0,
+      "official_reload_pass": 1.0,
+      "original_perplexity": 7.906224720549084,
+      "paired_block_length": 1.0,
+      "paired_ci_hi_nats": 0.0,
+      "paired_ci_lo_nats": 0.0,
+      "paired_effective_tokens": 4096.0,
+      "parallel_evaluation_used": 1.0,
+      "peak_gpu_mb": 0.0,
+      "peak_rss_mb": 19503.8359375,
+      "perplexity_delta_pct": 0.0,
+      "reference_logit_parity_pass": 1.0,
+      "reference_logit_relative_error": 6.787656774900957e-7,
+      "reload_pass": 1.0,
+      "sequential_early_rejection": 0.0,
+      "sequential_looks_completed": 4.0,
+      "source_clean": 1.0,
+      "spectral_filtering_enabled": 0.0,
+      "statistical_gate_pass": 1.0,
+      "text_generation_pass": 1.0,
+      "tokenizer_parity_pass": 1.0,
+      "vision_smoke_pass": 1.0
+    },
+    "recorded_at_ms": 1786758054074,
+    "authority": {
+      "level": "corpus_proxy",
+      "scope": {
+        "seeds": [
+          0
+        ],
+        "eval_set": "dataset://lecore/qwen-evaluation/a6c9d1135a04d10955fe11d210b7f642e1c2341d4f2c8369b9a832cc97839d94",
+        "coverage": 1.0
+      },
+      "provenance": {
+        "artifact_hashes": [
+          "artifact://sha256/2970f2d19be7e8b8592afcdccf40938ddf4fb39258582fdceaa3c48b491adb48",
+          "artifact://sha256/2ef1a0f767ae6b1cb9eafb9ac37fb1bbf5b8cdc95a29df7295f5ea822b7ae0a8",
+          "artifact://sha256/41b1d7c74316eeffdec5550f52beb8a5d33dd4da31d77e039e9e53007914357f",
+          "artifact://sha256/7e23bc82dc969ae730460e417e8e3095a3ed05d68c8dd6e7ffb98209d2efa90b",
+          "artifact://sha256/c444bffaed95aa2d7c8ae25468bb8ab454b3c3ca02c00434432f783d8405df20"
+        ],
+        "model_lineage": "model://Qwen/Qwen3.5-0.8B/20c3330d0b3e00c98b38e7813202b12952f37d6a4415a30da103c9bfe994d680",
+        "checker": "checker://lecore/qwen35-acceptance/5a73ec7002a4092a98f17f5b9e1a6911f3438c427a09b5e5d43262ce5612b17d/v7"
+      }
+    },
+    "lane": "promoted"
+  },
+  "settlements": [
+    {
+      "schema": "ilxyr.forecast_settlement.v1",
+      "forecast_id": "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.cb3b1d2ac71c.5a73ec7002a4.v7.forecast.empirical",
+      "experiment_id": "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.cb3b1d2ac71c.5a73ec7002a4.v7.acceptance",
+      "resolved_outcome": "accepted",
+      "brier_score": 1.0850000000000002,
+      "stake": 5
+    },
+    {
+      "schema": "ilxyr.forecast_settlement.v1",
+      "forecast_id": "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.cb3b1d2ac71c.5a73ec7002a4.v7.forecast-mechanistic",
+      "experiment_id": "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.cb3b1d2ac71c.5a73ec7002a4.v7.acceptance",
+      "resolved_outcome": "accepted",
+      "brier_score": 1.115,
+      "stake": 5
+    }
+  ],
+  "calibrations": [
+    {
+      "schema": "ilxyr.calibration_record.v1",
+      "handle": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/forecaster-empirical",
+      "forecasts_settled": 1,
+      "reliability": 1.0850000000000002,
+      "resolution": 0.0,
+      "brier_score": 1.0850000000000002,
+      "uncertainty": 0.0,
+      "probationary": true,
+      "last_settlement_at_ms": 1786758054081,
+      "forecast_ids": [
+        "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.cb3b1d2ac71c.5a73ec7002a4.v7.forecast.empirical"
+      ]
+    },
+    {
+      "schema": "ilxyr.calibration_record.v1",
+      "handle": "model://openai/codex/gpt-5/2026-08-12/qwen-acceptance-design/forecaster-mechanistic",
+      "forecasts_settled": 1,
+      "reliability": 1.115,
+      "resolution": 0.0,
+      "brier_score": 1.115,
+      "uncertainty": 0.0,
+      "probationary": true,
+      "last_settlement_at_ms": 1786758054085,
+      "forecast_ids": [
+        "lecore.qwen35.install.20c3330d0b3e.e4323ead9159.a6c9d1135a04.cb3b1d2ac71c.5a73ec7002a4.v7.forecast-mechanistic"
+      ]
+    }
+  ]
+}

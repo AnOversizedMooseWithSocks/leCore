@@ -1,0 +1,7 @@
+commit cb3b1d2ac71c183bf9307ca7145a2a619ff30c30
+Author:     atimics <atimics@ratimics.com>
+AuthorDate: Fri Aug 14 16:01:08 2026 -0700
+Commit:     atimics <atimics@ratimics.com>
+CommitDate: Fri Aug 14 16:01:34 2026 -0700
+
+    fix(qwen): compile native GDN under ilxyr
