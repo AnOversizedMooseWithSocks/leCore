@@ -296,3 +296,43 @@ def load_model(path):
         raise ValueError("torch pickle checkpoints are refused (unpickling is an "
                          "ACE surface); convert to .safetensors or .npz first")
     raise ValueError("unknown model format: %s" % model_path)
+
+
+def _selftest():
+    """Exercise the safe format boundary without external model fixtures."""
+    import tempfile
+
+    tensors = {
+        "f32": np.arange(24, dtype=np.float32).reshape(6, 4),
+        "f16": np.linspace(-1.0, 1.0, 12, dtype=np.float16).reshape(3, 4),
+    }
+    with tempfile.TemporaryDirectory() as directory:
+        safetensors_path = os.path.join(directory, "model.safetensors")
+        save_safetensors(safetensors_path, tensors)
+        loaded = load_model(safetensors_path)
+        assert np.array_equal(loaded["f32"], tensors["f32"])
+        assert np.array_equal(loaded["f16"], tensors["f16"])
+
+        lazy = load_safetensors(safetensors_path, lazy=True, max_cached=1)
+        assert isinstance(lazy["f32"], np.memmap)
+        assert lazy.stats["misses"] == 1
+
+        npz_path = os.path.join(directory, "model.npz")
+        np.savez(npz_path, **tensors)
+        assert np.array_equal(load_model(npz_path)["f32"], tensors["f32"])
+
+        refused_path = os.path.join(directory, "unsafe.pt")
+        with open(refused_path, "wb") as fh:
+            fh.write(b"not a safe model format")
+        try:
+            load_model(refused_path)
+        except ValueError as exc:
+            assert "pickle checkpoints are refused" in str(exc)
+        else:
+            raise AssertionError("pickle checkpoint was not refused")
+
+    print("checkpointio selftest OK")
+
+
+if __name__ == "__main__":
+    _selftest()

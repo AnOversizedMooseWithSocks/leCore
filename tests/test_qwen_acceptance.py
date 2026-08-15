@@ -238,7 +238,7 @@ def test_hrnn_growth_preserves_grouped_and_flat_qwen_outputs(tmp_path):
         grouped_weights, grouped_config, gain=0.0)
 
     assert report["layers"]
-    assert np.array_equal(
+    assert_portable_identity_logits(
         GDNRuntime(grown_weights, grown_config).forward(ids), grouped_logits)
 
     # Converted checkpoints can store split Q/K/V projections as flat blocks.
@@ -264,7 +264,7 @@ def test_hrnn_growth_preserves_grouped_and_flat_qwen_outputs(tmp_path):
     grown_weights, grown_config, _ = grow_channel(
         flat_weights, flat_config, gain=0.0)
 
-    assert np.array_equal(
+    assert_portable_identity_logits(
         GDNRuntime(grown_weights, grown_config).forward(ids), flat_logits)
 
 

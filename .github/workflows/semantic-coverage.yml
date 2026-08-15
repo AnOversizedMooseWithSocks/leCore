@@ -122,7 +122,7 @@ jobs:
         run: |
           cd tools/semantic && python knowledge_index.py nomic_text/model.safetensors \
             nomic_text/vocab.txt --repo ../.. --no-md --structural --exam --gate-shipped-row \
-            --require-top5 8 --require-median 2 --require-fused-top1 6
+            --require-top5 8 --require-median 1 --require-fused-top1 7
           # --structural exercises the PRODUCTION path (dense + workflow bones, route_semantic's default).
           # --gate-shipped-row: ALL THREE criteria now judge ONE configuration -- the fused gamma=0.50 128d
           # row, which is literally what ships (export_index writes the 128d index; route_semantic defaults

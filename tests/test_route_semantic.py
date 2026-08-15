@@ -32,14 +32,21 @@ def test_route_semantic_with_shipped_artifact():
     # free text must NEVER raise, artifact or not (embedder may be absent -> honest None)
     assert m.route_semantic("smooth a mesh") is None or isinstance(m.route_semantic("smooth a mesh"), list)
     if os.path.isfile(idx):
-        # vector path: a document's own (dequantized) vector must route to that module, fusion default on
+        # Vector path: a document's own (dequantized) vector must route to that
+        # module at the best score, fusion default on.  Quantization can make
+        # two module vectors identical, in which case the router's stable name
+        # tie-break decides display order; top-score membership is the contract.
         z = np.load(idx)
         names = [str(n) for n in z["names"]]
         i = names.index("holographic_meshsmooth")
         v = (z["q"][i].astype(np.float64) / 255.0
              * (z["hi"][i].astype(np.float64) - z["lo"][i].astype(np.float64)) + z["lo"][i].astype(np.float64))
         hits = m.route_semantic("", query_vec=v, k=3)
-        assert hits and hits[0][0] == "holographic_meshsmooth", hits
+        assert hits, hits
+        scores = dict(hits)
+        assert "holographic_meshsmooth" in scores, hits
+        assert np.isclose(scores["holographic_meshsmooth"], hits[0][1],
+                          rtol=0.0, atol=1e-12), hits
 
 
 def test_embedding_router_helper_exists_and_caches():

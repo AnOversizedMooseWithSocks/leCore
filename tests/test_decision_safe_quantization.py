@@ -45,8 +45,12 @@ def test_ambiguous_queries_collapse_the_margin(index):
     # collapse relative to ordinary queries. This is why flip rate is not predictable from N and bits.
     amb = 0.5 * (_rows(index, 200, seed=2) + _rows(index, 200, seed=3))
     normal = _rows(index, 200, seed=4)
-    r_amb = decision_flip_rate(index, amb, bits=8, mode="uniform")
-    r_norm = decision_flip_rate(index, normal, bits=8, mode="uniform")
+    # The shipped source is already on a uint8 grid, so an 8-bit pass can be a
+    # no-op for both populations.  Four bits is the coarsest level that the
+    # ordinary-query gate below still requires to be decision-exact, making it
+    # the useful probe of whether collapsed margins actually drive flips.
+    r_amb = decision_flip_rate(index, amb, bits=4, mode="uniform")
+    r_norm = decision_flip_rate(index, normal, bits=4, mode="uniform")
     assert r_amb["margin_median"] < 0.2 * r_norm["margin_median"]
     assert r_amb["flip_rate"] > r_norm["flip_rate"]
 

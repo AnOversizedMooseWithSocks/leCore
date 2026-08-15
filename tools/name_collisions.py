@@ -210,7 +210,7 @@ KNOWN_COLLISIONS = {
     "install": frozenset({"galvacache", "install", "install_lecore"}),  # monkey-patch cache vs
                                                               # weight install vs six-part assembly
     "load": frozenset({"core", "sidecar", "testkit"}),        # npz objects vs curtain vs kit
-    "load_model": frozenset({"modelstore", "unicron"}),       # container vs safetensors front door
+    "load_model": frozenset({"checkpointio", "modelstore"}), # safe file formats vs lazy container
     "measure": frozenset({"hrnnbake", "measure"}),            # ppl+horizon vs ppl+uncertainty
     "place": frozenset({"devicerun", "machinemodel"}),        # device placement vs cost arithmetic
     "project": frozenset({"hlb", "nullspace", "query"}),      # WHT sign vs subspace vs SELECT
