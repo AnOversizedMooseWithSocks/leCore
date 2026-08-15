@@ -1,0 +1,19 @@
+[package]
+name = "lecore-sys"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+description = "Audited ABI-0 Rust bindings and ownership wrapper for liblecore"
+license = "MIT"
+repository = "https://github.com/AnOversizedMooseWithSocks/leCore"
+publish = false
+links = "lecore"
+build = "build.rs"
+
+[features]
+default = ["vendored"]
+vendored = []
+installed = []
+
+[build-dependencies]
+cc = "=1.2.65"

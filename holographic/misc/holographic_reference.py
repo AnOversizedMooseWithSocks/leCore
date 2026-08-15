@@ -71,21 +71,98 @@ def ref_permute(vec, shift):
 
 
 def ref_bundle(vectors):
-    """Superpose then renormalize; a zero-sum bundle returns the zero vector (the pinned edge)."""
-    total = np.sum(np.asarray(vectors, float), axis=0)
-    norm = np.linalg.norm(total)
-    return total / norm if norm > 0 else total
+    """Superpose in row/index order, then normalize; a zero-sum bundle stays zero."""
+    vectors = np.asarray(vectors, float)
+    if vectors.ndim != 2 or not len(vectors):
+        raise ValueError("ref_bundle expects a non-empty 2-D matrix")
+    total = np.zeros(vectors.shape[1], dtype=float)
+    for row in vectors:
+        for index in range(vectors.shape[1]):
+            total[index] += float(row[index])
+    return ref_normalize(total)
 
 
 def ref_cosine(a, b):
-    """dot / (|a| |b|); zero norm -> 0.0 (the pinned edge)."""
+    """Ascending-order dot / (|a| |b|); zero norm -> 0.0."""
     a = np.asarray(a, float)
     b = np.asarray(b, float)
-    na = np.linalg.norm(a)
-    nb = np.linalg.norm(b)
-    if na == 0 or nb == 0:
+    norm_a_squared = ref_dot(a, a)
+    norm_b_squared = ref_dot(b, b)
+    if norm_a_squared == 0.0 or norm_b_squared == 0.0:
         return 0.0
-    return float(np.dot(a, b) / (na * nb))
+    norm_a = float(np.sqrt(norm_a_squared))
+    norm_b = float(np.sqrt(norm_b_squared))
+    return ref_dot(a, b) / (norm_a * norm_b)
+
+
+def ref_normalize(a):
+    """Ascending-order normalization: zero stays zero; non-finite values propagate."""
+    a = np.asarray(a, float)
+    norm = float(np.sqrt(ref_dot(a, a)))
+    return a / norm if norm > 0 else a.copy()
+
+
+def ref_dot(a, b):
+    """Definition of the ordered f64 dot utility: multiply/accumulate from the lowest index upward."""
+    a = np.asarray(a, float)
+    b = np.asarray(b, float)
+    if a.ndim != 1 or b.ndim != 1 or len(a) != len(b):
+        raise ValueError("ref_dot expects equal-length 1-D vectors")
+    acc = 0.0
+    for i in range(len(a)):
+        acc += float(a[i]) * float(b[i])
+    return acc
+
+
+def ref_dot_many(query, matrix):
+    """Apply ref_dot to codebook rows in stable ascending order."""
+    query = np.asarray(query, float)
+    matrix = np.asarray(matrix, float)
+    if matrix.ndim != 2 or query.ndim != 1 or matrix.shape[1] != len(query):
+        raise ValueError("ref_dot_many expects a 1-D query and a matching 2-D matrix")
+    return np.asarray([ref_dot(query, row) for row in matrix], dtype=float)
+
+
+def ref_cosine_many(query, matrix):
+    """Apply ref_cosine to codebook rows in stable ascending order."""
+    query = np.asarray(query, float)
+    matrix = np.asarray(matrix, float)
+    if matrix.ndim != 2 or query.ndim != 1 or matrix.shape[1] != len(query):
+        raise ValueError("ref_cosine_many expects a 1-D query and a matching 2-D matrix")
+    return np.asarray([ref_cosine(query, row) for row in matrix], dtype=float)
+
+
+def ref_cleanup(query, codebook):
+    """Return the frozen cleanup decision and score, including NumPy's first-NaN argmax behavior."""
+    scores = ref_cosine_many(query, codebook)
+    if not len(scores):
+        raise ValueError("ref_cleanup requires a non-empty codebook")
+    index = int(np.argmax(scores))
+    return index, float(scores[index])
+
+
+def ref_cosine_many_f64_f32(query, matrix):
+    """Definition of the mixed f64-query/f32-corpus utility planned for NoSQLite.
+
+    Corpus components are first rounded to f32, then converted exactly to f64. Dot and both squared norms are
+    accumulated from the lowest component index upward in f64. A zero norm takes precedence over a non-finite value,
+    matching ref_cosine's boundary behavior.
+    """
+    query = np.asarray(query, dtype=np.float64)
+    matrix = np.asarray(matrix, dtype=np.float32)
+    if matrix.ndim != 2 or query.ndim != 1 or matrix.shape[1] != len(query):
+        raise ValueError("ref_cosine_many_f64_f32 expects a 1-D f64 query and matching 2-D f32 matrix")
+
+    query_norm_sq = ref_dot(query, query)
+    out = np.empty(matrix.shape[0], dtype=np.float64)
+    for row_index, row_f32 in enumerate(matrix):
+        row = row_f32.astype(np.float64)
+        row_norm_sq = ref_dot(row, row)
+        if query_norm_sq == 0.0 or row_norm_sq == 0.0:
+            out[row_index] = 0.0
+        else:
+            out[row_index] = ref_dot(query, row) / (np.sqrt(query_norm_sq) * np.sqrt(row_norm_sq))
+    return out
 
 
 # =================================================================================================

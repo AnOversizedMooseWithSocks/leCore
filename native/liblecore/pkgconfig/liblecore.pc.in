@@ -1,0 +1,12 @@
+prefix=@LECORE_PC_PREFIX@
+exec_prefix=${prefix}
+libdir=@LECORE_PC_LIBDIR@
+includedir=@LECORE_PC_INCLUDEDIR@
+
+Name: liblecore
+Description: Portable leCore vector algebra kernel
+Version: @LECORE_VERSION@
+URL: https://github.com/AnOversizedMooseWithSocks/leCore
+Libs: -L${libdir} -llecore @LECORE_PC_PUBLIC_LIBS@
+Libs.private: @LECORE_PC_PRIVATE_LIBS@
+Cflags: -I${includedir} @LECORE_PC_CFLAGS@
