@@ -3,26 +3,38 @@
 The committee-facing design and review questions are in
 [`PROPOSAL.md`](PROPOSAL.md). V1-v3 and v5 are preserved as execution
 failures, and v4 is preserved as a preflight failure. V6 is the first formally
-admitted, fully executed result and resolves the preregistered experiment as
-`accepted` — **GO**.
+admitted, fully executed correctness result. V7 independently preserves that
+parity while qualifying the native full-sequence C GDN recurrence on AWS. Both
+resolve their frozen identities as `accepted` — **GO**.
 
-The accepted v6 record is in
-[`results/v6-3e130ddc1500-accepted/`](results/v6-3e130ddc1500-accepted/).
+The promoted v7 record is in
+[`results/v7-cb3b1d2ac71c-accepted/`](results/v7-cb3b1d2ac71c-accepted/).
 Its complete evidence bundle, excluding model weights, is permanently indexed
-at [`Ks5BCVFX…ikiTs`](https://arweave.net/Ks5BCVFX6179VUXQL8lMczLXX6hAp7j-lUpOcXikiTs/).
+at [`RaDOgThG…CUSa0`](https://arweave.net/RaDOgThGonnt9eLUe_1eKjJukMY-FnbXlBYSRmCUSa0/).
 All 4,096 paired positions, the statistical gate, checkpoint reloads, text
 generation, and the official vision-input smoke test passed. Original and
-installed perplexity were identical in this frozen run.
+installed perplexity were identical in this frozen run. The accepted v6 record
+remains permanently indexed at
+[`Ks5BCVFX…ikiTs`](https://arweave.net/Ks5BCVFX6179VUXQL8lMczLXX6hAp7j-lUpOcXikiTs/).
 
 The layer-prepending installer remains experimental pending committee review.
-V6 also recorded that the requested native GDN accelerator failed to compile
-on the AWS host and safely fell back to NumPy, so it validates correctness but
-not the compiled acceleration path. No retry is authorized under the v6
-identity.
+V6 recorded a safe NumPy fallback and therefore validates correctness but not
+compiled acceleration. V7 closes that specific gap for the full-sequence C
+recurrence; it does not establish native cached-step generation. No retry is
+authorized under either frozen identity.
+
+## Compute accounting
+
+The published compute estimates are `$4.71` (v2), `$2.66` (v3), `$0.27`
+(all v4 preflights), `$2.57` (v5), `$2.70` (v6), and `$1.32` (v7): about
+`$14.23` for v2-v7, plus the unestimated v1 attempt and a few cents of storage.
+The `$6.86` figure in the v7 launch tracker is specifically the v4-v7 phase
+subtotal. The proposal explicitly says its `$10` ceiling buys one formal
+attempt; it must not be read as all-history program spend.
 
 This directory turns the open Qwen integration questions into a frozen ilxyr
-project and preserves its bounded executions, including the accepted v6
-result. It generates the
+project and preserves its bounded executions, including the accepted v6 and v7
+results. It generates the
 hypothesis, methodology contributions, experiment contract, two explicit model
 forecasts, funding record, and ordered ilxyr commands for one real checkpoint.
 
@@ -43,7 +55,7 @@ python experiments/qwen35_acceptance/generate.py \
   /absolute/path/to/installation-corpus.txt \
   /absolute/path/to/evaluation-corpus.txt \
   /absolute/path/to/ilxyr-project \
-  --experiment-version 6 \
+  --experiment-version 7 \
   --python .venv-qwen-acceptance/bin/python
 ```
 
@@ -79,8 +91,8 @@ re-hashes the source commit, complete model/processor manifest, installation
 corpus, and held-out corpus and refuses any drift from the admitted identity.
 
 The layer-prepending installer is deliberately invoked with `--experimental`.
-V6 supplies the first accepted ilxyr outcome; removing that flag remains a
-maintainer and committee decision.
+V7 supplies the native-qualified accepted outcome; removing that flag remains
+a maintainer and committee decision.
 
 Future-run performance controls are frozen into the generated project. The
 generator requests the parity-gated C recurrence, increases chunks above 128
