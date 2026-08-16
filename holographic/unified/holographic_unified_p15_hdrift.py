@@ -591,6 +591,24 @@ class _UnifiedPart15:
 
 
 
+
+    def ablation_table(self, seeds=range(3)):
+        """Run the VSA-load-bearing audit: for each subsystem, the dumbest honest non-holographic
+        baseline on the SAME task/data/metric, both measured across seeds, confidence intervals
+        deciding the verdict (load-bearing / decorative / tie). The honest answer to 'where is
+        VSA actually the reason it works'. See holographic_ablate.ablation_table."""
+        import holographic.misc.holographic_ablate as _ab
+        return _ab.ablation_table(seeds=seeds)
+
+    def roles_by_shift(self, pairs, dim=None):
+        """Encode role-filler pairs with ROLES AS POWERS OF ONE SHIFT OPERATOR -- the trick that
+        made the in-weights role machine affordable (one permutation instead of one circulant
+        per role; the origin design behind the weight installs). Returns the trace; decode with
+        holographic_vsaroles.decode_structure. See holographic_vsaroles.encode_structure."""
+        import holographic.io_and_interop.holographic_vsaroles as _vr
+        return _vr.encode_structure(pairs, dim=dim)
+
+
 def _as_blob(blob):
     """Wire-tolerant blob coercion: bytes pass through; a base64 str or the service's
     {"__bytes_b64__": ...} sentinel (see holographic_service._jsonable) decode to bytes --

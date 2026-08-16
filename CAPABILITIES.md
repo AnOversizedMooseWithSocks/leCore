@@ -3624,6 +3624,14 @@ from holographic.agents_and_reasoning.holographic_machine import HoloMachine; fr
 ```
 *Find it by:* virtual machine, stored program, run a program, vm, recipe, template, recipe with holes, compile
 
+### Roles as powers of one shift (the affordable role machine)
+mind.roles_by_shift(pairs, dim=): encode role-filler pairs where role k IS the k-th power of ONE cyclic shift -- the oldest VSA trick, and the fix that made the in-weights role machine affordable (one permutation instead of one circulant PER role: the circulant design wanted 228 percent of a 3584-wide MLP for eight roles). Roles are INTEGERS (shift counts); decode via holographic_vsaroles.decode_structure; capacity() measures the load law. The origin design behind the weight installs..
+
+```python
+import numpy as np, lecore; m = lecore.UnifiedMind(dim=64, seed=0); m.roles_by_shift([(0, np.ones(32)), (1, 0.5 * np.ones(32))], dim=32).shape == (32,)
+```
+*Find it by:* roles as shifts, role filler machine, cheap role binding, powers of one operator, affordable roles in weights
+
 ### Run an allowlisted external command
 mind.run_command(name, args) runs an external program that an OPERATOR put on the allowlist (ffmpeg, a solver, a shell script, an API client), returning {stdout, stderr, returncode, ok}. It joins the same VSA fabric as an internal faculty -- mind.command_tool wraps one as an orchestrator Tool the Planner can select and chain, with the CircuitBreaker tripping on a flaky one. SECURITY: the allowlist is the boundary and it is set IN PROCESS (registration is private, so it is not reachable over /invoke -- measured: an agent could register `sh` before that was fixed). run_command can only run a name already on the list; values fill {placeholders} one token in one token out with NO shell, so an injection attempt in a value is a literal value..
 
@@ -4908,6 +4916,13 @@ the engine's cross-cutting UTILITY tools: content addressing & hashing (uri), ta
 from holographic.io_and_interop.holographic_uri import address_from_content, make_key; from holographic.misc.holographic_verify import CompositionTree
 ```
 
+### VSA load-bearing audit (the ablation table)
+mind.ablation_table(seeds=...): for each subsystem, run the DUMBEST honest non-holographic baseline on the SAME task, data, and metric; measure both across seeds with the variance harness; confidence intervals decide the verdict -- load-bearing (holo lower CI above baseline upper), decorative (baseline wins), or tie. The honest answer to 'where is VSA actually the reason it works', system-wide. FDR-corrected verdicts included..
+
+```python
+import holographic.misc.holographic_ablate as ab; ab.verdict({'mean': 0.9, 'ci': (0.88, 0.92)}, {'mean': 0.5, 'ci': (0.48, 0.52)})['verdict']
+```
+
 ### Void explorer (what the corpus implies but does not contain)
 'undiscovered' as a MEASURED set, three warrants: mind.void_map finds bootstrap-null-gated low-density regions inside the support (sparsity the data's own noise explains is never called void; the instrument probes its own sharpest honest bandwidth -- the sampler's smooth kernel smears absence); mind.structured_voids is the Mendeleev move -- combinations every observed pairwise slot co-occurrence licenses but the full set lacks, REFUSED when the structure cannot beat a shuffle; mind.transfer_voids: present in B, absent in A -- instantiated elsewhere, the cross-disciplinary warrant.
 
@@ -5309,4 +5324,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*679 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*681 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

@@ -53,6 +53,18 @@ def _unit(v):
     return v / n if n > 0 else v
 
 
+
+def _unbind_many(T, K):
+    """Batched unbind of ONE trace against MANY keys -- the house pattern (see
+    holographic_superposed.score_all): unbind(T, k) == bind(T, involution(k)), so one
+    bind_fixed call over the involuted key stack replaces a Python loop of unbinds. The
+    strict batchable-site scan (tests/test_holographic_batched_bind.py) enforces this."""
+    from holographic.agents_and_reasoning.holographic_ai import bind_fixed
+    K = np.asarray(K)
+    Ki = np.concatenate([K[:, :1], K[:, :0:-1]], axis=1)   # circular involution per row
+    return bind_fixed(T, Ki)
+
+
 def build_trace(keys, vals):
     """Bundle bind(k_i, v_i) -- the standard HRR episodic trace the surgeries operate on."""
     return np.sum([bind(k, v) for k, v in zip(keys, vals)], axis=0)
@@ -72,8 +84,9 @@ def rotation_battery(keys, vals, shift):
     Tr = np.roll(T, shift)
     base = float(np.mean([recall_cos(T, k, v) for k, v in zip(keys, vals)]))
     vs_orig = float(np.mean([recall_cos(Tr, k, v) for k, v in zip(keys, vals)]))
-    vs_rot = float(np.mean([float(_unit(unbind(Tr, k)) @ _unit(np.roll(v, shift)))
-                            for k, v in zip(keys, vals)]))
+    Ur = _unbind_many(Tr, np.stack(keys))                  # batched: one call, not a loop
+    Vr = np.stack([_unit(np.roll(v, shift)) for v in vals])
+    vs_rot = float(np.mean(np.sum((Ur / np.linalg.norm(Ur, axis=1, keepdims=True)) * Vr, axis=1)))
     coherent = float(np.mean([recall_cos(Tr, np.roll(k, shift), v) for k, v in zip(keys, vals)]))
     return {"baseline": base, "vs_original": vs_orig, "vs_rotated": vs_rot,
             "coherent_surgery": coherent}
@@ -132,7 +145,9 @@ def cleanup_rescue(keys, vals, fraction=0.5):
     mask[:int(D * fraction)] = 0.0
     T = build_trace(keys, vals) * mask
     V = np.stack([_unit(v) for v in vals])
-    correct = sum(int(np.argmax(V @ _unit(unbind(T, k))) == i) for i, k in enumerate(keys))
+    U = _unbind_many(T, np.stack(keys))
+    U = U / np.linalg.norm(U, axis=1, keepdims=True)
+    correct = int(np.sum(np.argmax(U @ V.T, axis=1) == np.arange(len(keys))))
     raw = float(np.mean([recall_cos(T, k, v) for k, v in zip(keys, vals)]))
     return {"raw_mean_cos": raw, "identified": int(correct), "of": len(keys)}
 
@@ -197,9 +212,11 @@ def spectral_lesion(keys, vals, band):
         Y = np.fft.rfft(np.asarray(v, float))
         Y[sl] = 0
         return np.fft.irfft(Y, n=D)
-    coart = max(float(np.max(np.abs(unbind(Tl, k) - bl(unbind(T, k))))) for k in keys)
+    Ul, U0 = _unbind_many(Tl, np.stack(keys)), _unbind_many(T, np.stack(keys))
+    coart = float(np.max(np.abs(Ul - np.stack([bl(u) for u in U0]))))
     raw = np.array([recall_cos(Tl, k, v) for k, v in zip(keys, vals)])
-    vsbl = np.array([float(_unit(unbind(Tl, k)) @ _unit(bl(v))) for k, v in zip(keys, vals)])
+    Uln = Ul / np.linalg.norm(Ul, axis=1, keepdims=True)
+    vsbl = np.array([float(Uln[i] @ _unit(bl(v))) for i, v in enumerate(vals)])
     return {"coarticulation_err": coart, "vs_bandlimited_mean": float(vsbl.mean()),
             "vs_bandlimited_sd": float(vsbl.std()), "raw_mean": float(raw.mean()),
             "dead": int(np.sum(raw < 0.05))}

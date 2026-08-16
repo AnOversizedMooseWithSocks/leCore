@@ -1426,6 +1426,27 @@ def register_p06(c):
                               "install the drift head", "merge distributions by adding weights",
                               "generative model as a matrix", "ship the model as weights"))
 
+    c.register_capability("VSA load-bearing audit (the ablation table)",
+        "mind.ablation_table(seeds=...): for each subsystem, run the DUMBEST honest non-"
+        "holographic baseline on the SAME task, data, and metric; measure both across seeds with "
+        "the variance harness; confidence intervals decide the verdict -- load-bearing (holo lower "
+        "CI above baseline upper), decorative (baseline wins), or tie. The honest answer to 'where "
+        "is VSA actually the reason it works', system-wide. FDR-corrected verdicts included.",
+        example="import holographic.misc.holographic_ablate as ab; ab.verdict({'mean': 0.9, 'ci': (0.88, 0.92)}, {'mean': 0.5, 'ci': (0.48, 0.52)})['verdict']",
+        native=True, aliases=("is vsa load bearing here", "ablation table", "honest baseline comparison",
+                              "which subsystems need vsa", "vsa vs simple baseline"))
+
+    c.register_capability("Roles as powers of one shift (the affordable role machine)",
+        "mind.roles_by_shift(pairs, dim=): encode role-filler pairs where role k IS the k-th power "
+        "of ONE cyclic shift -- the oldest VSA trick, and the fix that made the in-weights role "
+        "machine affordable (one permutation instead of one circulant PER role: the circulant "
+        "design wanted 228 percent of a 3584-wide MLP for eight roles). Roles are INTEGERS (shift "
+        "counts); decode via holographic_vsaroles.decode_structure; capacity() measures the load "
+        "law. The origin design behind the weight installs.",
+        example="import numpy as np, lecore; m = lecore.UnifiedMind(dim=64, seed=0); m.roles_by_shift([(0, np.ones(32)), (1, 0.5 * np.ones(32))], dim=32).shape == (32,)",
+        native=True, aliases=("roles as shifts", "role filler machine", "cheap role binding",
+                              "powers of one operator", "affordable roles in weights"))
+
     c.register_capability("The thesis (one data type, many costumes -- why none of this is junk)",
         "docs/THE_THESIS.md: for visitors who see 600 modules and conclude bloat. Everything -- data "
         "AND functionality -- is a hypervector or an operator on them, one algebra; modules MULTIPLY. "

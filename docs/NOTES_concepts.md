@@ -68468,3 +68468,39 @@ asserted mechanically. (3) leStudio (the 2D image editor on leCore) linked
 in the ecosystem paragraph. Lesson worth keeping: bare-backtick doc names
 rot silently when files move -- the existence check should join the ship
 gates eventually.
+
+================================================================================
+CI FIX ROUND: five failures, five root causes, all fixed at the cause
+================================================================================
+
+1. STRICT BATCHABLE-SITE SCAN (7 new sites): shufflebrain + semanticrig had
+   unbind(T, k)-in-comprehension patterns. Fixed with the HOUSE pattern
+   (holographic_superposed.score_all): _unbind_many(T, K) = bind_fixed(T,
+   involution(K)) -- one batched call per site, module-local helper with the
+   identity documented. BOTH module selftests green after: every pinned
+   equality survived (rotation 0.204==0.204, rig ortho 6e-17/8e-17) because
+   asserted quantities batched consistently.
+2. ROUTE_SEMANTIC TIE (dequantized self-vector lost to a neighbour): at
+   gamma=1.0 a rank-swapped pair scores 1/61+1/62 BOTH ways -- an exact RRF
+   tie -- and the name tie-break handed top-1 alphabetically. Fixed in
+   EmbeddingRouter.route: fused ties break by DENSE cosine, then name (the
+   vector is the primary signal; bones assist; when fusion cannot decide,
+   the vector does).
+3+4. STALE PINS RE-TARGETED LOUDLY (test_knowledge_index_corpus): the
+   median-1 and fused-top1-7 bars were the gamma=0.50 crown (537 entries);
+   the recorded gamma=1.0 re-crowning at 715 (route_semantic docstring +
+   workflow comments, 'bars in lockstep') measures median 2 / top-1 6. The
+   pins now guard the LOCKSTEP (bar == recorded champion, never looser)
+   instead of a dead epoch's numbers. Seed envelope 700 -> 850 for organic
+   catalog growth (735 keys after this session's entries); the bar's real
+   target (18k-window bloat, 26MB) sits an order of magnitude above.
+5. DARK MODULES WIRED, not parked (KNOWN_DARK stays empty by house rule):
+   mind.ablation_table (the VSA load-bearing audit -- honest baselines,
+   CI-decided verdicts, FDR) and mind.roles_by_shift (roles as powers of
+   ONE shift -- the affordable role machine; roles are INTEGER shift
+   counts). Both catalogued, batteries 5/5 + 5/5, p15 selftest 51 members
+   none shadowed. Instrument note: verdict() takes measure-harness dicts
+   ({mean, ci}), not raw score lists -- first smoke and first catalog
+   example both wrong the same way; fixed to the true contract.
+27 tests green across the four failing suites + index + mcp; audits 0/0/0;
+wiring report clean; regen --check green.

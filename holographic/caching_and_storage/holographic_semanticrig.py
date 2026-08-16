@@ -48,6 +48,18 @@ def _unit(v):
     return v / n if n > 0 else v
 
 
+
+def _unbind_many(T, K):
+    """Batched unbind of ONE trace against MANY keys -- the house pattern (see
+    holographic_superposed.score_all): unbind(T, k) == bind(T, involution(k)), so one
+    bind_fixed call over the involuted key stack replaces a Python loop of unbinds. The
+    strict batchable-site scan (tests/test_holographic_batched_bind.py) enforces this."""
+    from holographic.agents_and_reasoning.holographic_ai import bind_fixed
+    K = np.asarray(K)
+    Ki = np.concatenate([K[:, :1], K[:, :0:-1]], axis=1)   # circular involution per row
+    return bind_fixed(T, Ki)
+
+
 class GivensRig:
     """Bones = disjoint 2-plane Givens hinges (commuting -> exact closed-form CCD) with angle
     limits, acting on a dk-dimensional value space. Pose vectors, solve handles, pose a whole
@@ -261,7 +273,8 @@ def semantic_rig_battery(dim=128, hrr_dim=2048, n_items=20, seed=0):
     brig = BandPhaseRig(hrr_dim)
     phis_p = rngh.uniform(-0.6, 0.6, brig.n) * brig.limit
     Tp = brig.pose(T, phis_p)
-    hcoart = max(float(np.max(np.abs(unbind(Tp, k) - brig.pose(unbind(T, k), phis_p)))) for k in hk)
+    Up, U0 = _unbind_many(Tp, np.stack(hk)), _unbind_many(T, np.stack(hk))
+    hcoart = float(np.max(np.abs(Up - np.stack([brig.pose(u, phis_p) for u in U0]))))
     wh = unbind(T, hk[0])
     ph, wh1 = brig.solve(wh, brig.pose(wh, phis_p))
     hrestore = float(np.max(np.abs(brig.pose(Tp, phis_p, inverse=True) - T)))

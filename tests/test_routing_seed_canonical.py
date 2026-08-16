@@ -50,7 +50,10 @@ def test_seed_is_the_routing_slice_only():
     keys, vecs = _load()
     assert vecs.dtype == np.float16, "half precision is the shipped form (cosine-identical, half the bytes)"
     assert vecs.shape[0] == len(keys)
-    assert 400 <= len(keys) <= 700, ("seed should hold only the routing slice", len(keys))
+    # envelope widened 700 -> 850 for ORGANIC catalog growth (735 keys after the sphere/ladder/
+    # monoid/thesis/persistence entries landed); the bar exists to catch the 18k-window md/NOTES
+    # bloat (26 MB), which sits an order of magnitude above this ceiling.
+    assert 400 <= len(keys) <= 850, ("seed should hold only the routing slice", len(keys))
     assert vecs.shape[1] == 768, "the seed stores FULL width so any dim can be measured from it"
     assert _SEED.stat().st_size < 5_000_000, "seed must stay small enough to commit comfortably"
 
