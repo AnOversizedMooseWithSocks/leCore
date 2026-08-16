@@ -460,6 +460,14 @@ from holographic.simulation_and_physics.holographic_loadmemory import AdaptiveRo
 ```
 *Find it by:* adaptive record, role filler memory, fhrr, phasor, tensor, exact recall, load, capacity
 
+### Bake persistence (screens to_state / restore, hash-guarded)
+Index.screens_state() / screens_restore(state): persist the Lloyd bake (centroids, blocks, contiguous rows, radii) so the ~40s 1M bake is paid ONCE EVER; restore is seconds. A sha256 of the corpus travels with the state -- restoring onto different items REFUSES loudly (a bake is a derived fact about one exact corpus). Round-trip answers bit-equal, pinned. Includes the BULK-FINISH worst-case guard: when 32 blocks prune nothing, sphere delegates to the exact fast path -- 1M dust measured 8527 -> 55 ms/q, recall 1.000. HoloForest's to_state convention, applied to screens..
+
+```python
+import numpy as np; from holographic.caching_and_storage.holographic_index import Index; X=np.random.default_rng(0).standard_normal((512,16)); a=Index(X, method='sphere'); st=a.screens_state(); Index(X, method='sphere').screens_restore(st).nearest(X[0], k=2) == a.nearest(X[0], k=2)
+```
+*Find it by:* save the index bake, persist the screens, restore a baked index, bake once query forever, hash guarded index state
+
 ### Behavior pool (LOD for minds: tick 50k NPCs on one box)
 mind.behavior_pool() manages a population of ticking agents with behavior level-of-detail: an agent whose recent output stream certifies as an EXACT CYCLE (the symbolic surrogate contract) is demoted to a served cycle at near-zero cost; any input to that agent promotes it back to live ticking instantly; agents that never certify -- driven, chaotic, LEARNING -- are never demoted, and report() says which and why. pool.add(name, tick_fn, state); pool.step_all(inputs); pool.report().behavior costs what its information content costs..
 
@@ -539,6 +547,14 @@ shrink INACTIVE data to save memory and disk, and inflate it back on demand: sto
 store = mind.cold_store(keep_warm=4); store.put('t1', big_table); store.get('t1')  # transparently warmed
 ```
 *Find it by:* cold storage, compress inactive, evict, spill to disk, cool, fast file compression, compress a file on disk quickly, speed up compression
+
+### Composable index (merge and ablate corpora without rebuild)
+Index.merge(other) / Index.ablate(source): HDRIFT's compose/ablate applied to retrieval -- THE INDEX AS A COMMUTATIVE MONOID. Baked block families concatenate with provenance; every sphere bound is a fact about its own members so CERTIFIED EXACTNESS survives union untouched (zero re-Lloyd). MEASURED LAWS (pinned): exact-over-union; merge(A,B).ablate(B) answers == A alone; commutative up to tie order; merge 2.8 ms vs rebuild. Pruning after merge = the bakes side by side, never re-optimized (priced). Sphere/ladder family..
+
+```python
+import numpy as np; from holographic.caching_and_storage.holographic_index import Index; a=Index(np.eye(8)[:4], method='sphere'); b=Index(np.eye(8)[4:], method='sphere'); a.nearest(np.eye(8)[0]); b.nearest(np.eye(8)[7]); len(a.merge(b).items) == 8
+```
+*Find it by:* merge two indexes, combine corpora without rebuild, ablate a corpus source, composable index, index algebra, add and remove corpora
 
 ### Creature readability: proportion as a SEARCH, not a rule table
 per Togelius et al.'s search-based PCG, quality comes from an evaluation function you SEARCH, so this scores specs with the metric already trusted for the field rebuild rather than hand-coding proportions. TWO TERMS, because one is degenerate: negative space alone is MONOTONE in limb thickness (0.470 -> 0.332), so maximising it yields a spider-legged wisp; mass dominance runs the other way (0.817 -> 0.516), giving an interior optimum. Webbing is a hard GATE, not a term. Also grounds a creature (A-4) so it reads as an animal..
@@ -720,6 +736,14 @@ import numpy as np; np.save('/tmp/d.npy', np.random.default_rng(0).standard_norm
 ```
 *Find it by:* search a file bigger than memory, exact search on disk, top k over a huge npy, streaming nearest neighbours, dataset does not fit in ram
 
+### Precision ladder (certified int8 rung: exact answers at quantized speed)
+Index(method='int8') and the auto ladder: row-scaled int8 scan (numba OPT-IN kernel; absent numba the route does not exist) with a SPECTRUM-IMMUNE certified dot-error bound (s_r/2)|q|1 + (qs/2)|x|1 + (s_r qs/4)D -- conservative candidates PROVABLY contain every true top-k row incl ties; f64 rescore; near-tie storms fall to exact. THE BENCHMARK: 100k x768 hard: recall 1.000 @ 9.7 ms (FAISS Flat exact: 27.1); 1M x128: 1.000 @ 34.8 ms (only exactness in the table). Whitened data killed dimension-domain bounds twice; PRECISION-domain lifting is the lever the spectrum cannot touch..
+
+```python
+import numpy as np; from holographic.caching_and_storage.holographic_index import Index; X=np.random.default_rng(0).standard_normal((2000,64)); i8=Index(X, method='int8'); ex=Index(X, method='exact'); q=X[3]+0.05*np.random.default_rng(1).standard_normal(64); [i for i,_ in i8.nearest(q,k=8)] == [i for i,_ in ex.nearest(q,k=8)]
+```
+*Find it by:* int8 index, quantized exact search, precision ladder, certified quantized scan, exact recall at quantized speed
+
 ### Purity & effect analysis (the gate a cache needs)
 decide whether a Python function is PURE -- side-effect free and deterministic -- so a shape-keyed cache can safely memoize it. mind.function_purity(source, name) is the verdict; mind.purity_report(source) explains every function; mind.purity_scan(root) runs the whole tree. Built from stdlib `ast` alone: no linter dependency, no constitutional exception. CONSERVATIVE BY CONTRACT -- a wrong 'impure' costs a cache miss; a wrong 'pure' silently corrupts a cache and everything downstream, so an unresolved callee, an unrecognised method and any attribute write are impure. Escape analysis is implemented: mutating a container the function itself allocated is invisible from outside, so `out = []; out.append(x)` is pure. THE CORRECTION: the analysis is closed over the CALL GRAPH, because a function that calls an impure function is impure however clean its own body looks. Measured on this tree (2,154 module-level functions): a LOCAL rule that ignores calls reports 54.3% pure; the sound fixpoint reports 32.1%. The backlog's '76.0% with escape analysis' is a local-rule number, and a local purity rule is unsound for a cache -- so purity_report carries BOTH figures and never lets the flattering one travel alone..
 
@@ -743,6 +767,14 @@ how many restarts does YOUR factoring problem need -- measured on your own codeb
 mind.advise_restarts([bookA, bookB], targets=(0.95,))
 ```
 *Find it by:* how many restarts does my resonator need, pick a search budget, how long should i search before giving up, advise a restart count, is my factoring failing from budget or capacity
+
+### Retrieval dispute harness (FAISS + HoloForest + leCore, hard data only)
+tools/benchmarks_faiss.py: the NEUTRAL INSTRUMENT for benchmark disputes -- same hard data (real anchors + on-manifold offspring cliques at EVERY scale; a friendliness gate REFUSES near-orthogonal separable data), exact float64 ground truth computed by the harness, leCore pays its full ingest, FAISS configs stated in the output. MEASURED 100k x768: leCore fast recall 1.000 @ 23.4ms BEATS FAISS Flat exact (27.1ms); IVF 0.875 / HNSW 0.853 -- approximate engines drop 12-15%% recall on clique data where friendly benchmarks show ~0.99. Three gate bugs kept as negatives in the module docstring..
+
+```python
+import subprocess; r=subprocess.run(['python3','tools/benchmarks_faiss.py','--scales','1000','--queries','8'],capture_output=True,text=True,timeout=600); 'recall' in r.stdout
+```
+*Find it by:* faiss benchmark, retrieval dispute harness, benchmark against faiss, independent benchmark harness, recall benchmark hard data, compare index engines
 
 ### Scatter bake & level of detail (measured)
 bake a scattered population once, then serve any distance from the cache: thin the population and drop to a coarser blade as it recedes. Thinning is deterministic and NESTED, so the far set is a subset of the near set and blades never flicker as the camera moves. Reports exact triangle counts against the full-resolution baseline.
@@ -768,6 +800,14 @@ import lecore; m=lecore.UnifiedMind(); [l for l,_s in m.code_search('subdivide a
 ```
 *Find it by:* find similar code, search the codebase semantically, what other function looks like this one, code similarity, semantic search over my own source, find near duplicate functions, what else does what this does, search my source
 
+### Semantic rig (bones, hinges, and IK handles for the memory itself)
+mind.semantic_rig(): rig the framework like a bound mesh. Bones from each substrate's SYMMETRY GROUP: Givens hinges (GDN, full orthogonal) / rfft band-phase bones (HRR, cyclic; Nyquist excluded). IK = closed-form CCD under limits (planted pose 1e-16 rad). POSE = a new edit primitive: isometry, zero capacity cost (write pays crosstalk). SKINNING: key-space regions -- ortho topology exact; random keys leak at sqrt(nA/D); CANDY-WRAPPER quantitative (0.707 at full coverage), pinned not patched. Family: solve_ik / skin_mesh..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); r=m.semantic_rig(dim=96, hrr_dim=1024, n_items=12); r['gdn']['restore_err'] < 1e-12
+```
+*Find it by:* semantic rig, rig the memory like a mesh, pose the memory, ik handles for the framework, bones and joints for hypervectors, memory with a skeleton, adaptive shape with trigger response, skin weights for memory
+
 ### Semantic word index (find words by meaning)
 the fuzzy REVERSE of a dictionary: describe an idea and get the words whose definitions mean it. mind.build_semantic_index(words=...) places words in a meaning space by RANDOM INDEXING over their glosses, then idx.find('unexpected good luck') -> 'serendipity' and idx.similar('puppy') -> 'dog','kitten'. OPT-IN and separate: nothing loads or builds until you call it. Approximate by design (this is where leCore's geometry-preserving/lossy side belongs) -- reliable for the top hit, noisy in the tail, and word-sense sensitive..
 
@@ -775,6 +815,14 @@ the fuzzy REVERSE of a dictionary: describe an idea and get the words whose defi
 idx = mind.build_semantic_index(words=my_vocab); idx.find('a young dog'); idx.similar('ocean')
 ```
 *Find it by:* semantic index, find words by meaning, reverse dictionary, words like, similar words, meaning search, word similarity, describe a word
+
+### Shufflebrain (Pietsch's surgeries on holographic memory, measured)
+mind.shufflebrain_battery(): Pietsch's surgeries, measured. Rotation = COHERENT TRANSFORM; focal lesion: holographic keeps all items, localized loses half; cleanup identifies 24/24 at half-brain; GDN orthogonal-covariant vs HRR cyclic-only. GRAFT (S2): a CHANNEL, not a destination -- identify through it, consolidate FRESH = full transfer, host untouched; in-place pays the capacity law (kept negative, with mincing). docs/PANEL_pietsch_hologramic.md.
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); r=m.shufflebrain_battery(dim=512, n_items=12); abs(r['rotation']['vs_rotated']-r['rotation']['baseline'])<0.01
+```
+*Find it by:* shufflebrain, pietsch battery, rotate the memory trace, does memory survive brain surgery, hologramic memory test, lesion the memory and measure recall, memory graft experiment, graft amplification
 
 ### Spatial memory (position hypervectors: closest-point as associative recall)
 EVERY CLOSEST-POINT IS A RECALL (H5): positions become hypervectors via fractional power encoding (nearby points -> similar vectors, spearman 0.967); nearest-point queries are argmax cosine over an item store -- one matmul, no spatial hash. m.spatial_recall(points, queries, payloads=, k=) returns (indices, resonant payload readout, report). Measured 4.1x vs brute at scan scale; recalled points within 1% of true nearest (p95); colour readout 0.034 RGB. KEPT NEGATIVE: no bundle mode -- FPE keys are correlated and cross-talk in superposition (33% at K=128)..
@@ -4748,6 +4796,13 @@ tools/showcase.py executes the six flagship claims as LIVE assertions in ~2 s on
 import subprocess; print(subprocess.run(['python3','tools/showcase.py'],capture_output=True,text=True).stdout[-200:])
 ```
 
+### The thesis (one data type, many costumes -- why none of this is junk)
+docs/THE_THESIS.md: for visitors who see 600 modules and conclude bloat. Everything -- data AND functionality -- is a hypervector or an operator on them, one algebra; modules MULTIPLY. The junk test w/ receipts: cleanup IS a denoiser (24/24 at half-brain); IK/PBD/PnP/resonator = one solver (rig CCD 8e-17 rad); mesh subdivision ran on symbol sequences; a mince is block_shuffle; sphere tracing became a certified retrieval bound. Plus the discipline that keeps sprawl honest, and a ten-minute skeptic tour..
+
+```python
+import pathlib; t = pathlib.Path('docs/THE_THESIS.md').read_text(); 'one algebra wearing 600 costumes' in t
+```
+
 ### Tighten a selection to opaque pixels (auto-shrink marquee)
 SHRINK a rectangular raster selection to its NON-TRANSPARENT content -- the auto-shrink-to-opaque-pixels Photoshop/GIMP do, so a rotate/scale pivots about the DRAWING's centre, not the loose marquee's empty centre. mind.tighten_selection(alpha, bbox, threshold): alpha is (H,W) 0..1 or 0..255, an (H,W,4) RGBA image, or a bool mask; bbox=(r0,c0,r1,c1) inclusive is the marquee (None=whole image). Returns {empty, bbox, centre, area}: bbox is the tight box, centre the (row,col) pivot. empty=True means KEEP the original selection. Deterministic, numpy-only..
 
@@ -5254,4 +5309,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*672 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*679 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

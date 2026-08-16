@@ -785,6 +785,24 @@
     },
     {
       "aliases": [
+        "save the index bake",
+        "persist the screens",
+        "restore a baked index",
+        "bake once query forever",
+        "hash guarded index state"
+      ],
+      "consumes": [],
+      "does": "Index.screens_state() / screens_restore(state): persist the Lloyd bake (centroids, blocks, contiguous rows, radii) so the ~40s 1M bake is paid ONCE EVER; restore is seconds. A sha256 of the corpus travels with the state -- restoring onto different items REFUSES loudly (a bake is a derived fact about one exact corpus). Round-trip answers bit-equal, pinned. Includes the BULK-FINISH worst-case guard: when 32 blocks prune nothing, sphere delegates to the exact fast path -- 1M dust measured 8527 -> 55 ms/q, recall 1.000. HoloForest's to_state convention, applied to screens.",
+      "example": "import numpy as np; from holographic.caching_and_storage.holographic_index import Index; X=np.random.default_rng(0).standard_normal((512,16)); a=Index(X, method='sphere'); st=a.screens_state(); Index(X, method='sphere').screens_restore(st).nearest(X[0], k=2) == a.nearest(X[0], k=2)",
+      "method": null,
+      "name": "Bake persistence (screens to_state / restore, hash-guarded)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
         "bind many vectors at once on the gpu",
         "batched bind on any gpu",
         "circular convolution on the gpu",
@@ -1982,6 +2000,25 @@
       "produces": [],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "merge two indexes",
+        "combine corpora without rebuild",
+        "ablate a corpus source",
+        "composable index",
+        "index algebra",
+        "add and remove corpora"
+      ],
+      "consumes": [],
+      "does": "Index.merge(other) / Index.ablate(source): HDRIFT's compose/ablate applied to retrieval -- THE INDEX AS A COMMUTATIVE MONOID. Baked block families concatenate with provenance; every sphere bound is a fact about its own members so CERTIFIED EXACTNESS survives union untouched (zero re-Lloyd). MEASURED LAWS (pinned): exact-over-union; merge(A,B).ablate(B) answers == A alone; commutative up to tie order; merge 2.8 ms vs rebuild. Pruning after merge = the bakes side by side, never re-optimized (priced). Sphere/ladder family.",
+      "example": "import numpy as np; from holographic.caching_and_storage.holographic_index import Index; a=Index(np.eye(8)[:4], method='sphere'); b=Index(np.eye(8)[4:], method='sphere'); a.nearest(np.eye(8)[0]); b.nearest(np.eye(8)[7]); len(a.merge(b).items) == 8",
+      "method": null,
+      "name": "Composable index (merge and ablate corpora without rebuild)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
     },
     {
       "aliases": [
@@ -8161,6 +8198,24 @@
     },
     {
       "aliases": [
+        "int8 index",
+        "quantized exact search",
+        "precision ladder",
+        "certified quantized scan",
+        "exact recall at quantized speed"
+      ],
+      "consumes": [],
+      "does": "Index(method='int8') and the auto ladder: row-scaled int8 scan (numba OPT-IN kernel; absent numba the route does not exist) with a SPECTRUM-IMMUNE certified dot-error bound (s_r/2)|q|1 + (qs/2)|x|1 + (s_r qs/4)D -- conservative candidates PROVABLY contain every true top-k row incl ties; f64 rescore; near-tie storms fall to exact. THE BENCHMARK: 100k x768 hard: recall 1.000 @ 9.7 ms (FAISS Flat exact: 27.1); 1M x128: 1.000 @ 34.8 ms (only exactness in the table). Whitened data killed dimension-domain bounds twice; PRECISION-domain lifting is the lever the spectrum cannot touch.",
+      "example": "import numpy as np; from holographic.caching_and_storage.holographic_index import Index; X=np.random.default_rng(0).standard_normal((2000,64)); i8=Index(X, method='int8'); ex=Index(X, method='exact'); q=X[3]+0.05*np.random.default_rng(1).standard_normal(64); [i for i,_ in i8.nearest(q,k=8)] == [i for i,_ in ex.nearest(q,k=8)]",
+      "method": null,
+      "name": "Precision ladder (certified int8 rung: exact answers at quantized speed)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
         "pack this array smaller than zlib",
         "beat zlib on a float array",
         "quantize my weights",
@@ -9208,6 +9263,25 @@
     },
     {
       "aliases": [
+        "faiss benchmark",
+        "retrieval dispute harness",
+        "benchmark against faiss",
+        "independent benchmark harness",
+        "recall benchmark hard data",
+        "compare index engines"
+      ],
+      "consumes": [],
+      "does": "tools/benchmarks_faiss.py: the NEUTRAL INSTRUMENT for benchmark disputes -- same hard data (real anchors + on-manifold offspring cliques at EVERY scale; a friendliness gate REFUSES near-orthogonal separable data), exact float64 ground truth computed by the harness, leCore pays its full ingest, FAISS configs stated in the output. MEASURED 100k x768: leCore fast recall 1.000 @ 23.4ms BEATS FAISS Flat exact (27.1ms); IVF 0.875 / HNSW 0.853 -- approximate engines drop 12-15%% recall on clique data where friendly benchmarks show ~0.99. Three gate bugs kept as negatives in the module docstring.",
+      "example": "import subprocess; r=subprocess.run(['python3','tools/benchmarks_faiss.py','--scales','1000','--queries','8'],capture_output=True,text=True,timeout=600); 'recall' in r.stdout",
+      "method": null,
+      "name": "Retrieval dispute harness (FAISS + HoloForest + leCore, hard data only)",
+      "native": false,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
         "what were the runner up matches",
         "return several candidates instead of one",
         "how close was the second best answer",
@@ -10040,6 +10114,34 @@
     },
     {
       "aliases": [
+        "semantic rig",
+        "rig the memory like a mesh",
+        "pose the memory",
+        "ik handles for the framework",
+        "bones and joints for hypervectors",
+        "memory with a skeleton",
+        "adaptive shape with trigger response",
+        "skin weights for memory",
+        "candy wrapper",
+        "regional memory handles",
+        "bone chains for memory",
+        "auto rig from the data",
+        "re-address the memory",
+        "twist bones",
+        "kinematic redundancy"
+      ],
+      "consumes": [],
+      "does": "mind.semantic_rig(): rig the framework like a bound mesh. Bones from each substrate's SYMMETRY GROUP: Givens hinges (GDN, full orthogonal) / rfft band-phase bones (HRR, cyclic; Nyquist excluded). IK = closed-form CCD under limits (planted pose 1e-16 rad). POSE = a new edit primitive: isometry, zero capacity cost (write pays crosstalk). SKINNING: key-space regions -- ortho topology exact; random keys leak at sqrt(nA/D); CANDY-WRAPPER quantitative (0.707 at full coverage), pinned not patched. Family: solve_ik / skin_mesh.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=64, seed=0); r=m.semantic_rig(dim=96, hrr_dim=1024, n_items=12); r['gdn']['restore_err'] < 1e-12",
+      "method": "semantic_rig",
+      "name": "Semantic rig (bones, hinges, and IK handles for the memory itself)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
         "drill down from a command to exact settings",
         "semantic scene to node graph",
         "convert a described scene to nodes",
@@ -10211,6 +10313,36 @@
       "produces": [],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "shufflebrain",
+        "pietsch battery",
+        "rotate the memory trace",
+        "does memory survive brain surgery",
+        "hologramic memory test",
+        "lesion the memory and measure recall",
+        "memory graft experiment",
+        "graft amplification",
+        "transfer memories between minds",
+        "two speed transfer",
+        "mince law",
+        "spectral lesion",
+        "literal resolution loss",
+        "aligned mass fraction",
+        "graft between trained models",
+        "model graft rejection",
+        "behavior transfer between models"
+      ],
+      "consumes": [],
+      "does": "mind.shufflebrain_battery(): Pietsch's surgeries, measured. Rotation = COHERENT TRANSFORM; focal lesion: holographic keeps all items, localized loses half; cleanup identifies 24/24 at half-brain; GDN orthogonal-covariant vs HRR cyclic-only. GRAFT (S2): a CHANNEL, not a destination -- identify through it, consolidate FRESH = full transfer, host untouched; in-place pays the capacity law (kept negative, with mincing). docs/PANEL_pietsch_hologramic.md",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=64, seed=0); r=m.shufflebrain_battery(dim=512, n_items=12); abs(r['rotation']['vs_rotated']-r['rotation']['baseline'])<0.01",
+      "method": "shufflebrain_battery",
+      "name": "Shufflebrain (Pietsch's surgeries on holographic memory, measured)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
     },
     {
       "aliases": [
@@ -11570,6 +11702,27 @@
       "example": "import subprocess; print(subprocess.run(['python3','tools/showcase.py'],capture_output=True,text=True).stdout[-200:])",
       "method": null,
       "name": "The showcase (runnable proof of what makes this engine different)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "is this junk",
+        "why is this codebase so big",
+        "unrelated modules",
+        "what is the unifying idea",
+        "why hypervectors for everything",
+        "the thesis",
+        "one data type many costumes",
+        "why should I care about vsa"
+      ],
+      "consumes": [],
+      "does": "docs/THE_THESIS.md: for visitors who see 600 modules and conclude bloat. Everything -- data AND functionality -- is a hypervector or an operator on them, one algebra; modules MULTIPLY. The junk test w/ receipts: cleanup IS a denoiser (24/24 at half-brain); IK/PBD/PnP/resonator = one solver (rig CCD 8e-17 rad); mesh subdivision ran on symbol sequences; a mince is block_shuffle; sphere tracing became a certified retrieval bound. Plus the discipline that keeps sprawl honest, and a ten-minute skeptic tour.",
+      "example": "import pathlib; t = pathlib.Path('docs/THE_THESIS.md').read_text(); 'one algebra wearing 600 costumes' in t",
+      "method": null,
+      "name": "The thesis (one data type, many costumes -- why none of this is junk)",
       "native": true,
       "produces": [],
       "semantic": null,
@@ -15640,7 +15793,7 @@
       "theme": "Scenes you can describe & adjust"
     }
   ],
-  "count": 672,
+  "count": 679,
   "schema_version": "1.0",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

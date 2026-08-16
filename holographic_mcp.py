@@ -221,21 +221,30 @@ class MCPServer:
             self._memory = KnowledgeStore(self._memory_root)
         return self._memory
 
-    def _corpus_bind(self, texts=None, text=None):
+    def _corpus_bind(self, texts=None, text=None, documents=None, docs=None, name=None):
+        # ALIAS TOLERANCE (UX sweep): strangers send documents=/docs= before reading a schema
+        # -- the first phrasing must work. name= is accepted and ignored (content-addressing
+        # IS the name); refusing an extra courtesy field would be hostile.
         from holographic.caching_and_storage.holographic_knowledgestore import chunk_text
         chunks = []
-        for t in (texts or []):
+        for t in (texts or documents or docs or []):
             chunks.append(str(t))
         if text:
             chunks.extend(chunk_text(str(text)))
         if not chunks:
-            return {"error": "pass texts=[...] or text='...'"}
+            return {"error": "pass texts=[...] (aliases: documents=, docs=) or text='...'"}
         import hashlib
         h = "corpus:" + hashlib.sha256("\x00".join(chunks).encode()).hexdigest()[:12]
         self._corpora[h] = chunks                          # content-addressed: re-binding
         return {"handle": h, "n_chunks": len(chunks)}      # the same corpus is idempotent
 
-    def _corpus_ask(self, handle, query, k=4):
+    def _corpus_ask(self, handle=None, query=None, k=4, question=None, corpus=None):
+        # ALIAS TOLERANCE: question= for query=, corpus= for handle= -- and a missing arg
+        # must produce advice, not a KeyError traceback in a tool result.
+        query = query if query is not None else question
+        handle = handle if handle is not None else corpus
+        if handle is None or query is None:
+            return {"error": "need handle= (alias corpus=) and query= (alias question=)"}
         if handle not in self._corpora:
             return {"error": "unknown handle %r -- corpus_bind first (handles live for this "
                              "server process; the zoo proxy owns persistence)" % handle}
@@ -284,13 +293,23 @@ class MCPServer:
             _t0 = _t.perf_counter()
             try:
                 if tool == "receipt_verify":
-                    inner = self.handle({"jsonrpc": "2.0", "id": "receipt_verify",
-                                         "method": "tools/call",
-                                         "params": {"name": a["name"],
-                                                    "arguments": a.get("arguments", {})}})
-                    got = inner["result"]["_meta"]["lecore.receipt"]["output_sha256"]
-                    out = {"match": got == a["expected_output_sha256"],
-                           "actual_output_sha256": got}
+                    # ALIAS TOLERANCE (UX sweep): the primer says 'send a receipt back and
+                    # watch it confirm' -- so a pasted receipt dict must BE a valid argument
+                    # (receipt={'output_sha256': ...}), alongside tool=/name= for the tool id
+                    # and expected_output_sha256= for the raw hash. Missing pieces advise.
+                    vt = a.get("name") or a.get("tool")
+                    exp = a.get("expected_output_sha256") \
+                        or (a.get("receipt") or {}).get("output_sha256")
+                    if not vt or not exp:
+                        out = {"error": "need name= (alias tool=) plus expected_output_sha256="
+                                        " or receipt={...} from a prior call's _meta"}
+                    else:
+                        inner = self.handle({"jsonrpc": "2.0", "id": "receipt_verify",
+                                             "method": "tools/call",
+                                             "params": {"name": vt,
+                                                        "arguments": a.get("arguments", {})}})
+                        got = inner["result"]["_meta"]["lecore.receipt"]["output_sha256"]
+                        out = {"match": got == exp, "actual_output_sha256": got}
                 elif tool == "void_explore":
                     if a["handle"] not in self._corpora:
                         out = {"error": "unknown handle -- corpus_bind first"}
@@ -331,15 +350,22 @@ class MCPServer:
                            "how": "pick a family, pass an ask_for phrase (or your own words) "
                                   "to lecore_find, then lecore_invoke the method it names"}
                 elif tool == "corpus_bind":
-                    out = self._corpus_bind(a.get("texts"), a.get("text"))
+                    out = self._corpus_bind(**a)               # handler owns alias tolerance
                 elif tool == "corpus_ask":
-                    out = self._corpus_ask(a["handle"], a["query"], a.get("k", 4))
+                    out = self._corpus_ask(**a)                # handler owns alias tolerance
                 elif tool == "lecore_find":
                     out = self._find(a["query"])
                 elif tool == "lecore_describe":
                     out = self._describe(a["name"])
                 elif tool == "lecore_invoke":
-                    out = self._invoke(a["name"], a.get("args", {}))
+                    # ALIAS TOLERANCE (UX sweep): method= is what a stranger sends after
+                    # lecore_find told them the method name; a miss advises instead of KeyError.
+                    fac = a.get("name") or a.get("method") or a.get("faculty")
+                    if not fac:
+                        out = {"error": "need name= (aliases: method=, faculty=) -- the string "
+                                        "lecore_find returns as 'method'"}
+                    else:
+                        out = self._invoke(fac, a.get("args", a.get("arguments", {})))
                 else:
                     return {"jsonrpc": "2.0", "id": rid,
                             "error": {"code": -32602, "message": "unknown tool %r" % tool}}

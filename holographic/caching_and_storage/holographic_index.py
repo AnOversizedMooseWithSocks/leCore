@@ -40,19 +40,43 @@ class Index:
     indices. `method` is 'auto' (exact for small sets, forest for large), or force 'exact' / 'forest'."""
 
     def __init__(self, vectors, labels=None, method="auto", seed=0, forest_threshold=30000, forest_trees=8,
-                 recall_budget=None, screens_probe=0.35, screens_coherent=True, fast=False):
+                 recall_budget=None, screens_probe=0.35, screens_coherent=True, fast=False,
+                 compact=False):
         # WHY 30000, not 4096: MEASURED (dim=128, random unit rows, seed 0) the exact scan is FASTER than
         # the forest until ~30-50k items (0.20 vs 0.65 ms/q at N=5000), and forest recall@1 vs exact
         # DEGRADES with N on unstructured data: 0.93 at 5k, 0.59 at 50k, 0.51 at 200k. The old default
         # silently traded half the correct answers for nothing below the crossover. KEPT NEGATIVE: the
         # forest is a LATENCY tool for large N, not a free lunch -- past the threshold it answers fast
         # and approximately, and callers who need exact answers at scale should use nearest_batch.
-        self.items = _unit_rows(vectors)                       # unit rows -> dot == cosine (matches ai.nearest)
+        if compact:
+            # COMPACT STORAGE (the 1M-on-3GB lever): f32-normalized rows ARE the index -- the
+            # f64 full copy is never materialized (normalization runs BLOCKED into a
+            # preallocated f32 array, so peak memory is one chunk, not 2x the corpus).
+            # Exactness contract: compact is its OWN tie domain -- 'exact' means exact over
+            # the f32-normalized items (f32->f64 upcast is lossless, so the fast arbiter's
+            # f64 rescore is the truth of THIS index), deterministic and self-consistent,
+            # but ties may order differently than the default f64-normalized index. Opt-in,
+            # default False -- the default index is bit-stable, additive discipline intact.
+            V = np.asarray(vectors)
+            out32 = np.empty(V.shape, dtype=np.float32)
+            for s in range(0, len(V), 100000):
+                blk = np.asarray(V[s:s + 100000], np.float64)
+                out32[s:s + 100000] = (blk / (np.linalg.norm(blk, axis=1, keepdims=True)
+                                              + 1e-300)).astype(np.float32)
+            self.items = out32
+            fast = True                                        # compact rides the arbiter
+        else:
+            self.items = _unit_rows(vectors)                   # unit rows -> dot == cosine (matches ai.nearest)
         self.labels = list(labels) if labels is not None else None
         self.seed = int(seed)
         n = len(self.items)
         self.recall_note = None
-        if method == "auto":
+        self._forest_beam = None
+        if method == "auto" and recall_budget is not None and n > forest_threshold:
+            # THE LADDER (resolved at first nearest(): needs k). Below the threshold exact is
+            # measured-fastest anyway (the WHY above); no behavior change without a budget.
+            method = "ladder"
+        elif method == "auto":
             method = "forest" if n > forest_threshold else "exact"
             # F4/F12: with a recall_budget, 'auto' never silently ships a forest below it -- the
             # budget is MEASURED on this data (measure_forest_recall) after construction, and the
@@ -152,14 +176,25 @@ class Index:
                 # nothing.
                 B = max(1, int(np.ceil(n / block_size)))
                 C = self.items[np.linspace(0, n - 1, B).astype(int)].copy()
+
+                def _assign_blocked(items, cents):
+                    # SCALING FIX (the 1M rung caught it): items @ C.T materialized the FULL
+                    # (n, B) similarity matrix -- 14.6 GiB at 1M x 1954 blocks -- for an argmax
+                    # that only ever needs one row's winner at a time. Assign in 50k-row chunks:
+                    # identical argmax (lowest-index ties preserved per chunk), peak memory
+                    # bounded at chunk x B regardless of n. Bit-identical results, priced RAM.
+                    out = np.empty(len(items), dtype=np.int64)
+                    for s in range(0, len(items), 50000):
+                        out[s:s + 50000] = np.argmax(items[s:s + 50000] @ cents.T, axis=1)
+                    return out
                 for _ in range(2):
-                    assign = np.argmax(self.items @ C.T, axis=1)   # np.argmax: lowest-index ties
+                    assign = _assign_blocked(self.items, C)        # np.argmax: lowest-index ties
                     for b in range(B):
                         sel = assign == b
                         if sel.any():
                             C[b] = self.items[sel].mean(axis=0)
                     C /= (np.linalg.norm(C, axis=1, keepdims=True) + 1e-12)
-                assign = np.argmax(self.items @ C.T, axis=1)
+                assign = _assign_blocked(self.items, C)
                 blocks = [np.where(assign == b)[0] for b in range(B)]
                 keep = [i for i, b in enumerate(blocks) if len(b)]
                 blocks = [blocks[i] for i in keep]
@@ -176,6 +211,17 @@ class Index:
             self._screens_baked = np.ascontiguousarray(self.items[order])
             self._screens_gid = order.astype(np.int64)
             ends = np.cumsum([len(b) for b in blocks])
+            # SPHERE RADII (the certified upgrade, 2025's Tribase/TRIM lineage grafted onto the
+            # bake we already had): each block records the WORST member cosine to its centroid.
+            # For unit vectors, no member can score better against q than
+            # cos(max(0, theta_qc - theta_block)) -- Cauchy-Schwarz on the sphere. One float
+            # per block, baked once; at query time it is a conservative bound that lets the
+            # scan MARCH PAST blocks that provably cannot reach the top-k (Quilez's sphere
+            # tracing, performed on the corpus). Tight cliques -> tiny radii -> savage pruning:
+            # the data regime that defeats approximate engines FUELS the exact one.
+            self._screens_theta = np.array([
+                float(np.arccos(np.clip(np.min(self.items[b] @ C[i]), -1.0, 1.0)))
+                for i, b in enumerate(blocks)])
             self._screens_spans = [(int(e - len(b)), int(e)) for b, e in zip(blocks, ends)]
 
     def measure_screens_recall(self, n_probe=200, noise=0.05, seed=1234):
@@ -227,6 +273,467 @@ class Index:
         half = z * np.sqrt(p_hat * (1 - p_hat) / take + z * z / (4 * take * take)) / den
         return {"recall": p_hat, "lo": max(0.0, centre - half), "hi": min(1.0, centre + half), "n": take}
 
+    @staticmethod
+    def _int8_kernel():
+        """The numba int8x8 GEMV, compiled once per process. numba is the house's OPT-IN
+        accelerator (never required): absent numba, this returns None and the int8 route
+        simply never exists -- the engine runs and passes everything on pure NumPy. NOTE
+        cache=False on purpose: the codebase's own kept negative forbids @njit(cache=True)
+        under dynamically-loaded modules."""
+        try:
+            from numba import njit, prange
+        except Exception:
+            return None
+        @njit(parallel=True, fastmath=False, cache=False)
+        def dot88(I8, q8):
+            n, d = I8.shape
+            out = np.empty(n, np.int32)
+            for i in prange(n):
+                acc = np.int32(0)
+                row = I8[i]
+                for j in range(d):
+                    acc += np.int32(row[j]) * np.int32(q8[j])
+                out[i] = acc
+            return out
+        return dot88
+
+    def _ensure_int8(self):
+        """Bake the int8 rung: row-scaled int8 items + per-row scale + per-row exact L1.
+        One byte per element -- a quarter of the f32 traffic -- and the quantization error
+        bound is SPECTRUM-IMMUNE: (s_r/2)|q|_1 + (q_s/2)|x|_1 + (s_r q_s/4) D, computable
+        exactly per row. On whitened data this is the lever dimension-truncation cannot be
+        (flat spectrum killed mip bounds twice, measured): PRECISION-domain lifting where
+        the dimension domain is dead.
+
+        KEPT NEGATIVE -- NESTING THE RUNGS: int8 inside sphere's touched spans was built and
+        MEASURED (cluster-massed 40k, touched 2.5%%): 0.169 -> 0.422 ms/q, 2.5x SLOWER --
+        after the bounds prune to ~500 rows there is no traffic left to save and per-span
+        kernel dispatch dominates; the conservative kth-lower also raised touched to 3.8%%.
+        Levers on the SAME wall (memory traffic) are SUBSTITUTES, not multipliers: sphere
+        wins where structure exists, int8 where it does not, and the LADDER choosing per
+        regime is the fractal. Reverted. Plausible large-span regime (touched blocks of
+        10k+ rows at 1M cluster-massed) unmeasured -- claimed for real hardware, not built."""
+        if getattr(self, "_items8", None) is None:
+            n, d = self.items.shape
+            # BLOCKED bake (the 1M rung OOM'd on the whole-corpus f64 temp -- 2 GB of
+            # transients for a 0.125 GB result): chunk peak is 100k rows, any-N safe.
+            self._scale8 = np.empty(n, np.float64)
+            self._items8 = np.empty((n, d), np.int8)
+            self._l1_8 = np.empty(n, np.float64)
+            for s in range(0, n, 100000):
+                blk = np.asarray(self.items[s:s + 100000], np.float64)
+                sc = np.max(np.abs(blk), axis=1) / 127.0 + 1e-300
+                self._scale8[s:s + 100000] = sc
+                self._items8[s:s + 100000] = np.round(blk / sc[:, None]).astype(np.int8)
+                self._l1_8[s:s + 100000] = np.sum(np.abs(blk), axis=1)
+            self._dot88 = Index._int8_kernel()
+            if self._dot88 is not None:
+                self._dot88(self._items8[:4], np.zeros(d, np.int8))  # compile now
+
+    def _int8_nearest(self, q, k=1):
+        """CERTIFIED-EXACT top-k through the int8 rung: quantized scan, conservative
+        candidate set {rows: s_est + e >= k-th largest (s_est - e)} -- every true top-k row
+        (ties included) is provably inside -- then f64 rescore of the candidates with the
+        global lexsort tie rule. If the candidate set explodes (a near-tie storm: dust at
+        the kth boundary), fall through to the exact fast path, bulk-finish style. Returns
+        None when numba is absent or on fallback; nearest() falls through either way."""
+        self._ensure_int8()
+        if self._dot88 is None:
+            return None
+        nq = np.linalg.norm(q) or 1.0
+        qs = float(np.max(np.abs(q)) / 127.0) + 1e-300
+        q8 = np.round(q / qs).astype(np.int8)
+        raw = self._dot88(self._items8, q8)
+        s_est = raw.astype(np.float64) * (self._scale8 * qs)
+        e = (0.5 * self._scale8 * float(np.sum(np.abs(q)))
+             + 0.5 * qs * self._l1_8
+             + 0.25 * self._scale8 * qs * self.items.shape[1])
+        lo = np.partition(s_est - e, -k)[-k]
+        cand = np.where(s_est + e >= lo)[0]
+        self.int8_candidates = int(len(cand))
+        if len(cand) > max(256, len(self.items) // 4):
+            return None                                        # near-tie storm: exact path pays
+        s64 = (np.asarray(self.items[cand], np.float64) @ q) / nq
+        pos = np.lexsort((cand, -s64))[:k]
+        return [(self._key(int(cand[j])), float(s64[j])) for j in pos]
+
+    def screens_state(self):
+        """Persist the bake (HoloForest's to_state convention, applied to screens): everything
+        _ensure_screens produced -- centroids, block members, contiguous baked rows, gids,
+        spans, radii -- plus a sha256 of the items it was baked over. The hash is the guard:
+        a bake is a DERIVED fact about one exact corpus, and restoring it onto anything else
+        must refuse loudly (determinism is the proof system; a silently mismatched bake would
+        serve certified-exact answers about the wrong data). Full-corpus hash on purpose --
+        seconds once per bake beats one impossible bug forever."""
+        self._ensure_screens()
+        import hashlib as _hl
+        C, blocks = self._screens
+        return {"items_sha": _hl.sha256(np.ascontiguousarray(self.items).tobytes()).hexdigest(),
+                "C": C, "blocks": [np.asarray(b) for b in blocks],
+                "baked": self._screens_baked, "gid": self._screens_gid,
+                "spans": np.asarray(self._screens_spans, np.int64),
+                "theta": self._screens_theta}
+
+    def screens_restore(self, state):
+        """Install a persisted bake onto THIS index -- after the hash proves the corpus is the
+        same one the bake was made from. Answers afterwards are bit-equal to a fresh bake
+        (pinned); the ~minutes of Lloyd at 1M become a one-time cost paid once ever."""
+        import hashlib as _hl
+        sha = _hl.sha256(np.ascontiguousarray(self.items).tobytes()).hexdigest()
+        if sha != state["items_sha"]:
+            raise ValueError("bake/corpus mismatch: this bake was made over different items "
+                             "-- refusing to serve certified answers about the wrong data")
+        self._screens = (np.asarray(state["C"]), [np.asarray(b) for b in state["blocks"]])
+        self._screens_baked = np.asarray(state["baked"])
+        self._screens_gid = np.asarray(state["gid"])
+        self._screens_spans = [tuple(int(x) for x in row) for row in np.asarray(state["spans"])]
+        self._screens_theta = np.asarray(state["theta"])
+        return self
+
+    def merge(self, other, source_self="a", source_other="b"):
+        """HDRIFT's compose, applied to retrieval: the INDEX AS A COMMUTATIVE MONOID. Both
+        sides' baked block families (centroids, radii, contiguous spans) CONCATENATE with a
+        gid offset -- every block's sphere bound is a fact about ITS OWN members, so validity
+        survives union untouched and the merged sphere/screens routes stay CERTIFIED EXACT
+        over the union corpus with ZERO re-Lloyd, zero re-bake. Provenance travels: each
+        block family is tagged by source, which is what makes ablate() a slice instead of a
+        rebuild. Merged pruning is at worst the two bakes side by side (never re-optimized --
+        priced, not hidden); tie ORDER follows merge order (deterministic; commutative up to
+        ties, like the drift algebra it copies). Returns a NEW Index; inputs untouched. If BOTH
+        sides carry the int8 rung it travels by concatenation (per-row facts, zero
+        requantization). LABEL WART, stated: unlabeled sides get LOCAL indices as labels --
+        two unlabeled merges collide on integer keys; label when identities must differ."""
+        if self.items.shape[1] != other.items.shape[1]:
+            raise ValueError("dim mismatch")
+        self._ensure_screens()
+        other._ensure_screens()
+        out = Index.__new__(Index)
+        out.items = np.vstack([self.items, other.items])
+        la = self.labels if self.labels is not None else list(range(len(self.items)))
+        lb = other.labels if other.labels is not None else list(range(len(other.items)))
+        out.labels = list(la) + list(lb)
+        out.seed = self.seed
+        out.method = "sphere"
+        out.recall_note = None
+        out.recall_budget = None
+        out._forest = None
+        out._forest_trees = self._forest_trees
+        out._forest_beam = None
+        out._null = None
+        out._screens_probe = self._screens_probe
+        out._screens_coherent = self._screens_coherent
+        out._fast = self._fast
+        off = len(self.items)
+        Ca, ba = self._screens
+        Cb, bb = other._screens
+        out._screens = (np.vstack([Ca, Cb]), [np.asarray(x) for x in ba]
+                        + [np.asarray(x) + off for x in bb])
+        out._screens_baked = np.vstack([self._screens_baked, other._screens_baked])
+        out._screens_gid = np.concatenate([self._screens_gid, other._screens_gid + off])
+        sa = list(self._screens_spans)
+        n0 = self._screens_baked.shape[0]
+        sb = [(s + n0, e + n0) for s, e in other._screens_spans]
+        out._screens_spans = sa + sb
+        out._screens_theta = np.concatenate([self._screens_theta, other._screens_theta])
+        out._sources = (getattr(self, "_sources", None) or [(source_self, 0, off, 0, len(sa))]) \
+            + [(source_other, off, off + len(other.items), len(sa), len(sa) + len(sb))]
+        # the MONOID CARRIES THE PRECISION RUNG: per-row int8 facts (values, scale, L1)
+        # survive union exactly like block radii -- facts about their own rows. Both sides
+        # baked -> concatenate, zero requantization; either unbaked -> lazy bake on demand.
+        if getattr(self, "_items8", None) is not None and getattr(other, "_items8", None) is not None:
+            out._items8 = np.vstack([self._items8, other._items8])
+            out._scale8 = np.concatenate([self._scale8, other._scale8])
+            out._l1_8 = np.concatenate([self._l1_8, other._l1_8])
+            out._dot88 = self._dot88
+        return out
+
+    def ablate(self, source):
+        """HDRIFT's ablate: remove one merged source WITHOUT rebuild -- its block family and
+        item span are sliced out (provenance recorded at merge), every surviving block's
+        bound is untouched, exactness over the remaining corpus holds by the same argument
+        as merge. The round-trip merge(a,b).ablate(b) answers identically to a alone."""
+        srcs = getattr(self, "_sources", None)
+        if not srcs:
+            raise ValueError("no merge provenance on this index")
+        keep = [s for s in srcs if s[0] != source]
+        gone = [s for s in srcs if s[0] == source]
+        if not gone:
+            raise ValueError("unknown source %r" % source)
+        out = Index.__new__(Index)
+        item_mask = np.ones(len(self.items), bool)
+        for _, i0, i1, _, _ in gone:
+            item_mask[i0:i1] = False
+        out.items = self.items[item_mask]
+        remap = np.cumsum(item_mask) - 1
+        out.labels = [l for l, m_ in zip(self.labels, item_mask) if m_] if self.labels else None
+        for a in ("seed", "method", "_forest_trees", "_screens_probe", "_screens_coherent",
+                  "_fast"):
+            setattr(out, a, getattr(self, a))
+        out.recall_note, out.recall_budget = None, None
+        out._forest, out._forest_beam, out._null = None, None, None
+        C, blocks = self._screens
+        bkeep = np.ones(len(blocks), bool)
+        for _, _, _, b0, b1 in gone:
+            bkeep[b0:b1] = False
+        out._screens = (C[bkeep], [remap[np.asarray(blocks[i])] for i in range(len(blocks))
+                                   if bkeep[i]])
+        rows = np.ones(self._screens_baked.shape[0], bool)
+        spans = []
+        at = 0
+        for i, (s, e) in enumerate(self._screens_spans):
+            if bkeep[i]:
+                spans.append((at, at + (e - s)))
+                at += e - s
+            else:
+                rows[s:e] = False
+        out._screens_baked = self._screens_baked[rows]
+        out._screens_gid = remap[self._screens_gid[rows]]
+        out._screens_spans = spans
+        out._screens_theta = self._screens_theta[bkeep]
+        out._sources = [(n, int(remap[i0]) if i0 < len(remap) else 0, 0, 0, 0)
+                        for (n, i0, i1, b0, b1) in keep]           # names survive; spans re-derivable
+        return out
+
+    def _sphere_nearest(self, q, k=1):
+        """CERTIFIED-EXACT nearest via sphere tracing the baked blocks: score centroids, bound
+        each block by cos(max(0, theta_qc - theta_b)), visit blocks in bound order, STOP when
+        the k-th best exact score clears every remaining bound (small fp slack keeps the stop
+        conservative). Returns exactly what the exact scan returns -- same lexsort tie rule --
+        while touching only the blocks the bound cannot rule out. self.sphere_touched records
+        the fraction, because a speed claim without its touched fraction is a narrative.
+
+        MEASURED, both regimes (the contract): on cluster-massed data (200 clusters x 200
+        members, 40k x 96) EXACT answers at 1.3%% touched, 24x over the fused exact scan. On
+        ABTT-WHITENED dust (the dispute harness corpus: isotropic anchors + micro-cliques)
+        touched is 100%% and the route LOSES to exact -- per-block worst-member radii die by
+        concentration of measure (any block of near-orthogonal members has radius ~90 deg, so
+        every bound is ~1). Sphere tracing needs empty space to skip; whitened dust has none.
+        KEPT NEGATIVE with its geometry stated -- and the ladder's measured-ms selection is
+        the guard: sphere serves only where its clock, not its story, wins. Lineage:
+        Fukunaga-Narendra 1975 branch-and-bound; kMkNN; Tribase/TRIM (SIGMOD 2025-26).
+
+        KEPT NEGATIVE -- SESSION/STREAM PRIORS: a hint mechanism (visit the last answer's
+        blocks first; HRNN-predicted blocks next) was built and MEASURED across regimes:
+        tight structure 1.3-12%% touched (bound order already visits the winner first -- the
+        hint only adds overhead), loose structure 100%% touched (no visit order can beat
+        radius-inflated bounds). NO regime exists: the query's own centroid affinities
+        dominate any session history -- the geometry knows more than the stream. Reverted,
+        including its O(N)-per-query winner bookkeeping. Do not rebuild without new physics."""
+        C, blocks = self._screens
+        nq = np.linalg.norm(q) or 1.0
+        qn = q / nq
+        theta_qc = np.arccos(np.clip(C @ qn, -1.0, 1.0))
+        ub = np.cos(np.maximum(0.0, theta_qc - self._screens_theta))
+        order = np.lexsort((np.arange(len(ub)), -ub))
+        gids_all, sims_all = [], []
+        kth = -np.inf
+        touched = 0
+        self.sphere_bulk = False
+        for bi in order:
+            if kth >= ub[bi] + 1e-12 and touched >= 1:
+                break                                          # every later block is <= this bound
+            if touched == 32 and kth < ub[order[min(touched, len(order) - 1)]]:
+                # BULK-FINISH (the 1M dust rung caught the worst case: 100% touched via ~2000
+                # Python-loop span matvecs = 8.5 s/q vs one fused matmul at ~50 ms). When 32
+                # blocks in the bound has pruned NOTHING, the geometry has spoken -- stop
+                # tracing, do the one fused scan over the whole bake, same numbers, and the
+                # worst case becomes exact-plus-epsilon instead of exact-times-170.
+                self.sphere_bulk = True
+                self.sphere_touched = 1.0
+                return None                                    # -> nearest() falls through to the
+                                                               # exact path, whose f32+arbiter
+                                                               # machinery already does the fused
+                                                               # scan optimally (no upcast copy)
+            s, e = self._screens_spans[int(bi)]
+            sims = (self._screens_baked[s:e] @ q) / nq
+            gids_all.append(self._screens_gid[s:e])
+            sims_all.append(sims)
+            touched += 1
+            if sum(len(g) for g in gids_all) >= k:
+                kth = float(np.sort(np.concatenate(sims_all))[-k])
+        self.sphere_touched = touched / float(len(ub))
+        gids = np.concatenate(gids_all)
+        sims = np.concatenate(sims_all)
+        pos = np.lexsort((gids, -sims))[:k]
+        return [(self._key(int(gids[j])), float(sims[j])) for j in pos]
+
+    def measure_route_recall_k(self, route, k, beam=None, n_probe=64, noise=0.05, seed=1234):
+        """The ladder's honesty instrument: recall@k of a candidate route vs the exact answer,
+        measured on THIS index's own vectors (jittered stored items as probes -- same discipline
+        as measure_forest_recall: real structure, never a gaussian proxy). route is 'forest'
+        (with `beam`) or 'screens'. Returns {'recall','lo','hi','n','ms'} -- the Wilson lower
+        bound is what the budget compares against, and 'ms' is the measured per-query cost so
+        the ladder can serve the FASTEST honest route, not the first one."""
+        import time as _time
+        rng = np.random.default_rng(seed)
+        n = len(self.items)
+        take = min(int(n_probe), n)
+        pick = rng.choice(n, take, replace=False)
+        Qp = _unit_rows(self.items[pick] + noise * rng.standard_normal((take, self.items.shape[1])))
+        from holographic.sampling_and_signal.holographic_tiledreduce import tiled_topk
+        _, exact_idx = tiled_topk(self.items, Qp.T, k=int(k))
+        if route == "forest":
+            if self._forest is None:
+                from holographic.misc.holographic_tree import HoloForest
+                self._forest = HoloForest(self.items.shape[1], n_trees=self._forest_trees,
+                                          seed=self.seed).build(self.items)
+            t0 = _time.perf_counter()
+            preds = [self._forest.recall_k(Qp[i], int(k), beam=int(beam))[0] for i in range(take)]
+            ms = (_time.perf_counter() - t0) * 1e3 / take
+        else:
+            self._ensure_screens()
+            t0 = _time.perf_counter()
+            preds = [[j for j, _ in self._screens_nearest(Qp[i], k=int(k))] for i in range(take)]
+            ms = (_time.perf_counter() - t0) * 1e3 / take
+        hits = 0
+        for i in range(take):
+            truth = set(int(x) for x in exact_idx[:, i])
+            hits += len(truth & set(int(x) for x in preds[i]))
+        p_hat = hits / float(take * k)
+        z = 1.96
+        den = 1 + z * z / take
+        c_ = (p_hat + z * z / (2 * take)) / den
+        h_ = z * np.sqrt(max(p_hat * (1 - p_hat), 1e-12) / take + z * z / (4 * take * take)) / den
+        return {"recall": p_hat, "lo": max(0.0, c_ - h_), "hi": min(1.0, c_ + h_),
+                "n": take, "ms": ms}
+
+    def _resolve_ladder(self, k):
+        """THE ADAPTIVE ROUTE (method='auto' + recall_budget): measure the fast structures on
+        this data at this k -- forest at escalating beams, then screens -- and serve the FASTEST
+        whose Wilson LOWER bound meets the budget; exact otherwise. The same contract the budget
+        always made ('approximate routes never serve below budget'), executed as a ladder
+        instead of a single demotion. The measurement travels in recall_note; nothing is served
+        on faith. Beams escalate 4 -> 16 -> 48 because the forest's union-of-leaves recall is a
+        monotone function of beam while its cost is linear in it -- the knob the 0.398 benchmark
+        row said nobody was turning."""
+        cands = []
+        # CHEAPEST BAKE FIRST (the 1M OOM taught the ordering): int8's bake is one byte per
+        # element and seconds; the screens bake is 0.5 GB and ~a minute at 1M. The ladder
+        # must never cost more to consult than the route it rejects -- so the int8 rung and
+        # an exact-fast baseline are measured FIRST, and if int8 serves every probe it wins
+        # or loses against exact on the CLOCK ALONE (both are certified) with no screens
+        # bake ever paid. Sphere/screens/forest are consulted only when int8 cannot serve.
+        import time as _time
+        rngs = np.random.default_rng(4321)
+        pk = rngs.choice(len(self.items), min(24, len(self.items)), replace=False)
+        Qs = _unit_rows(self.items[pk] + 0.05 * rngs.standard_normal((len(pk), self.items.shape[1])))
+        self._ensure_int8()
+        if self._dot88 is not None:
+            t0 = _time.perf_counter()
+            served = 0
+            for i in range(len(pk)):
+                served += int(self._int8_nearest(Qs[i], k=int(k)) is not None)
+            i8_ms = (_time.perf_counter() - t0) * 1e3 / len(pk)
+            if served == len(pk):
+                t0 = _time.perf_counter()
+                for i in range(min(8, len(pk))):
+                    j, _s = _exact_nearest(Qs[i], self.items)
+                ex_ms = (_time.perf_counter() - t0) * 1e3 / min(8, len(pk))
+                if i8_ms < ex_ms:
+                    self.method = "int8"
+                    self.recall_note = ("ladder: int8 (certified exact) @ %.2f ms/q beats "
+                                        "exact @ %.2f -- served with no screens bake paid"
+                                        % (i8_ms, ex_ms))
+                    return
+        # SPHERE FIRST, always: it is CERTIFIED EXACT (lo = 1.0 by construction, no
+        # measurement needed for recall -- only for cost), so it meets any budget; it serves
+        # iff its measured ms also beats the alternatives. On clique-structured data it
+        # touches ~1% of blocks (24x over exact measured); on isotropic data it degrades to
+        # exact-plus-overhead and the ladder correctly passes it over. The data's difficulty
+        # is this route's fuel -- the sphere-tracing judo.
+        import time as _time
+        self._ensure_screens()
+        rngs = np.random.default_rng(4321)
+        pk = rngs.choice(len(self.items), min(24, len(self.items)), replace=False)
+        Qs = _unit_rows(self.items[pk] + 0.05 * rngs.standard_normal((len(pk), self.items.shape[1])))
+        t0 = _time.perf_counter()
+        sph_served = 0
+        for i in range(len(pk)):
+            sph_served += int(self._sphere_nearest(Qs[i], k=int(k)) is not None)
+        sph_ms = (_time.perf_counter() - t0) * 1e3 / len(pk)
+        if sph_served == len(pk):
+            # a probe that ABSTAINED (bulk-finish) must disqualify the route: timing the
+            # give-up and crediting it as service is how the first ladder run lied to
+            # itself (9.76 ms 'sphere win' that served at 34.6). Abstainers don't ladder.
+            cands.append(("sphere", None, {"recall": 1.0, "lo": 1.0, "hi": 1.0,
+                                           "n": len(pk), "ms": sph_ms}))
+        self._ensure_int8()
+        if self._dot88 is not None:
+            t0 = _time.perf_counter()
+            served = 0
+            for i in range(len(pk)):
+                served += int(self._int8_nearest(Qs[i], k=int(k)) is not None)
+            i8_ms = (_time.perf_counter() - t0) * 1e3 / len(pk)
+            if served == len(pk):                              # storms would fall through anyway
+                cands.append(("int8", None, {"recall": 1.0, "lo": 1.0, "hi": 1.0,
+                                             "n": len(pk), "ms": i8_ms}))
+        # SCALING ORDER: the forest build is Python-loop bound (~minutes at 1M) while the
+        # screens bake is vectorized (~seconds), so at large N screens is measured FIRST and
+        # the forest is skipped entirely if screens already meets budget -- the ladder must
+        # never cost more to consult than the route it rejects.
+        if len(self.items) > 200000:
+            for probe in (0.35,):
+                pass                                           # sphere already measured above
+            for probe in (self._screens_probe, 0.5, 0.7):
+                self._screens_probe = float(probe)
+                r = self.measure_route_recall_k("screens", k)
+                cands.append(("screens", probe, r))
+                if r["lo"] >= self.recall_budget:
+                    ok = [c for c in cands if c[2]["lo"] >= self.recall_budget]
+                    route, knob, r = min(ok, key=lambda c: c[2]["ms"])
+                    self.method = route
+                    if route == "screens" and knob is not None:
+                        self._screens_probe = float(knob)
+                    self.recall_note = ("ladder(large-N): screens(probe %.2f) recall@%d %.3f "
+                                        "[%.3f,%.3f] @ %.2f ms/q meets budget %.2f"
+                                        % (knob, k, r["recall"], r["lo"], r["hi"], r["ms"],
+                                           self.recall_budget))
+                    return
+            ok = [c for c in cands if c[2]["lo"] >= self.recall_budget]
+            if ok:
+                route, knob, r = min(ok, key=lambda c: c[2]["ms"])
+                self.method = route
+                self.recall_note = ("ladder(large-N): %s (certified exact) @ %.2f ms/q serves"
+                                    % (route, r["ms"]))
+                return
+            self.method = "exact"
+            best = max(cands, key=lambda c: c[2]["lo"])
+            self.recall_note = ("ladder(large-N): best screens lo %.3f < budget %.2f -> exact "
+                                "(forest unmeasured: build cost exceeds its plausible win here)"
+                                % (best[2]["lo"], self.recall_budget))
+            return
+        for beam in (4, 16, 48):
+            r = self.measure_route_recall_k("forest", k, beam=beam)
+            cands.append(("forest", beam, r))
+            if r["lo"] >= self.recall_budget:
+                break                                          # beams only get slower from here
+        for probe in (self._screens_probe, 0.5, 0.7):
+            # the second knob: screens' touched-volume fraction. Escalate like beams --
+            # recall rises monotonically with probe while cost stays sub-exact until ~0.7.
+            self._screens_probe = float(probe)
+            r = self.measure_route_recall_k("screens", k)
+            cands.append(("screens", probe, r))
+            if r["lo"] >= self.recall_budget:
+                break
+        ok = [(c for c in cands if c[2]["lo"] >= self.recall_budget)]
+        ok = [c for c in cands if c[2]["lo"] >= self.recall_budget]
+        if ok:
+            route, knob, r = min(ok, key=lambda c: c[2]["ms"])
+            self.method = route
+            if route == "forest":
+                self._forest_beam = knob
+            elif route == "screens" and knob is not None:
+                self._screens_probe = float(knob)
+            beam = knob
+            self.recall_note = ("ladder: %s%s recall@%d %.3f [%.3f,%.3f] @ %.2f ms/q meets budget %.2f"
+                                % (route, "(knob %s)" % beam if beam else "", k, r["recall"],
+                                   r["lo"], r["hi"], r["ms"], self.recall_budget))
+        else:
+            self.method = "exact"
+            best = max(cands, key=lambda c: c[2]["lo"])
+            self.recall_note = ("ladder: best fast route %s recall@%d lo %.3f < budget %.2f -> exact"
+                                % (best[0], k, best[2]["lo"], self.recall_budget))
+
     def _pvalue(self, score):
         """Calibrated false-alarm probability of a match `score` -- P(a random query scores this high). Lazily fits
         the noise floor once (holographic_honesty.RecallNull) over this index's own items."""
@@ -249,6 +756,20 @@ class Index:
             return []
         nq = np.linalg.norm(q) or 1.0
 
+        if self.method == "int8" and abstain is None:
+            r = self._int8_nearest(q, k=k)
+            if r is not None:
+                return r
+            # numba absent or near-tie storm: the exact path below serves, certified anyway
+        if self.method == "sphere" and abstain is None:
+            self._ensure_screens()
+            r = self._sphere_nearest(q, k=k)
+            if r is not None:
+                return r
+            # bulk-finish fired: the bounds pruned nothing, so the certified answer comes from
+            # the exact path below at the exact path's price -- worst case is exact + 32 spans.
+        if self.method == "ladder":
+            self._resolve_ladder(int(k))                       # measured once; note travels
         # FAST PATH: forest, top-1, no abstain -> sub-linear recall (reuses HoloForest verbatim)
         if self.method == "screens":
             if self.recall_budget is not None and self.recall_note is None:
@@ -276,6 +797,18 @@ class Index:
             else:
                 self.recall_note = ("forest recall %0.2f [%0.2f, %0.2f] on this data meets budget %0.2f"
                                     % (r["recall"], r["lo"], r["hi"], self.recall_budget))
+        if self.method == "forest" and k > 1 and abstain is None and self._forest_beam is not None:
+            # the k>1 forest route the 0.398 row was missing: recall_k with the LADDER-CHOSEN
+            # beam. Only reachable through the budget ladder, so it never serves unmeasured;
+            # forced method='forest' without a budget keeps its old exact fallback for k>1.
+            if self._forest is None:
+                from holographic.misc.holographic_tree import HoloForest
+                self._forest = HoloForest(self.items.shape[1], n_trees=self._forest_trees,
+                                          seed=self.seed).build(self.items)
+            ids = self._forest.recall_k(q, int(k), beam=int(self._forest_beam))[0]
+            sims = self.items[np.asarray(ids, int)] @ q / nq
+            order = np.lexsort((np.asarray(ids, int), -sims))
+            return [(self._key(int(ids[int(j)])), float(sims[int(j)])) for j in order[:k]]
         if self.method == "forest" and k == 1 and abstain is None:
             if self._forest is None:                           # built lazily on first qualifying call (see __init__)
                 from holographic.misc.holographic_tree import HoloForest
@@ -306,7 +839,8 @@ class Index:
                 # construction, not by luck; the selftest pins identity across seeds AND plants a
                 # sub-epsilon tie that forces the fallback to fire.
                 if getattr(self, "_items32", None) is None:
-                    self._items32 = self.items.astype(np.float32)
+                    self._items32 = self.items if self.items.dtype == np.float32 \
+                        else self.items.astype(np.float32)     # compact: zero-copy alias
                     self._eps32 = float(self.items.shape[1] * np.finfo(np.float32).eps
                                         * np.max(np.abs(self.items)))
                     self.fast_fallbacks = 0

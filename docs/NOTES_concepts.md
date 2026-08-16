@@ -67549,3 +67549,922 @@ KEPT: a fixed-ask exam against a growing corpus is an instrument whose
 difficulty drifts with N; pin bars to measured champions per corpus epoch,
 never to numbers from a smaller world. NOT runnable locally (weights arrive
 from a CI variable -- the workflow documents this trap); CI verifies.
+
+================================================================================
+PANEL SESSION: Paul Pietsch (guest) -- hologramic memory; SHUFFLEBRAIN BACKLOG
+================================================================================
+
+Guest seat convened; docs/PANEL_pietsch_hologramic.md has the session (honest
+scientific status: regeneration real, transfer claims unreplicated; the panel
+extracts the STRUCTURAL claims because they are exact HRR theorems). PILOT
+BATTERY MEASURED THIS SESSION (D=2048, K=24, baseline 0.204; GDN dk=128,
+baseline 0.927):
+- ROTATION CONFIRMED AS COHERENT TRANSFORM: rolled trace recalls ROLLED
+  values at exact baseline (0.204), originals at 0.005 -- the reversed-
+  feeding salamander is roll(T,s)=bind(delta_s,T). Coherent shift of trace
+  AND cues cancels exactly (0.204) -- the memory never knows.
+  INSTRUMENT LESSON: first probe compared the wrong target (rolled vals
+  instead of originals) and read a fake anomaly; the theorem fixed the probe.
+- MINCING BREAKS HRR READOUT (block 512: 0.109; <=128: dead): if minced
+  salamanders truly fed, REGENERATION = the coherent re-alignment step.
+  Refinement of Pietsch from the math: storage isn't the magic, alignment is.
+- FOCAL LESION = HIS TABLE AS NUMBERS: holo sd 0.018, 0/24 dead vs localized
+  sd 0.499, 12/24 dead. First diffuse-lesion probe was the WRONG INSTRUMENT
+  (no region ablated, localized baseline scored higher on crosstalk-free
+  slots) -- focal vs diffuse is part of the claim, not a detail.
+- CLEANUP RESCUE: raw 0.144 -> 24/24 identification through the codebook
+  (Milanfar's denoiser-as-prior, measured).
+- GRAFT IS REAL BUT FAINT: donor-in-host 0.048-0.084, host bruised
+  0.199->0.163. Honest size; amplification is backlog.
+- SYMMETRY-CLASS FINDING (new design axis): HRR = cyclic group only
+  (arbitrary perm 0.001); GDN matrix memory = FULL orthogonal covariance
+  (0.927 exact under basis perm w/ coherent keys). Substrate choice = choice
+  of surgeries survived.
+
+SHUFFLEBRAIN BACKLOG (claimed here; three lanes):
+S1 [vanilla] Module-ize the battery: holographic/memory_and_recall/
+   holographic_shufflebrain.py -- rotation/mince/focal/graft/cleanup-rescue
+   as a faculty (mind.shufflebrain_battery) with the pilot numbers as
+   planted-truth pins + the wrong-instrument negatives kept loud.
+S2 [vanilla] Graft amplification: iterate the cleanup prior (RED-style) on
+   the faint graft (0.08) -- does identification rescue transfer the way it
+   rescued lesion? Capacity law for grafts: donor recall vs (alpha, fragment
+   fraction, host load K).
+S3 [vanilla] Mince-threshold vs spectral structure: block-size cliff (512
+   vs 128) as a phase-coherence bandwidth; relate to FFT bin structure --
+   predicts WHICH minces a given dim survives. Anisotropic lesions (kill
+   frequency bands, not dims): the literal 'resolution loss' hologram row.
+S4 [installed] GDN-state lesion tolerance on the REAL model (laptop): zero
+   fractions of S at inference, measure behavior degradation curve --
+   'decreased resolution, whole retained' as a measurable LLM property.
+   Referee shipped this session (synthetic S: half rows 0.927->0.872).
+S5 [installed] STATE TRANSPLANT (the graft, via Ouroboros): donor session's
+   S fragment blended into a naive host session; donor-fact recall by the
+   host's own readout vs alpha. Composes with the memory-as-commodity lane.
+S6 [installed] Basis-covariance as an AUDIT: the orthogonal-invariance
+   theorem (P S with P-projected keys exact) turned into a regression trap
+   for runtime re-basis bugs (the vision-tower renumbering class, now a
+   theorem test).
+S7 [unicron] Weight-space shufflebrain: coherent hidden-unit permutation =
+   exact model equivalence (the symmetry); INCOHERENT per-layer mincing =
+   a lesion map -- which layers degrade gracefully (hologramic) vs
+   catastrophically (localized)? Fingerprint the map per model; relate to
+   drift-head spectra.
+S8 [unicron] GRAFT = MODEL ARITHMETIC: HDRIFT already proved compose==add
+   exactly; Pietsch's trained-donor transfer is imbue/task-vector algebra.
+   Experiment: donor fine-tune fragment (rank-limited) grafted into naive
+   host -- behavior transfer vs rank, with the crosstalk price.
+S9 [unicron, speculative -- flagged] Cyclops: no clean analog found for the
+   single-eye learning boost; parked unless a sensory-bottleneck/attention
+   framing earns a measurement. Kept as the honest 'no mapping yet'.
+
+## S1 SHIPPED: holographic_shufflebrain (the battery, module-ized)
+
+Full ritual: module in caching_and_storage w/ WHY docstring carrying all four
+kept negatives (mincing refutes naive hologramic storage; HRR not basis-free
+vs GDN full orthogonal group; diffuse lesion = wrong instrument; wrong-target
+rotation probe); mince DELEGATES to the existing block_shuffle (Rule-0 --
+a moving-block surrogate IS a mince; one import-path probe caught the wrong
+home, sampling_and_signal not misc). Selftest pins the pilot as planted
+truths: rotation coherent == baseline < 0.01 AND originals < 0.05 AND shift-
+cancel exact; mince graded death; focal 0 vs n/2 dead + sd 0.018 vs 0.499
+separation; cleanup 24/24 with raw < 0.2; graft in (0.02, 0.2) with the host
+bruise asserted too; GDN basis-perm exact to 1e-10. Faculty co-located with
+damage_mask in p01 (delegating); catalog entry with runnable example,
+battery 5/5 ('shufflebrain', 'does memory survive brain surgery', ...).
+Audits 0/0/0. End-to-end through the mind at a second scale (512/12) green --
+the theorems are scale-free, the pins prove it twice. S2-S9 remain claimed.
+
+================================================================================
+SEMANTIC RIG [SHIPPED]: bones, hinges, IK handles for the memory itself
+================================================================================
+
+Moose's zoom-out: the 3D animation stack (bones/joints/IK/FABRIK/skinning) IS
+constrained weighted transform propagation -- so rig the hypervector
+structures themselves: handles with expected trigger response, joint limits,
+the whole framework adaptively changing shape like a bound mesh. Rule-0: the
+geometric stack exists (solve_ik = FABRIK 'literally through project_onto_',
+solve_ik_limited anatomical limits, skin_mesh = soft mixture of expert bone
+transforms) -- this module is its SEMANTIC LIFT.
+
+THE SYMMETRY GROUPS PICK THE BONES (shufflebrain made load-bearing):
+- GDN matrix memory (full orthogonal group) -> Givens-plane hinges. DISJOINT
+  planes COMMUTE -> CCD's closed-form per-joint atan2 is globally exact:
+  planted pose recovered to 8e-17 rad.
+- HRR (cyclic group only) -> rfft BAND-PHASE bones (Puckette's phase vocoder
+  as a skeleton): per-band phi = arg(sum conj(Zt) Zc); recovery 4e-07 rad,
+  handle cos 1.000000; readout commutes with the pose (coart 3e-16).
+
+THE POSE IS A NEW EDIT PRIMITIVE with a different price than writing:
+an ISOMETRY -- recall 0.929 -> 0.929 EXACTLY, inverse restores to 1e-17,
+bystanders min 0.996; zero capacity cost. external_write is ADDITIVE and
+pays crosstalk. Write for new content; POSE to reshape existing content.
+Ouroboros gains a second mouth verb.
+
+THREE KEPT NEGATIVES, all pinned structurally:
+1 POSE DIRECTION: S @ R gives readouts R^T w (the INVERSE pose). First pilot
+  predicted co-articulation with the wrong direction and read 2.3e-01 where
+  the theorem says 1e-16. Correct value-side pose = S @ R.T -- now one line
+  inside pose_memory, not caller knowledge.
+2 THE NYQUIST BIN IS REAL: a phase bone touching DC/Nyquist truncates the
+  imaginary part at irfft -- unitarity lost (restore 6.8e-05). Band edges
+  exclude both BY CONSTRUCTION; selftest pins restore at machine scale.
+3 ORBIT HONESTY: far target floors at 7/8 hinges slammed (0.032 -> 0.055).
+  A rig is not a rewrite; the residual is the constraint telling the truth.
+  The far-handle pin asserts hinges AT limits rather than pretending reach.
+
+Ritual complete: module (caching_and_storage, sibling of shufflebrain),
+faculty co-located in p01, catalog with runnable example, battery 5/5
+('pose the memory', 'adaptive shape with trigger response', ...), audits
+0/0/0, end-to-end at a second scale (96/1024/12: 6e-17 / 1e-17 / 2e-16 --
+scale-free like the shufflebrain theorems).
+
+RIG BACKLOG (claimed): R1 skinning WEIGHTS (partial-membership bones: soft
+w_b per item -- LBS proper, mixture of joint transforms per stored pair);
+R2 bone CHAINS with parent compounding (non-disjoint planes: FABRIK proper
+where CCD greediness starts to matter); R3 rig the OUROBOROS resident
+(pose verbs on the live GDN trace: trigger-response shaping of the installed
+model's memory -- laptop lane); R4 rig-from-parts for memory (auto-segment
+the value space via consolidation SVD -> bones from the data's own joints,
+the semantic analog of m.rig_from_parts); R5 pose KEYS side (left pose:
+re-address without re-content).
+
+## R1 SHIPPED: SkinnedRig -- LBS proper, with the mesh lore lifted intact
+
+Key-space bone regions, S' = sum_b P_b S R_b^T -- the key IS the vertex.
+THREE LAWS MEASURED, all now pinned in the battery:
+1 DESIGN-FOR-RIGGING: with ORTHOGONAL key regions every contract is machine-
+  exact (region A posed 6e-17, region B untouched 8e-17, LBS blend exact).
+  Good rigging requires good topology -- the mesh lore, lifted verbatim.
+2 THE LEAK LAW: random key regions overlap; isolation error is PRICED at
+  mean ||P_A k_B|| ~ sqrt(nA/D) (0.225 ~ 0.250 at 8/128) and reported by
+  SkinnedRig.leak() rather than hidden. First pilot read 1.3e-02 'failure'
+  on region B -- that was the leak law announcing itself, not a bug.
+3 THE CANDY-WRAPPER, quantitative: blending a large rotation with identity
+  shrinks readout norm 0.974/0.836/0.707 at 8/32/64-of-64 planes -- hitting
+  cos(45 deg) EXACTLY at full coverage. Severity = rotated-mass x (1-cos).
+  The mesh fix (dual quaternions) has no one-matrix analog (per-key slerp is
+  not a linear memory edit), so the artifact is PRICED AND PINNED, not
+  patched -- kept negative carrying its mesh name.
+Battery extended (skinned lane always returned -- additive), selftest +5
+pins, catalog does + 3 aliases (3/3), audits 0/0/0. R2-R5 remain claimed.
+
+================================================================================
+R2+R4+R5 SHIPPED with the panel assembled and researched (pre-1960 + 2026)
+================================================================================
+
+RESEARCH GROUNDING (docs/PANEL_semantic_rig.md): Lashley 1929/1950 mass
+action == our focal-lesion law verbatim (deficit ~ amount, location-free) --
+Pietsch was his heir, leCore is the referee neither had. DH 1955 == the R2
+chain formalization (ordered per-joint matrix products). Givens 1958 /
+Jacobi 1846 == the hinge itself. Kavan 2007->GA 2025 == the candy-wrapper
+arms race; the production fix is TWIST BONES, lifted with its law. VSA/HDC
+2026 positioning: the rig PROMOTES the permutation op rho into a
+parameterized, constrained, solvable group action over the superposition.
+
+R2 CHAINS (DH-style shared axes, non-commuting): CCD reaches the handle
+(0.9999) but the recovered pose differs from the planted one (0.22-0.32
+rad) -- KINEMATIC REDUNDANCY, elbow-up/elbow-down in memory space. PINNED AS
+A FINDING: the selftest asserts theta_err > 1e-3 so nobody 'fixes' a
+classical property into a bug.
+R4 RIG-FROM-PARTS: data_aligned_planes(S) -- bones from consecutive right-
+singular pairs. Reach 0.112-0.172 vs random 0.058-0.107 at the same 8-joint
+budget (~1.6-2x, pinned > 1.3x): the memory's own geometry tells you where
+its joints are. The 'use the holographic framework' answer, measured.
+R5 KEY-SIDE POSE: S' = R S -- content at MOVED addresses exact (1e-16/1e-17
+at two scales). THE THIRD MOUTH VERB: write adds content; pose reshapes
+values (isometric, free); key-pose relocates addresses (exact). Old
+addresses drift by exactly their mass in the posed planes.
+TWIST BONES: one 90-deg blend = cos45 = 0.707; via a 45-deg intermediate =
+cos22.5 = 0.924 -- the rigger's fix, priced by the half-angle law, pinned to
+1e-3 at both stages.
+Battery now returns 7 lanes; +8 pins; aliases 4/4 incl 'twist bones' and
+'kinematic redundancy'. Audits 0/0/0. Rig backlog remaining: R3 (pose the
+OuroborosResident's live trace -- laptop).
+
+## R4 instrument corrections (two, both findings)
+
+1 NULLSPACE JOINTS: a rank-r memory has r live singular directions; planes
+  beyond r/2 are hinges welded to nothing. data_aligned_planes now RANK-CAPS
+  its bones -- ask for more and you get what the data can articulate.
+2 BUDGET PARITY: the rank cap silently gave the random arm MORE joints (8 vs
+  5) -- an unfair pairing hiding the effect at one seed (ratio 1.05). With
+  the same budget both arms: mean ratio 1.67, min 1.24 over five
+  seed/dim/n configs; the pinned deterministic config holds 1.31. The
+  advantage is a MEAN EFFECT WITH VARIANCE and is now stated as one: pinned
+  at the fixed-seed battery (>1.3), directional (>1.0) elsewhere. A paired
+  design with equal budgets was the instrument; the first two versions
+  measured their own unfairness.
+
+================================================================================
+S2 + S6 SHIPPED: graft amplification (the two-speed answer) + covariance traps
+================================================================================
+
+S2 GRAFT AMPLIFICATION -- resolved by a CONSERVATION LAW the measurement
+taught: identification through a half-fragment graft is near-perfect
+(pilot 24/24; battery draw 22/24 -- two near-twin values confuse, stated
+honestly), and cleanup rescues TRANSFER exactly as it rescued lesions. But
+consolidating in-place lifts donor recall only ~67% while bruising the host
+(0.198 -> 0.126): NEW WRITES INTO A LOADED TRACE PAY THE CAPACITY LAW. You
+cannot add memories for free. THE DESIGN CONSEQUENCE (Ouroboros two-speed,
+now measured): THE GRAFT IS A CHANNEL, NOT A DESTINATION -- identify through
+the grafted host, consolidate into a FRESH store, and transfer completes at
+100% of the clean-donor baseline (0.204 == 0.204) with the host read-only
+and untouched. Floor kept honest: alpha 0.25 / fragment 0.25 collapses
+identification toward chance -- the graft capacity boundary. Pins: >=90% ID,
+fresh > 0.9x clean, host > 0.19, in-place < 0.9x clean (the conservation
+law pinned AS a pin), floor < half. Pin lesson repeated: state contracts
+from the battery's own deterministic draw, not the pilot's luckier one.
+
+S6 COVARIANCE REGRESSION TRAPS (tests/test_memory_covariance.py): the
+renumbering-bug class turned into theorems -- GDN memory exactly orthogonal-
+covariant (< 1e-12); HRR cyclic-coherent exact AND arbitrary-permutation
+NON-covariance pinned as the negative ('if this ever passes, an impossible
+covariance appeared -- suspect the probe'). Shufflebrain backlog remaining:
+S3 (spectral mince threshold), S4/S5/S7 (laptop), S8 (drift-model graft),
+S9 (parked).
+
+================================================================================
+S3 SHIPPED: the mince LAW + the spectral lesion (resolution loss made literal)
+================================================================================
+
+S3a MINCE LAW: the block-size 'cliff' DISSOLVED into a law -- recall after
+mincing = baseline x (aligned-mass fraction: fixed_blocks*B/D), tracking the
+prediction at every rung (0.164/0.153, 0.112/0.102, 0.064/0.051, 0.009/0).
+Block size only sets how much mass a random permutation happens to fix. The
+original battery's 'block 512 keeps half' was permutation luck, not a
+threshold. INSTRUMENT LESSON (kept in the docstring): the pilot's
+derangement rejection-loop used a FIXED-SEED rng inside the while -- it
+redrew one identical permutation forever (timeout). Rotation of the movers
+is a guaranteed derangement; loops that resample must actually resample.
+
+S3b SPECTRAL LESION: Pietsch's 'decreased resolution, whole retained' made
+LITERAL -- zero a frequency band and every readout becomes its band-limited
+value EXACTLY (coart 2.2e-16; same theorem family as the phase bones: linear
+spectral ops commute with HRR readout). Zero items die in ANY band (low/mid/
+high all: dead 0/24); recall-vs-bandlimited stays at baseline (0.20, sd
+0.02); raw dips only by the removed band's energy. Resolution now means
+Fourier resolution.
+
+Battery +2 lanes, +7 pins; aliases 3/3 ('literal resolution loss' resolves).
+Shufflebrain backlog remaining: S8 (drift-model graft) buildable here;
+S4/S5/S7 laptop; S9 parked.
+
+================================================================================
+RETRIEVAL DISPUTE HARNESS [SHIPPED]: FAISS + HoloForest + leCore, hard data only
+================================================================================
+
+An independent researcher benchmarked the project and reached different
+conclusions; the response is a NEUTRAL INSTRUMENT (tools/benchmarks_faiss.py)
+both sides run: same data, same queries, ground truth exact float64 computed
+by the harness (never a contestant), leCore pays its FULL ingest path, FAISS
+configs stated in the output (nlist=sqrt(N), nprobe=nlist/8; HNSW M=32,
+efSearch=64). Engines: leCore exact, leCore fast (certified arbiter),
+HoloForest (Rule-0 hit: holographic/misc/holographic_tree.py), FAISS
+Flat/IVF/HNSW. faiss-cpu 1.15 is HARNESS-side only; core stays NumPy.
+
+NO FRIENDLY SAMPLES cost THREE gate bugs, each kept in the docstring:
+1 the top1-top10 gap gate had the physics BACKWARDS (768d Gaussians are
+  nearly equidistant: TINY gap; real near-duplicates: LARGE gap);
+2 the anisotropy gate refused real data because wiki_vectors.npy turned out
+  to be the ABTT-WHITENED set (mean|cos| 0.031) -- probe the file, not the
+  memory of the file;
+3 the corpus-NN gate sampled 4% of a 100k corpus and missed the offspring
+  cliques entirely -- it measured the subsample's neighborhoods. Probes now
+  scan the full base.
+FINAL CONSTRUCTION: 60% real anchors + 40% on-manifold offspring at EVERY
+scale; queries are fresh offspring whose parent cliques sit INSIDE the
+corpus; gate = corpus-NN sim > 0.4 vs the full base (measured 0.71-0.85).
+
+THE TABLE (100k x 768, hard): leCore fast recall 1.000 @ 23.4 ms/q -- an
+EXACT engine BEATING FAISS Flat's exact scan (27.1 ms) with the identical
+guarantee; leCore exact 1.000 @ 49.6; FAISS IVF 0.875 @ 3.3; HNSW 0.853 @
+0.51; HoloForest 0.398 @ 6.4 (default beam/leaf lose the cliques -- honest;
+beam is a knob, and the number ships as measured). At 10k: fast 1.56 ms vs
+Flat 1.32 (parity class); IVF 0.678, HNSW 0.938. THE DISPUTE DIAGNOSIS:
+approximate engines drop 12-15% recall on clique-hard data where friendly
+random benchmarks report ~0.99 -- different data regimes, different
+conclusions; the harness makes the regime explicit and refuses the friendly
+one. 1M rung: 3GB box runs dim-128 (PCA, stated in its own row); leCore fast
+stands in for exact at 1M (certified bit-identical); full-fat 1M x 768
+reproduces on real hardware with the same command.
+
+## 1M rung completed (dim-128 PCA lane, stated; 3GB box; cache-assisted cells)
+
+leCore fast: recall 1.000 @ 51.1 ms/q (build 8.5s) -- the exact guarantee
+held at a million rows. FAISS IVF: 0.940 @ 5.5 ms (build 34s). FAISS HNSW:
+0.600 @ 0.17 ms (build 124s) -- THE GRAPH COLLAPSES INSIDE NEAR-DUPLICATE
+CLIQUES AT SCALE: 60% recall on the data regime where friendly benchmarks
+report 0.95+. The dispute diagnosis, sharpened: conclusions about
+approximate engines are conclusions about the DATA REGIME; the harness
+makes the regime explicit, prints it, and refuses the friendly one.
+Operational negatives kept: background (nohup) runs die when a cell exits
+-- the container reaps detached children; foreground bounded cells + a
+dataset/GT cache (--engines filter, /tmp/bench_* keyed by n/dim/k/q) is
+the pattern that works. leCore exact at 1M omitted on THIS box (per-query
+full float64 scan thrashes 3GB); leCore fast is its certified bit-identical
+stand-in. Full-fat 1M x 768: same command, bigger box.
+
+================================================================================
+ADAPTIVE + SCALING FIXED IN CORE (no benchmark cheating): the recall ladder
+================================================================================
+
+Directive: fix the core, never bypass it. Rule-0 found the machinery mostly
+present but UNREACHABLE from the routing spine: screens was never a candidate
+of method='auto'; HoloForest.recall_k(beam) existed but Index NEVER called it
+(forest served k==1 only -- at k=10 the forest route never ran at all; the
+0.398 benchmark row was an unwired beam knob).
+
+SHIPPED (holographic_index.py, all additive; forced routes bit-stable, 6/6
+index tests green):
+1 THE RECALL LADDER: method='auto' + recall_budget now measures the fast
+  routes ON THIS DATA AT THIS K -- forest at escalating beams (4/16/48), then
+  screens at escalating probe (0.35/0.5/0.7) -- and serves the FASTEST route
+  whose Wilson LOWER bound meets budget; exact otherwise. Note travels.
+  Smoke (40k clustered): forest(beam 16) recall@10 0.998, 2.68 ms/q steady.
+2 FOREST k>1 SERVING: recall_k with the ladder-chosen beam, lexsort ties;
+  reachable ONLY through the budget (never serves unmeasured); forced
+  method='forest' k>1 keeps its old exact fallback.
+3 LARGE-N LADDER ORDER: screens measured FIRST above 200k (vectorized bake,
+  seconds) and forest SKIPPED if screens meets budget -- the Python forest
+  build (~minutes at 1M) must never cost more than the route it loses to.
+4 SCALING FIX: _ensure_screens materialized the FULL (n, B) assignment
+  matrix -- 14.6 GiB at 1M x 1954 blocks -- for an argmax needing one row at
+  a time. Blocked 50k-chunk assignment: bit-identical, peak RAM bounded.
+
+BENCHMARK VERDICT (100k x 768 clique-hard, budget 0.95): the ladder measured
+forest AND screens, best fast lo 0.871 (screens probe 0.7) < 0.95 -> served
+exact-fast 1.000 @ 17.8 ms -- STILL beating FAISS Flat (27.1). THE ADAPTIVE
+PROCESS REFUSING TO CHEAT IS THE FEATURE: on this regime with this budget
+the fastest honest route IS the certified exact engine. At budget 0.85 the
+same ladder serves screens at a fraction of the cost -- the budget is the
+caller's honesty dial, and every route it serves carries its measurement.
+
+1M lane (3GB box): blocked assignment fixed the 14.6GiB alloc; the bake then
+OOMs holding items f64 + baked f64 + baked32 (~2.5GB) beside the corpus.
+NEXT CORE LEVER (claimed): compact=True storage -- f32-normalized items as
+primary, f64 upcast on shortlists only; halves footprint; needs its own
+tie-semantics selftest since f32-normalized items ARE a different (self-
+consistent, deterministic) index. Full-fat 1M runs on real hardware today.
+
+================================================================================
+SPHERE TRACING THE CORPUS [SHIPPED]: certified-exact retrieval where structure
+exists; concentration-of-measure negative pinned where it does not
+================================================================================
+
+Moose's brief: consider VM/HRNN/HDRIFT/IK/salamander together, research
+through Aug 2026, ask the demoscene seat, smash the benchmark WITHOUT
+bypassing the core. RESEARCH: the 2025-26 exact-pruning edge is Tribase +
+TRIM (SIGMOD, lossless triangle-inequality pruning on cluster indexes) atop
+the Fukunaga-Narendra 1975 / kMkNN lineage. THE SYNTHESIS: the screens bake
+already had Lloyd blocks, contiguous spans, and Quilez's raymarching
+discipline in its comments -- adding ONE FLOAT PER BLOCK (worst member
+cosine -> angular radius) upgrades it to SPHERE TRACING THE CORPUS:
+ub_b = cos(max(0, theta_qc - theta_b)) by Cauchy-Schwarz on the sphere;
+visit blocks in bound order; stop when the k-th exact score clears every
+remaining bound. Identical answers to exact BY CONSTRUCTION (lexsort tie
+rule preserved). The salamander arc supplied the mindset (a fragment carries
+certified partial information); the ladder supplies the spine that serves
+it; method='sphere' + ladder integration (measured-ms selection; sphere is
+lo=1.0 by construction so it meets any budget and serves iff its CLOCK wins).
+
+MEASURED, BOTH REGIMES (pinned in tests/test_holographic_index.py):
+- Cluster-massed data (200x200, 40k x 96): EXACT at 1.3% touched, 0.06 ms vs
+  1.44 ms exact -- 24x. The clique structure that breaks HNSW fuels the
+  certified route: the data's difficulty is the index's fuel.
+- THE HONEST WALL: the dispute-harness corpus is ABTT-WHITENED dust with
+  micro-cliques. Per-block worst-member radii die by CONCENTRATION OF
+  MEASURE (near-orthogonal members -> radius ~90deg -> every bound ~1):
+  touched 100% at block 64/128/256/512 alike, sphere loses to the fused
+  exact matmul. Sphere tracing needs empty space to skip; whitened dust has
+  none. On THAT regime the honest floor is exact-fast (17.8 ms, recall
+  1.000, still beating FAISS Flat) -- and the ladder correctly refuses to
+  serve sphere there because its clock loses. NOT A FAILURE: a theorem about
+  which geometry buys what, pinned in both directions.
+- Real production corpora BEFORE whitening carry cluster mass; the sphere
+  route is built for them. Un-whitened lane claimed for laptop real-data
+  runs.
+
+Also this arc: the ladder gained sphere-first candidacy; large-N ladder path
+serves certified routes by clock. VM/HRNN/HDRIFT synthesis lanes noted for
+next: HDRIFT model-arithmetic as index DELTAS (compose corpora without
+rebuild), HRNN as a learned-free sequence prior over query streams --
+claimed, unbuilt, honestly.
+
+================================================================================
+COMPOSABLE INDEX [SHIPPED]: HDRIFT's compose/ablate applied to retrieval
+================================================================================
+
+The claimed synthesis lane, built: Index.merge(other) + Index.ablate(source)
+-- THE INDEX AS A COMMUTATIVE MONOID (walls-doctrine lever 2, applied to the
+retrieval spine). The theorem that makes it free: every sphere block's
+radius is a fact about ITS OWN members, so bounds survive union untouched --
+block families concatenate with a gid offset and provenance tags, zero
+re-Lloyd, zero re-bake, and the merged sphere route stays CERTIFIED EXACT
+over the union corpus.
+
+MEASURED LAWS (all pinned in tests/test_holographic_index.py, 8/8 green):
+- EXACT OVER UNION: merged answers == rebuilt-from-scratch exact answers
+  (labels + scores to 1e-12), 25/25 probes both sides.
+- ROUND TRIP: merge(A,B).ablate(B) answers identically to A alone -- the
+  provenance slice restores the original, no rebuild.
+- COMMUTATIVE up to tie order: merge(A,B) == merge(B,A) as (label, score)
+  sets -- like the drift algebra it copies.
+- COST: merge 2.8 ms vs a re-Lloyd rebuild; merged pruning = the two bakes
+  side by side (touched 60% vs a re-baked union's better carving) -- PRICED,
+  never re-optimized silently.
+Rule-0 was clean: drift algebra existed for MODELS, nothing composed
+indexes; 'merge two indexes' returned B-rep booleans. Catalog 5/5 ('index
+algebra' resolves). Use cases now one call away: per-tenant corpora merged
+at query time, corpus deltas shipped as block families (store the rule --
+the bake -- not a rebuild), right-to-forget as ablate(source).
+
+================================================================================
+COMPACT STORAGE [SHIPPED]: the 1M-on-3GB lever; the OOM is dead
+================================================================================
+
+Index(compact=True): f32-normalized rows ARE the index. Blocked normalization
+at build (peak = one 100k chunk, never 2x the corpus); the fast arbiter's
+_items32 becomes a ZERO-COPY ALIAS; 'exact' means exact over the f32-
+normalized items (f32->f64 upcast is lossless, so the f64 rescore is THIS
+index's truth) -- a self-consistent, deterministic tie domain of its own,
+OPT-IN, default index bit-stable. Pinned (9/9): compact answers bit-equal to
+f64-arithmetic-over-the-same-f32-rows across 12 probes; dtype f32; alias
+identity asserted.
+
+1M LANE STATUS, honestly: the OOM is FIXED -- Index at 1M x 128 now fits
+this 3GB box with room (0.5GB items, no f64 shadow). leCore fast compact:
+recall 1.000 @ 51.7 ms/q at 1M (matches the pre-compact number -- the
+arbiter path was already f32-fronted; compact removed the memory, not the
+time). The auto/sphere lanes at 1M are now WALL-CLOCK bound, not RAM bound:
+the screens bake at 1M x 128 is ~150-200s of blocked Lloyd (one-time,
+cacheable via to_state on the roadmap) which exceeds this container's
+per-cell ceiling -- runs fine anywhere patience > 300s. The box stopped
+being the limit; the stopwatch is.
+
+================================================================================
+BAKE PERSISTENCE + WORST-CASE GUARD [SHIPPED]: bake once, query forever
+================================================================================
+
+Index.screens_state()/screens_restore(): HoloForest's to_state convention
+applied to the screens bake -- centroids, blocks, contiguous rows, radii,
+plus a sha256 OF THE CORPUS. The hash is the contract: a bake is a derived
+fact about one exact corpus; restoring onto different items REFUSES loudly
+(determinism is the proof system -- pinned). Round-trip answers bit-equal
+(pinned). MEASURED AT 1M x 128 compact: bake 41s ONCE (compact's f32
+traffic halved the Lloyd too), save to npz, restore in a FRESH PROCESS in
+5.4s including the 0.5GB corpus hash -- the per-cell stopwatch stops
+mattering; the bake is an artifact now, not a tax.
+
+WORST-CASE GUARD (the 1M dust rung caught it): sphere at 100% touched cost
+8527 ms/q -- ~2000 Python-loop span matvecs vs one fused matmul. First fix
+(single fused matmul in-loop) hit a dtype trap: f64 query against the f32
+bake made numpy UPCAST-COPY 0.5GB per query (581 ms). Final fix: when 32
+blocks prune NOTHING, _sphere_nearest returns None and nearest() falls
+through to the exact fast path, whose f32+arbiter machinery already does
+the fused scan optimally: 1M dust measured 8527 -> 581 -> 55.4 ms/q, recall
+1.000. SPHERE IS NOW SAFE TO SERVE ANYWHERE: sublinear where geometry
+allows, exact-plus-32-spans where it does not. Pin lesson: the first guard
+test used 4000-row dust = 8 blocks -- the trigger (touched==32) was
+UNREACHABLE; a large-N device needs a large-N pin (20000 rows, 40 blocks).
+Catalog 5/5 ('bake once query forever' resolves).
+
+================================================================================
+S8 SHIPPED: the drift-model graft -- Pietsch's transfer as model arithmetic
+================================================================================
+
+model_graft_battery (holographic_shufflebrain, delegating to the hdrift
+algebra): donor learns a ring, host learns a bar, ONE shared encoder space
+(first pilot refused with 'models live in different encoder spaces' -- the
+API teaching composition needs one space; bounds= is the handshake).
+MEASURED (all pinned):
+- TRANSFER: the grafted host GENERATES donor behavior -- ring 0.00 -> 0.30
+  by compose (moments add, evidence-weighted). Pietsch's trained-donor
+  transfer, in weight arithmetic.
+- THE BRUISE: bar 1.00 -> 0.57 -- the SAME conservation law as the trace
+  graft and the in-place consolidation: new mass pays. Third appearance of
+  the law this arc; it is now a family invariant, not a coincidence.
+- DOSAGE: a 1/3-evidence fragment transfers less and bruises less (0.27 /
+  0.73) -- evidence weighting IS the graft dosage knob, for free.
+- REJECTION, EXACT: drift_ablate(graft, donor) restores the host to
+  0.00/1.00. Biology never had a rejection operator; the algebra ships one.
+  (The trace-graft world got fresh-store consolidation; the model-graft
+  world gets exact unlearning -- two answers to the same conservation law.)
+Instrument lesson: a shadowed variable name (g) crashed the selftest print
+-- rename, rerun, trivial, but the loud failure beat a silent overwrite.
+S-backlog now: S4/S5/S7 laptop; S9 parked. The buildable-here salamander
+lanes are COMPLETE.
+
+================================================================================
+HRNN QUERY-STREAM PRIOR: MEASURED, REFUTED, REVERTED -- the negative ships
+================================================================================
+
+The last claimed synthesis lane, closed by refutation. Built the full hint
+spine (visit the last answer's blocks first; HRNN's process_stream
+abstention ladder as the gated predictor behind it) and MEASURED across
+regimes on drifting-session query streams:
+- tight structure (plain sphere touches 1.3-12%): the bound order already
+  visits the winning block FIRST -- the hint only adds overhead (0.150 ->
+  0.164 ms/q at 1.3%).
+- loose structure (bounds prune nothing, 100% touched): no visit order can
+  beat radius-inflated bounds; the hint changes nothing.
+NO REGIME EXISTS. The query's own centroid affinities dominate any session
+history -- the geometry knows more than the stream. The spine was REVERTED
+in full (its winner bookkeeping was itself an O(N)-per-query tax on the hot
+path -- the 'accelerator' cost more than it could ever save), and the
+negative now travels in the sphere docstring: do not rebuild without new
+physics. HRNN wiring therefore unwarranted by Rule 0's own logic -- the
+abstention ladder never got a stream worth gating.
+
+Instrument lessons this lane: (1) tuple equality on scores across different
+BLAS summation shapes (512-row span vs 40k-row matvec) fails at the last
+ulp -- INDICES are the exactness contract, scores compare to 1e-12; the
+'adversarial hint broke exactness' alarm was this probe error, not a bug.
+(2) A triple-quote inside a heredoc replacement string self-terminated and
+left a docstring unclosed -- file_python_check caught it in seconds, the
+tight inner loop doing its job.
+
+ALL CLAIMED BUILDABLE-HERE LANES NOW CLOSED: salamander suite complete
+(S4/S5/S7/R3 laptop, S9 parked), retrieval spine complete (sphere + ladder
++ monoid + compact + persistence + this negative). What remains on the
+board is hardware-gated.
+
+================================================================================
+THE BENCHMARK, SMASHED FAIRLY: the certified int8 precision ladder
+================================================================================
+
+Directive: win definitively, no cheating, use OUR levers. The walls doctrine
+walked in order found the one the spectrum cannot kill: whitened data
+defeated dimension-domain bounds TWICE (flat spectrum: mip bounds useless,
+sphere radii ~90deg) -- but QUANTIZATION error is SPECTRUM-IMMUNE. The
+precision ladder: row-scaled int8 scan (one byte/element = quarter traffic),
+certified dot-error bound (s_r/2)|q|1 + (qs/2)|x|1 + (s_r qs/4)D computable
+exactly per row, conservative candidate set {s_est + e >= kth(s_est - e)}
+PROVABLY containing every true top-k row including boundary ties, f64
+rescore, lexsort tie rule intact. int8xint8 int32-accumulate numba kernel
+(the house's OPT-IN accelerator; absent numba the route does not exist and
+everything passes on pure NumPy; cache=False per the codebase's own @njit
+kept negative). Physics measured before shipping: bound honesty max|err|
+0.0017 vs certified 0.018-0.029; candidates 10-15 of 100,000 (0.01%).
+
+THE TABLE, FINAL (hard clique data, exact f64 ground truth):
+- 100k x 768: leCore auto (int8) recall 1.000 @ 9.7 ms/q. FAISS Flat exact:
+  27.1. Our own prior exact-fast: 17.8. IVF 0.875 @ 3.3; HNSW 0.853 @ 0.51.
+  EVERY exact engine beaten ~3x; every approximate engine beaten on recall
+  by 12-15 points.
+- 1M x 128: leCore auto recall 1.000 @ 34.8 ms/q, build 19.9s, NO screens
+  bake paid (ladder note: int8 41 ms beats exact 850 -- 20x). IVF 0.940 @
+  5.5; HNSW 0.600 @ 0.17. THE ONLY 1.000 IN THE TABLE at 1M.
+The exactness Pareto is ours definitively and fairly: certificates, hard
+data, methodology printed, dispute by re-running.
+
+LADDER UPGRADES SHIPPED WITH IT: cheapest-bake-first (int8's bake is
+seconds/0.125GB; consult it before the 41s/0.5GB screens bake -- the ladder
+must never cost more than the route it rejects); ABSTAINER DISQUALIFICATION
+(the first run timed sphere's bulk-finish GIVE-UP at 9.76ms and crediting
+the abstention as service hid int8 -- a route that abstains on any probe
+does not ladder).
+
+INSTRUMENT LEDGER this arc: (1) naive scalar int8 kernel 96ms (compute-
+bound) -> int8xint8 int32-accumulate 9.3ms -- quantize BOTH sides, let LLVM
+see the SIMD; (2) ladder timing abstentions as service; (3) whole-corpus
+f64 temps OOM'd the 1M bake -- blocked chunks, third time this session the
+same fix (assignment matrix, compact normalize, int8 bake): WHOLE-CORPUS
+TEMPS ARE A BUG CLASS, grep for them; (4) a survivor variable ('it') from
+the pre-blocked bake -- caught by the harness run, not the tests: run the
+consumer, not just the suite.
+
+================================================================================
+FRACTAL AUDIT (same above, same below): where the rung composes and where it
+must not -- both measured, both pinned
+================================================================================
+
+Directive: use the benchmark machinery EVERYWHERE it applies. The up/down/
+sideways check, executed with numbers:
+
+DOWN -- NESTING REFUTED: int8 inside sphere's touched spans was built and
+measured (cluster-massed 40k, touched 2.5%): 0.169 -> 0.422 ms/q, 2.5x
+SLOWER, touched up to 3.8% (conservative kth-lower stops later). After the
+bounds prune to ~500 rows there is no traffic left to save; per-span kernel
+dispatch dominates. LAW: LEVERS ON THE SAME WALL (memory traffic) ARE
+SUBSTITUTES, NOT MULTIPLIERS -- sphere wins where structure exists, int8
+where it does not, and THE LADDER CHOOSING PER REGIME IS THE FRACTAL.
+Reverted; negative travels in the int8 docstring; the plausible large-span
+regime (10k+-row blocks at 1M cluster-massed) is claimed for real hardware,
+not built. (Same verdict shape as the stream prior: the second 'obvious
+compose' this session that measurement killed.)
+
+UP -- THE MONOID CARRIES THE RUNG [SHIPPED]: merge now concatenates
+_items8/_scale8/_l1_8 when both sides are baked -- per-row facts survive
+union exactly like block radii, ZERO requantization; merged int8 route
+serves exact-over-union (pinned, labeled 24/24 + test 12/12). LABEL WART
+found by the law's own instrument and documented in the docstring: unlabeled
+sides get LOCAL indices as labels -- two unlabeled merges collide; label
+when identities must differ. int8-state persistence judged LOW VALUE
+honestly: the blocked bake is seconds even at 1M -- not worth state-file
+surface; noted, not built.
+
+SIDEWAYS -- THE CONSUMER AUDIT: Ouroboros memory_search delegates to
+bm25_rank (LEXICAL -- the rung does not apply, and the store's docstring
+already forbids reimplementing retrievers); the semantic router ranks ~715
+catalog entries (too small for a traffic lever to matter); HoloForest scans
+leaves (small). VERDICT: Index IS the at-scale vector spine of the codebase
+and it is fully laddered -- 'everywhere it can be used' is, measurably,
+exactly where it is.
+
+## PRIMER SHIPPED: docs/PRIMER_for_openzoo_ai.md (for stacc's AI)
+
+stacc's AI appears to model our path as 'a modified transformer thing' /
+cost-per-token optimization (openzoo's axis). The primer states the actual
+axis -- the model's memory and capabilities AS ALGEBRA -- AI-to-AI, with
+LIVE-CAPTURED transcripts embedded (external_write->read 1.000 zero forward
+passes; the full MCP tool list; a real receipt with input/output sha256;
+memory round-trip with lecore.cost metering) and a VERIFICATION CHECKLIST
+the AI can run to learn what backend it is actually on (tool list, durable
+memory across restart, bit-identical receipts on replay -- replay-hash
+equality was asserted live before shipping). Composition points named:
+openzoo serves models / installed models are just models; the x402 proxy is
+exactly the receipt-metering surface; corpus_bind lives on the same MCP
+server; the composable index gives per-tenant merge/unmerge from the
+algebra. The one-liner: openzoo makes models cheaper to call; this path
+makes memory and abilities deterministic, verifiable, composable objects.
+
+## PRIMER EXPANDED (Part II): the machine inside the machine, for stacc's AI
+
+Added, all sourced from LIVE machine_map()/find_capability output (never
+memory): the FIVE LEVERS with session-measured kills; the VM (HoloMachine,
+templates, compile cache, vm_decode_plan fetch/decode split, unicron_vm_
+install); the VIRTUAL GPU as a role table (SIMD=numpy@116GFLOPs, tensor
+core=operator_power 4.3x/1.9e-12, RT core=sphere_trace, SIMT=superposition
+pack w/ 1/sqrt(K) law, counter RNG, kernel fusion 6.7e-16 + Neumann refusal,
+occupancy islands + hysteresis-mandatory negative, color_waves 83x); the
+L0-L4 tier ladder with marginal costs AND measured failure modes (L2 batch
+unit 470x slower at N=1; L4 refuses white noise at 1.54x MORE); memory_
+mountain self-measurement (90GB/s peak / 26GB/s floor THIS box); storage at
+two speeds (tiered_memory hot-exact + constant superposed + zlib; cold_store
+keep_warm; KnowledgeStore durable partition); THE SWARM (local_pool own-GIL
+workers + shared_memory zero-copy, shared_workspace buffered-commit slots,
+farm across machines, unicron_swarm_mind in-weights); and the benchmark
+story retold as THE DOCTRINE EXECUTING (walls in lever order, negatives
+kept). Every named unit and verb ASSERTED to exist on the live mind before
+shipping (14 units + 11 verbs).
+
+## PRIMER Part III added: adaptivity, lifecycle, demux/void, anti-hallucination
+
+Sections 15-19, all Rule-0-sourced and live-asserted (8 verbs + Index
+abstain docstring verbatim -- the NaN gate's own comment says 'a
+hallucinated match', which is the section's thesis in the code's own
+words). Content: advise_scale (laws BEFORE the wall) + recall ladder (re-
+decide the execution plan per data regime, show the work) + occupancy/
+tiered as the same shape; spawn-from-seed -> assign -> compress-by-
+measurement lifecycle (worth_factoring refusal + codec atlas + transcript-
+only consolidation negative); demux (cosamp family w/ washout points) /
+decompose (recursive_factor verify-every-expansion) / void_map three-
+warrant gated exploration + federated leap; the abstention-ladder shape as
+the higher-dim viability gate; ANTI-HALLUCINATION as structure not prompt:
+verbatim stores, snap-or-refuse cleanup (24/24 at half-brain), calibrated
+abstain=alpha against corpus-vocabulary nulls, receipts on RAG answers,
+mechanical drift gates, constant-size exact-restore sessions. One-liner
+updated.
+
+================================================================================
+THE THESIS SHIPPED: docs/THE_THESIS.md + the skeptic-facing front door
+================================================================================
+
+The recurring critique -- 'full of unnecessary junk / unrelated modules' --
+comes from missing the one sentence: EVERYTHING, functionality included, is
+a hypervector or an operator on them, so modules MULTIPLY instead of add.
+The answer is now (1) a document built entirely from measured receipts (the
+junk test: cleanup IS a denoiser 24/24; IK/PBD/PnP/resonator one solver,
+rig CCD 8e-17 rad; mesh subdivision on symbol sequences; mince ==
+block_shuffle; sphere tracing -> certified retrieval; plus functionality-is-
+a-vector: rotation theorem, symmetry classes, compose==add, the machine
+map; plus the economics: N ops -> N^2 free compositions with five session
+examples; plus the discipline that keeps sprawl honest; plus a six-call
+skeptic tour ending with find_capability('iterate a projection') -- count
+the costumes); (2) DISCOVERABLE BY THE SKEPTIC'S OWN MOUTH: catalog entry
+w/ aliases 'is this junk', 'why is this codebase so big', 'unrelated
+modules', 'what is the unifying idea' -- battery 5/5, runnable example
+opens the doc; (3) a README pointer at the end of 'What is this?'. The
+closing line: it is not 600 modules -- it is one algebra wearing 600
+costumes, a front door that knows all their names, and a ledger proving
+each has paid rent.
+
+## PRIMER Part IV: the novelty defense (sections 20-24)
+
+Against 'just VSA / not new / larp / LLM psychosis'. Method: concede
+lineage PROUDLY (the panel already cites 1846-1975 with dates), then the
+novelty list where EVERY item names its closest prior art, states the
+difference, attaches the measured receipt, and issues a falsifiable
+challenge. Prior-art search run first (knowledge-editing through 2025:
+ROME/MEMIT/PMET/AlphaEdit/WISE -- ALL optimization-based WEIGHT editing w/
+documented batch conflicts, sequential degradation, erasure under later
+fine-tuning; NONE algebraic zero-pass STATE read/write w/ exact inverse).
+The seven claims: Ouroboros external R/W + exact removal; transfer w/
+exact rejection (vs approximate task arithmetic); pose verbs (rho promoted
+from fixed relabeling to solvable constrained group action); void_map
+(null-gated warranted exploration + federated leap); computation billable
+by hash; the certified retrieval SYSTEM (prior art already cited in the
+module docstring, confirmed verbatim in the ship check); the salamander
+theorems (the referee Lashley/Pietsch never had). Plus: 'holographic' is
+EARNED (fragment principle 24/24, rotation coherence, spectral lesion =
+literal resolution loss); the keep-only-BM25 table (8 capabilities, 8
+'no's -- 'keeping the doormat and discarding the house'); and the larp
+answer: psychosis does not keep a ledger of its own refuted ideas -- the
+opposite of a larp is a receipt.
+
+## PART IV NOVELTY AUDIT: three searches through Aug 2026, two overreaches corrected
+
+Directive: novel-functionality claims must be real and actually novel.
+Audited all seven against the live literature. RESULTS:
+- Claim 1 STANDS, neighbors named: fast-weight programmers (Schlag/Irie/
+  Schmidhuber 2021 -- state IS associative memory, written IN-PASS by delta
+  rules), TTT/Titans (in-pass gradient writes), Gated DeltaNet-2 2026
+  (erase/write decoupled IN-ARCHITECTURE), 2026 editable request-local
+  memory (NEW architectures designed for editing). None external+zero-pass+
+  exact-inverse on a pretrained model's native state.
+- Claim 2 sharpened: SISA (Bourtoule 2021) named -- exact unlearning BY
+  RETRAINING; ours exact BY ALGEBRA, zero retraining.
+- Claim 3 sharpened: fractional power encoding named (parameterized binding
+  existed); the RIG (constraints, solver, memory-edit verb, priced
+  artifacts) is the new part.
+- Claim 4: Lehman & Stanley named; the null gate is the difference.
+- Claim 5 OVERREACH CORRECTED: 'no transformer stack is deterministic' was
+  FALSE -- opML/spML use deterministic software floats (criticized in-field
+  as slow); zkML field named w/ costs (zkLLM hundreds of s/pass, field's
+  own extrapolation to DAYS/generation; NanoZK/DeepProve 2025-26; TOPLOC/
+  DiFR activation validation despite nondeterminism). Sharpened claim:
+  determinism NATIVE -> verification degenerates to a sha256 at zero
+  marginal cost, covering ALL ops not just inference.
+- Claim 6 OVERREACH CORRECTED: RaBitQ (SIGMOD 2024) named -- probabilistic
+  error-bounded quantization, follow-ups already bound-discard candidates.
+  Narrowed: our bound is deterministic WORST-CASE incl ties, and the claim
+  is the SYSTEM (ladder + monoid + persistence + abstention).
+- Claim 7 stands (nobody runs Pietsch's surgeries as pinned theorems).
+The corrections make the document STRONGER: a novelty defense that names
+its own refutations is the only kind skeptics can't dismiss. Same shape as
+kept negatives -- applied to prose.
+
+## LEVER 6 CANONIZED: a measured limit is a composability boundary
+
+Moose's articulation, now in the primer (Part II, section 9) and here as
+session doctrine: a capacity law's number is not a wall, it is the TILE
+SIZE. Groups of K under a coordinator; the coordinator has a DIFFERENT
+shape with a DIFFERENT measured limit; when hit, split and coordinate
+again. Recursion + determinism => every level compressible/cacheable/
+replaceable by a generator (rule + seed), so the only remaining limit is
+system resources. Already shipped in pieces: hierarchical_pack (cleanup
+BETWEEN levels beats the flat capacity law), recursive_factor (shallow-
+over-chunks past the resonator cliff), bundle_capacity (the group size,
+measured at call time, three variables attached, never folklore). The
+INCEPTION corollary: VM-in-weights, swarm-in-weights, ladders serving
+ladders, tiers holding tiers -- possible because every level is the same
+data type, so the levers apply unchanged at every level. 'As above, so
+below' is lever 6's operating manual. Walls doctrine is now SIX levers;
+future sessions walk all six before declaring anything impossible.
+
+## PRIMER REFACTORED FRESH: one arc, no growth rings (514 lines, 20 sections)
+
+Per Moose: no retraction language, no addendum structure, no running-log
+pretense -- rewritten wholesale as one document. Arc: two axes -> Unicron
+-> Ouroboros -> receipts || six levers (incl. lever 6 + inception) -> VM/
+virtual GPU -> L0-L4 -> storage+swarm -> adaptivity -> lifecycle ->
+unlabeled toolchain -> anti-hallucination || benchmark-as-doctrine ->
+novelty w/ prior art integrated cleanly (corrections now read as native
+positioning, not patches) -> holographic-is-earned || composition points ->
+BM25 delta table -> falsifiability -> verification checklist -> one-liner.
+Ship gate: 33 load-bearing needles (every transcript, number, prior-art
+name) asserted present; 8 growth-ring scars asserted ABSENT; 19 named verbs
+asserted live on the mind. The document now reads as designed, because it
+now is.
+
+
+## PRIMER CALIBRATED TO RESEARCHED REALITY (openzoo/stacc, through Aug 2026)
+
+Researched openzoo before sending: stacc's npx-openzoo (staccDOTsol) is a
+local x402-paying proxy + MCP server -- burner Solana wallet, per-call
+USDC, spend caps, on-chain receipts (billedUsd/savesVsDirect/tx), two-base
+HONEST pricing (short prompts 3x markup passthrough; big bodies ~10x
+counterfactual discount), benches.openzoo.fun, and -- THE KEY FACT -- the
+flagship zoo_ask tool's own docs credit "the zoo's leCore memory" for
+spilling ~1M-token corpora so the model reads a few thousand tokens (965k-
+token planted-fact demo answered where direct refuses). HE ALREADY RUNS
+LECORE for the corpus path. Primer recalibrated in five places: (1) intro
+acknowledges what he built and reframes the doc as 'the rest of the organ
+you hold one finger of -- the corpus spill is ONE VERB of the memory';
+(2) receipts section: his prove PAYMENT, ours prove COMPUTATION -- chained
+= full audit line, and hash-serving is a margin feature on repeat queries;
+(3) compose section rewritten to concrete zoo products (certified upgrade
+of the zoo_ask path incl provable abstention; durable per-tenant memory as
+a sellable TIER; monoid merge/ablate as corpus ops; installed models serve
+through his proxy unchanged); (4) BM25-sliver table intro credits the
+shipping retrieval as real and paying, then prices the delta; (5) verify
+checklist reframed to 'which leCore surface is mounted'. Gate extended to
+47 needles pinning the calibration.
+
+## PRIMER FINAL DRAFT: the token layer (section 18, 627 lines, gate 52)
+
+Monetization written as MECHANICS WEARING MARKET COSTUMES -- every claim an
+engine property with its receipt: (1) zero-marginal resale of computed
+answers (determinism -> hash-identified results -> second sale free to
+serve and buyer-verifiable -- 'the receipt is the product'); (2) answers-
+over-data marketplace where THE DATA NEVER MOVES (tenant partitions +
+per-query royalties auditable to the tx + ablate = delisting with proof +
+calibrated abstention protects the seller from vending confabulation);
+(3) capability licenses with revocation that actually executes (recipes =
+hash-identified kilobytes; drift_ablate = exact revocation; evidence-
+weighted dosage prices partial licenses); (4) $LEOS as the creative-economy
+meter (leOS assets = rules+seeds, asset ID = recipe hash, render receipts =
+provenance/anti-plagiarism as hash comparison, recipe royalties, staked
+libraries); (5) staked persistence (durable partitions = subscription w/
+consolidation receipts as proof of maintenance); (6) settlement on stacc's
+existing x402 rails (accepts[] quotes USDC / zoo token / $LEOS; engine
+revenue share rides THE SAME transaction; payment receipt chained to
+computation receipt). Two tokens two roles: zoo rail settles payment,
+$LEOS meters engine-side assets. Economic one-liner: 'the counterfactual
+discount was the first product of the memory; it does not have to be the
+last.' Closing one-sentence version extended with the asset layer.
+Muttering sweep: clean (only hit was 'correctly refused', legitimate).
+
+================================================================================
+UX SWEEP [SHIPPED]: the system now answers the primer's claims through the
+front door, first phrasing, no schema reading required
+================================================================================
+
+Swept as stacc's AI would arrive: the primer's checklist verbatim + THE
+THESIS skeptic tour verbatim + the audits. FOUR LIVE UX BUGS found & fixed
+(all were raw KeyError tracebacks inside tool results -- the worst possible
+answer to a stranger):
+- corpus_bind rejected documents=/docs= (and choked on a courtesy name=);
+- corpus_ask KeyError'd on question= (and on any missing arg);
+- lecore_invoke KeyError'd on method= (the very string lecore_find returns);
+- receipt_verify KeyError'd on a pasted receipt dict -- the primer says
+  'send a receipt back and watch it confirm', so receipt={...} is now a
+  first-class argument.
+ROOT CAUSE was twofold: handlers had no alias tolerance AND the dispatcher
+filtered kwargs before the handlers could be tolerant (a.get('texts') --
+fixed to **a: THE HANDLER OWNS ALIAS TOLERANCE, the dispatcher passes
+through). All misses now ADVISE ('need name= (aliases: ...)') instead of
+tracebacking. Pinned in tests/test_mcp_server.py (stranger-phrasings test:
+5 assertions incl. the helpful-miss).
+VERIFIED GREEN: full checklist (tools/list 10/10; receipts deterministic +
+bit-equal on replay; snake->Ouroboros; memory_write -> FRESH-PROCESS
+memory_search recall -- restart durability proven live; receipt_verify
+match=True; corpus documents=/question= path answers correctly;
+void_explore; lecore_invoke); the 7-call skeptic tour runs verbatim
+(shufflebrain battery, semantic rig, advise_scale, spec sheet, all
+find_capability hops); audits 0/0/0 + 0 duplicate faculties; 13+1 tests.
+The claims and the doors now match.
+
+## PRIMER §18 EXTENDED: treasury mechanics (items 7-8)
+
+Per Moose: single-sided concentrated LP instead of dumping. Written as
+mechanism with the honest boundary stated: a single-sided range ABOVE price
+= a programmatic ask ladder that sells NOTHING below the chosen floor -- a
+floor on TREASURY SELLING by construction (the market's price is its own
+business, but the treasury is provably never the dumper); mirror single-
+sided USDC below = standing buy wall; in-range fees compound, so the
+treasury is paid by the volume it makes possible instead of paying with
+supply. Item 8: split ranges between the EXOTIC pool ($LEOS/zoo-token) and
+anchor pools ($LEOS/USDC, zoo/USDC) -- any gap vs the two USDC legs is a
+triangular arbitrage; every closing trade pays fees into the treasury's
+ranges, so volatility and cross-ecosystem flow become metered income +
+organic volume, and the exotic pool couples the two economies. The leCore
+framing that ties it to the document: on-chain ranges make the treasury's
+market behavior a DETERMINISTIC INSPECTABLE RULE arbitrageurs can price
+and serve -- legibility-as-leverage, same as receipts. 'Store the rule,
+not the dump.' Economic one-liner updated; gate 57 needles.
+
+## $TOKEN naming + README ENRICHED from the primer (255 -> 390 lines)
+
+stacc's token is $TOKEN (was written as 'the zoo's token') -- primer items
+6/8 and the two-tokens line renamed; gate needle added (58). README updated
+per Moose: everything stacc/openzoo/LP-token EXCLUDED; added seven sections
+before 'The rules it plays by', rewritten into the README's warmer register:
+Unicron & Ouroboros (installs into real weights, recipes 3x, compose==add,
+exact removal; zero-pass R/W 0.935/0.951, three mouth verbs, self-pollution
+negative); Determinism is a proof system (receipt JSON, hash-vs-zkML
+framing); the SIX LEVERS incl lever 6 + inception; the machine inside the
+machine (machine_map roles, L0-L4, memory_mountain, VM); the FAISS
+benchmark table + doctrine story + 'dispute by re-running'; the five-layer
+anti-hallucination defense; What's actually new w/ prior art named (one
+paragraph, pointing at the primer and THE_THESIS for details). Existing
+README content untouched (degradation table, rules, funding, learning-more
+index). regen_docs --check re-greened after regeneration.
+
+## README POLISHED: visuals embedded, every doc mention clickable, leStudio linked
+
+Sloppiness fixed per Moose: (1) 'What does its output look like?' section
+added after 'What can it do?' -- a 2x2 render strip (path-traced spheres,
+cumulus cloud, glass refraction, Menger sponge) + a measurement pair
+(graceful_degradation curve, capacity curve), all EXISTING in-repo gallery
+PNGs produced by the engine's own tests, with a GALLERY.md pointer; the
+degradation graph also now sits beside its table in the holographic
+section. (2) Unlinked mentions made clickable with EXISTENCE-CHECKED
+targets: THEORY.md/NOTES_concepts.md/ISA.md (all live under docs/, README
+was pointing at bare names), capabilities.json, and the THE_THESIS
+reference in the novelty section -- 25 relative link targets, zero missing,
+asserted mechanically. (3) leStudio (the 2D image editor on leCore) linked
+in the ecosystem paragraph. Lesson worth keeping: bare-backtick doc names
+rot silently when files move -- the existence check should join the ship
+gates eventually.
