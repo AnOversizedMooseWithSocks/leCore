@@ -1405,11 +1405,15 @@ class _UnifiedPart07:
     def render_scene_document(self, scene, camera, width=96, height=72, quality="medium", max_bounce=4,
                               seed=0, sky=None, default_material="matte_gray", return_stats=False, sss_dir=None,
                               sss_depth=0.6, sss_sigma=4.0, lights=None, dome_cache=False, demodulate=False, soft_light_cache=False,
-                              indirect_cache=False, view=None, affine=False):
+                              indirect_cache=False, view=None, affine=False, sss_interior=False,
+                              emissive_mesh_lights=False):
         """Render the canonical SCENE DOCUMENT (holographic_scene_doc.Scene) -- the 'a modeling app builds a
         document, then renders it' path. The document is a table of objects (each a stable handle + transform +
         SDF geometry + library material); this flattens it to ONE scene SDF (nearest-object distance) plus a
-        material_fn that shades each hit with its owning object's material, then renders with render_auto. So the
+        material_fn that shades each hit with its owning object's material, then renders with render_auto.
+        emissive_mesh_lights=True derives a REAL MeshLight from every emissive-material object (NEE-sampled;
+        glowing objects cast light and soft shadows -- exposed emitters only, a sealed emitter is binary-occluded);
+        sss_interior=True adds the interior-emission translucency term (emissive bodies glow through wax/skin). So the
         renderer consumes the authoritative scene instead of a hand-built Python class per scene (backlog H7).
         `sss_dir` (a light direction) turns on the SUBSURFACE glow for translucent materials (wax/jade/skin).
         `dome_cache` (default off) serves any DomeLight via the cheap cached-dome pass (holographic_domecache)
@@ -1432,7 +1436,8 @@ class _UnifiedPart07:
                                      default_material=default_material, return_stats=return_stats, sss_dir=sss_dir,
                                      sss_depth=sss_depth, sss_sigma=sss_sigma, lights=lights, dome_cache=dome_cache,
                                      demodulate=demodulate, soft_light_cache=soft_light_cache,
-                                     indirect_cache=indirect_cache, view=view, affine=affine)
+                                     indirect_cache=indirect_cache, view=view, affine=affine,
+                                     sss_interior=sss_interior, emissive_mesh_lights=emissive_mesh_lights)
 
     def render_preview(self, scene, camera, width=240, height=180, scale=0.5, max_bounce=1,
                        quality="draft", seed=0, sky=None, lights=None, view="display", **kw):

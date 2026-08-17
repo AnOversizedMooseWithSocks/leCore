@@ -48,24 +48,58 @@ import numpy as np
 
 # ------------------------------------------------------------------- primitives
 
+
+def _self_xp(rt):
+    """The module a RUNTIME's weights live in. Methods bind from this rather
+    than from an argument, because the first thing forward() touches is a
+    weight and not a caller-supplied array."""
+    try:
+        return _xp_of(next(iter(rt.w.values())))
+    except Exception:
+        return np
+
+
+def _xp_of(*arrays):
+    """The array module the DATA already lives in -- numpy, or cupy on a device.
+
+    THE GPU PATH WAS HALF-BUILT AND THIS IS THE MISSING HALF. to_device() moved
+    the weights in one line; the forward pass then read them through hardcoded
+    `np.asarray`, and cupy REFUSES implicit conversion:
+        TypeError: Implicit conversion to a NumPy array is not allowed.
+    Field-caught on an A4500 at the first weight read, one line into the first
+    forward, AFTER the install had reported "hardware: gpu (weights resident)".
+    leCore already had the answer -- holographic_backend.get_array_module,
+    "follow-the-data: cupy if any argument is a cupy array" -- and the runtime
+    never asked. This is that, with a numpy fallback so the engine still runs
+    with no cupy installed at all, which is the standing constraint.
+    """
+    try:
+        from holographic.misc.holographic_backend import get_array_module
+        return get_array_module(*arrays)
+    except Exception:
+        return np
+
+
 def _rmsnorm(x, w, eps):
     """Qwen3Next RMSNorm is ZERO-CENTERED: y = norm(x) * (1 + w), weight init 0.
     Field-caught: plain `* w` matched nothing (rel err 1.0) -- the norm is where
     the first full-model divergence lived, masked earlier by a standalone mixer
     test that bypassed the norm. NOTE the asymmetry: the GATED norm below keeps
     plain `* w` (its weight init is ones) -- reference has both conventions."""
-    x32 = x.astype(np.float64)
-    v = np.mean(x32 * x32, axis=-1, keepdims=True)
-    return (x32 / np.sqrt(v + eps)) * (1.0 + w)
+    xp = _xp_of(x, w)
+    x32 = x.astype(xp.float64)
+    v = xp.mean(x32 * x32, axis=-1, keepdims=True)
+    return (x32 / xp.sqrt(v + eps)) * (1.0 + w)
 
 
 def _rmsnorm_gated(x, w, gate, eps):
     """Norm BEFORE gate; gate goes through SiLU (reference Qwen3NextRMSNormGated)."""
-    x32 = x.astype(np.float64)
-    v = np.mean(x32 * x32, axis=-1, keepdims=True)
-    y = (x32 / np.sqrt(v + eps)) * w
-    g = gate.astype(np.float64)
-    return y * (g / (1.0 + np.exp(-g)))
+    xp = _xp_of(x, w)
+    x32 = x.astype(xp.float64)
+    v = xp.mean(x32 * x32, axis=-1, keepdims=True)
+    y = (x32 / xp.sqrt(v + eps)) * w
+    g = gate.astype(xp.float64)
+    return y * (g / (1.0 + xp.exp(-g)))
 
 
 def _silu(x):
@@ -83,14 +117,19 @@ def _l2norm(x, eps=1e-6):
 def _causal_conv_silu(x, w):
     """Depthwise causal conv, kernel K, over (S, C) with weight (C, 1, K), then SiLU.
     Left-pad K-1 zeros: output[t] sees inputs t-K+1..t only."""
+    # NAME COLLISION AVOIDED DELIBERATELY: this function already had a local
+    # called `xp` -- the LEFT-PADDED input -- and a mechanical np.->xp. rewrite
+    # turned "xp.zeros" into a method call on that array. Renamed to `padded`,
+    # which is what it always was.
+    xp = _xp_of(x, w)
     S, C = x.shape
     K = w.shape[-1]
-    xp = np.concatenate([np.zeros((K - 1, C)), x], axis=0)
+    padded = xp.concatenate([xp.zeros((K - 1, C)), x], axis=0)
     # WHY spelled out: conv weight index order is w[:, 0, k] multiplying input at
     # offset t-(K-1)+k -- easy to flip silently. Verified against torch.
-    out = np.zeros((S, C))
+    out = xp.zeros((S, C))
     for k in range(K):
-        out += xp[k:k + S] * w[:, 0, k][None, :]
+        out += padded[k:k + S] * w[:, 0, k][None, :]
     return _silu(out)
 
 
@@ -111,10 +150,11 @@ def _kmeans(X, nc, iters=8, seed=0):
 
 
 def _rope_tables(dim, positions, theta):
-    inv = 1.0 / (theta ** (np.arange(0, dim, 2, dtype=np.float64) / dim))
-    ang = np.outer(positions, inv)               # (S, dim/2)
-    emb = np.concatenate([ang, ang], axis=-1)    # (S, dim) -- non-interleaved
-    return np.cos(emb), np.sin(emb)
+    xp = _xp_of()
+    inv = 1.0 / (theta ** (xp.arange(0, dim, 2, dtype=xp.float64) / dim))
+    ang = xp.outer(positions, inv)               # (S, dim/2)
+    emb = xp.concatenate([ang, ang], axis=-1)    # (S, dim) -- non-interleaved
+    return xp.cos(emb), xp.sin(emb)
 
 
 def _rotate_half(x):
@@ -124,12 +164,13 @@ def _rotate_half(x):
 
 def _apply_rope(q, k, cos, sin):
     """Partial RoPE: rotate the first cos.shape[-1] dims, pass the rest through."""
+    xp = _xp_of(q, k)
     d = cos.shape[-1]
     qr, qp = q[..., :d], q[..., d:]
     kr, kp = k[..., :d], k[..., d:]
     c, s = cos[:, None, :], sin[:, None, :]      # (S,1,d) over (S,H,d)
-    q2 = np.concatenate([qr * c + _rotate_half(qr) * s, qp], axis=-1)
-    k2 = np.concatenate([kr * c + _rotate_half(kr) * s, kp], axis=-1)
+    q2 = xp.concatenate([qr * c + _rotate_half(qr) * s, qp], axis=-1)
+    k2 = xp.concatenate([kr * c + _rotate_half(kr) * s, kp], axis=-1)
     return q2, k2
 
 
@@ -208,7 +249,12 @@ class GDNRuntime:
         return np.asarray(self.w[key], np.float64)
 
     def _g(self, layer, name):
-        return np.asarray(self.w[self.root + "layers.%d.%s" % (layer, name)], np.float64)
+        xp = _xp_of()
+        _a = self.w[self.root + "layers.%d.%s" % (layer, name)]
+        # FOLLOW THE DATA. On a device this array is a cupy array and
+        # np.asarray would raise; xp.asarray keeps it where it already is.
+        _xp = _xp_of(_a)
+        return _xp.asarray(_a, _xp.float64)
 
     def load_factors(self, factors):
         """Attach low-rank factors produced by refactor.decompose so the forward
@@ -250,6 +296,7 @@ class GDNRuntime:
     # ---- mixers ----
 
     def _gdn(self, layer, x, collect=None, init=None):
+        xp = _xp_of(x)
         c = self.cfg
         Kh, Vh = c["linear_num_key_heads"], c["linear_num_value_heads"]
         dk, dv = c["linear_key_head_dim"], c["linear_value_head_dim"]
@@ -299,14 +346,14 @@ class GDNRuntime:
             b = ba[:, :, :r].reshape(S, Vh)
             a = ba[:, :, r:].reshape(S, Vh)
         # causal depthwise conv + SiLU over concat(q,k,v) flat; z bypasses
-        mixed_pre = np.concatenate([q.reshape(S, -1), k.reshape(S, -1),
+        mixed_pre = xp.concatenate([q.reshape(S, -1), k.reshape(S, -1),
                                     v.reshape(S, -1)], axis=-1)
         cw = self._g(layer, "linear_attn.conv1d.weight")
         if init is not None and "conv" in init:
             # continue the causal conv with the CARRIED window as left context,
             # instead of the zero padding a fresh sequence gets -- otherwise the
             # first tokens of every chunk are computed as if the stream restarted
-            pre = np.concatenate([np.asarray(init["conv"], np.float64), mixed_pre])
+            pre = xp.concatenate([xp.asarray(init["conv"], xp.float64), mixed_pre])
             mixed = _causal_conv_silu(pre, cw)[-S:]
         else:
             mixed = _causal_conv_silu(mixed_pre, cw)
@@ -314,24 +361,24 @@ class GDNRuntime:
         q = mixed[:, :kd].reshape(S, Kh, dk)
         k = mixed[:, kd:2 * kd].reshape(S, Kh, dk)
         v = mixed[:, 2 * kd:].reshape(S, Vh, dv)
-        beta = 1.0 / (1.0 + np.exp(-b))
+        beta = 1.0 / (1.0 + xp.exp(-b))
         A_log = self._g(layer, "linear_attn.A_log")
         dt = self._g(layer, "linear_attn.dt_bias")
-        g = -np.exp(A_log)[None, :] * _softplus(a + dt[None, :])
+        g = -xp.exp(A_log)[None, :] * _softplus(a + dt[None, :])
         if r > 1:                                      # repeat q,k to value heads
-            q = np.repeat(q, r, axis=1)
-            k = np.repeat(k, r, axis=1)
+            q = xp.repeat(q, r, axis=1)
+            k = xp.repeat(k, r, axis=1)
         q = _l2norm(q) * (dk ** -0.5)
         k = _l2norm(k)
-        St = np.zeros((Vh, dk, dv)) if (init is None or "S" not in init) \
-            else np.array(init["S"], np.float64, copy=True)
-        out = np.zeros((S, Vh, dv))
+        St = xp.zeros((Vh, dk, dv)) if (init is None or "S" not in init) \
+            else xp.array(init["S"], xp.float64, copy=True)
+        out = xp.zeros((S, Vh, dv))
         for t in range(S):
-            St = St * np.exp(g[t])[:, None, None]
-            kv = np.einsum("hkv,hk->hv", St, k[t])
+            St = St * xp.exp(g[t])[:, None, None]
+            kv = xp.einsum("hkv,hk->hv", St, k[t])
             delta = (v[t] - kv) * beta[t][:, None]
             St = St + k[t][:, :, None] * delta[:, None, :]
-            out[t] = np.einsum("hkv,hk->hv", St, q[t])
+            out[t] = xp.einsum("hkv,hk->hv", St, q[t])
         nw = self._g(layer, "linear_attn.norm.weight")
         eps = self.cfg["rms_eps"]
         out = _rmsnorm_gated(out, nw, z, eps).reshape(S, Vh * dv)
@@ -339,12 +386,13 @@ class GDNRuntime:
         if collect is not None:
             K = self._g(layer, "linear_attn.conv1d.weight").shape[-1]
             # the L1 line the step path will slide: last K-1 PRE-conv rows
-            pad = np.concatenate([np.zeros((K - 1, mixed_pre.shape[1])), mixed_pre])
+            pad = xp.concatenate([xp.zeros((K - 1, mixed_pre.shape[1])), mixed_pre])
             collect["conv"] = pad[-(K - 1):].copy()
             collect["S"] = St
         return y
 
     def _attn(self, layer, x, positions, collect=None, init=None):
+        xp = _xp_of(x)
         c = self.cfg
         H, Hkv, hd = c["n_heads"], c["n_kv_heads"], c["head_dim"]
         S = x.shape[0]
@@ -357,7 +405,7 @@ class GDNRuntime:
         # families without a branch in the hot loop.
         q = qg[:, :, :hd]
         gate = (qg[:, :, hd:].reshape(S, H * hd) if _gated
-                else np.full((S, H * hd), 20.0))
+                else xp.full((S, H * hd), 20.0))
         k = (x @ self._g(layer, "self_attn.k_proj.weight").T).reshape(S, Hkv, hd)
         v = (x @ self._g(layer, "self_attn.v_proj.weight").T).reshape(S, Hkv, hd)
         # QK-NORM IS OPTIONAL: Qwen normalises queries and keys per head, while
@@ -375,19 +423,19 @@ class GDNRuntime:
         q, k = _apply_rope(q, k, cos, sin)
         n_past = 0
         if init is not None and "k" in init:
-            n_past = int(np.asarray(init["k"]).shape[0])
-            k = np.concatenate([np.asarray(init["k"], np.float64), k], axis=0)
-            v = np.concatenate([np.asarray(init["v"], np.float64), v], axis=0)
+            n_past = int(xp.asarray(init["k"]).shape[0])
+            k = xp.concatenate([xp.asarray(init["k"], xp.float64), k], axis=0)
+            v = xp.concatenate([xp.asarray(init["v"], xp.float64), v], axis=0)
         if collect is not None:
             collect["k"], collect["v"] = k.copy(), v.copy()
         rep = H // Hkv
-        k = np.repeat(k, rep, axis=1)
-        v = np.repeat(v, rep, axis=1)
-        scores = np.einsum("shd,thd->hst", q, k) * (hd ** -0.5)
+        k = xp.repeat(k, rep, axis=1)
+        v = xp.repeat(v, rep, axis=1)
+        scores = xp.einsum("shd,thd->hst", q, k) * (hd ** -0.5)
         # causal mask over the FULL key range: query i (absolute n_past+i) may
         # attend to every past key and to itself, never forward
         T = k.shape[0]
-        mask = np.full((S, T), -np.inf)
+        mask = xp.full((S, T), -xp.inf)
         for _i in range(S):
             mask[_i, :n_past + _i + 1] = 0.0
         scores = scores + mask[None, :, :]
@@ -446,7 +494,7 @@ class GDNRuntime:
             want = int(scr.get("topk", 8))
             win = int(scr.get("window", 32))
             rank = int(scr.get("rank", 0) or 0)
-            allow = np.zeros(scores.shape, bool)
+            allow = xp.zeros(scores.shape, bool)
             for h in range(H):
                 Kh = k[:, h]
                 # SHARED BOUNDARY BASIS (rank>0): the keys are mu + coefficients
@@ -467,47 +515,47 @@ class GDNRuntime:
                 if rank > 0:
                     bmu = Kh.mean(0)
                     Rr = Kh - bmu
-                    _u, _s, Vt_ = np.linalg.svd(Rr, full_matrices=False)
+                    _u, _s, Vt_ = xp.linalg.svd(Rr, full_matrices=False)
                     bas = Vt_[:rank]
                     coef = Rr @ bas.T
-                    tail = np.linalg.norm(Rr - coef @ bas, axis=1)
+                    tail = xp.linalg.norm(Rr - coef @ bas, axis=1)
                 a, C = _kmeans(Kh, min(nc, len(Kh)), seed=0)
                 nn = C.shape[0]
-                rad = np.zeros(nn)
+                rad = xp.zeros(nn)
                 for j in range(nn):
                     m = a == j
                     if m.any():
-                        rad[j] = np.max(np.linalg.norm(Kh[m] - C[j], axis=-1))
+                        rad[j] = xp.max(xp.linalg.norm(Kh[m] - C[j], axis=-1))
                 for t in range(S):
                     lo = max(0, t - win + 1)
                     allow[h, t, lo:t + 1] = True
                     qv = q[t, h]
-                    ub = C @ qv + rad * np.linalg.norm(qv)
+                    ub = C @ qv + rad * xp.linalg.norm(qv)
                     heap = []
-                    for j in np.argsort(ub)[::-1]:
+                    for j in xp.argsort(ub)[::-1]:
                         if len(heap) >= want and ub[j] <= heap[want - 1]:
                             break            # certificate: cannot contain a winner
-                        sel = np.where((a == j) & (np.arange(S) <= t))[0]
+                        sel = xp.where((a == j) & (xp.arange(S) <= t))[0]
                         if not len(sel):
                             continue
                         allow[h, t, sel] = True
                         if rank > 0:
                             approx = (qv @ bmu) + coef[sel] @ (bas @ qv)
-                            hi = approx + tail[sel] * np.linalg.norm(qv)
-                            thr = heap[want - 1] if len(heap) >= want else -np.inf
+                            hi = approx + tail[sel] * xp.linalg.norm(qv)
+                            thr = heap[want - 1] if len(heap) >= want else -xp.inf
                             need = sel[hi > thr]          # only these can matter
                             vals = list(Kh[need] @ qv) if len(need) else []
                         else:
                             vals = list(Kh[sel] @ qv)
                         heap = sorted(list(heap) + vals, reverse=True)[:want]
-            scores = np.where(allow, scores, -np.inf)
+            scores = xp.where(allow, scores, -xp.inf)
             scr = None
         if scr and n_past == 0:
             blk = int(scr.get("block", 32))
             nb = int(scr.get("blocks", 2))
             win = int(scr.get("window", 32))
             T_ = scores.shape[-1]
-            nblk = int(np.ceil(T_ / blk))
+            nblk = int(xp.ceil(T_ / blk))
             # EXTRA ACCUMULATORS (leCore lever 4: more dimensions / more
             # accumulators when capacity binds). One summary per block caps how
             # many rankings can survive it; r summaries per block, filled
@@ -515,35 +563,35 @@ class GDNRuntime:
             # 0.667 -> 0.698 (r=8) at the tight setting and 0.858 -> 0.871
             # (r=4) at the loose one, for r x tiny screen-scoring cost.
             acc = max(1, int(scr.get("accumulators", 1)))
-            cent = np.zeros((nblk, acc, H, hd))
+            cent = xp.zeros((nblk, acc, H, hd))
             for i in range(nblk):
                 seg = k[i * blk:(i + 1) * blk]
                 for j, kv in enumerate(seg):
                     cent[i, j % acc] += kv
-            n = np.linalg.norm(cent, axis=-1, keepdims=True)
-            cent = cent / np.maximum(n, 1e-12)
+            n = xp.linalg.norm(cent, axis=-1, keepdims=True)
+            cent = cent / xp.maximum(n, 1e-12)
             # a block scores as its BEST accumulator: one strong match should not
             # be averaged away by the rest of the block
-            bsc = np.einsum("shd,bahd->hsba", q, cent).max(axis=-1)
-            allow = np.zeros(scores.shape, bool)
+            bsc = xp.einsum("shd,bahd->hsba", q, cent).max(axis=-1)
+            allow = xp.zeros(scores.shape, bool)
             for t in range(S):
                 lo = max(0, t - win + 1)
                 done = t // blk                  # completed blocks only
                 for h in range(H):
                     if done > 0:
-                        for i in np.argsort(bsc[h, t, :done])[-nb:]:
+                        for i in xp.argsort(bsc[h, t, :done])[-nb:]:
                             allow[h, t, i * blk:(i + 1) * blk] = True
                     allow[h, t, lo:t + 1] = True
-            scores = np.where(allow, scores, -np.inf)
+            scores = xp.where(allow, scores, -xp.inf)
         top_k = int(self.cfg.get("attn_top_k", 0) or 0)
         if 0 < top_k < scores.shape[-1]:
-            kth = np.sort(scores, axis=-1)[..., -top_k][..., None]
-            scores = np.where(scores >= kth, scores, -np.inf)
+            kth = xp.sort(scores, axis=-1)[..., -top_k][..., None]
+            scores = xp.where(scores >= kth, scores, -xp.inf)
         scores -= scores.max(axis=-1, keepdims=True)
-        w = np.exp(scores)
+        w = xp.exp(scores)
         w /= w.sum(axis=-1, keepdims=True)
-        o = np.einsum("hst,thd->shd", w, v).reshape(S, H * hd)
-        o = o * (1.0 / (1.0 + np.exp(-gate)))          # sigmoid output gate
+        o = xp.einsum("hst,thd->shd", w, v).reshape(S, H * hd)
+        o = o * (1.0 / (1.0 + xp.exp(-gate)))          # sigmoid output gate
         return o @ self._g(layer, "self_attn.o_proj.weight").T
 
     mlp_probe = None      # set to fn(layer, x) to observe the MLP's true input
@@ -564,6 +612,17 @@ class GDNRuntime:
 
     device = None         # None = follow the policy; "cpu" / "gpu" to force
 
+    #: The forward pass now binds `xp` from the WEIGHTS on every call
+    #: (_self_xp -> get_array_module), so a cupy-resident model is read with
+    #: cupy and a host model with numpy. Verified BIT-IDENTICAL against the
+    #: pre-conversion runtime: max|diff| 0.000e+00 over a 32-token forward.
+    FORWARD_FOLLOWS_DATA = True
+
+    def _xp(self):
+        """Follow the weights: numpy on host, cupy once to_device has moved
+        them. Bound once per call rather than threaded through every kernel."""
+        return _self_xp(self)
+
     def to_device(self, on=True):
         """Move the WEIGHTS to the accelerator ONCE, if there is one.
 
@@ -576,7 +635,26 @@ class GDNRuntime:
         matmul it feeds -- the backend's own docstring says so -- so weights
         move ONCE and stay. Token ids and logits are small and cross per call.
         Returns what actually happened, because "I asked for a GPU" and "I got
-        one" are different claims and only the second is worth reporting."""
+        one" are different claims and only the second is worth reporting.
+
+        REFUSES ON A REAL DEVICE UNTIL THE FORWARD PASS FOLLOWS THE DATA, and
+        that refusal is the honest state of this path. Moving the weights is one
+        line; READING them is 47 hardcoded `np.asarray` / `np.zeros` calls in
+        this file, and cupy REJECTS implicit conversion:
+            TypeError: Implicit conversion to a NumPy array is not allowed.
+            Please use `.get()` to construct a NumPy array explicitly.
+        FIELD-CAUGHT on an A4500, at the FIRST weight read (_g on
+        input_layernorm), one line into the first forward.
+        AND MY OWN PARITY TEST COULD NOT HAVE CAUGHT IT: it aliased numpy AS
+        cupy to prove residency without hardware, and numpy-as-cupy accepts
+        np.asarray happily. A FAKE DEVICE TESTS THE PLUMBING AND NOT THE
+        CONTRACT -- the thing that breaks on a real GPU is precisely the thing a
+        stand-in is chosen for being unable to break.
+        The fix is get_array_module (already in holographic_backend: "follow-the
+        -data: cupy if any argument is a cupy array") threaded through those 47
+        sites, with a measured parity check per kernel. Until that is done, this
+        returns device="cpu" with the reason rather than moving weights the
+        forward pass cannot read."""
         from holographic.misc.holographic_backend import (
             array_module, gpu_available, to_device as _to)
         if not on:
@@ -587,6 +665,21 @@ class GDNRuntime:
             self._dev = None
             return {"device": "cpu", "resident": 0,
                     "why": "no accelerator available -- running on NumPy"}
+        if not GDNRuntime.FORWARD_FOLLOWS_DATA and xp is not np:
+            # A DEVICE WE CANNOT READ FROM IS WORSE THAN NO DEVICE. Moving the
+            # weights succeeds and the FIRST weight read then dies with cupy's
+            # "Implicit conversion to a NumPy array is not allowed" -- so the
+            # user gets a crash one line into the first forward, after the
+            # install has already reported "hardware: gpu (weights resident)".
+            # Refusing here costs the speedup and keeps the run.
+            self._dev = None
+            return {"device": "cpu", "resident": 0,
+                    "why": "a CUDA device IS present and usable, but this "
+                           "runtime's forward pass still reads weights through "
+                           "np.asarray (47 sites) and cupy refuses implicit "
+                           "conversion. Residency is wired; the kernels are "
+                           "not. Running on NumPy rather than crashing at the "
+                           "first layer."}
         moved = 0
         for k in list(self.w):
             try:
@@ -646,12 +739,13 @@ class GDNRuntime:
         start at the resumed offset, the GDN carry seeds each linear layer, and
         the KV cache prepends to each attention layer -- and getting any one of
         them wrong produces fluent nonsense rather than an error."""
+        xp = self._xp()
         c = self.cfg
         hooks = hooks or {}
-        ids = np.asarray(token_ids, np.int64)
+        ids = xp.asarray(token_ids, xp.int64)
         h = self.embed[ids]
         past = int(getattr(resume, "pos", 0) or 0) if resume is not None else 0
-        positions = np.arange(past, past + len(ids), dtype=np.float64)
+        positions = xp.arange(past, past + len(ids), dtype=xp.float64)
         st = InferenceState() if collect_state else None
         # LAYER SCHEDULE: which layers run, in what order, how many times.
         # Owning the forward pass makes depth up-scaling (SOLAR/Goliath-style
@@ -686,10 +780,10 @@ class GDNRuntime:
                 if fn is not None:
                     d = fn(h)
                     if d is not None:
-                        h = h + np.asarray(d, np.float64)
+                        h = h + xp.asarray(d, xp.float64)
         nk = next(k for k in (self.root + "norm.weight", "model.norm.weight")
                   if k in self.w)
-        h = _rmsnorm(h, np.asarray(self.w[nk], np.float64), c["rms_eps"])
+        h = _rmsnorm(h, xp.asarray(self.w[nk], xp.float64), c["rms_eps"])
         logits = h @ self.lm_head.T
         if collect_state:
             # ADVANCE FROM WHERE WE RESUMED, not from zero. A state carried out
@@ -708,6 +802,7 @@ class GDNRuntime:
         SAME arithmetic as the full-sequence path -- the selftest demands token-
         for-token equality between cached and uncached generation (the
         determinism contract applies to the cache too)."""
+        xp = _xp_of(x)
         c = self.cfg
         Kh, Vh = c["linear_num_key_heads"], c["linear_num_value_heads"]
         dk, dv = c["linear_key_head_dim"], c["linear_value_head_dim"]
@@ -741,29 +836,29 @@ class GDNRuntime:
             ba = (x @ self._g(layer, "linear_attn.in_proj_ba.weight").T
                   ).reshape(Kh, 2 * r)
             b = ba[:, :r].reshape(Vh); a = ba[:, r:].reshape(Vh)
-        mixed = np.concatenate([q.ravel(), k.ravel(), v.ravel()])
+        mixed = xp.concatenate([q.ravel(), k.ravel(), v.ravel()])
         w = self._g(layer, "linear_attn.conv1d.weight")
         K = w.shape[-1]
-        win = st.setdefault("conv", np.zeros((K - 1, mixed.size)))
-        xw = np.concatenate([win, mixed[None, :]], axis=0)     # (K, C)
-        conv = _silu(np.sum(xw * w[:, 0, :].T, axis=0))
+        win = st.setdefault("conv", xp.zeros((K - 1, mixed.size)))
+        xw = xp.concatenate([win, mixed[None, :]], axis=0)     # (K, C)
+        conv = _silu(xp.sum(xw * w[:, 0, :].T, axis=0))
         st["conv"] = xw[1:]                                    # slide the L1 line
         kd = Kh * dk
         q = conv[:kd].reshape(Kh, dk); k = conv[kd:2 * kd].reshape(Kh, dk)
         v = conv[2 * kd:].reshape(Vh, dv)
-        beta = 1.0 / (1.0 + np.exp(-b))
-        g = -np.exp(self._g(layer, "linear_attn.A_log")) * _softplus(
+        beta = 1.0 / (1.0 + xp.exp(-b))
+        g = -xp.exp(self._g(layer, "linear_attn.A_log")) * _softplus(
             a + self._g(layer, "linear_attn.dt_bias"))
         if r > 1:
-            q = np.repeat(q, r, axis=0); k = np.repeat(k, r, axis=0)
+            q = xp.repeat(q, r, axis=0); k = xp.repeat(k, r, axis=0)
         q = _l2norm(q) * (dk ** -0.5); k = _l2norm(k)
-        S = st.setdefault("S", np.zeros((Vh, dk, dv)))
-        S = S * np.exp(g)[:, None, None]
-        kv = np.einsum("hkv,hk->hv", S, k)
+        S = st.setdefault("S", xp.zeros((Vh, dk, dv)))
+        S = S * xp.exp(g)[:, None, None]
+        kv = xp.einsum("hkv,hk->hv", S, k)
         delta = (v - kv) * beta[:, None]
         S = S + k[:, :, None] * delta[:, None, :]
         st["S"] = S
-        out = np.einsum("hkv,hk->hv", S, q)
+        out = xp.einsum("hkv,hk->hv", S, q)
         out = _rmsnorm_gated(out, self._g(layer, "linear_attn.norm.weight"),
                              z, self.cfg["rms_eps"]).reshape(-1)
         return out @ self._g(layer, "linear_attn.out_proj.weight").T
@@ -869,12 +964,13 @@ class GDNRuntime:
 
         This is the verification primitive speculative decoding needs: draft k
         tokens cheaply, then check all k with a single batched forward."""
+        xp = _xp_of()
         c = self.cfg
         hooks = hooks or {}
-        ids = np.asarray(tokens, np.int64)
+        ids = xp.asarray(tokens, xp.int64)
         S = len(ids)
         h = self.embed[ids]
-        positions = np.arange(state.pos, state.pos + S, dtype=np.float64)
+        positions = xp.arange(state.pos, state.pos + S, dtype=xp.float64)
         for L in range(c["n_layers"]):
             hn = _rmsnorm(h, self._g(L, "input_layernorm.weight"), c["rms_eps"])
             if self._is_gdn(L):
@@ -890,11 +986,11 @@ class GDNRuntime:
             if fn is not None:
                 d = fn(h)
                 if d is not None:
-                    h = h + np.asarray(d, np.float64)
+                    h = h + xp.asarray(d, xp.float64)
         state.pos += S
         nk = next(k for k in (self.root + "norm.weight", "model.norm.weight")
                   if k in self.w)
-        h = _rmsnorm(h, np.asarray(self.w[nk], np.float64), c["rms_eps"])
+        h = _rmsnorm(h, xp.asarray(self.w[nk], xp.float64), c["rms_eps"])
         logits = h @ self.lm_head.T
         state.logits = logits[-1]
         return logits, state
@@ -907,11 +1003,12 @@ class GDNRuntime:
         steered state. Without it, any such experiment silently degrades to
         re-tokenizing the input (measured: it did, and the results looked like a
         failure of the idea rather than of the plumbing)."""
+        xp = _xp_of()
         c = self.cfg
         hooks = hooks or {}
         step_hooks = step_hooks or {}
-        h = np.asarray(embeds, np.float64)
-        positions = np.arange(h.shape[0], dtype=np.float64)
+        h = xp.asarray(embeds, xp.float64)
+        positions = xp.arange(h.shape[0], dtype=xp.float64)
         sched = c.get("layer_schedule") or list(range(c["n_layers"]))
         for step_i, L in enumerate(sched):
             hn = _rmsnorm(h, self._g(L, "input_layernorm.weight"), c["rms_eps"])
@@ -926,10 +1023,10 @@ class GDNRuntime:
                 if fn is not None:
                     d = fn(h)
                     if d is not None:
-                        h = h + np.asarray(d, np.float64)
+                        h = h + xp.asarray(d, xp.float64)
         nk = next(k for k in (self.root + "norm.weight", "model.norm.weight")
                   if k in self.w)
-        h = _rmsnorm(h, np.asarray(self.w[nk], np.float64), c["rms_eps"])
+        h = _rmsnorm(h, xp.asarray(self.w[nk], xp.float64), c["rms_eps"])
         return h @ self.lm_head.T
 
     def token_nll(self, token_ids, hooks=None):

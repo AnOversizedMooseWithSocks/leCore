@@ -545,6 +545,9 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
         if ok:
             w = w2
             rep["boot_row"] = int(brep["row"])
+            # CARRY THE SPILL REPORT OUT, so the exporter knows which tensors
+            # must not be narrowed to bf16.
+            rep["boot"] = dict(brep)
         _note("boot_record", ok, "row %d, perplexity %+.3f%%"
               % (brep["row"], 100 * (m["perplexity"] - base["perplexity"])
                  / base["perplexity"]))

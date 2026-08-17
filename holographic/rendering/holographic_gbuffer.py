@@ -177,7 +177,8 @@ def render_denoised(sdf, camera, width, height, material, sky=None, spp=16, max_
 
 def converge_samples(scene, camera, width, height, material, sky=None, quality="high",
                      max_bounce=4, seed=0, pass_spp=8, max_passes=8, antialias=True,
-                     sss_dir=None, sss_depth=0.6, sss_sigma=4.0, lights=None):
+                     sss_dir=None, sss_depth=0.6, sss_sigma=4.0, lights=None, sss_interior=False,
+                     active=None, tol_scale=None):
     """The SAMPLING half of the auto-calibrating render, exposed on its own so the render PIPELINE's render
     stage can delegate to it (backlog A1) instead of duplicating the loop. Renders in PASSES; after each pass the
     calibrated stop rule (holographic_adaptive_sample.converged_mask) marks the pixels whose confidence interval
@@ -192,14 +193,21 @@ def converge_samples(scene, camera, width, height, material, sky=None, quality="
     N = np.zeros((height, width))
     M = np.zeros((height, width, 3))
     S2 = np.zeros((height, width))
-    active = np.ones((height, width), bool)
+    # a caller-provided starting mask restricts ALL passes to those pixels (the batch-thumbnail door composites
+    # the rest from a cached reference); default None keeps the whole frame live, exactly as before.
+    active = np.ones((height, width), bool) if active is None else np.asarray(active, bool).reshape(height, width).copy()
     passes = 0
-    for p in range(max_passes):
+    # tol_scale pixels demand a TIGHTER interval, and the sigma^2/n law prices it: tol/3 needs ~9x the
+    # samples, which max_passes=8 cannot hold. When a tol_scale is provided, the still-active (tight) pixels
+    # may earn up to 3x the pass budget -- the cost grows only on those pixels, since `active` has already
+    # shrunk to them by the time the base budget runs out.
+    _pass_cap = int(max_passes) * (3 if tol_scale is not None else 1)
+    for p in range(_pass_cap):
         passes += 1
         m_p, v_p = path_trace(scene, camera, width=width, height=height, spp=pass_spp, max_bounce=max_bounce,
                               material=material, sky=sky, seed=seed + p, return_variance=True,
                               active=active.reshape(-1), antialias=antialias,
-                              sss_dir=sss_dir, sss_depth=sss_depth, sss_sigma=sss_sigma, lights=lights)
+                              sss_dir=sss_dir, sss_depth=sss_depth, sss_sigma=sss_sigma, lights=lights, sss_interior=sss_interior)
         v_p = np.asarray(v_p, float).reshape(height, width)
         s2_p = v_p * pass_spp                                     # recover this pass's per-sample variance
         A = active
@@ -209,7 +217,10 @@ def converge_samples(scene, camera, width, height, material, sky=None, quality="
         S2[A] = (n_old * S2[A] + pass_spp * s2_p[A]) / n_tot
         N[A] = n_tot
         vom = np.where(N > 0, S2 / np.maximum(N, 1.0), 0.0)      # variance OF THE MEAN, per pixel
-        active = ~converged_mask(vom, tol)                       # keep only the pixels still outside tolerance
+        # tol_scale (optional, (H,W)): a per-pixel MULTIPLIER on the quality tolerance -- the upscale door
+        # tightens convergence to tol/3 on smooth-metal pixels only, where the reflection detail lives.
+        eff_tol = tol if tol_scale is None else tol * np.asarray(tol_scale, float)
+        active = ~converged_mask(vom, eff_tol)                   # keep only the pixels still outside tolerance
         if not active.any():
             break                                                # everything converged -- stop early
 
@@ -222,7 +233,8 @@ def converge_samples(scene, camera, width, height, material, sky=None, quality="
 def render_auto(scene, camera, width, height, material, sky=None, quality="high",
                 max_bounce=4, seed=0, pass_spp=8, max_passes=8, firefly_k=3.0,
                 svgf_levels=5, return_stats=False, antialias=True,
-                sss_dir=None, sss_depth=0.6, sss_sigma=4.0, lights=None, demodulate=False):
+                sss_dir=None, sss_depth=0.6, sss_sigma=4.0, lights=None, demodulate=False,
+                sss_interior=False, active=None, tol_scale=None):
     """Auto-calibrating render -- NO hand-set spp or denoise strength, just a quality target. The SAME call
     renders spheres, glass, a fractal or a water tank to the same quality bar, because it MEASURES what each
     scene needs instead of being told.
@@ -242,7 +254,8 @@ def render_auto(scene, camera, width, height, material, sky=None, quality="high"
     M, vom, N, info = converge_samples(scene, camera, width, height, material, sky=sky, quality=quality,
                                        max_bounce=max_bounce, seed=seed, pass_spp=pass_spp, max_passes=max_passes,
                                        antialias=antialias, sss_dir=sss_dir, sss_depth=sss_depth, sss_sigma=sss_sigma,
-                                       lights=lights)
+                                       lights=lights,
+                                       sss_interior=sss_interior, active=active, tol_scale=tol_scale)
     noisy = M.copy()                                             # the pre-denoise converged estimate (for stats)
 
     # de-speckle isolated fireflies, then VARIANCE-GUIDED SVGF: the measured noise sets the per-pixel strength.

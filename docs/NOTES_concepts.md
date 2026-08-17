@@ -68504,3 +68504,1339 @@ CI FIX ROUND: five failures, five root causes, all fixed at the cause
    example both wrong the same way; fixed to the true contract.
 27 tests green across the four failing suites + index + mcp; audits 0/0/0;
 wiring report clean; regen --check green.
+
+## README HERO RENDERS: the first impression re-shot at real resolution
+
+Moose called the strip out (rightly): 130x100-340x255 thumbnails, mixed
+aspect, spheres-on-a-checkerboard. Re-rendered SIX gallery scenes at
+768x432 (16:9, uniform) through the same auto-calibrating pipeline
+(make_gallery with WIDTH/HEIGHT raised; QUALITY='high'; renders 94-293s
+each on this box), overwriting in place so every existing GALLERY.md link
+upgrades too. JUDGED THE OUTPUTS (viewed, not assumed): fur (strand-level
+groomed critter -- the showstopper), crystal (mineral facets + ore),
+hot_metal (five bars cold->white-hot, physical emission), iridescence
+(kept, moody), light_types (professional but gray -- gallery only), ocean
+(weak at scale: flat teal + pixel artifacts in the caustic band -- DROPPED
+from the strip, stays in gallery). New README strip = fur / crystal /
+hot_metal / iridescence with honest captions; measurement pair unchanged.
+Kept negative: 'render the strip candidates then LOOK at them' -- two of
+six lost their slots on inspection.
+
+## THE RESEARCHER'S QUESTION ANSWERED: "is any of this benchmarking VSA?"
+
+docs/ANSWER_benchmark_and_vsa.md, linked from the README benchmark section.
+The confident answer is a NO with receipts, which is stronger than a yes:
+(1) the FAISS hot path does not run bind/unbind -- and VSA AUDITIONED for
+the block-summary role and LOST, 0.797 centroid vs 0.789 HRR bundle, kept
+negative in the Index docstring; the exactness contract is linear algebra
++ quantization bounds, and claiming otherwise would be the larp. The table
+certifies the SUBSTRATE (cleanup is nearest-neighbour by definition; the
+Index is nearest-neighbour at scale), not the memory. (2) Where VSA IS
+benchmarked, run LIVE for the answer: key->value with NOISY keys 0.889
+[0.839-0.939] vs exact dict 0.000 (the baseline cannot play); degradation
+100% recall at 40% destroyed vs contiguous 0%; 24/24 cleanup at half-
+brain; GDN predictive capacity law; PLUS the honest trade kept as a trade
+(recall index 0.817 at 41% comparisons vs exact scan 1.000 at 100%).
+(3) His feedback is institutionalized: mind.ablation_table IS the
+'bypassing VSA' detector -- honest baselines, CI verdicts, FDR; nltk
+corpus lanes skipped on this box and said so. Architecture position
+stated: VSA where superposition is load-bearing, exact linear algebra
+where exactness is the contract, CIs draw the boundary. 'A system that
+only ever finds its favorite tool load-bearing is not measuring.'
+
+## FUR HERO v2: real environment, real lighting, real AA -- and reproducible
+
+Per Moose (grey + pixelation called out): the fur hero re-shot with a
+four-part fix, then PORTED INTO tools/make_gallery.render_fur so the image
+regenerates from code (a hero from a lost one-off script is a rotting
+example). (1) ENVIRONMENT: strands composite over a path-traced backdrop
+-- the critter's ginger SKIN body on a floor under a graded sky with a
+warm key lobe matching the strand key light, so the contact shadow and
+the coat agree; rendered with the SAME look-at camera via a ray_dirs
+adapter (per-pixel alignment between the path tracer and the strand
+rasteriser). (2) SOFT ALPHA: the old binary lit>thresh mask fringed and
+speckled at dim tips; now smoothstep coverage, PREMULTIPLIED BEFORE the
+downsample (the correct compositing order). (3) SS=3: 2x was not enough
+for 1-px strands at 768 wide. (4) 3x3 MEDIAN on the backdrop ONLY (path-
+trace fireflies are isolated outliers on smooth studio surfaces; the fur
+is never filtered). Instrument notes banked: SDF box() takes three
+scalars not a tuple; path_trace material contract is a 4-tuple
+(alb, met, rough, emis). Costs on this box: backdrop 185s, strands
+2x114s at SS3. Judged visually at every stage (backdrop, v1 composite,
+final) -- the specks that survived the quality target were found by
+LOOKING, not by the CI number.
+
+================================================================================
+THE FILM RUNG [SHIPPED]: hairshade H7 -- deep opacity + dual scattering +
+medulla + groom clumping; the fur hero is now film-adjacent
+================================================================================
+
+Researched (SIGGRAPH canon through 2025 confirmed via EGSR'25 LOD paper's
+citations): film fur = Marschner R/TT/TRT (had it) + deep opacity maps
+(Yuksel-Keyser 2008) + dual scattering (Zinke 2008 -- our own H5 docstring
+called it "the harder further rung"; this is that rung) + medulla scattered
+lobes TTs/TRTs (Yan 2017 "fur = hair + two widened desaturated lobes").
+BUILT (holographic_hairshade H7, all additive/default-off):
+- light_depth_grid: light-aligned voxel grid, EXCLUSIVE cumsum along the
+  light axis, 3x3 TRANSVERSE FILTER (unfiltered, occlusion lives only in
+  exact fiber columns and rays between columns see nothing -- the slab
+  plant caught it; filtered deep opacity is also standard practice).
+- fibers_toward_light: vectorized nearest-voxel n(x) lookup.
+- fur_shade: T_deep = exp(-k n) direct attenuation; dual-scatter forward
+  glow (transmittance^0.8n, lobe width grows with n) + backscatter fill;
+  medulla lobes at 3x/5x width, sqrt(T2) desaturation. SINGLE SCATTERING
+  DELEGATES TO marschner() -- one source of truth; zero strengths ARE
+  marschner to 1e-12, PINNED (H7-4).
+- render_hair: film params (self_shadow/dual_scatter/medulla/shadow_res),
+  ONE vectorized n-lookup per STRAND (per-segment lookups rebuilt the
+  light basis 300k+ times and blew the render budget -- measured timeout).
+- holographic_groom.clump: tufts (roots planted, tips gather to guides;
+  planted truths: roots immobile, tip spread shrinks).
+Instrument errors banked: slab plant with zero light-axis extent (grid
+collapse); H7-4 compared different DEFAULT HAIR COLORS across the two
+functions. Hero v3 (clump 700/0.45 + shadow 0.16 + dual 0.55 + medulla
+0.40, key 190s + rim 188s at SS3): tufted locks, shadowed valleys, silky
+lit tips -- judged visually. Generator ports v3; catalog 5/5; audits
+0/0/0/0-dup; selftests green.
+
+## README STRIP LEVELED UP: all four heroes now at the fur's standard
+
+Per Moose: the remaining strip images brought to the film-rung fur's level,
+via generator code (reproducible), each JUDGED after rendering:
+- _despeckle helper (shared): firefly clamp -- 3x3 median applied ONLY to
+  relative outliers, so specular detail survives (a full median would
+  smear); now used by iridescence, crystal, hot_metal.
+- _bloom helper: bright-pass separable Gaussian added back -- hot things
+  glow past their silhouette.
+- HOT METAL v2 (the transformation): floor polished (rough 0.12, met 0.35
+  -- the floor is the LAST object in its owner partition) so it MIRRORS
+  the emission in a long warm pool; bloom on the white-hot bar. 146s.
+- IRIDESCENCE v3: two iterations -- first pass fixed specks but the frame
+  was 60 percent flat grey (the sky dome's ground hemisphere); REFRAMED
+  camera low and level so the warm horizon band fills the background.
+  Physics is subtle by nature; kept its slot after the smoke_fire audition
+  (a diagnostic side-by-side panel, wrong genre for a hero).
+- CRYSTAL v2: despeckle at quality high (ultra attempted, walked back --
+  the specks were the flaw, not the sampling; budget honesty).
+Kept practice reaffirmed: render, LOOK, then decide -- one audition
+(smoke_fire) rejected on sight, one walk-back (crystal ultra) on cost.
+
+
+# ===== MERGED FROM PARALLEL BRANCH (shader-ball preview arc; entries preserved verbatim) =====
+
+## SHADER-BALL PREVIEW SCENE (preview_scene) -- the honest material preview, three slots
+
+WHAT SHIPPED. `holographic_preview.preview_scene(_document)`: the classic shader-ball preview
+SCENE -- sphere + collar torus + pedestal on a floor, PATH-TRACED by render_scene_document, so
+reflections/shadows/material contrast read as a real render would (material_ball stays the fast
+flat-lit thumbnail; the two are complements, not rivals). Slot contract from the user's mouth:
+ONE material dresses all three slots by default; trim=/base= names three materials explicitly;
+material=None -> neutral default diffuse; floor= styles the environment (its own object, its
+own material). Materials: matlib names, PBRMaterial objects, or plain PBR dicts (a dict is
+coerced to ONE shared PBRMaterial -- one definition, not three copies). Wired in p11 beside
+preview_material; catalog entry in p06; 5/5 stranger phrasings route; HTTP /invoke proven
+(POST {"name":"preview_scene","args":{...}} -> bounded (res,res,3)).
+
+BUILT BY COMPOSITION ONLY. Rule-0 audit: soft shadows, SDF primitives, BRDF, floor/backdrop,
+Scene doc, and the full render path all existed; only the assembled preview scene was a gap.
+Zero new rendering code -- the module is geometry placement + slot logic + one delegating call.
+
+COST, measured: ~26-29 s at res=192 quality='fast' (pure NumPy path trace); res=32-64 for the
+iterate loop. Documented in docstring + catalog so nobody discovers it by surprise.
+
+KEPT NEGATIVES / instrument errors, loud:
+  * HTTP verification failed TWICE on my own instrument: wrong entrypoint (app.py is not the
+    service; holographic_service.py is) and wrong payload key ('tool' vs the schema's 'name').
+    The wiring was correct both times. The probe is guilty until proven innocent.
+  * Scene.objects is a DICT keyed by handle, not a list -- iterate .values().
+  * Graph-paper/checker FLOOR texture: DEFERRED, not impossible -- floor is a solid matlib
+    material today; a textured floor should route through the existing scene-texture path.
+  * Dark-capability sweep re-run AFTER registering (per the fifth-wave lesson): 6/6 green, and
+    the old preview aliases (material ball / quick material preview / texture preview) still
+    route top-3 -- the new entry buried nothing.
+
+TEST DELTA: holographic_preview._selftest grew 8 asserts pinning the slot-inherit rule
+STRUCTURALLY on the Scene document (materials per slot, dict coercion identity, default fill)
+plus one tiny real render (bounded, shaded). Collected suite: 6304 tests.
+
+## PREVIEW SCENE v2 -- the CORE slot (same session; v1 geometry superseded before any merge)
+
+USER FEEDBACK: v1's "three materials" (ball/collar/pedestal) was not the point -- the reference
+shader balls (Blender, Substance) have a complex object with an interacting CORE: translucent/
+transparent outers over an inner sphere, emissive cores lighting the shell. And the v1 framing
+cropped the object.
+
+V2 GEOMETRY: hollow outer SHELL (sphere 0.60 minus 0.52, wall 0.08) with a CUTAWAY WINDOW
+(sphere 0.30 subtracted at the camera-facing surface point -- the camera position participates
+in the geometry on purpose, so the core always presents to the viewer), CORE sphere (0.34, air
+gap inside the shell), collar + pedestal unchanged, camera pulled back (whole object frames).
+Slots: material(outer) / core / trim / base, inherit rule unchanged. Verified interacting:
+glass_clear outer + neon_blue core glows through the shell (crop mean 0.421 lit vs 0.287 dark,
+blue channel 0.519 vs 0.320, res=36 'fast'); the cutaway shows the core under opaque outers.
+
+INSTRUMENT ERROR, kept loud: the first emissive-core assert used the FULL-FRAME mean and
+FAILED while the render was correct -- the frame is mostly sky and floor, which do not care
+about the core (full mean was 0.608 lit vs 0.623 dark: the meter, not the code). The shipped
+assert measures the central object crop. "State what the number is a function of" strikes
+again: a brightness claim is conditioned on WHERE you average.
+
+Cost re-measured: ~30 s at res=192 'fast' opaque, ~49 s glass+emissive (refraction bounces).
+Catalog does-field hit the 600-char lint at 615 -- tightened to 591, not budgeted. Dark sweep
+re-run green (6/6), old preview aliases still route, 5/5 new phrasings incl. 'emissive core
+preview' / 'translucent material preview'. HTTP /invoke proven WITH the core arg.
+
+## PREVIEW SCENE v3 -- 3D-Coat-style proportions (reference-driven, same slots)
+
+USER supplied a reference .glb (3D-Coat material ball). MEASURED it rather than eyeballing:
+imported through the mind's own glb_to_mesh (Rule 0 -- the importer existed), extracted the
+LATHE PROFILE (max radius per height band) + two orthographic silhouettes. Reading: sphere
+r~6.0 DOMINANT, flush on a wide THIN puck base (r 5.91, ~1.4 tall -- 0.23r), a tilted band
+around the sphere, a small front inset. No collar torus, no tall pedestal.
+
+V3 GEOMETRY (slot names and inherit rule UNCHANGED -- only shapes moved): base = puck
+cylinder(0.07, 0.60) (nearly the sphere's own radius), sphere flush on it (centre y 0.74),
+trim = tilted half-embedded band torus(0.60, 0.045).rotate(x, 0.45) -- shows the trim material
+at every incidence angle in one image; core + camera-facing cutaway window (r 0.26) unchanged
+in concept. Docstrings/faculty/catalog synced (collar/pedestal wording removed); does-field
+hit 601 chars, tightened to 593. Full battery green: selftests, lint/gaps/reachability 0/0/0,
+dark sweep 6/6, 5/5 phrasings. Cost: ~28 s opaque / ~38 s glass+emissive at res=192 'fast'.
+
+METHOD NOTE, kept: "read the reference's lathe profile" is a reusable trick -- max radius per
+height band of any rotationally-symmetric reference mesh IS its SDF recipe. Cheaper and more
+honest than eyeballing proportions off a render.
+
+## PREVIEW SCENE v4 -- studio rig + off-axis window (lighting was the problem, and it was)
+
+USER: "not sure if it's the environment or the lighting, but this does not look great" + the
+window should sit at an angle, not stare at the camera. Both fixed:
+
+LIGHTING. New preview_scene_lighting(): three softboxes (key 55 high camera-left, fill 14
+broad camera-right, rim 28 behind) built with the EXISTING holographic_lights.make_light one
+door (Rule 0 -- scene_light's own delegate), plus a grey vertical-gradient studio sky. WHY a
+gradient: metals/glass are mirrors of their environment -- a flat sky renders them as flat
+discs; a gradient gives every reflected ray a different value, which is what makes 'shiny'
+legible. soft_light_cache=True (existing cache) because the uncached rig speckles at 'fast'.
+preview_scene(lighting='studio') is the new default; lighting='plain' keeps the bare-renderer
+look reachable; unknown name raises naming the options (pinned by test).
+
+WINDOW. Cutaway direction = view direction swung 0.62 rad (~35 deg) about Y -- reads as an
+inset feature at an angle, the way the reference balls present theirs.
+
+INSTRUMENT ERROR #3 in this arc, kept loud: the emissive-core assert failed AGAIN under the
+rig -- luminance margin diluted to +0.047 by the grey ambient (gate was +0.05), while the
+effect stayed real. The core is BLUE and the rig is GREY, so the blue channel is the
+discriminating meter: +0.083 with the same gate. The general lesson now has three exhibits:
+a brightness claim is conditioned on WHERE you average and on WHICH channel discriminates
+signal from rig.
+
+Catalog does-field: rewrote whole entry rather than patching (674 after a naive patch; 553
+rewritten). Cost re-measured: ~24 s copper / ~34 s glass at res=192 'fast' (the soft-light
+cache roughly paid for the three softboxes). Full battery green; docs regenerated.
+
+## PREVIEW SCENE v5 -- graph-paper floor + fluorescent ceiling panels (reflection content)
+
+USER: add a procedural grid floor and a fluorescent-ceiling / sky texture so reflections are
+interesting. BOTH built by riding existing rails (Rule 0): the floor grid is a plain callable
+on the EXISTING albedo_socket override that scene_to_render already honours per-point (found
+via 'texture a scene object' -- scene_set_texture documents the socket; we set it in-process,
+no HTTP JSON constraint applies); the panels live inside the studio sky callable.
+
+FLOOR: preview_grid_albedo(P) -- graph paper, fine lines every 0.30, major every 1.50, widths
+in world units wide enough to survive preview-res minification. floor_grid=True default;
+False = plain floor (pinned: on-vs-off must change pixels). The floor material keeps its
+roughness/metallic; only albedo becomes the grid.
+
+CEILING: soft-edged HDR panels (x2.6) on a virtual ceiling plane, applied ONLY to rays with
+D.y > 0.40. The threshold IS the design: reflections off the top of the ball leave steeply
+and see the panels (the streaked highlight every product photo has); near-horizontal
+background rays see the clean gradient. Panels in the direct view were measured as
+distracting background stripes -- kept negative, fixed by the threshold.
+
+INSTRUMENT ERRORS #4 AND #5 (same mechanism twice in one selftest): both the grid lines and
+the panels are centred at cell MIDPOINTS (the |frac - 0.5| centring), so my line-test point
+at the ORIGIN was mid-cell and my straight-up panel probe hit a GAP. Both times the function
+was right and the meter's coordinates were wrong. Sharpened lesson: when testing a periodic
+pattern, derive the test point FROM the phase convention in the code, never from the mental
+image of the pattern.
+
+Cost: ~43 s copper / ~56 s glass at res=192 'fast' -- the grid socket adds per-point albedo
+evaluation on every floor hit and the panels add HDR energy to bounce; documented in the
+docstring. Battery green end to end; does-field held at 598 after two trims.
+
+## POSTFX FXAA + PREVIEW AA FORK -- cheap edge cleanup, priced honestly
+
+USER: cheap image cleanup for antialiasing. Rule-0: postfx already had resample + supersample
+(true SSAA -- the quality answer at ~4x render time, NOT cheap); no same-res AA pass existed
+and 'antialiasing' surfaced nothing relevant. Built postfx.fxaa(img): the SUBPIXEL term of
+FXAA (Lottes 2009) -- luma-contrast edge mask over the 4-neighbour cross, blend toward a 3x3
+tent by contrast, flat regions (contrast < threshold) returned BIT-IDENTICAL so texture and
+grain survive. Registered as PostChain step 'fxaa'. Behaviour pinned exactly: a hard diagonal
+staircase (0 intermediate pixels) gains 63 blended edge pixels at 32px; flat crop bit-equal;
+chain step == function; 2-D input raises legibly.
+
+KEPT NEGATIVE: the full FXAA edge-walk (end-of-edge search + directional blend) deliberately
+NOT implemented -- the subpixel term alone removed the visible staircase on the preview
+renders; the walk's cost/complexity did not pay there. Named in the docstring.
+
+preview_scene gains aa= : 'fxaa' (default; milliseconds, measured ~28.6 s total vs ~43 s
+before at res=192 -- run-to-run variance dominates, fxaa itself is noise-level), 'ssaa2'
+(render 2x + postfx.supersample, ~4x), 'off' (raw). Pinned: default == postfx.fxaa(raw frame)
+EXACTLY, so the preview's AA can never silently drift from the postfx implementation it
+claims to be; ssaa2 returns the asked-for size; typo raises naming the options.
+
+New catalog entry 'Cheap anti-aliasing (FXAA subpixel pass + SSAA)' (aliases from the user's
+mouth: 'antialiasing', 'jaggies in my render', 'my render looks pixelated', ...) -- 5/5
+phrasings route; capability count 218 -> 219. Battery green end to end.
+
+## SOFT-LIGHT CACHE PAINTS FALSE SHADOWS ON CURVED MIRRORS (measured; preview v7)
+
+USER: "something looks strange -- geometry or lighting?" Isolated by ABLATION, and the road
+there logged honestly, because three wrong hypotheses were measured dead on the way:
+  * band's buried tube half (seam/proud/microgap variants: crescent luma 0.353/0.353/0.358 --
+    identical; hypothesis dead)
+  * auto-exposure crushed by HDR ceiling panels (display luma 0.587 with panels at x2.6 vs
+    x1.2 -- identical; dead)
+  * geometry (primary_gbuffer normals: clean smooth sphere, sharp band, clean window; dead --
+    after instrument error #6: unpacked the gbuffer as a dict and rendered the ALBEDO as
+    'normals'; it returns a (normal, albedo, depth) TUPLE)
+THE CAUSE, by direct A/B at 192px: soft_light_cache. Cache-on = large false dark crescent +
+milky streaks (28 s); cache-off = correct (92 s, 3 boxes). Mechanism: the cache's premise is
+that the shaded soft-light term is a SMOOTH FIELD over the surface -- true for diffuse
+receivers, false for a curved MIRROR, where the response to an area light rides the
+reflection vector and spins rapidly across the surface. This is exactly the view-dependent
+term the cache's own scope note says to keep on the tracer. Negative recorded IN THE CACHE'S
+DOCSTRING (holographic_lightcache) so no future session re-enables it on mirror-hero scenes.
+
+FIX SHIPPED: preview_scene renders with soft_light_cache=False (a measured REVERSAL of the
+v4 decision -- v4 A/B'd the cache on speckle, not on a mirror), and the rig drops the rim
+softbox (its separation job was already done by the gradient backdrop; no visible loss,
+~20% saved). Costs re-measured and republished everywhere: ~73-77 s at res=192, ~33 s at
+res=128. Also corrected: 'fast' was never a real quality preset (draft/medium/high/ultra;
+unknown names fall through to medium) -- the docstring now says so.
+
+LESSON: an eyeball ablation under view='display' compares EXPOSURES, not renders --
+auto-exposure re-meters every variant. Diff maps and fixed regions on linear buffers are the
+honest instruments. (Instrument-error tally for this arc: 6.)
+
+## PREVIEW v8 -- FLUSH CORE (interior filled, no air gap)
+
+USER: the inner object should be flush with the shell interior, like the original reference
+balls' inset -- not a small floating sphere with a gap. Core radius 0.34 -> 0.53 vs inner
+shell 0.52: slight INTERPENETRATION on purpose, because coincident surfaces (core exactly at
+0.52) make the union's nearest-object attribution a TIE, and tie-sensitive paths flip on
+1e-12 changes. The 0.01 overlap is invisible; the attribution is unambiguous.
+
+Result: the cutaway window now reveals a continuous flush inner surface (a clean recessed
+dimple on opaque outers); through glass the interior reads as one solid body. The emissive
+blue-channel gate still passes with the flush core -- no re-tuning needed.
+
+FLUSHNESS PINNED ON THE SDFs, not on remembered constants: the selftest probes the actual
+core geometry from the document (inside at r=0.525 past the shell interior, outside at
+r=0.595 short of the outer surface) -- shrink the core back to a floating ball and the test
+fires. Small API note logged: SDF nodes are CALLABLES (sdf(P)); they have .eval, not .f
+(instrument error #7 -- probed from memory instead of the live object, exactly what Rule 0
+says not to do).
+
+## PREVIEW v9 -- FLUSH BY HAIR-GAP, NEVER OVERLAP (v8 interpenetration reversed, measured)
+
+USER: "why isn't the blue core showing in the refraction?" ROOT CAUSE: v8's tie-avoidance
+went the wrong DIRECTION. Interpenetrating the core (0.53) past the shell interior (0.52)
+merges the two solids into ONE continuous body -- the union DELETES the core's surface. An
+opaque outer hid it (the window exposes a cut cap either way); a GLASS outer refracted
+through to nothing, so the blue vanished from the refraction. A/B at 128px: buried 0.53 =
+grey ball; hair-gap 0.518 = interior structure visible through the glass. FIX: core 0.518,
+gap 0.002 -- dodges the coincident-surface tie exactly as well, keeps the core surface REAL
+for transmitted rays.
+
+RULE SHARPENED: "avoid SDF surface ties" has a direction -- separate with a hair GAP;
+overlap doesn't avoid the tie, it deletes a surface. Pinned in the selftest as the
+TRANSMISSION CONTRACT: both core and shell SDFs must be positive in the gap (a real surface
+pair exists); interpenetrate again and the test names the glass consequence.
+
+Physics note recorded for the docstring readers: through glass the interior reads dimmer
+than at the window because the tracer sends no shadow rays through refractive interfaces --
+Fresnel reflection of the sky competes with the dimly-lit interior. Direct light reaches the
+core only through the window opening. Not a bug; a scope fact of the tracer.
+
+## PREVIEW v10 -- THE THIN LENS (translucency/SSS test region)
+
+USER: is the invisible core just wall thickness? Can we get a thin area for SSS/translucency
+and a low-refraction view of the core? ANSWER, measured: yes, thickness (plus Fresnel) --
+through the 0.08 wall the core is dominated by surface reflection; through 0.012 it shows.
+
+BUILT: a shallow dish carved into the outer surface, thinning the wall 0.08 -> 0.012 over
+the core (bite sphere r=0.34 carving to r=0.532; inner shell 0.52; hair-gap core 0.518
+intact). This is the classic thin-wall region every material tester needs: glass shows the
+core with near-zero refraction; wax/skin/jade/marble (the engine's _SSS set, plus
+Beer-Lambert) read their translucency there -- thin = lighter -- which the full wall hides.
+
+PLACEMENT IS A LIGHTING DECISION, measured twice before it landed (both kept):
+  * swung low it COLLIDES with the tilted band;
+  * raised high the dish MIRRORS THE BRIGHT SKY and the reflection drowns the transmitted
+    core (Fresnel vs dim interior -- same physics as the full-wall case).
+Near-camera-facing with a mild raise (rotY -0.45, +0.22 lift) keeps the dish's reflection on
+the darker mid-gradient so the transmission reads.
+
+PINNED geometrically in the selftest, recomputing the lens axis exactly as the builder does:
+dish carved (shell SDF positive at r=0.55 on-axis) AND wall surviving (negative at r=0.526)
+-- one assert for "the test region is gone", one for "the lens became a second hole".
+
+Costs at res=192: glass ~143 s, wax ~131 s (the lens adds refraction/SSS bounce work in the
+dish); republish deferred to the docstring's next pass -- the ~73 s figure remains right for
+opaque outers. New aliases route 5/5: 'subsurface scattering test', 'translucency preview',
+'thin wall test'.
+
+## PREVIEW v11 -- THE INVISIBLE CORE WAS A REAL RENDERING BUG: SUB-RESOLUTION AIR GAP
+
+USER: "glass still isn't showing the inner material -- refraction physics or a rendering
+bug?" IT WAS A BUG, and the user's instinct beat my v9/v10 Fresnel narrative. Chased through
+the tracer with live probes:
+  * _march_through: transmitted ray exits the glass inner wall correctly INTO the 0.002 gap
+    (no tunneling -- that hypothesis measured dead at exit r=0.5190);
+  * sdf_normal AT THE EXIT POINT: **THE ZERO VECTOR** (measured: [0,0,-0]). With FD eps
+    1e-3, the probes straddle the 0.002 gap symmetrically -- shell wall 0.001 one way, core
+    0.001 the other -- and the central difference cancels. refract_dir with a null normal
+    scatters every transmitted ray -> the glass showed grey mush over a geometrically
+    "correct" core.
+FIX: gap 0.002 -> 0.010 (core 0.510). RULE, now in the geometry comment and pinned: an air
+gap must comfortably exceed max(2 x FD-normal eps, ray re-offset 3e-3) ~= 0.006 -- features
+below the tracer's GEOMETRIC RESOLUTION exist in the SDF but not in the render. New
+regression trap: the selftest evaluates sdf_normal at the glass exit point on the live union
+and requires |n| > 0.9 -- the exact failure, pinned at its exact location. Verified: normal
+[0,0,-1] healthy; the blue core now shows through the glass EVERYWHERE (192px staged).
+
+WAX + EMISSIVE CORE: measured honestly and NOT supported -- emissive-vs-dark core A/B at
+128px: open window +0.257 blue delta; wax body INCLUDING the thin lens dish -0.015 (noise).
+The engine's SSS is a local shading approximation against EXTERNAL lights (sss_dir/depth);
+it does not transport an emissive neighbour's radiance through the medium. KEPT NEGATIVE,
+loud: "glow from within" through wax needs translucent-transport work in the tracer (a
+scoped follow-up, not a preview-session hack). What DOES work today: emissive cores through
+GLASS (transmission carries emission), and external-light translucency at the thin lens.
+
+Arc instrument-error tally: 8 (the v9 'Fresnel dominates' physics note was a wrong narrative
+over an unmeasured mechanism -- believe the probe, not the plausible story).
+
+## PREVIEW v12 -- SLOT DEFAULTS, SILICONE BAND, AND REAL INTERIOR-EMISSION TRANSLUCENCY
+
+USER: (1) default core = soothing dark grey diffuse, "a mouse ball from the 90s",
+overridable -- same for ring and base; (2) ring thinner, like a silicone bracelet; (3) the
+wax+emissive preview shows no subsurface/translucency -- make it real.
+
+SLOT RULE REVISED (user direction; replaces the v1 'one material fills every slot'):
+`material` dresses the OUTER only; defaults elsewhere -- core "mouse_ball_gray" PBR
+(0.16,0.16,0.17 rough 0.85), trim "silicone_dark" (0.20,0.20,0.22 rough 0.65), base
+matte_black -- each overridable via core=/trim=/base=. Band tube 0.045 -> 0.022 (bracelet,
+not collar), pinned on the trim SDF (+x probe: 0.018 inside / 0.026 outside).
+
+TRANSLUCENCY, two wiring fixes + one new tracer term (additive, default OFF everywhere;
+preview opts in):
+  1. sss_dir was never passed by the preview -> the EXTERNAL subsurface term was inert.
+     Now aimed at the key softbox (sss_depth 0.30, sigma 5).
+  2. NEW `subsurface_emission` (holographic_raymarch): march INWARD, measure wall thickness,
+     find the body BEHIND the wall, return its emissive * exp(-sigma*wall). Wired as
+     `sss_interior` through path_trace -> converge_samples/render_auto ->
+     render_scene_document. Existing renders byte-stable (param defaults False).
+  3. THE SAME SUB-RESOLUTION BUG CLASS, THIRD APPEARANCE, this time in my own new code:
+     the first subsurface_emission used FIXED steps (dl = depth/steps = 0.021) and stepped
+     clean OVER the 0.010 air gap -- 'exited' never fired, glow was zero everywhere while
+     every ingredient probed healthy (emissive present, sss=1, wall sane). REWRITTEN with
+     adaptive interior sphere-stepping (step by |SDF|, floored 2e-3 -- _march_through's
+     proven approach): wall thickness becomes an exact crossing measure (no banding, jitter
+     unnecessary), any gap >= ~2e-3 resolves in a handful of evals.
+     THE GENERAL RULE, now three-for-three: NEVER fixed-step-march past geometry that owns
+     features near your step size; sphere-step by the field itself.
+
+MEASURED: term on live scene -- thick wall glow 0.70 blue, thin lens 0.99 (thin > thick ✓);
+end-to-end left-half-body blue delta 0.0012 (broken) -> 0.0133 (fixed), gated in the preview
+selftest at 0.0065; raymarch selftest pins thin>thick>0 and solid==0. The glow is honest:
+subtle through 0.08 wax under a bright studio rig (real thick wax is subtle), strongest at
+the thin lens; a hotter emissive dict (e.g. emissive=(0.3,1.8,3.0)) reads stronger.
+
+Instrument-error ledger note: matlib fuzzy-matches unknown names ('brushed_steel' ->
+"did you mean steel_brushed") -- the error message is the lookup table; read it.
+
+## PREVIEW v13 -- EMISSIVE PRESETS ARE NOW LIGHTS; DENT GLOWS; GREY BASE
+
+USER: dent should read bluer than the body (it measured 2.5x bluer but looked pale); crank
+the emissive so it glows like a light; mouse-ball grey as the base default too.
+
+ROOT CAUSE of the pale dent: the emissive PRESETS peaked at 1.0 -- they were COLOURS, not
+lights. An HDR tracer tone-maps a lit white diffuse to ~1.0 as well, so a "neon" could never
+out-glow the wall behind it, and transmitted glow could never out-shine reflected key light.
+RETUNE (deliberate, visible; renders using these presets get brighter -- that is the fix):
+lamps x6 (soft sources), neon_*/led_white x15 (hard sources; real tubes sit 10-50x over
+diffuse white), lava x8. Measured on the wax lens: x6 pale, x15 reads as a backlit panel.
+Preview sss_sigma 5 -> 20 so thin/thick transmission contrast is exp(-20*0.012)=0.79 vs
+exp(-20*0.08)=0.20 -- the dent SEPARATES from the body instead of the whole shell glowing
+evenly. Dent blueness measured 0.0225 vs adjacent wall 0.0089 (crops read off the frame --
+the first crop pair was misplaced and read NEGATIVE contrast; place meters by LOOKING).
+
+Base default: matte_black -> the same mouse_ball_gray as the core (shared _default_core()).
+Two stale docstrings ("material fills ALL slots") synced to the revised slot rule.
+
+## MESH LIGHTS FROM EMISSIVE OBJECTS (auto-derivation) -- and why the preview keeps them off
+
+USER: emissive material is the wrong approach; use a MESH LIGHT (a given mesh object as a
+light) -- the decade-old standard. CORRECT on the architecture: emissive material only
+contributes when a path happens to HIT it; NEE never sends shadow rays toward it, so a
+"glowing" object never actually LIT anything. Rule-0 found MeshLight already shipped in
+holographic_lights (make_light('mesh', vertices, faces) -- area-weighted triangle sampling,
+soft shadows) but undiscoverable by 'mesh light' phrasing and with no bridge from materials.
+
+BUILT the bridge: emissive_mesh_lights_fn(scene) in holographic_scene_render -- every object
+whose material emits gets its SDF meshed (coarse 24^3 occupancy probe finds a tight bbox in
+the search volume, surface_nets over a fine 22^3 grid, quads split to tris) and wrapped as a
+MeshLight (colour = emissive hue, intensity = HDR peak). Wired as render_scene_document(...,
+emissive_mesh_lights=False) -- default OFF, additive -- and through the p07 faculty. New
+catalog entry 'Emissive objects cast light (auto mesh lights)', aliases from the user's
+mouth ('mesh light', 'use a mesh as a light', ...) -- 5/5 route (they routed 0/5 before).
+
+MEASURED, both directions, both pinned in the scene_render selftest:
+  * EXPOSED emitter: a bare neon bulb pools +0.049 blue on the floor beneath it, lights a
+    neighbour ball, casts a soft shadow (demo render staged). Gate at 0.02.
+  * SEALED emitter (the shader ball's core): noise-level diff at ~2x render cost -- every
+    NEE shadow ray toward the interior light crosses the shell and occlusion is binary.
+    KEPT NEGATIVE: mesh lights are for emitters that can SEE the scene; glow THROUGH a wall
+    stays the job of the sss_interior transport term. The preview documents this and keeps
+    the flag off; the two features are complements, not substitutes.
+
+Capability count 219 -> 220.
+
+## PREVIEW v14 -- CLOSE FRAMING (base at the bottom edge)
+
+USER: closer view; base at the bottom of the image without a gap, but not super tight --
+displaced materials need headroom. Camera eye (1.30,1.20,2.00)->(1.18,1.12,1.82), target
+(0,0.55,0)->(0,0.63,0), fov unchanged. Chosen by MEASURED gap search (black-base meter, the
+base-vs-floor boundary read off pixel rows): candidates at gap 3/5 rows too loose, gap 0
+risks slicing the base rim at higher res; shipped at gap 1 row of 96 (~1%). Note propagated:
+the camera PARTICIPATES in geometry (window and lens aim off the view direction), so the
+selftest's recomputed lens axis had to move with the eye -- forgetting that would have made
+the lens pin probe a stale direction.
+
+FRAMING PINNED (values measured at 48px before pinning: gap 1, headroom 5 sky rows): base
+gap <= 2 rows AND >= 3 sky rows above the object. Both directions guarded: drift down
+(floor strip returns) and drift up (headroom for displacement lost) each fire their own
+message.
+
+## PREVIEW v15 -- TWO LEVEL BELTS (rubber-band profile, per-belt materials)
+
+USER: v12's "thinner" band was mis-read -- thin meant SHALLOW DEPTH, and the round tube read
+as rope; the diagonal read as a sloppy sash. Redesign: TWO LEVEL BELTS, one a little below
+the window (hole bottom ~y 0.585; belt y0 0.50, height 0.11) and one above it (hole top
+~y 1.084; belt y0 1.12, height 0.09). PROFILE, the actual lesson: a torus tube can never be
+a rubber band -- band = thin CONCENTRIC SPHERICAL SHELL (0.608..0.633: 0.025 radial depth,
+wide on the surface) INTERSECTED with a horizontal slab. The 0.008 radial clearance off the
+ball is the v11 resolution rule applied at design time (never again a sub-resolution gap),
+hidden by the contact shadow.
+
+SLOTS: trim_top / trim_bottom are separate objects with separate materials; trim= still
+dresses BOTH (backward-compatible spelling); defaults stay dark silicone. The user's
+canonical demo renders in one frame: wax outer (translucent SSS) + neon_blue core (glows
+through window, lens, and body) + glass_clear top belt + chrome bottom belt + default grey
+base -- staged.
+
+PINS: belt profile asserted in three directions on the live SDFs -- mid-belt inside (body
+exists), same radius past the belt height outside (LEVEL and bounded -- a sash would fail
+this), deeper radial point outside (SHALLOW -- rope/collar would fail); per-belt override
+and trim=-dresses-both each pinned; object set updated. Costs re-measured and republished:
+~145 s res=160 opaque, ~165 s with a glass belt (the second belt + refraction pay real
+time); the stale ~73 s figure corrected in all three homes.
+
+Process note: skill_lint's memo masked a does-length regression mid-session ('tree
+unchanged' on a changed tree) -- the standing rule to delete /tmp/lecore_lint_memo.json when
+diagnosing held; deleted, re-linted clean at 589.
+
+## PREVIEW v16 -- FLUSH INLAY BELTS (partition construction)
+
+USER: belts 25% narrower, moved clear of the hole AND the lens dip, and CUT INTO the ball --
+flush, no outward bumps. THE CONSTRUCTION IS THE INSIGHT: do not fight tolerances with a
+groove + insert (which would need resolution-rule gaps on every face and a tie-free fit) --
+PARTITION the shell by height instead. Each belt = shell INTERSECT slab; outer = shell MINUS
+both slabs. The union of the three objects is EXACTLY the original ball surface: flushness
+cannot drift, no gap needs to clear the tracer's resolution floor, and the seams are
+material boundaries only, never geometry. (Generalize-on-contact note: this is the same
+partition idiom as per-material submesh splitting -- one surface, many owners.)
+
+Positions from the measured feature extents (window ~y 0.585..1.084; lens dish reaches
+~y 1.11): bottom belt y0 0.46 half 0.041 (spans 0.419..0.501 -- ~0.08 of room below the
+hole), top belt y0 1.17 half 0.034 (spans 1.136..1.204 -- above both features). Widths are
+the v15 belts minus 25%.
+
+PINS assert the PARTITION, per belt: no material past the ball radius (flush -- a bump
+fails), mid-wall inside the belt AND outside the outer (the slab really transferred
+ownership), the same ring past the belt height flips owners (level + bounded), and neither
+belt reaches the lens-dish axis point (clearance). Full battery green; costs at the new
+geometry ~200 s res=160 (partition CSG deepened the union tree; drop res to iterate).
+
+## PREVIEW v17 -- THE THUMBNAIL DOOR (material in, PNG out) + one grey default family
+
+USER: no easy way to feed a material and get a thumbnail back; and default the bands and
+core to the diffuse. TWO changes:
+
+1. ONE DEFAULT FAMILY: both belts now default to the same mouse_ball_gray as core and base
+   (silicone_dark retired from the defaults). The hero material stands alone on the outer;
+   the thumbnail is ABOUT the material.
+
+2. preview_thumbnail(material, res=96, fmt='png'|'array') -- the one-call door. Delegates
+   entirely to preview_scene (not a second renderer); fmt='png' encodes with the engine's
+   existing holographic_render.png_bytes (Rule 0 -- found before building). Pinned: png
+   magic + png == png_bytes(array) EXACTLY (one render, two encodings -- the door can never
+   silently render twice or drift); typo'd fmt raises naming the options. Wired as
+   mind.preview_thumbnail (126 members), catalogued with user-mouth aliases ('show me what
+   this material looks like', ...) 5/5. Costs measured then published: ~81 s res=96 draft,
+   ~51 s res=64 (first-guess ~45 s was wrong; the number in the docstring is the measured
+   one). Capability count 220 -> 221.
+
+HTTP CONTRACT REPAIRED ALONG THE WAY: /invoke returned bytes as {'type':'bytes','repr':...}
+-- a Python repr no caller can decode. _jsonable in holographic_service.py gained the
+{'__bytes_b64__': ...} branch (the codec-arc wire convention, additive -- the repr path was
+useless, not depended-upon). FULL HTTP ROUND-TRIP PROVEN: POST /invoke preview_thumbnail
+with a plain PBR dict -> {'__bytes_b64__': ...} -> decoded 614-byte PNG with a valid magic.
+"It works in-process" and "an agent can call it" are different claims; both now hold.
+
+## PREVIEW v18 -- 2.8x FASTER RENDERS VIA THE DISTANCE PROXY (+ two accelerators refuted honestly)
+
+USER: previews should be faster via the HRNN/HDRIFT improvements, no quality loss. Three
+findings, all measured:
+
+1. HDRIFT is the GENERATIVE image model (train on images, generate more) -- not a render
+   device. Nothing to wire; stated plainly.
+
+2. HRNN accelerate_convergence on the render's pass loop: fed the REAL MC pass-mean
+   sequence as step(x) -- the gate returned "no lawful convergence found", 0 jumps. That is
+   the accelerator WORKING: Monte Carlo averaging decays as stochastic 1/sqrt(k), no
+   geometric mode, nothing lawful to extrapolate; per its own docstring, an accelerator
+   that cannot refuse is a liability. KEPT NEGATIVE: convergence acceleration does not
+   apply to MC pass-averaging.
+
+3. THE REAL COST, found by measurement: the v16 belt PARTITION makes three objects (outer +
+   both belts) each carry the full deep shell subtree -- the plain min-over-objects union
+   evaluates it 3x per query (the 73s -> 200s regression, mechanically explained). Two
+   fixes attempted:
+   * BOUNDING-SPHERE PRUNING: built, measured, REFUTED -- partition pieces share one
+     bounding sphere, so bounds cannot separate exactly the objects that are expensive;
+     null 1.13x on bulk queries (plus an -inf poisoning bug from the unboundable floor).
+     Ripped out. Lesson: structure the caller already has beats geometry the engine probes.
+   * DISTANCE PROXY, shipped: scene_to_render/render_scene_document gain distance_sdf= --
+     an explicit whole-scene distance the CALLER guarantees equals the union. The preview
+     builder knows the partition's union is exactly the unpartitioned shell (the v16
+     invariant), so it hands min(shell, core, base, floor): one shell evaluation, not
+     three. material_fn keeps per-piece attribution.
+   MEASURED: 3.99x on bulk distance eval; 2.83x end-to-end render (100.7s -> 35.5s at
+   96px); image diff mean 0.0143 -- BELOW the renderer's own seed-to-seed noise floor
+   (0.0167), i.e. quality uncompromised by the instrument's own standard. Also learned:
+   near partition seams the plain union mildly OVERestimates distance (max-CSG artifact,
+   0.034 max) and the proxy is strictly more conservative there -- equal-or-safer marching.
+
+PINNED: proxy <= plain everywhere (an overestimate would overshoot geometry) and byte-equal
+beyond |d|=0.05 of the surface (the speedup cannot smuggle in a different scene). All image
+gates now run THROUGH the proxy path. Costs republished in all three homes: thumbnails
+~36s res=96 / ~24s res=64 (were 81/51); preview ~75s res=160 (was ~145-200). The res=128
+door: 52s, was 116s.
+
+## PREVIEW v19 -- BATCH THUMBNAILS (fixed-camera static cache + masked re-render)
+
+USER: thumbnails should be faster; fixed camera means cacheable work; render a plain diffuse
+first, then re-render per material. THE IDEA MAPPED ONTO THE TRACER, with the measurements
+that shaped it:
+  * Rule-0 found IncrementalRenderer (exactly this concept -- material edits re-shade only
+    affected pixels via a ray index) but it lives on the SEMANTIC renderer stack, not the
+    path tracer; wiring the preview to it would change the look. Not the tool here.
+  * The obvious cache (primary visibility) measured at 0.10 s of a 35.5 s render -- 0.3%.
+    KEPT NEGATIVE: primary-hit caching buys nothing in this tracer; the cost is per-sample
+    shading marches (58M SDF points/frame at 96px draft), which are material-dependent.
+  * What IS cacheable: the whole material-independent HALF of the frame. New
+    preview_thumbnail_batch(materials): renders the neutral reference ONCE per (res,
+    quality, seed) -- cached for the process lifetime -- plus an ACTIVE MASK (primary-owner
+    outer/core, dilated 6 px; ~48% of pixels, and the expensive half); each material then
+    renders with active=mask (threaded additively through converge_samples/render_auto/
+    render_scene_document -- the adaptive sampler already spoke masks internally),
+    composites fixtures from the reference in LINEAR light, display-transforms once, FXAA.
+
+MEASURED: 36 s -> 26 s per material at res=96 warm (1.37x -- honest and modest: the masked-
+off pixels were the cheap ones), 24 s -> 19 s at res=64; reference amortised to zero from
+the second call. QUALITY, by the honest standard: composite-vs-full mean 0.0134 / p99 0.134
+-- BELOW the seed-to-seed noise floor (0.0167 / 0.176); the scattered per-pixel max is
+draft-sampler speckle present between ANY two draft runs. KEPT SCOPE, stated in the
+docstring: copied fixture pixels carry the reference's indirect light -- a coloured outer's
+far-floor bounce tint is approximated by the grey reference's (within noise at draft; the
+never-composited preview_thumbnail remains the exact door).
+
+PINNED: batch PNG list aligned with input; deterministic on cache reuse (byte-equal);
+composite within 2x the measured draft deltas of the full door. Faculty count 126 -> 127;
+new aliases ('batch of material thumbnails', ...) route 5/5.
+
+## PREVIEW v20 -- BIG THUMBNAILS AT SMALL LIGHTING COST (demodulated upscale, out_res=)
+
+USER: batch thumbnails were tiny; the earlier ~192 size was the target; upscale/upsample.
+Rule-0 found the exact tool already shipped: superres_demodulated (M5) -- demodulate the
+LOW-res render's albedo out (irradiance is smooth, upscales cleanly), re-modulate with a
+CHEAP high-res albedo G-buffer (primary rays only, no transport). Both thumbnail doors gain
+out_res=N: lighting rendered at `res`, delivered at N. Measured at 192-from-96: G-buffer
+1.7 s + upscale 0.2 s on top of the 26 s warm masked render -> ~29 s for a 192 px thumbnail
+(native 192 at this geometry is ~200 s; the plain door was 116 s pre-proxy). The grid floor
+and material colours arrive SHARP -- the detail is albedo-borne, exactly the method's claim.
+
+NEW KEPT NEGATIVE, the corollary of the module's own scope note ("the win needs the albedo
+to vary"): a TRANSMISSIVE outer carries its detail in TRANSPORT -- the refraction of the
+scene behind it -- which the method deliberately keeps low-res. Glass at 192-from-96
+rendered as dark speckle MUSH (staged at build). ENCODED as _upscale_wants_native():
+transmission > 0 auto-routes to a native out_res render (the honest price, stated in the
+docstring); raw dicts are checked BEFORE coercion because PBRMaterial coercion drops the
+transmission field (measured -- the dict probe returned False until the check moved).
+
+PINNED: out_res returns the ASKED size, bounded; the routing predicate (glass native, gold
+demod) is asserted by name so the mush cannot silently return. Costs republished across all
+three homes. Warm 192 px thumbnail: 24.6 s (gold, staged); the arc total for a ~192 px
+thumbnail: ~200 s -> 116 s -> 52 s -> 29 s.
+
+## PREVIEW v21 -- AA AFTER THE UPSCALE (2x-carrier coverage AA)
+
+USER: the anti-aliasing should happen after the upscale. Mechanically FXAA already ran last
+in the out_res path -- but the critique was still RIGHT about the result: the silhouette is
+a GEOMETRY edge, so the upscaled low-res irradiance leaves 2-px stairs that a subpixel FXAA
+cannot heal (its blend radius is 1 px). THE FIX FOLLOWS THE METHOD'S OWN LOGIC: the crisp
+carrier is the CHEAP half (primary rays only), so SUPERSAMPLE IT -- G-buffer at 2 x out_res,
+remodulate at 2x, box-average down in LINEAR light (true coverage AA on every geometry
+edge), then the display transform and a final FXAA at delivery size. AA is now genuinely
+after (and above) the upscale.
+
+MEASURED at 192-from-96: silhouette/window/belt edges visibly clean vs the v20 stairs
+(staged side by side); warm cost 18.7-29 s (material convergence dominates run-to-run; the
+2x-carrier tail itself is ~7 s at 192). Costs republished in the three homes. LESSON logged:
+"the AA pass runs last" and "the output is antialiased" are different claims -- order alone
+does not fix an edge whose aliasing was baked upstream of the pass's reach.
+
+## PREVIEW v22 -- THE UPSCALE VERDICT (measured three-way; native recommended for quality)
+
+USER: is rendering smaller + upsampling actually saving time? Worth it? "The larger
+thumbnail was superior to this upsampled one." MEASURED, same copper, same session, warm
+caches, staged side by side:
+  A) native 192, exact door ............ 64.8 s   cleanest
+  B) batch masked, NATIVE 192, warm .... 33.1 s   native quality (composite diff below noise)
+  C) upscale 192-from-96, warm ......... 15.8 s   visibly softer reflections + shadow speckle
+
+VERDICT, encoded in the guidance of all three homes: the upscale saves 2.1x over the
+like-for-like warm native batch (4.1x over the exact door) but the cost is exactly where a
+material like copper LIVES -- lighting detail is the thing the method keeps low-res. The
+user's judgment (native superior) is confirmed by the side-by-side and is now the
+RECOMMENDATION: for quality thumbnails render NATIVE at delivery size via the batch door
+(B is the sweet spot: native quality at ~half the exact price); out_res is the quick-grid
+tool. The finding nobody asked for but the measurement delivered: B at 33 s warm makes
+native-192 cheap enough that the upscale's remaining saving rarely justifies its softness.
+
+No code changed -- both paths stay; the guidance now carries the measured trade instead of
+implying the upscale is free quality.
+
+## PREVIEW v23 -- THE UPSCALE, DE-SPECKLED AND DE-STAIRED (denoise + guided upsample)
+
+USER: the 16 s upscale is close but aliased and noisy; fix those and it's good. Both
+complaints traced to their mechanisms and addressed there:
+  * NOISE = draft MC speckle upscaled into blotches. FIX: denoise the demodulated
+    IRRADIANCE at LOW res (M4, denoise_demodulated) before upscaling. levels=4 measured
+    over-smoothed (reflections flattened to blobs); levels=2 shipped -- metered against the
+    native render: whole-frame luma identical (0.556 vs 0.554), copper mid within 0.024,
+    the only loss ~0.07 luma off the TOP belt's specular streak.
+  * RESIDUAL ALIASING = plain bilinear irradiance upscaling ignores geometry edges where
+    the ALBEDO barely varies (grey fixtures against grey floor) -- the 2x albedo carrier
+    could not help there. FIX: Rule-0 found guided_upsample (joint-bilateral, ST3) already
+    shipped; the irradiance now upscales guided by the 2x DEPTH and ALBEDO, so geometry
+    edges land crisp regardless of albedo contrast.
+  * INSTRUMENT ERROR EN ROUTE, the module's own documented negative re-learned live:
+    demodulating by the point-sampled LOW G-buffer albedo aliased the thin belts (they
+    rendered charcoal); the anti-aliased carrier (box-downsampled 2x albedo) fixed them --
+    and a metered check killed the false 'belts too dark' narrative (bottom belt actually
+    LIGHTER than native; the top-belt delta is the specular, not the base).
+
+Chain shipped in _demod_upscale_display: low gbuffer -> M4 denoise (levels=2) -> demodulate
+by AA carrier -> guided_upsample (depth+albedo guides, levels=4) -> remodulate at 2x -> box
+down in linear -> display -> FXAA. Tail ~2.5 s at 192 (was ~7 s for the plain 2x path --
+the JBU replaced the brute supersample of the remodulated frame). WARM 192-from-96: 17.8 s,
+clean of speckle and stairs (staged). The three-way ledger now reads: exact 64.8 s / batch
+native 33.1 s (sharpest speculars) / tuned upscale 17.8 s (clean, slightly softer
+speculars) -- each honest, each documented at its door.
+
+## PREVIEW v24 -- REFLECTIONS RESTORED (metal-aware denoise + the res ladder)
+
+USER: reflection quality diminished by the v23 denoise. TRACED: on smooth METAL the
+irradiance IS the reflection, and both the M4 denoise and the JBU smooth irradiance -- the
+filter was eating exactly what copper is made of. TWO fixes shipped, one honest boundary
+named:
+  * METAL-AWARE BLEND: weight the denoise per pixel from the primary hits' own material --
+    full filter on diffuse pixels (where the blotch lived), raw kept on smooth metal
+    (w ramps with roughness from 0.05; glossy structure masks residual noise). copper
+    (rough 0.2, met 1.0) keeps 82% raw. JBU levels 4 -> 3 (its refinement passes were the
+    second softener).
+  * THE HONEST BOUNDARY: at 96 px draft the lighting genuinely lacks clean reflection data
+    -- every filter setting just picks a point on the blur<->noise curve. The lever OUTSIDE
+    the curve is lighting res: 192-from-128 (1.5x upscale, integer 3x carrier at 384)
+    delivers structured reflections at 24 s warm. (2*out_res) %% res == 0 enforced with a
+    naming error -- the AA carrier is an integer box average.
+  * Instrumented tail: per-pixel met/rough from matfn at reconstructed primary hits (the
+    same camera-basis reconstruction the static cache uses).
+
+THE LADDER at 192, measured and now the published guidance everywhere: batch NATIVE 33 s
+(every specular streak) > res=128 upscale 24 s (structured reflections) > res=96 upscale
+18 s (speed; coarser metal). Each door honest about what it trades.
+
+## PREVIEW v25 -- ANY SIZE, OPTIONAL UPSAMPLING (size= / upsample=)
+
+USER: request a render at any size (same aspect); upsampling optional for higher quality.
+BOTH doors gain the front-door spelling: size=N delivers exactly N px (square frame, aspect
+fixed by construction); upsample=False (default) renders NATIVE at N -- the higher-quality
+option; upsample=True renders the lighting at ~2N/3 (floored 64 -- the measured reflections
+sweet spot from v24) and demod-upscales. size overrides res/out_res, which remain for
+direct control at any combination.
+
+THE CONSTRAINT THAT HAD TO DIE: (2*out_res) %% res == 0 existed only because the AA carrier
+was an integer reshape box-average. Replaced by _area_resize -- integer box-average as far
+as the ratio allows, bilinear for the residual -- explicitly NOT point-sampling (the kept
+negative that turned belts charcoal stays honoured at every ratio). Probes: constant-
+preserving at 384->117; area character exact (0.5 on a half-on pattern).
+
+PINNED: size=50 native delivers (50,50,3); size=77 upsample=True delivers (77,77,3) bounded
+(odd ratio exercises the bilinear residual); glass + upsample=True still routes NATIVE
+(the sugar consults the transmissive predicate). Faculty + catalog updated; battery green.
+Staged: size=160 upsample=True, 28.5 s.
+
+v25 addendum: the clean-extract battery caught a size-contract break BEFORE ship -- at
+size=45 with upsample=True the 64-px lighting floor exceeded the target, the upscale branch
+went inert, and the door delivered 64 px instead of the asked 45. Fixed: when the floor
+meets or exceeds the target, upsampling is meaningless and the door falls back to a NATIVE
+render at the ASKED size (both doors); pinned at exactly size=45. The front-door contract
+is absolute: size=N returns N, whatever path gets there.
+
+## PREVIEW v26 -- ROUTE BY WHERE THE DETAIL LIVES (smooth metals go native)
+
+USER (with a side-by-side): the upsampled render still lacks detail vs native. The missing
+detail is REFLECTION SAMPLES -- glossy lobes are draft-undersampled at 2/3 res before any
+filter touches them. The scalpel was tried and MEASURED before conceding:
+  * converged_mask gained ARRAY tolerance (additive; scalar path byte-identical) and
+    converge_samples/render_auto/render_scene_document gained tol_scale= -- a per-pixel
+    multiplier on the quality tolerance. First run: NULL -- draft's max_passes=8 capped the
+    tight pixels before tol/3 could bite (a ceiling, not a tolerance, was binding).
+  * Extended pass budget (x3 when tol_scale given; cost grows only on still-active pixels):
+    reflections came BACK -- at 44.4 s for size=160, vs ~23 s for a masked NATIVE render at
+    that size. KEPT NEGATIVE: buying smooth-metal reflections with samples on the upscale
+    path costs MORE than rendering native. Transport-borne detail is transport-borne.
+  * The tol_scale + array-tolerance + extended-budget machinery STAYS in the tracer as a
+    general capability (regional quality); the preview just stopped being its customer.
+
+ROUTING ENCODED: _upscale_wants_native now names TWO transport-detail classes, both
+measured: transmissive (glass mushes) and smooth metal (metallic>0.5, roughness<0.35 --
+mottles, and cannot win back). v26 fix en route: the batch door's native fallback was
+paying the 54.5 s EXACT-door price; it now routes through the batch's own masked machinery
+at out_res (chrome warm at 160: 36.8 s, mirror detail intact -- staged). The single door's
+size+upsample=True delegates to the batch (a single material is a batch of one; the
+never-composited exact door remains the upsample=False spelling).
+
+Warm at size=160: wax 20.9 s (upscale path -- its home turf, staged), chrome 36.8 s
+(auto-native). The caller asks for size and speed; the router pays each material's honest
+price.
+
+## PREVIEW v27 -- MESH-LIGHT TOGGLE BY OUTER CLASS (directed; measured; scope named)
+
+USER: toggle the core's mesh light ON for translucent/SSS outers, OFF for glass/refractive/
+transparent. WIRED as directed: _outer_is_translucent (sss > 0 AND transmission <= 0; raw
+dicts checked pre-coercion per the standing instrument note) drives emissive_mesh_lights in
+the preview's studio branch. Truth table pinned: wax/jade/skin_light ON; glass_clear/gold/
+matte_gray OFF; dict sss ON; dict sss+transmission OFF (transmission vetoes).
+
+MEASURED at wiring (wax + neon core, 128 px A/B): x1.21 cost, diff mean 0.0066 -- BELOW the
+seed noise floor -- and the window-beam crop flat (-0.0015). The standing physics holds for
+wax exactly as it did for the sealed-glass case: NEE occlusion through the wall is BINARY,
+so the interior light's only reachable path is the porthole, too small to register at this
+angle. The toggle is the CONTRACT (and costs ~20% on translucent previews today); the named
+follow-up that would make it PAY is transmittance-aware shadow rays -- direct_lighting
+occludes on the bare scene SDF and would need per-occluder material (sigma * thickness
+attenuation for sss-class occluders) to let a candle glow spill through its own wall. Filed
+on the horizon, not smuggled in.
+
+================================================================================
+BRANCH MERGE [COMPLETE]: shader-ball preview arc merged in, zero loss both sides
+================================================================================
+
+Moose's branch zip (a parallel session: preview_scene v1-v27 shader-ball
+arc + FXAA + soft-light-cache findings + mesh lights + interior-emission
+translucency + guided upscaling) merged into the working line. METHOD:
+hash inventory (3 theirs-only, 69 differing, 169 ours-only, 1502
+identical), then symbol-map + diff-POLARITY per file, then FINGERPRINT
+resolution for the mixed ones -- the crucial lesson: polarity alone LIES
+in both directions (their '+lines' were often fossils of OUR refactors:
+old forest index, old random-null honesty, old gamma=0.5 bars, old fur
+v1, old BM25; and OUR '-lines' in their files were old signatures THEIR
+refactors extended). Fingerprints decided: content referencing their arc
+(shader-ball wax lens, upscale door, batch-thumbnail door) = theirs;
+content referencing our arcs (codec C-2..C-6, re-pin ratchet, F24
+duplicate audit) = ours.
+TAKEN THEIRS (11 wholesale): preview, postfx (fxaa), lightcache,
+gbuffer (active=/tol_scale=), pathtrace (sss_interior), raymarch
+(subsurface_emission), scene_render (distance_sdf proxy w/ its own kept
+negative), adaptive_sample (per-pixel tolerance), p07 (emissive mesh
+lights), p11, VERSION (0.9.0). SPLICED THEIRS: matlib emissive retune
+(lights x6-x15 over diffuse -- deliberate, documented), 4 catalog entries
+(thumbnail/preview scene/mesh lights/fxaa), 5 name_collision allowlist
+entries, 3 docs (BACKLOG_organics, PANEL_REVIEW_hrnn_year,
+RESEARCH_CONSOLIDATED), 28 NOTES entries appended VERBATIM under a merge
+banner (their session had consolidated/trimmed 349 old entries; ours is
+append-only ground truth so we keep ALL of ours AND all of theirs).
+KEPT OURS where their side was the fossil: index ladder, hairshade H7,
+groom clump, coldstore fast codec, determinism topk_det, honesty vocab-
+null, bm25, router dense-tiebreak, p08/p14/p15, workflow bars + re-pinned
+tests, make_gallery heroes, gallery pngs, service b64 (newer comment),
+pipelines.json (3231), reachability F24, .gitignore minus the 2 lines
+that were HIDING the branch docs.
+VERIFIED: 728-file compile sweep clean; selftests green on BOTH sides
+(postfx w/ fxaa, preview front door renders copper ball, hairshade,
+groom, matlib, p15 51-members); skill_lint runs THEIR 4 examples + ours
+0/0; catalog_gaps 0; reachability 0 dark 0 dup; 41 tests across six
+suites; both lines discoverable from ONE mind (6/6 probes); regen --check
+green. VERSION now 0.9.0 per the branch.
+
+## SECOND BRANCH ZIP: merge audit -- bit-identical to the first, nothing to do
+
+A second branch zip arrived for merging. Hash comparison against the
+FIRST branch zip: 1,574 files, ZERO differences -- the same snapshot.
+Everything in it was already merged in the previous round. Audit run
+anyway (the no-loss guarantee is a check, not a memory): every one of the
+57 files where the branch still differs from our tree maps exactly onto
+last round's adjudicated keep-ours decisions (fossil resolutions: old
+bars, old fur v1, old forest index, old random-null, pre-retune presets)
+plus generated docs and hero renders where ours is the regenerated
+successor; the branch contains zero files absent from our tree. No edits
+made; tree unchanged except this note.
+
+## THE REAL QWEN RAN, AND THE BOOT RECORD DIED ON THE WAY TO DISK
+
+Moose's run: 26 layers (24 + 2 prepended), hidden 1024, vocab 248320, and
+audit.bat reporting 128/128 REGISTERS RECALLED FROM THE SEED and the ACT-R fit
+at 0.99858 -- on the real model, from the saved artifact. The install works.
+
+THREE PROBLEMS, and the first is a genuine bug with an exact mechanism.
+
+1. NO BOOT RECORD (JSONDecodeError). The install said boot_record ok; the audit
+   on the SAVED model said the record was gone. BOTH WERE TELLING THE TRUTH
+   ABOUT DIFFERENT BYTES.
+   A manifest larger than one embedding row SPILLS into the LOW BITS of surface
+   weights and leaves a POINTER in the row -- measured, 6 tensors touched for a
+   146-byte spill. bf16 keeps EIGHT MANTISSA BITS and the surface encoding lives
+   BELOW that. So a bf16 export ERASES THE PAYLOAD WHILE THE POINTER SURVIVES,
+   and boot() finds a header promising bytes that are gone.
+   Reproduced directly: dtype=None round-trips, F16 (11 mantissa bits)
+   round-trips, BF16 raises "no leCore substrate header here".
+   write_boot now REPORTS surface_keys, boot_substrate_keys collects them, and
+   export_portable takes keep_f32 to spare them from narrowing.
+   AND I COULD NOT REPRODUCE IT THROUGH THE FULL like= PATH on the fixture --
+   the protection is correct and UNPROVEN on the failing case. So the install
+   now VERIFIES THE RECORD ON DISK rather than trusting the in-memory write:
+   "boot record ok reads back from disk: 9 capabilities". If it still fails on
+   the real model, the failure now appears at install time with the reason,
+   instead of one command later with a JSON error.
+
+2. SIDECAR INDEX ABSENT. Not a bug: Qwen3.5 HAS free vocabulary rows at
+   248,070+, so memory_index went INTO THE WEIGHTS as designed and the sidecar
+   was correctly skipped. The AUDIT is wrong to call that "no passages
+   installed" -- same capability, the other storage site.
+
+3. ASSESS PERPLEXITY 269.85 against the loader's own sanity check of 16.2 on the
+   SAME model. Two numbers from two probes, and at least one of them is not
+   measuring what its label says. That is the next thing to chase and it is not
+   yet diagnosed -- recorded here rather than guessed at.
+
+## DOES THE INSTALL DO THINGS THE leCORE WAY? An audit against our own rules
+
+Moose asked whether the installed leCore follows leCore's own principles. Audited
+the install against the constraints this project treats as non-negotiable, and
+tested the ones I had never actually run.
+
+DETERMINISM -- the first constraint, and I had never verified it end to end.
+    two identical installs: 63 tensors IDENTICAL, 0 DIFFER
+    PYTHONHASHSEED=0      sha256 46fe855d5d11434bd0fdb75b
+    PYTHONHASHSEED=random sha256 46fe855d5d11434bd0fdb75b
+IDENTICAL UNDER A RANDOMISED HASH SEED, which is the check that catches a
+stray hash() leaking into an ordering. It passes, and now it is on record as
+passing rather than assumed.
+
+MEASUREMENT DISCIPLINE. The verdict is a PAIRED BOOTSTRAP with a confidence
+interval, not a comparison of two numbers -- its own docstring explains why:
+"the two models saw the same tokens, so the difference per position is the
+statistic, and pairing removes the probe-choice variance that swamps everything
+otherwise". Verified it REFUSES a false positive: two different texts differ by
+16.4% and it returns INDISTINGUISHABLE because the interval crosses zero. A
+verdict that cannot say "I don't know" is not a verdict.
+
+KEPT NEGATIVES. Every step reports ok/detail, failures stay in the report rather
+than aborting the run, and the report is JSON-serialisable so lecore.json
+carries them to disk. The architecture gate ABSTAINS -- on a model with no
+recurrent state, registers/ladder/self-write are SKIPPED WITH A REASON rather
+than attempted and crashed.
+
+THE REST, checked against the source: hashlib not hash(), seeded default_rng
+everywhere, default-off for new behaviour (vm_program=None), sizes DERIVED not
+hardcoded (_shortest_rung, prepend from depth, passages from width), and 21%
+WHY-comment density -- 141 comment lines in 675.
+
+WHAT THIS AUDIT IS FOR: the install is now twelve steps written across a long
+session, and the risk with that is not a bug -- it is DRIFT, where each step is
+individually reasonable and the whole stops looking like leCore. Checking against
+the project's own rules is cheap and it found nothing this time, which is the
+result worth having.
+
+## THE 269.85 vs 16.2 CONTRADICTION: assess was measuring a different model
+
+Moose: this is mission critical, it cannot be a toy. The thing making it one was
+that I LEFT A CONTRADICTION UNDIAGNOSED -- his assess reported perplexity 269.85
+on a model whose own loader reported 16.2, and I wrote "not yet diagnosed" and
+moved on. If the install breaks a model and reports BETTER, that is not a tool,
+it is a hazard.
+
+DIAGNOSED. assess builds its probe like this:
+    try:    ids = BPE.from_dir(model_dir).encode(text)
+    except: ids = [b for b in text.encode("utf-8")]        <- SILENT
+ON A BPE MODEL THOSE BYTE VALUES ARE ARBITRARY TOKEN IDS. "The" is one token in
+Qwen; as raw bytes it is 84, 104, 101 -- three rows that mean something else
+entirely in a 248,320-token vocabulary. THE 269.85 IS REAL AND IT IS NOT THE
+MODEL'S PERPLEXITY. It is the model's response to noise, printed in a field
+labelled "perplexity", next to numbers that were measured properly.
+
+A SILENT FALLBACK IS A MEASUREMENT THAT LIES ABOUT ITS OWN SUBJECT. That is
+worse than an error, because an error stops you and this invites a comparison.
+
+FIXED, and NOT by removing the fallback -- measuring nothing is worse than
+measuring something odd. The profile now records `tokenizer` (bpe or
+utf8_bytes), `tokenizer_error` (WHY it fell back), and
+`perplexity_comparable`, computed as: a byte probe is fine on a byte-level
+model (vocab <= 1024, where byte ids ARE the tokens) and NOT fine on anything
+larger. When it is not comparable the manifest carries an explicit
+perplexity_warning and galvatron prints:
+    [!] measured on RAW BYTES (tokenizer would not load) -- NOT comparable
+
+VERIFIED on the byte-level fixture: tokenizer=utf8_bytes, comparable=TRUE, no
+warning -- because there the fallback IS the correct measurement. The flag
+distinguishes the two cases rather than firing on the fallback itself.
+
+WHAT MOOSE SHOULD SEE NEXT RUN: either a real perplexity with tokenizer=bpe, or
+269.85 WITH THE REASON THE TOKENIZER FAILED TO LOAD -- which is the actual bug
+to fix and was invisible until now.
+
+## THE 269.85: assess quotes ONE number from a probe that mixes prose and CODE
+
+Moose: fix the bug, do not ask me to run a test to find it. Right -- I had
+shipped an instrument and called it a fix.
+
+RULED OUT BY MEASUREMENT, not by argument:
+  THE TOKENIZER. The loader's sanity check RETURNS NONE if BPE fails on a
+    >256-vocab model. It printed 16.2, so BPE LOADED. Both numbers came from
+    the same tokenizer on the same loaded model. The byte-fallback theory was
+    wrong.
+  LENGTH. Installed vs original across 32/128/512/1024 tokens: 5.95 vs 5.82,
+    7.96 vs 7.77, 9.11 vs 9.03, 9.13 vs 9.03. NO EXPLOSION -- the install
+    tracks the base model at every length.
+
+WHAT IS LEFT IS THE PROBE CONTENT. The sanity check measures 32 tokens of
+PLAIN ENGLISH. assess measures 512 tokens that deliberately mix English,
+technical prose and PYTHON SOURCE -- svd calls, def lines, indentation. That is
+the right probe for a PROFILE and the wrong number to quote ALONE: a model can
+be fine on prose and poor on code, and ONE NUMBER CANNOT TELL YOU WHICH.
+
+FIXED BY MAKING THE INSTRUMENT SELF-DIAGNOSING. assess now always measures the
+loader's own plain-English sentence too, tokenized identically, and reports:
+    perplexity 9.1143 | 210.6 tokens/sec | harden 5
+    plain English 7.4044 | mixed probe 1.2x that
+A HEALTHY MODEL READS ~1.2x. Moose's Qwen read 16.2 plain against 269.85 mixed
+-- 16.6x -- which now fires an explicit warning saying the headline is dominated
+by the code spans rather than the model's general fluency, and to quote both.
+
+AND A PROCESS BUG WORTH THE LINE: my first verification showed the new field
+missing, and I nearly went hunting for a logic error. IT WAS A STALE .pyc --
+the direct call had already printed 7.40 while the harness ran cached bytecode.
+WHEN A CHANGE IS INVISIBLE IN ONE CALLER AND VISIBLE IN ANOTHER, SUSPECT THE
+CACHE BEFORE THE CODE.
+
+## MULTI-STEP THINKING: three shapes, and the boundary between them is exact
+
+Moose: the installed leCore should help with multi-step thinking. Measured which
+shapes actually install, and the answer is sharper than "some do".
+
+A FIXED SEQUENCE FUSES. `a; b; c` is a matrix PRODUCT, so an opcode sequence
+becomes ONE operator before installation -- 1.78e-15 between running the steps
+and applying the fused matrix. DEPTH IS FREE.
+
+A CONVERGENT ITERATION INSTALLS AT ITS LIMIT. A contracting map's fixed point is
+(I-A)^-1, and 200 iterations agree with the limit matrix at 8.88e-16. UNBOUNDED
+DEPTH IS ALSO FREE, when it converges.
+
+A DATA-DEPENDENT BRANCH CANNOT FUSE, because which operator applies is not known
+until the data arrives. THAT is the real ceiling on reasoning in weights -- not
+depth, not iteration count, and I had not named it before.
+
+LEVER 4, MORE DIMENSIONS, GETS PAST IT: install BOTH arms and gate the OUTPUT.
+    y = g(x)*A@x + (1-g(x))*B@x,    g = sigmoid(gain * x.key)
+A, B and the gate are all things install_op already writes, so a two-way branch
+is TWO OPERATORS AND ONE NEURON in ONE forward pass, with no control flow.
+MEASURED against the hard branch, 200 random inputs:
+    gain   8    161/200 overall,  128/128 AWAY FROM THE BOUNDARY
+    gain  32    185/200             125/125
+    gain 128    200/200             132/132
+EVERY FAILURE IS A NEAR-TIE, where the two answers are equally defensible and
+the blend is a legitimate hedge rather than an error. Away from the boundary the
+match is EXACT AT EVERY GAIN, so the gain is a knob and not a wall. At the margin
+the operator ABSTAINS rather than blending -- the same discipline as
+decide_or_abstain, which is what this engine does everywhere else.
+
+AND A TEST BUG WORTH KEEPING, because it is the failure mode this whole project
+warns about. My first selftest asserted 200/200 OVERALL and got 196 on a
+different RNG stream -- the four misses were near-ties, exactly the case the
+docstring calls legitimate. ASSERTING THE OVERALL COUNT TESTS THE SEED, NOT THE
+MECHANISM. It now asserts the DECISIVE cases (128/128) and requires enough of
+them to be meaningful.
+
+## AN INTERRUPTED INSTALL LOOKED FINISHED: nothing was written atomically
+
+Moose walked away, Windows Update forced a restart mid-install, and the
+resulting folder LOADED, RAN AND ASSESSED CLEANLY. The only tell was a number
+nobody would think to check: "layers 24" where a finished install on his 24-layer
+Qwen reports 26, because prepend adds 2.
+
+A HALF-WRITTEN MODEL THAT PASSES ITS OWN CHECKS IS THE WORST FAILURE MODE THIS
+PROJECT HAS. Everything downstream -- perplexity, harden, the profile bundle --
+was measured honestly on a model that was not the one the install intended.
+
+NOTHING WAS WRITTEN ATOMICALLY. export_portable wrote model.safetensors in
+place, and a safetensors header is written FIRST, so a truncated file is
+structurally valid and its tensors are absent or garbage. The config was written
+separately, so a run could die between them and leave a config claiming 26
+layers beside weights carrying 24.
+
+FIXED THREE WAYS:
+  THE MODEL writes to model.safetensors.incomplete and os.replace()s it --
+    atomic on Windows and POSIX alike, so the final name either does not exist
+    or is a complete file. THERE IS NO PARTIAL STATE TO MISREAD.
+  lecore.json IS NOW THE COMPLETION MARKER, written LAST and atomically. Its
+    presence means every earlier step finished.
+  audit.bat CHECKS FOR IT FIRST and says so plainly:
+      [!] NO lecore.json -- this install did NOT FINISH.
+          A folder can load and assess normally and still be incomplete;
+          the marker is written last on purpose.
+          Re-run:  install.bat ./work/original
+  and it cross-checks the layer count in the weights against the count the
+  install RECORDED, so files from two different runs cannot be mistaken for one.
+
+THE PRINCIPLE: A PROCESS THAT CAN BE KILLED AT ANY INSTANT MUST HAVE NO INSTANT
+AT WHICH ITS OUTPUT LOOKS COMPLETE AND IS NOT. Windows Update is not an
+exceptional condition; it is Tuesday.
+
+## GPU: the --device flag did not reach the backend it names
+
+Moose has an A4500 with 20 GB. Checked what leCore actually needs, and found the
+flag was inert.
+
+WHAT IT NEEDS: CuPy matching the machine's CUDA version. The probe imports cupy
+and calls cp.cuda.runtime.getDeviceCount(), which RAISES if no CUDA device is
+really there -- so a missing GPU silently means NumPy and the engine still runs.
+CuPy is an OPT-IN ACCELERATOR, never a dependency, which is the constraint.
+
+BUT THE SWITCH IS AN ENVIRONMENT VARIABLE, HOLOSTUFF_GPU, read at import. And
+install.py's `--device gpu` set a variable that place() read while NOTHING EVER
+REQUESTED THE GPU FROM THE BACKEND. So on a machine with a working card,
+`--device gpu` would have reported "no accelerator available -- running on
+NumPy" and been believed. A FLAG THAT DOES NOT REACH THE THING IT NAMES IS A
+FLAG THAT LIES.
+FIXED: --device gpu|auto now calls enable_gpu() when a device is visible, and
+when it is NOT and gpu was asked for explicitly, says so with the fix:
+    [!] --device gpu requested but no CUDA device is visible to cupy.
+        Install cupy for your CUDA version (e.g. pip install cupy-cuda12x)
+        inside assimilation\.venv, then re-run.
+Verified: enable_gpu(True) on a GPU-less box leaves gpu_enabled() FALSE -- it
+refuses rather than pretending, which is the behaviour the abstention discipline
+demands.
+
+WHY 20 GB IS THE INTERESTING NUMBER: Qwen3.5-0.8B is ~1.6 GB in bf16, so it
+fits ENTIRELY with room for the KV cache -- which is the case to_device(True)
+was written for: weights move ONCE and stay resident, only ids and logits cross.
+And the install is 72% fit_improvement, one lstsq over a (tokens x hidden)
+matrix, which is precisely what a GPU is good at.
+
+THIS UNBLOCKS A KEPT ITEM. gpu_crossover has been listed as HARDWARE-BLOCKED in
+these notes for the whole arc -- the device path was proven for PARITY using
+numpy-as-fake-cupy (50 tensors resident, output bit-identical) and NO SPEEDUP
+WAS EVER CLAIMED because no real GPU was available to measure one. An A4500 is
+the first machine that can settle it, and the honest thing is that the number is
+still unmeasured until it runs there.
+
+## GPU, PART 2: the CUDA Toolkit is NOT needed, and the tool now says which wheel
+
+Moose asked whether he needs to install CUDA. NO -- and the distinction matters
+because installing the Toolkit is a large detour nobody needs:
+    THE DRIVER is required, and is already present if the card works at all.
+    THE CUDA RUNTIME is BUNDLED IN THE PIP WHEEL (cupy-cuda12x / cupy-cuda11x).
+    THE CUDA TOOLKIT -- nvcc, headers, the multi-GB installer -- IS NOT NEEDED.
+
+AND THE ONLY THING THAT DECIDES BETWEEN THE TWO WHEELS is the CUDA version the
+DRIVER reports, which nvidia-smi prints in its header. So the install now asks
+it and names the exact command:
+    [!] a driver IS present (CUDA 12.x) but cupy is not installed. Run:
+        .venv\Scripts\python.exe -m pip install cupy-cuda12x
+        (the wheel bundles the CUDA runtime -- you do NOT need the CUDA Toolkit)
+Verified the parse against both header eras: "CUDA Version: 12.4" -> cuda12x,
+"CUDA Version: 11.4" -> cuda11x. When nvidia-smi is absent it falls back to the
+general message rather than guessing a wheel.
+
+TELLING SOMEONE TO "INSTALL CUPY FOR YOUR CUDA VERSION" IS TELLING THEM TO GO
+FIND OUT SOMETHING THE MACHINE ALREADY KNOWS. That was the previous message and
+it was one step short of useful -- the same shape as "check that assimilation
+finished" and "no directory with a .safetensors file was found nearby", both
+fixed earlier this session. An error should end with a command, not a research
+task.
+
+## THE GPU PATH IS HALF-BUILT, AND THE FAKE DEVICE IS WHY I DID NOT KNOW
+
+Moose put an A4500 in front of it. CuPy 14.1.1 imports, getDeviceCount() returns
+1, HOLOSTUFF_GPU=1 flips the switch, and the install printed
+    hardware: gpu (weights resident)
+and then died ONE LINE INTO THE FIRST FORWARD:
+    _g(L, "input_layernorm.weight") -> np.asarray(self.w[...])
+    TypeError: Implicit conversion to a NumPy array is not allowed.
+                Please use `.get()` to construct a NumPy array explicitly.
+
+MOVING THE WEIGHTS IS ONE LINE. READING THEM IS 47 HARDCODED np.asarray /
+np.zeros CALLS in holographic_gdnruntime.py, and cupy REFUSES implicit
+conversion by design. So to_device(True) was putting the model somewhere the
+forward pass cannot read it.
+
+AND MY OWN PARITY TEST COULD NOT HAVE CAUGHT THIS. It aliased NUMPY AS CUPY to
+prove residency without hardware -- 50 tensors resident, output bit-identical --
+and numpy-as-cupy ACCEPTS np.asarray HAPPILY. A FAKE DEVICE TESTS THE PLUMBING
+AND NOT THE CONTRACT: the thing that breaks on a real GPU is precisely the thing
+a stand-in is chosen for being unable to break. The test was not weak, it was
+STRUCTURALLY INCAPABLE of the finding, and "path proven without GPU" in the
+earlier notes was worth less than it read.
+
+FIXED BY REFUSING, NOT BY PATCHING. GDNRuntime.FORWARD_FOLLOWS_DATA is False,
+and to_device now declines a real device with the reason:
+    "a CUDA device IS present and usable, but this runtime's forward pass still
+     reads weights through np.asarray (47 sites) and cupy refuses implicit
+     conversion. Residency is wired; the kernels are not. Running on NumPy
+     rather than crashing at the first layer."
+A DEVICE WE CANNOT READ FROM IS WORSE THAN NO DEVICE -- the crash arrived AFTER
+the install had already reported success, which is the failure shape this
+session keeps finding.
+
+THE REAL FIX, scoped: thread get_array_module (already in holographic_backend --
+"follow-the-data: cupy if any argument is a cupy array") through those 47 sites,
+with a per-kernel parity check against the NumPy result. That is a real piece of
+work and it is now a NAMED one with a count attached, rather than a capability
+the notes implied was finished.
+
+## THE GPU PATH, FINISHED: the forward pass now follows the data
+
+Converted the runtime so a device-resident model is actually readable.
+
+WHAT CHANGED: `_xp_of(*arrays)` wraps holographic_backend.get_array_module
+("follow-the-data: cupy if any argument is a cupy array") with a numpy
+fallback, and `_self_xp(rt)` binds from the RUNTIME'S OWN WEIGHTS -- because the
+first thing forward() touches is a weight, not a caller-supplied array. 84 lines
+across 11 forward-path functions moved from np. to xp., plus the weight
+accessor.
+
+VERIFIED BIT-IDENTICAL: the converted runtime against the pre-conversion one,
+max|diff| 0.000e+00 over a 32-token forward, same perplexity to four decimals.
+The full install, assess and session selftests all pass, and an end-to-end
+install still reports BETTER.
+
+TWO THINGS THE MECHANICAL REWRITE GOT WRONG, both caught:
+  A NAME COLLISION. _causal_conv_silu already had a local called `xp` -- the
+    LEFT-PADDED INPUT -- so np.zeros became a method call on an ndarray:
+    "'numpy.ndarray' object has no attribute 'zeros'". Renamed to `padded`,
+    which is what it always was. A GLOBAL RENAME NEEDS A COLLISION CHECK, and
+    the compiler will not give you one when the shadowed name is a valid
+    object.
+  A FALSE ALARM I NEARLY CHASED. The selftest prints "perplexity 45.5 on plain
+    English (chance ~97) -- SUSPICIOUS" and I took it for a regression. THE
+    PRE-CONVERSION VERSION PRINTS IT TOO -- it is a 97-vocab synthetic fixture
+    inside the selftest, and the run passes. Diffing against the OLD MODULE
+    rather than trusting the warning is what settled it in one step.
+
+AND THE HONEST LIMIT, restated because it is the whole lesson of the previous
+entry: I STILL CANNOT PROVE THIS ON A DEVICE. A fake cupy cannot refuse
+np.asarray convincingly -- even an ndarray subclass raising from __array__ is
+bypassed by numpy's own fast paths. The parity claim here is that the NUMPY path
+is unchanged to 0.000e+00, which is a real and checkable claim; the DEVICE claim
+is that the reads now go through xp, which is structural and unproven until it
+runs on Moose's A4500. FORWARD_FOLLOWS_DATA is now True, so to_device will move
+the weights instead of refusing -- and if a site was missed, it will fail at that
+site with the same cupy TypeError, which names itself.
+
+## MERGE: an incoming branch that forked mid-session
+
+Merged an updated branch into the working copy. It had forked PARTWAY THROUGH
+this session -- it carried the early work (lazy loader, RAG sidecar,
+_shortest_rung, carry="memory") and none of the later fixes.
+
+SURVEYED BEFORE TOUCHING ANYTHING, which is the whole discipline here:
+    only in theirs   48 files -- 12 new modules, a p17 faculty page, an MCP
+                     server, benchmark tools, 12 docs, 7 tests
+    only in mine      0 real files (cache artifacts only)
+    differ           85
+THE BIG STRUCTURAL CHANGE: they SPLIT holographic_unified_p16_unicron into
+p16 + p17 and added 23 faculties. My p16 read 3282 lines against their 1730,
+which looks like deletion and is not -- 75 + 83 = 158 faculties against my 136.
+TAKING EITHER SIDE WHOLE WOULD HAVE LOST WORK IN A DIFFERENT DIRECTION.
+
+RESOLUTION, per file rather than per repo:
+    23 faculties of theirs   KEPT (their structure is the base)
+     1 faculty of mine       PORTED -- unicron_branch, into p17 where the
+                             newest faculties live, plus its catalog entry
+     9 files                 TAKEN FROM MINE, after proving every line they had
+                             that I lacked was the PRE-EDIT FORM of something I
+                             changed -- not new content. That check is what
+                             made the overwrite safe rather than hopeful.
+    10 NOTES sections        APPENDED in original order; 1,621 sections now,
+                             both sides' records intact and verified by set
+                             containment rather than by eye.
+
+VERIFIED AFTER: six selftests spanning both sides' code, their new
+memorymountain module ("peak 75 GB/s @ 256 KB"), nine faculties called live
+across both sides, all four audits at 0 -- INCLUDING the duplicate-faculty
+check, which is the one that would catch a botched split -- and a full install
+end to end with prepend bit-identical, exit calibration, and the sidecar index.
+
+THE RULE THIS COST NOTHING TO FOLLOW: A FILE THAT IS LONGER ON ONE SIDE IS NOT
+EVIDENCE OF ANYTHING. p16 shrank because content MOVED. The only safe question
+is what each side has that the other lacks, asked per symbol, and the answer
+here was 23 one way and 1 the other.
+
+## CI AFTER THE MERGE: nothing to fix, and here is what was actually checked
+
+Moose expected the merge to break CI. It did not, and the useful part is WHAT
+WAS RUN rather than the conclusion.
+
+EVERY GATE THAT RUNS WITHOUT SECRETS OR GPU WEIGHTS, on a CLEAN EXTRACT of the
+shipped zip under PYTHONHASHSEED=random:
+    tools/regen_docs.py --check     generated docs are up to date (9 outputs)
+    apiquickref.py                  regenerates clean
+    tools/semantic/lint_scripts.py  9 files, 0 errors, 0 warnings
+    tools/bump_version.py --current 0.9.0
+    skill_lint / catalog_gaps / reachability_audit / usage_audit   all 0
+    install_audit on a fresh install                               0 problems
+The reachability audit's DUPLICATE FACULTY check is the one that mattered here:
+a botched p16/p17 split would show up there as a silently shadowed definition,
+and it reads 0.
+
+TESTS: the full suite does not finish in one pass here, so it was SAMPLED --
+two independent random samples of 22 and 40 files (seeds 0 and 7), 62 of 288
+test files, 535 PASSED, 12 skipped, 0 FAILED. Plus every test whose name touches
+the merged surface (unified_split, holographic_catalog, catalog_exam,
+holographic_unified) and all four of THEIR new tests (mcp_server,
+robustness_edges, memory_covariance, and the bm25/knowledgestore pair).
+
+WHY SAMPLING IS HONEST HERE AND WHAT IT DOES NOT PROVE: the merge was
+STRUCTURAL -- a file split, one ported faculty, nine whole-file takeovers -- so
+the failure modes it can produce are import errors, duplicate definitions and
+missing symbols, and those surface on ANY test that touches the package. A
+random fifth of the suite exercises that surface heavily. What sampling cannot
+rule out is a NUMERICAL regression in a module neither sample touched, and the
+selftests are the second net under that: six ran green across both sides' code,
+including their memorymountain ("peak 75 GB/s @ 256 KB").
+STATED PLAINLY BECAUSE "CI PASSES" AND "I RAN A FIFTH OF CI" ARE DIFFERENT
+CLAIMS, and only the second one is true.

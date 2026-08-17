@@ -801,6 +801,23 @@ def main():
         print("      wrote %s (%.2f MB)" % (rep["path"], rep["megabytes"]))
         print("      perplexity %.4f | %.1f tokens/sec | harden %s"
               % (rep["perplexity"], rep["tokens_per_second"], rep["harden"]))
+        # A NUMBER THAT IS NOT THIS MODEL'S PERPLEXITY MUST SAY SO WHERE IT IS
+        # PRINTED. Field-caught: a real Qwen3.5 read 269.85 here while its own
+        # loader read 16.2 -- the tokenizer had not loaded and the probe fell
+        # back to raw UTF-8 bytes, silently, and the byte values address
+        # unrelated rows in a 248,320-token vocabulary.
+        if rep.get("perplexity_plain_english"):
+            print("      plain English %.4f | mixed probe %.1fx that"
+                  % (rep["perplexity_plain_english"],
+                     rep.get("probe_vs_plain_ratio") or 0.0))
+        if not rep.get("perplexity_comparable", True):
+            print("      [!] measured on RAW BYTES (tokenizer would not load) "
+                  "-- NOT comparable to a tokenizer-measured perplexity")
+        if rep.get("perplexity_warning"):
+            # PRINT THE DISCREPANCY WHERE THE NUMBER IS READ. A profile that
+            # records a warning nobody sees is the same failure as not having
+            # measured it.
+            print("      [!] %s" % rep["perplexity_warning"])
         for c in rep["contains"]:
             print("        - %s" % c)
         print("      This is a PROFILE, not the model: no weight tensors, no "

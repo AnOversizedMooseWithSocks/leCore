@@ -1426,6 +1426,82 @@ def register_p06(c):
                               "install the drift head", "merge distributions by adding weights",
                               "generative model as a matrix", "ship the model as weights"))
 
+    c.register_capability("Material thumbnail (one call: material in, PNG out)",
+                          "mind.preview_thumbnail(material) -- name, material object, or PBR dict in; "
+                          "small shader-ball render out; fmt='png' bytes (HTTP {'__bytes_b64__':...}) or 'array'. "
+                          "Fixture slots stay grey unless overridden. size=N delivers ANY size; upsample=True optional: diffuse/rough demod-upscale "
+                          "(lighting ~2N/3); transmissive+smooth-metal auto-route masked NATIVE (metals "
+                          "cannot win upscaled, measured). Warm@160: wax 21s, chrome 37s. MANY materials: "
+                          "mind.preview_thumbnail_batch([...]) caches the fixed-camera reference + active "
+                          "mask per process, re-rendering only ball pixels: 26s/material warm at res=96.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=128,seed=0); png=m.preview_thumbnail('gold', res=16); (isinstance(png, bytes), png[:4])",
+                          native=True, module="preview",
+                          aliases=("material thumbnail", "render a thumbnail of a material",
+                                   "batch of material thumbnails", "thumbnails for many materials",
+                                   "material thumbnail cache",
+                                   "preview this material", "thumbnail render", "quick material preview image",
+                                   "png of a material", "show me what this material looks like",
+                                   "material swatch render"))
+
+    c.register_capability("Preview scene (shader ball with core, path-traced, material slots)",
+                          "mind.preview_scene(material) renders the SHADER BALL -- "
+                          "hollow shell with cutaway, THIN LENS dish (translucency/SSS test), flush core, TWO "
+                          "FLUSH inlay belts (trim_top/trim_bottom, own materials), puck base -- graph-paper floor, "
+                          "studio rig (softboxes, gradient, ceiling panels; "
+                          "lighting='plain' for the bare renderer). An emissive core glows through glass and "
+                          "translucent outers (brightest at the lens). material dresses "
+                          "the OUTER; defaults: mouse-ball grey core+base, silicone belts; trim= dresses both "
+                          "belts, trim_top=/trim_bottom= each. preview_scene_document -> (scene, camera). ~75s res=160.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=128,seed=0); img=m.preview_scene('glass_clear', core='neon_blue', res=32); img.shape",
+                          native=True, aliases=("preview scene", "shader ball", "material preview scene",
+                                                "subsurface scattering test", "translucency preview", "thin wall test",
+                                                "default preview scene", "render material in a scene",
+                                                "test scene for materials", "preview object with slots",
+                                                "show my material on the shader ball", "material ball with floor",
+                                                "emissive core preview", "translucent material preview",
+                                                "see the material with reflections", "core and shell preview"))
+
+    c.register_capability("Emissive objects cast light (auto mesh lights)",
+                          "Any object with an EMISSIVE material becomes a real light: render_scene_document(..., "
+                          "emissive_mesh_lights=True) meshes each emitter's SDF (surface_nets) into a "
+                          "MeshLight -- NEE-sampled area source: glowing objects pool light and cast soft "
+                          "shadows. emissive_mesh_lights_fn(scene) returns the lights to compose "
+                          "by hand. SCOPE, measured: EXPOSED emitters only (sealed = binary-occluded; sss_interior "
+                          "covers glow THROUGH walls). The shader-ball preview auto-toggles the core mesh "
+                          "light ON for translucent/SSS outers, OFF for glass/transparent.",
+                          example="import lecore; m=lecore.UnifiedMind(dim=128,seed=0); from holographic.scene_and_pipeline.holographic_scene_doc import Scene; from holographic.mesh_and_geometry.holographic_sdf import sphere, plane; sc=Scene(seed=0); sc.add(name='floor',geometry=plane(0.0),material='matte_white'); sc.add(name='bulb',geometry=sphere(0.2).translate((0,0.5,0)),material='neon_blue'); from holographic.rendering.holographic_scene_render import emissive_mesh_lights_fn; len(emissive_mesh_lights_fn(sc))",
+                          native=True, module="scene_render",
+                          aliases=("mesh light", "use a mesh as a light", "emissive object as light",
+                                   "geometry light", "glowing object casts light", "area light from geometry",
+                                   "make my emissive material illuminate", "light shaped like an object"))
+
+    c.register_capability("Cheap anti-aliasing (FXAA subpixel pass + SSAA)",
+                          "Two AA doors, priced honestly. postfx.fxaa(img) (also a PostChain step 'fxaa'): the "
+                          "SUBPIXEL term of FXAA -- edge-masked blend toward a 3x3 tent, milliseconds at the same "
+                          "resolution, flat regions returned BIT-IDENTICAL so texture and grain survive. "
+                          "postfx.supersample(img, factor): true SSAA when you can afford to over-render (~factor^2 "
+                          "render time). mind.preview_scene defaults to aa='fxaa'; aa='ssaa2' renders 2x and "
+                          "box-averages down; aa='off' is raw. KEPT NEG: the full FXAA edge-walk did not pay on "
+                          "preview renders; the subpixel term alone removed the visible staircase.",
+                          example="import lecore, numpy as np; from holographic.rendering.holographic_postfx import fxaa; img=np.zeros((16,16,3)); img[:, 8:]=1.0; fxaa(img).shape",
+                          native=True, module="postfx",
+                          aliases=("antialiasing", "anti aliasing", "fxaa", "smooth jagged edges",
+                                   "jaggies in my render", "stair stepped edges", "supersample an image",
+                                   "clean up render edges", "aa post process", "edge smoothing pass",
+                                   "my render looks pixelated", "ssaa"))
+
+    c.register_capability("Film-grade fur shading (deep opacity + dual scattering + medulla)",
+        "render_hair(..., self_shadow=, dual_scatter=, medulla=): the film rung over the single-"
+        "scattering Marschner lobes. Deep-opacity self-shadow (Yuksel-Keyser structure: a light-"
+        "aligned voxel grid, filtered, exclusive-cumsum along the light axis) darkens buried "
+        "fibers; a compact dual-scattering term (Zinke structure) adds the forward-scatter glow "
+        "and backscatter fill single scattering cannot produce; medulla lobes (Yan fur structure) "
+        "widen and desaturate for animal fur. All default OFF; zero strengths ARE marschner, "
+        "pinned. Plus holographic_groom.clump: tuft the coat (roots planted, tips gather).",
+        example="import numpy as np; from holographic.mesh_and_geometry.holographic_hairshade import fur_shade; fur_shade(np.array([0.,1.,0.]), np.array([0.,0.,1.]), np.array([0.3,0.1,1.0])/1.05, 6.0).shape == (3,)",
+        native=True, aliases=("pixar quality fur", "movie fur rendering", "hair self shadowing",
+                              "dual scattering hair", "fur looks flat and dark", "clump fur into tufts"))
+
     c.register_capability("VSA load-bearing audit (the ablation table)",
         "mind.ablation_table(seeds=...): for each subsystem, run the DUMBEST honest non-"
         "holographic baseline on the SAME task, data, and metric; measure both across seeds with "

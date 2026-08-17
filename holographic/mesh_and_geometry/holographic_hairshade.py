@@ -162,7 +162,7 @@ def _draw_segment(img, p0, p1, color, cover=None):
 def render_hair(strands, camera, light_dir=(0.3, 0.6, 0.6), width=400, height=400,
                 shader="kajiya", hair_color=(0.55, 0.35, 0.15), background=(0.05, 0.05, 0.08),
                 smooth_levels=2, lod_stride=1, roughness=None, tilt_deg=None, reflect=0.10,
-                return_alpha=False):
+                return_alpha=False, self_shadow=0.0, dual_scatter=0.0, medulla=0.0, shadow_res=48):
     """Render a list of strands to an (H,W,3) image. Each strand's smoothed centerline is projected and its
     segments shaded by their tangent (`shader`='kajiya' or 'marschner'). Strands are drawn far-to-near (painter's
     order). `lod_stride` > 1 draws every Nth strand (a cheap level of detail). Returns the image array.
@@ -182,16 +182,26 @@ def render_hair(strands, camera, light_dir=(0.3, 0.6, 0.6), width=400, height=40
     eye = camera.eye
     l = _unit(light_dir)
     picked = strands[::max(1, lod_stride)]
+    # THE FILM RUNG (all default off -> the old path bit-identical): one deep-opacity grid per call
+    film = (self_shadow > 0.0) or (dual_scatter > 0.0) or (medulla > 0.0)
+    grid = light_depth_grid(picked, l, res=shadow_res) if film else None
     # sort strands far-to-near by their root depth so nearer hair draws on top
     order = np.argsort([-np.linalg.norm(s.root - eye) for s in picked])
     for si in order:
         s = picked[si].smoothed(levels=smooth_levels)
         pix, depth = _project(camera, s.points, width, height)
         tang = s.tangents()
+        # ONE vectorized deep-opacity lookup per STRAND, not one per segment: the per-segment
+        # call rebuilt the light basis 300k+ times and blew the render budget (measured).
+        nf_arr = fibers_toward_light(grid, 0.5 * (s.points[:-1] + s.points[1:])) if film else None
         for i in range(len(s.points) - 1):
             mid = 0.5 * (s.points[i] + s.points[i + 1])
             view_dir = _unit(eye - mid)
-            if shader == "marschner":
+            if film:
+                col = fur_shade(tang[i], l, view_dir, float(nf_arr[i]), hair_color=hair_color,
+                                alpha_r=alpha_r, beta_r=beta_r, reflect=reflect,
+                                self_shadow=self_shadow, dual_scatter=dual_scatter, medulla=medulla)
+            elif shader == "marschner":
                 col = marschner(tang[i], l, view_dir, hair_color=hair_color,
                                 alpha_r=alpha_r, beta_r=beta_r, reflect=reflect)
             else:
@@ -203,11 +213,139 @@ def render_hair(strands, camera, light_dir=(0.3, 0.6, 0.6), width=400, height=40
     return img
 
 
+
+# ---------------------------------------------------------------------------------------------------------------
+# H7 -- the FILM rung: deep-opacity self-shadow, dual-scattering approximation, medulla lobes.
+# The single-scattering H5 lobes make a strand read as HAIR; these three make a COAT read as FUR. Structure and
+# names follow the film canon: deep opacity maps (Yuksel & Keyser 2008) for self-shadow transmittance, dual
+# scattering (Zinke et al. 2008) for multiple scattering through the volume (the soft glow that single scattering
+# cannot produce -- this module's own H5 note called it "the harder further rung"; this is that rung), and the
+# scattered-lobe structure of Yan et al. 2017, who showed FUR (with its scattering medulla) is hair plus two
+# WIDENED, DESATURATED lobes (TTs/TRTs) -- "keep R/TT/TRT ... add two new scattered lobes".
+# All of it keys off ONE quantity: n(x) = how many fibers sit between a point and the light. We voxelize strand
+# points in a LIGHT-ALIGNED frame and exclusive-cumsum along the light axis -- the deep opacity map as a grid.
+# ---------------------------------------------------------------------------------------------------------------
+
+def light_depth_grid(strands, light_dir, res=48, stride=2, seg_stride=2, hairs_per_point=1.0):
+    """Build the deep-opacity structure: a light-aligned voxel grid whose value at a cell is the COUNT of fiber
+    points between that cell and the light (exclusive cumulative sum along the light axis). `stride` subsamples
+    strands and `seg_stride` points, with `hairs_per_point` scaling counts back up, so cost is tunable without
+    changing the answer's scale. Returns a dict for fibers_toward_light."""
+    l = _unit(np.asarray(light_dir, float))
+    a = np.array([1.0, 0.0, 0.0]) if abs(l[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    u = _unit(np.cross(l, a)); v = np.cross(l, u)                 # (u, v, l) orthonormal, l = toward the light
+    P = np.concatenate([s.points[::seg_stride] for s in strands[::max(1, stride)]], axis=0)
+    C = np.stack([P @ u, P @ v, P @ l], axis=1)
+    mins = C.min(axis=0); maxs = C.max(axis=0)
+    size = np.maximum(maxs - mins, 1e-6)
+    ijk = np.minimum((res - 1), ((C - mins) / size * res).astype(int))
+    grid = np.zeros((res, res, res))
+    np.add.at(grid, (ijk[:, 0], ijk[:, 1], ijk[:, 2]), float(hairs_per_point) * stride * seg_stride)
+    # exclusive cumsum FROM THE LIGHT SIDE: the light arrives from +l, so a cell's occlusion is the
+    # count in cells with LARGER l-coordinate. Flip, cumsum, flip, shift to exclusive.
+    occ = np.flip(np.cumsum(np.flip(grid, axis=2), axis=2), axis=2) - grid
+    # FILTER transversely (3x3 box in the u,v plane): deep opacity maps are filtered in practice --
+    # unfiltered, occlusion lives only in the exact voxel COLUMNS that contain fiber points, and a
+    # query ray between columns sees nothing (the selftest's slab caught exactly this).
+    pad = np.pad(occ, ((1, 1), (1, 1), (0, 0)), mode="edge")
+    occ = np.mean(np.stack([pad[di:di + res, dj:dj + res] for di in range(3) for dj in range(3)]), axis=0)
+    return {"occ": occ, "mins": mins, "size": size, "res": res, "basis": (u, v, l)}
+
+
+def fibers_toward_light(grid, P):
+    """n(x) for world points P (..., 3): nearest-voxel lookup into the light_depth_grid."""
+    u, v, l = grid["basis"]
+    P = np.asarray(P, float)
+    C = np.stack([P @ u, P @ v, P @ l], axis=-1)
+    ijk = np.clip(((C - grid["mins"]) / grid["size"] * grid["res"]).astype(int), 0, grid["res"] - 1)
+    return grid["occ"][ijk[..., 0], ijk[..., 1], ijk[..., 2]]
+
+
+def fur_shade(tangent, light_dir, view_dir, n_front, hair_color=(0.55, 0.35, 0.15),
+              alpha_r=None, beta_r=None, reflect=0.10, self_shadow=0.15, dual_scatter=0.6,
+              medulla=0.35):
+    """The film-fur BSDF: H5's single-scattering lobes, attenuated and augmented by the volume.
+
+    * DEEP-OPACITY SHADOW: direct light is attenuated exp(-self_shadow * n_front) -- roots dark, tips lit,
+      the shading gradient that gives the coat its volume (Yuksel & Keyser 2008 structure).
+    * DUAL SCATTERING: light that reaches depth n by FORWARD scattering through fibers is not gone -- it
+      arrives colored (transmittance^n) and SPREAD (lobe width grows with n), plus a soft local backscatter
+      where the direct term died (Zinke et al. 2008 structure, compact).
+    * MEDULLA: fur fibers scatter internally; add WIDENED, DESATURATED TTs/TRTs lobes scaled by `medulla`
+      (Yan et al. 2017 structure). Human hair: medulla ~ 0; animal fur: 0.3-0.7.
+    All three default to film-typical strengths; self_shadow/dual_scatter/medulla = 0 recovers marschner()."""
+    t = _unit(np.asarray(tangent, float)); l = _unit(np.asarray(light_dir, float))
+    v = _unit(np.asarray(view_dir, float))
+    a_r = alpha_r if alpha_r is not None else np.radians(-6.0)
+    b_r = beta_r if beta_r is not None else np.radians(7.0)
+    sin_ti = np.clip(np.sum(t * l, axis=-1), -1, 1); sin_to = np.clip(np.sum(t * v, axis=-1), -1, 1)
+    th_i = np.arcsin(sin_ti); th_o = np.arcsin(sin_to); theta_h = 0.5 * (th_i + th_o)
+    lp = _unit(l - sin_ti[..., None] * t if np.ndim(sin_ti) else l - sin_ti * t)
+    vp = _unit(v - sin_to[..., None] * t if np.ndim(sin_to) else v - sin_to * t)
+    phi = np.arccos(np.clip(np.sum(lp * vp, axis=-1), -1, 1))
+    sig = absorption_from_color(hair_color); t1 = np.exp(-sig); T2 = np.exp(-2.0 * sig)
+    # single scattering DELEGATES to marschner() -- one source of truth for the H5 lobes, so
+    # zero-strength fur_shade IS marschner by construction (pinned in the selftest)
+    single = np.clip(marschner(tangent, light_dir, view_dir, hair_color=hair_color,
+                               alpha_r=a_r, beta_r=b_r, reflect=reflect), 0.0, None)
+    single = single.reshape(np.shape(theta_h) + (3,)) if np.ndim(theta_h) else single.reshape(3)
+    # medulla: widened, desaturated scattered lobes (sqrt(T2) desaturates -- scattered paths lose saturation)
+    TTs = _gaussian(theta_h + a_r * 0.5, b_r * 3.0) * _gaussian(np.pi - phi, np.radians(55.0))
+    TRTs = 0.35 * _gaussian(theta_h + a_r * 1.5, b_r * 5.0)
+    single = single + medulla * (TTs + TRTs)[..., None] * np.sqrt(T2)
+    n = np.asarray(n_front, float)
+    T_deep = np.exp(-self_shadow * n)                                            # deep-opacity transmittance
+    # dual scattering: forward-scattered arrival, colored t1^(0.8 n), spread grows with depth
+    spread = _gaussian(theta_h, b_r * (2.0 + 0.5 * np.minimum(n, 12.0)))
+    G = dual_scatter * spread[..., None] * (t1[None, ...] ** np.minimum(0.8 * n, 10.0)[..., None]
+                                            if np.ndim(n) else t1 ** min(0.8 * float(n), 10.0))
+    B = dual_scatter * 0.35 * (1.0 - T_deep)[..., None] * T2 if np.ndim(n) else \
+        dual_scatter * 0.35 * (1.0 - T_deep) * T2                                # local backscatter fill
+    out = T_deep[..., None] * single + G + B if np.ndim(n) else T_deep * single + G + B
+    return np.clip(out, 0.0, None)
+
+
 def _selftest():
     """Kajiya-Kay is anisotropic (specular peaks when light/view are symmetric about the tangent; diffuse peaks
     when the light is perpendicular to the hair); Marschner is brighter for blonde than black, has a nonzero
     colored TRT secondary highlight, and conserves energy loosely; rendering produces a non-empty image and a
     coarser LOD keeps a similar silhouette. Deterministic."""
+    # (H7-1) DEEP OPACITY: a slab of parallel fibers, light from +z -- the point BEHIND the slab
+    # sees more fibers toward the light than the point in front, and its direct term is darker.
+    from holographic.mesh_and_geometry.holographic_groom import Strand
+    # fibers must SPAN the light axis or the grid's z-range collapses and every query clips to
+    # one voxel (the first version of this plant did exactly that -- instrument error, kept here)
+    slab = [Strand(np.stack([np.array([x, y, z]), np.array([x, y + 0.5, z])]))
+            for x in np.linspace(-1, 1, 8) for y in np.linspace(-1, 1, 8)
+            for z in np.linspace(0.0, 0.5, 4)]
+    g = light_depth_grid(slab, (0.0, 0.0, 1.0), res=24, stride=1, seg_stride=1)
+    n_back = fibers_toward_light(g, np.array([0.0, 0.0, 0.0]))      # bottom of the slab: everything above occludes
+    n_front_ = fibers_toward_light(g, np.array([0.0, 0.0, 0.5]))    # top of the slab: nothing above
+    assert n_back > n_front_, "the slab must occlude the point behind it (%s vs %s)" % (n_back, n_front_)
+    tv = np.array([0.0, 1.0, 0.0]); lz = np.array([0.0, 0.0, 1.0]); vz = _unit(np.array([0.3, 0.1, 1.0]))
+    deep = fur_shade(tv, lz, vz, 10.0, dual_scatter=0.0, medulla=0.0).sum()
+    shallow = fur_shade(tv, lz, vz, 0.0, dual_scatter=0.0, medulla=0.0).sum()
+    assert deep < shallow * 0.35, "deep-opacity shadow must darken buried fibers (%.3f vs %.3f)" % (deep, shallow)
+
+    # (H7-2) DUAL SCATTERING: at depth, turning dual_scatter ON adds energy (the glow single scattering lacks)
+    ds_on = fur_shade(tv, lz, vz, 6.0, self_shadow=0.3, dual_scatter=0.7, medulla=0.0).sum()
+    ds_off = fur_shade(tv, lz, vz, 6.0, self_shadow=0.3, dual_scatter=0.0, medulla=0.0).sum()
+    assert ds_on > ds_off * 1.5, "dual scattering must add volume glow (%.4f vs %.4f)" % (ds_on, ds_off)
+
+    # (H7-3) MEDULLA: off-peak longitudinal response rises (the lobes WIDEN -- fur is soft where hair is sharp)
+    v_off = _unit(np.array([0.5, 0.55, 0.7]))                    # well off the specular cone
+    med_on = fur_shade(tv, lz, v_off, 0.0, self_shadow=0.0, dual_scatter=0.0, medulla=0.6).sum()
+    med_off = fur_shade(tv, lz, v_off, 0.0, self_shadow=0.0, dual_scatter=0.0, medulla=0.0).sum()
+    assert med_on > med_off, "medulla lobes must widen the response (%.5f vs %.5f)" % (med_on, med_off)
+
+    # (H7-4) DEFAULT-OFF REGRESSION: fur_shade at zero strengths == marschner exactly (the additive contract)
+    l = _unit(np.array([0.4, 0.3, 0.7])); v = _unit(np.array([-0.3, 0.2, 0.8]))
+    hc = (0.6, 0.4, 0.2)                                         # SAME color both sides (the defaults differ!)
+    a = fur_shade(tv, l, v, 0.0, hair_color=hc, self_shadow=0.0, dual_scatter=0.0, medulla=0.0, reflect=0.10)
+    b = marschner(tv, l, v, hair_color=hc, reflect=0.10)
+    assert np.allclose(a, np.clip(np.reshape(b, (3,)), 0, None), atol=1e-12), \
+        "zero-strength fur_shade must BE marschner"
+
     t = np.array([0.0, 1.0, 0.0])                                # a vertical hair
 
     # (1) Kajiya-Kay diffuse peaks when the light is PERPENDICULAR to the tangent, ~0 when parallel

@@ -222,6 +222,7 @@ KNOWN_COLLISIONS = {
     "search": frozenset({"dictionary", "memsearch"}),         # prefix words vs state ranking
     "select": frozenset({"scene_query", "writepolicy"}),      # scene predicates vs register policy
 
+
 }
 
 

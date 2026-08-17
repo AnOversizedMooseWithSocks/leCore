@@ -37,6 +37,26 @@ def main(model_dir):
 
     print("INSTALL AUDIT: %s" % model_dir)
     print()
+    # ---- WAS THE INSTALL EVEN FINISHED? lecore.json is written LAST and
+    #      atomically, so its absence on a folder that otherwise looks like a
+    #      model means the run was interrupted -- a forced restart mid-export
+    #      leaves a directory that loads, runs and assesses cleanly.
+    lj_path = os.path.join(model_dir, "lecore.json")
+    if not os.path.exists(lj_path):
+        print("  [!] NO lecore.json -- this install did NOT FINISH.")
+        print("      A folder can load and assess normally and still be "
+              "incomplete; the marker is written last on purpose.")
+        print("      Re-run:  install.bat ./work/original")
+        print()
+    else:
+        _lj = json.load(open(lj_path))
+        _cal = (_lj.get("exit_calibration") or {})
+        if _cal.get("of_layers") and int(cfg["n_layers"]) != _cal["of_layers"]:
+            print("  [!] LAYER COUNT MISMATCH: the model has %d layers, the "
+                  "install recorded %d -- these files are from different runs."
+                  % (int(cfg["n_layers"]), _cal["of_layers"]))
+            print()
+
     print("ROUND TRIP -- what survived to disk:")
     try:
         rec = boot(w)["record"]

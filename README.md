@@ -76,10 +76,10 @@ is in **[`GALLERY.md`](GALLERY.md)**.
 
 | | |
 |---|---|
-| ![Path-traced spheres on a checker floor](gallery/render_spheres.png) | ![A realistic volumetric cumulus cloud](gallery/render_cloud.png) |
-| *Path tracing: soft shadows, reflections* | *Volumetrics: a cumulus cloud, one call* |
-| ![A glass sphere refracting the scene](gallery/render_glass.png) | ![A Menger-sponge fractal](gallery/render_fractal.png) |
-| *Refraction through glass* | *A raymarched Menger sponge* |
+| ![A groomed furry critter, strand-level fur](gallery/render_fur.png) | ![Crystal grains and ore inclusions](gallery/render_crystal.png) |
+| *Strand-level groomed fur, path-traced* | *Procedural crystal grains with ore inclusions* |
+| ![Metal bars glowing by temperature](gallery/render_hot_metal.png) | ![Thin-film iridescence on a bubble and an oil-slick sphere](gallery/render_iridescence.png) |
+| *Hot metal: emission from physical temperature* | *Thin-film iridescence: soap bubble, oil slick* |
 
 And the measurement culture, in pictures:
 
@@ -298,6 +298,11 @@ row-scaled int8 scan under a provable worst-case error bound yields a candidate 
 measures every route on *your* data at *your* k and serves the fastest whose certified
 bound meets budget. Exact answers at quantized-scan speed; the only 1.000 in the 1M table.
 Dispute the numbers by re-running, not by re-describing (`tools/benchmarks_faiss.py`).
+
+Is this table exercising the holographic core? **No — by measurement, and that is the point**:
+[the honest answer](docs/ANSWER_benchmark_and_vsa.md) documents where VSA auditioned for the
+hot path and lost (centroid 0.797 vs HRR bundle 0.789, a kept negative), and where it is
+measured as decisively load-bearing (noisy-key recall 0.889 where an exact dict scores 0.000).
 
 ## Why it doesn't hallucinate about stored facts
 

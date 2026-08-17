@@ -204,6 +204,36 @@ def _row_scale(A, row):
     return peak / 255.0
 
 
+#: Tensors whose dtype must NOT be narrowed on export, because they carry PACKED
+#: BYTES rather than numbers. bf16 has EIGHT mantissa bits; a manifest byte
+#: needs all of them and more, so a bf16 round trip returns
+#: b'\x00\x00\x00\x00...' and boot() raises "no leCore substrate header here".
+#: MEASURED: dtype=None round-trips, dtype=F16 round-trips (11 mantissa bits),
+#: dtype=BF16 DESTROYS IT. Field-caught on a real Qwen3.5-0.8B whose source is
+#: bf16 -- the install reported boot_record ok, and the audit on the SAVED model
+#: reported NO BOOT RECORD (JSONDecodeError), because both were telling the
+#: truth about different bytes.
+BOOT_SUBSTRATE_KEEP_PRECISION = True
+
+
+def boot_substrate_keys(weights, key=None, report=None):
+    """Which tensors carry the boot record, so an exporter can spare them.
+
+    THE ROW IS NOT THE WHOLE STORY. A manifest larger than one embedding row
+    SPILLS into the LOW BITS of surface weights and leaves a pointer in the row
+    -- measured, 6 tensors touched for a 146-byte spill on a small model. bf16
+    keeps EIGHT mantissa bits and the surface encoding lives BELOW that, so
+    narrowing spilled tensors erases the payload while the pointer survives:
+    boot() then finds a header promising bytes that are gone and raises.
+    Pass the write_boot report to get the spilled tensors too; without it this
+    returns the row's tensor only, which is correct for an unspilled record."""
+    keys = [key or next(k for k in weights
+                        if k.endswith("embed_tokens.weight"))]
+    if report and report.get("spilled"):
+        keys += [k for k in report.get("surface_keys", ())]
+    return keys
+
+
 def write_boot(weights, record, key=None, row=None, spill=True):
     """Install the boot sector, spilling into the weight SURFACE when needed.
 
@@ -264,8 +294,16 @@ def write_boot(weights, record, key=None, row=None, spill=True):
     _sent[0] = -1.0                      # SPILL sentinel: see decode_record
     A[r] = _fit_row(_sent, A, r)
     w[key] = A.astype(np.asarray(weights[key]).dtype)
+    # NAME THE TENSORS THE SPILL TOUCHED. An exporter that narrows them to bf16
+    # erases the payload while leaving the pointer intact, so boot() finds a
+    # header promising bytes that are gone. Measured: 6 tensors for a 146-byte
+    # spill, and a real bf16 Qwen3.5 install that reported ok in memory and NO
+    # BOOT RECORD from disk.
+    _touched = [k for k in w
+                if not np.array_equal(np.asarray(weights[k]), np.asarray(w[k]))]
     return w, {"row": r, "key": key, "spilled": True,
-               "surface_bytes": srep["bytes"]}
+               "surface_bytes": srep["bytes"],
+               "surface_keys": _touched}
 
 
 def boot(weights, row=None, key=None):

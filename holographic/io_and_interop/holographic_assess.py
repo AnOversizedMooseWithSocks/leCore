@@ -53,11 +53,24 @@ def assess(model_dir, out_path, text=None, n_gen=32, layers=(0, None, -1),
     rt, cfg = load_runtime(model_dir)
     w = load_weights_dir(model_dir)
     text = text or PROBE
+    # SAY WHICH TOKENIZER PRODUCED THE NUMBER. Falling back to raw UTF-8 bytes
+    # on a BPE model does not measure that model -- it measures the model's
+    # response to ARBITRARY IDS. "The" is one token id in Qwen; as bytes it is
+    # 84, 104, 101. FIELD-CAUGHT: a real Qwen3.5-0.8B whose own loader reported
+    # perplexity 16.2 was assessed at 269.85, and the number was reported with
+    # no indication that it had been measured on different input.
+    # A SILENT FALLBACK IS A MEASUREMENT THAT LIES ABOUT ITS OWN SUBJECT. The
+    # fallback still happens -- measuring nothing is worse -- but the profile
+    # now RECORDS which path ran, and a byte fallback on a large vocabulary is
+    # flagged as UNCOMPARABLE rather than presented as the model's perplexity.
+    tok_kind, tok_why = "bpe", ""
     try:
         from holographic.io_and_interop.holographic_bpe import BPE
         tok = BPE.from_dir(model_dir)
         ids = tok.encode(text)[:512]
-    except Exception:
+    except Exception as exc:
+        tok_kind, tok_why = "utf8_bytes", "%s: %s" % (type(exc).__name__,
+                                                      str(exc)[:120])
         ids = [b for b in text.encode("utf-8")][:512]
     if len(ids) < 16:
         # the tokenizer did not recognise the probe: fall back to a
@@ -66,7 +79,16 @@ def assess(model_dir, out_path, text=None, n_gen=32, layers=(0, None, -1),
         ids = [int(i % max(n - 1, 1)) for i in range(10, 10 + 128)]
 
     out = {}
+    # A BYTE PROBE ON A BIG-VOCABULARY MODEL IS NOISE, and the perplexity that
+    # comes out of it is not this model's perplexity. 1024 is the line: a
+    # byte-level model has 256-512 rows and the two agree; anything larger and
+    # the byte ids address rows that mean something else entirely.
+    _vocab = int(np.asarray(rt.lm_head).shape[0])
+    _comparable = (tok_kind == "bpe") or (_vocab <= 1024)
     man = {"model_dir": os.path.abspath(model_dir), "probe_tokens": len(ids),
+           "tokenizer": tok_kind, "tokenizer_error": tok_why,
+           "perplexity_comparable": bool(_comparable),
+           "vocab": _vocab,
            "when": time.strftime("%Y-%m-%d %H:%M"), "contains": []}
 
     prof = bios_report(w, cfg, model_dir=model_dir, probe_ids=ids[:16])
@@ -84,6 +106,51 @@ def assess(model_dir, out_path, text=None, n_gen=32, layers=(0, None, -1),
     gen, _st = rt.generate_fast(list(prompt), n_new=int(n_gen))
     t_gen = time.time() - t0
     man["perplexity"] = ppl
+    # ---- A SECOND, PLAIN-ENGLISH REFERENCE NUMBER, always.
+    # The main PROBE deliberately mixes English, technical prose and PYTHON
+    # SOURCE, which is the right probe for a profile and the WRONG one to quote
+    # alone: a model can be fine on prose and poor on code, and one number
+    # cannot tell you which. Field-caught -- a real Qwen3.5 assessed at 269.85
+    # while the loader's own plain-English check on the SAME LOADED MODEL read
+    # 16.2, and there was no way to see from the profile that the two sentences
+    # were measuring different material.
+    # This is the loader's sanity sentence, tokenized the same way, so the two
+    # are directly comparable and the RATIO is the diagnostic.
+    try:
+        _ref_text = ("The capital of France is Paris. Water freezes at zero "
+                     "degrees and boils at one hundred degrees celsius.")
+        if tok_kind == "bpe":
+            _ref_ids = tok.encode(_ref_text)[:64]
+        else:
+            _ref_ids = [b for b in _ref_text.encode("utf-8")
+                        if b < _vocab][:64]
+        if len(_ref_ids) >= 16:
+            _ref = float(rt.perplexity(list(_ref_ids)))
+            man["perplexity_plain_english"] = _ref
+            man["probe_vs_plain_ratio"] = round(ppl / max(_ref, 1e-9), 2)
+            # A model that is 5x worse on the mixed probe than on plain prose
+            # is telling you something -- either about the model or about the
+            # probe -- and either way the profile should say it out loud rather
+            # than publish the higher number unqualified.
+            if ppl > 5.0 * _ref:
+                man["perplexity_warning"] = (
+                    "the mixed probe reads %.2f but PLAIN ENGLISH reads %.2f on "
+                    "this same model (%.1fx). The headline number is dominated "
+                    "by the code and technical spans in the probe, not by the "
+                    "model's general fluency -- quote both or quote the plain "
+                    "one." % (ppl, _ref, ppl / max(_ref, 1e-9)))
+    except Exception:
+        pass
+    if not _comparable:
+        # LOUD, IN THE PROFILE ITSELF. A number that is not this model's
+        # perplexity must not sit in a field called "perplexity" without
+        # saying so, because the next reader will compare it to one that is.
+        man["perplexity_warning"] = (
+            "measured on RAW UTF-8 BYTES because the tokenizer would not load "
+            "(%s). This model has a %d-row vocabulary, so byte values address "
+            "unrelated tokens and this number is NOT comparable to a "
+            "tokenizer-measured perplexity for the same model."
+            % (tok_why or "no reason recorded", _vocab))
     man["perplexity_seconds"] = round(t_ppl, 3)
     man["generation"] = {"tokens": int(n_gen), "seconds": round(t_gen, 3),
                          "tokens_per_second": round(n_gen / max(t_gen, 1e-9), 1)}
@@ -195,6 +262,11 @@ def assess(model_dir, out_path, text=None, n_gen=32, layers=(0, None, -1),
     return {"path": out_path,
             "megabytes": round(os.path.getsize(out_path) / 1e6, 2),
             "perplexity": ppl,
+            "perplexity_comparable": bool(_comparable),
+            "perplexity_plain_english": man.get("perplexity_plain_english"),
+            "probe_vs_plain_ratio": man.get("probe_vs_plain_ratio"),
+            "perplexity_warning": man.get("perplexity_warning"),
+            "tokenizer": tok_kind,
             "tokens_per_second": man["generation"]["tokens_per_second"],
             "harden": man.get("harden", {}).get("passed"),
             "contains": man["contains"]}

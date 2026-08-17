@@ -1092,6 +1092,14 @@ cols = mind.toon_shade(mesh, cols, cam['eye'], bands=3, rim=0.42); img = mind.re
 ```
 *Find it by:* cel shading, toon shading, flat cartoon look, outline the creature, posterize shading, non photorealistic render, comic book look, quantize shading bands
 
+### Cheap anti-aliasing (FXAA subpixel pass + SSAA)
+Two AA doors, priced honestly. postfx.fxaa(img) (also a PostChain step 'fxaa'): the SUBPIXEL term of FXAA -- edge-masked blend toward a 3x3 tent, milliseconds at the same resolution, flat regions returned BIT-IDENTICAL so texture and grain survive. postfx.supersample(img, factor): true SSAA when you can afford to over-render (~factor^2 render time). mind.preview_scene defaults to aa='fxaa'; aa='ssaa2' renders 2x and box-averages down; aa='off' is raw. KEPT NEG: the full FXAA edge-walk did not pay on preview renders; the subpixel term alone removed the visible staircase..
+
+```python
+import lecore, numpy as np; from holographic.rendering.holographic_postfx import fxaa; img=np.zeros((16,16,3)); img[:, 8:]=1.0; fxaa(img).shape
+```
+*Find it by:* antialiasing, anti aliasing, fxaa, smooth jagged edges, jaggies in my render, stair stepped edges, supersample an image, clean up render edges
+
 ### Closest point on a mesh (shared correspondence machine for transfer + bakes)
 Closest point on a mesh to each query point -- the shared correspondence machine behind uv/attribute transfer AND the high-to-low bakes (M14: one projection, many channels). Builds a uniform spatial hash over triangles ONCE and ring-searches it per point; returns (face_index, barycentric, distance) so the caller reads whatever it needs (position, normal, uv, weight) off the single projection instead of re-casting. m.mesh_closest_point(mesh, points). The dedup of four inline copies of the same grid+ring-search; bit-identical to each (same cell rule, ring order, first-seen tie-break)..
 
@@ -1276,6 +1284,14 @@ r=mind.synthesize_model((__import__('numpy').arange(40),(__import__('numpy').ara
 ```
 *Find it by:* build a model pipeline automatically, synthesize a model on the fly, emit a training recipe, why did it choose this model, dynamic model construction, model as a stored program
 
+### Emissive objects cast light (auto mesh lights)
+Any object with an EMISSIVE material becomes a real light: render_scene_document(..., emissive_mesh_lights=True) meshes each emitter's SDF (surface_nets) into a MeshLight -- NEE-sampled area source: glowing objects pool light and cast soft shadows. emissive_mesh_lights_fn(scene) returns the lights to compose by hand. SCOPE, measured: EXPOSED emitters only (sealed = binary-occluded; sss_interior covers glow THROUGH walls). The shader-ball preview auto-toggles the core mesh light ON for translucent/SSS outers, OFF for glass/transparent..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=128,seed=0); from holographic.scene_and_pipeline.holographic_scene_doc import Scene; from holographic.mesh_and_geometry.holographic_sdf import sphere, plane; sc=Scene(seed=0); sc.add(name='floor',geometry=plane(0.0),material='matte_white'); sc.add(name='bulb',geometry=sphere(0.2).translate((0,0.5,0)),material='neon_blue'); from holographic.rendering.holographic_scene_render import emissive_mesh_lights_fn; len(emissive_mesh_lights_fn(sc))
+```
+*Find it by:* mesh light, use a mesh as a light, emissive object as light, geometry light, glowing object casts light, area light from geometry, make my emissive material illuminate, light shaped like an object
+
 ### Exact planar cross-section (area / perimeter / contours)
 CROSS-SECTION a triangle mesh with a plane (holographic_meshtools.section): m.mesh_section(mesh, plane_point, plane_normal) returns the exact enclosed AREA (winding-signed shoelace over the triangle/plane segments -- holes subtract automatically), PERIMETER, CONTOUR count, and the world-space POLYLINES. No rasterising or field sampling -- the numeric contour, from the geometry itself. Unit cube at mid-height: area 1, perimeter 4, 1 contour, to 1e-12..
 
@@ -1323,6 +1339,14 @@ fill the unknown cells of a field, dispatched on TYPE. mind.inpaint(field, known
 import numpy as np; N = 32; y, x = np.meshgrid(np.linspace(0,1,N), np.linspace(0,1,N), indexing='ij'); f = 0.3*x + 0.4*np.exp(-((x-0.6)**2 + (y-0.3)**2)/0.05); known = np.random.default_rng(0).random((N,N)) > 0.5; print(mind.fill_report(f, mind.inpaint(f, known), known))
 ```
 *Find it by:* inpaint, inpaint a hole, impute missing values, fill in missing data, label propagation, hole filling, missing data, impute
+
+### Film-grade fur shading (deep opacity + dual scattering + medulla)
+render_hair(..., self_shadow=, dual_scatter=, medulla=): the film rung over the single-scattering Marschner lobes. Deep-opacity self-shadow (Yuksel-Keyser structure: a light-aligned voxel grid, filtered, exclusive-cumsum along the light axis) darkens buried fibers; a compact dual-scattering term (Zinke structure) adds the forward-scatter glow and backscatter fill single scattering cannot produce; medulla lobes (Yan fur structure) widen and desaturate for animal fur. All default OFF; zero strengths ARE marschner, pinned. Plus holographic_groom.clump: tuft the coat (roots planted, tips gather)..
+
+```python
+import numpy as np; from holographic.mesh_and_geometry.holographic_hairshade import fur_shade; fur_shade(np.array([0.,1.,0.]), np.array([0.,0.,1.]), np.array([0.3,0.1,1.0])/1.05, 6.0).shape == (3,)
+```
+*Find it by:* pixar quality fur, movie fur rendering, hair self shadowing, dual scattering hair, fur looks flat and dark, clump fur into tufts
 
 ### Fit a base mesh to a target
 FIT A BASE MESH TO A TARGET (the closed block-out loop): skin a skeleton into a watertight base mesh, SHRINKWRAP it onto a target, report the silhouette-fit gain (faculty m.fit_base_mesh). The block-out-then-snap loop, an OPTIMISATION target since it returns iou_base and iou_fitted. Returns {base, fitted, residual, iou_base, iou_fitted}. MEASURED: a crude 1-edge capsule fitted to a stretched-box target jumped 0.64 -> 0.97 mean IoU. KEPT NEG: closest-point shrinkwrap -- the skeleton must roughly COVER the target parts; fits SHAPE not TOPOLOGY (retopo after)..
@@ -1564,6 +1588,14 @@ the engine's material LIBRARIES, discoverable in one place: ~141 RENDER presets 
 mind.material_info('gold'); mind.find_materials('clear liquid'); mind.materials()
 ```
 *Find it by:* material library, materials, physical material, material properties, density, refractive index, render material, pbr preset
+
+### Material thumbnail (one call: material in, PNG out)
+mind.preview_thumbnail(material) -- name, material object, or PBR dict in; small shader-ball render out; fmt='png' bytes (HTTP {'__bytes_b64__':...}) or 'array'. Fixture slots stay grey unless overridden. size=N delivers ANY size; upsample=True optional: diffuse/rough demod-upscale (lighting ~2N/3); transmissive+smooth-metal auto-route masked NATIVE (metals cannot win upscaled, measured). Warm@160: wax 21s, chrome 37s. MANY materials: mind.preview_thumbnail_batch([...]) caches the fixed-camera reference + active mask per process, re-rendering only ball pixels: 26s/material warm at res=96..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=128,seed=0); png=m.preview_thumbnail('gold', res=16); (isinstance(png, bytes), png[:4])
+```
+*Find it by:* material thumbnail, render a thumbnail of a material, batch of material thumbnails, thumbnails for many materials, material thumbnail cache, preview this material, thumbnail render, quick material preview image
 
 ### Mesh Laplacian eigenmaps (cotan spectrum for spectral analysis)
 R6 foundation -- the low SPECTRUM of a mesh's cotan Laplace-Beltrami operator (m.mesh_laplacian_eigenmaps): the eigenfunctions a spectral analysis builds on (spectral segmentation, quadrangulation layout, shape descriptors). Cotan weights (Pinkall-Polthier) + lumped mass, solved as the symmetrised generalised eigenproblem via eigh (exact, fine to a few thousand verts). VALIDATED on a sphere: eigenvalues cluster at l(l+1)=0,2,6,12 and the first eigenspace recovers x,y,z at R2=1.000. SCALAR vertex operator, distinct from the crossfield CONNECTION Laplacian. Returns (eigenvalues, eigenfunctions)..
@@ -1836,6 +1868,14 @@ SEE what you composed: mind.preview_texture(graph) renders a CMP1 texture graph 
 img = mind.preview_texture(graph); ball = mind.preview_material(layered_material)
 ```
 *Find it by:* preview, swatch, material ball, material preview, texture preview, see the texture, render swatch, thumbnail
+
+### Preview scene (shader ball with core, path-traced, material slots)
+mind.preview_scene(material) renders the SHADER BALL -- hollow shell with cutaway, THIN LENS dish (translucency/SSS test), flush core, TWO FLUSH inlay belts (trim_top/trim_bottom, own materials), puck base -- graph-paper floor, studio rig (softboxes, gradient, ceiling panels; lighting='plain' for the bare renderer). An emissive core glows through glass and translucent outers (brightest at the lens). material dresses the OUTER; defaults: mouse-ball grey core+base, silicone belts; trim= dresses both belts, trim_top=/trim_bottom= each. preview_scene_document -> (scene, camera). ~75s res=160..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=128,seed=0); img=m.preview_scene('glass_clear', core='neon_blue', res=32); img.shape
+```
+*Find it by:* preview scene, shader ball, material preview scene, subsurface scattering test, translucency preview, thin wall test, default preview scene, render material in a scene
 
 ### Procedural plants & trees (L-system grammar)
 grow branching plants and trees from rewrite rules: expand an L-system, walk it with a 3-D turtle into branch segments, then mesh it as tapered limbs; also greebles, seeded procedural objects and terrain vegetation.
@@ -5324,4 +5364,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*681 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*686 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

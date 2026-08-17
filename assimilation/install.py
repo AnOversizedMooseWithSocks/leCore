@@ -281,6 +281,54 @@ def main():
     # pipeline was host-NumPy throughout. Weights go resident ONCE if a device
     # and the policy allow; on a laptop this reports cpu and runs unchanged.
     from holographic.io_and_interop.holographic_devicerun import place, status
+    # ASK FOR THE GPU BEFORE ASKING WHERE IT IS. `--device gpu` set a variable
+    # that place() read, but the BACKEND's switch is the environment variable
+    # HOLOSTUFF_GPU, checked at import. So --device gpu found "no accelerator
+    # available" on a machine with a working CUDA card, because nothing had
+    # requested one. A flag that does not reach the thing it names is a flag
+    # that lies.
+    if str(a.device).lower() in ("gpu", "auto"):
+        try:
+            from holographic.misc.holographic_backend import (
+                enable_gpu, gpu_available)
+            if gpu_available():
+                enable_gpu(True)
+            elif str(a.device).lower() == "gpu":
+                # NAME THE EXACT WHEEL, by asking the DRIVER. nvidia-smi reports
+                # the highest CUDA version the installed driver supports, which
+                # is the only number that decides between cupy-cuda11x and
+                # cupy-cuda12x. THE CUDA TOOLKIT IS NOT NEEDED -- the pip wheel
+                # bundles the runtime; only the driver has to be present, and
+                # it already is if the card works at all. Saying "install cupy
+                # for your CUDA version" makes the user go find that out.
+                _hint = ""
+                try:
+                    import subprocess
+                    _out = subprocess.run(["nvidia-smi"], capture_output=True,
+                                          text=True, timeout=10).stdout
+                    _m = re.search(r"CUDA Version:\s*(\d+)\.", _out)
+                    if _m:
+                        _hint = ("cupy-cuda12x" if int(_m.group(1)) >= 12
+                                 else "cupy-cuda11x")
+                        print("      [!] a driver IS present (CUDA %s.x) but "
+                              "cupy is not installed. Run:" % _m.group(1))
+                        print("          .venv\\Scripts\\python.exe -m pip "
+                              "install %s" % _hint)
+                        print("          (the wheel bundles the CUDA runtime "
+                              "-- you do NOT need the CUDA Toolkit)")
+                except Exception:
+                    pass
+                if not _hint:
+                    print("      [!] --device gpu requested but no CUDA device "
+                          "is visible. Check `nvidia-smi` runs; if it does, "
+                          "install cupy-cuda12x (or cupy-cuda11x for an older "
+                          "driver) into assimilation\\.venv. The CUDA Toolkit "
+                          "is NOT required -- the wheel bundles the runtime.")
+        except Exception as _exc:
+            if str(a.device).lower() == "gpu":
+                print("      [!] --device gpu requested but the GPU backend "
+                      "would not load: %s" % str(_exc)[:70])
+
     _dev = place(rt, want=a.device)
     print("      hardware: %s (%s)"
           % (_dev.get("device"), _dev.get("why", status()["array_module"])))
@@ -294,8 +342,31 @@ def main():
 
     # ---- write an ORDINARY checkpoint ----
     os.makedirs(a.out_dir, exist_ok=True)
-    export_portable(w2, os.path.join(a.out_dir, "model.safetensors"),
-                    like=a.model_dir)
+    # KEEP THE BOOT SUBSTRATE OUT OF BF16. `like=` copies the source dtypes,
+    # and a bf16 source narrows the embedding -- which carries PACKED BYTES, not
+    # numbers. bf16 has EIGHT mantissa bits; the manifest needs more, so the row
+    # comes back zeroed and boot() raises "no leCore substrate header here".
+    # FIELD-CAUGHT on a real Qwen3.5-0.8B: the install reported boot_record ok
+    # (true in memory) and audit.bat on the SAVED model reported NO BOOT RECORD
+    # (true on disk). Both were honest about different bytes.
+    # Measured: dtype=None round-trips, F16 round-trips, BF16 DESTROYS IT.
+    from holographic.io_and_interop.holographic_boot import (
+        boot_substrate_keys)
+    _keep = boot_substrate_keys(w2, report=(rep.get("boot") or {}))
+    # WRITE TO A TEMP NAME AND RENAME. A forced Windows Update restart during
+    # the export leaves a TRUNCATED model.safetensors that still loads -- the
+    # header is written first, so the file looks structurally fine and the
+    # tensors after the cut are garbage or absent. Field-caught: an install was
+    # interrupted and the resulting folder assessed cleanly at 24 layers,
+    # because the layer count came from a config that HAD been written while
+    # the weights had not.
+    # os.replace is atomic on Windows and POSIX alike, so the final name either
+    # does not exist or is a complete file. THERE IS NO PARTIAL STATE TO
+    # MISREAD.
+    _final = os.path.join(a.out_dir, "model.safetensors")
+    _tmp = _final + ".incomplete"
+    export_portable(w2, _tmp, like=a.model_dir, keep_f32=_keep)
+    os.replace(_tmp, _final)
     for f in os.listdir(a.model_dir):
         src = os.path.join(a.model_dir, f)
         if os.path.isfile(src) and not f.endswith(".safetensors") \
@@ -305,6 +376,9 @@ def main():
     # THE CONFIG MUST MATCH THE NEW DEPTH, including layer_types -- a loader
     # that reads 24 entries for a 26-layer model misreads every tensor after
     # the second one.
+    # AND THE CONFIG LAST, for the same reason in the other direction: a config
+    # claiming 26 layers beside weights that only have 24 is exactly the state
+    # that made an interrupted run look finished.
     cp = os.path.join(a.out_dir, "config.json")
     if os.path.exists(cp):
         with open(cp) as f:
@@ -337,7 +411,15 @@ def main():
         with open(cp, "w") as f:
             json.dump(cj, f, indent=2)
 
-    with open(os.path.join(a.out_dir, "lecore.json"), "w") as f:
+    # lecore.json IS THE COMPLETION MARKER, written LAST and atomically. Its
+    # presence means every earlier step finished; its ABSENCE on a folder that
+    # otherwise looks like a model means the run was interrupted. Before this,
+    # an install killed by a forced restart left a directory that loaded, ran,
+    # and assessed cleanly -- with no way to tell it from a finished one except
+    # by counting layers and knowing what the count should have been.
+    _lj = os.path.join(a.out_dir, "lecore.json")
+    _ljt = _lj + ".incomplete"
+    with open(_ljt, "w") as f:
         json.dump({"format": "leCore/installed/1",
                    "installed": rep["installed"],
                    "registers": rep.get("registers"),
@@ -353,6 +435,7 @@ def main():
                    "boot_row": rep.get("boot_row"),
                    "baseline_perplexity": rep.get("baseline_perplexity"),
                    "final": rep.get("final")}, f, indent=2)
+    os.replace(_ljt, _lj)          # atomic: the marker appears complete or not
 
     mb = os.path.getsize(os.path.join(a.out_dir, "model.safetensors")) / 1e6
     print("\n[wrote] %s  (%.1f MB, %s)"
@@ -407,6 +490,25 @@ def main():
             print("      index         FAIL  %s: %s"
                   % (type(_exc).__name__, str(_exc)[:60]))
 
+
+    # ---- VERIFY THE BOOT RECORD ON DISK, not in memory. It reported ok during
+    #      the install and came back NO BOOT RECORD (JSONDecodeError) from the
+    #      saved file on a real bf16 Qwen3.5 -- both true, about different
+    #      bytes. The record is the LAST thing written and the FIRST thing a
+    #      narrowing export can destroy, so it is checked where it lands.
+    try:
+        from holographic.io_and_interop.holographic_boot import boot as _boot
+        from holographic.io_and_interop.holographic_unicron import (
+            load_safetensors as _ls)
+        _disk = _ls(os.path.join(a.out_dir, "model.safetensors"))
+        _rec = _boot(_disk)["record"]
+        print("      boot record   ok    reads back from disk: %d capabilities"
+              % len(_rec.capabilities))
+    except Exception as _exc:
+        print("      boot record   FAIL  wrote ok but does NOT read back from "
+              "disk (%s) -- the manifest is in lecore.json, the model still "
+              "works, but nothing can identify it from the weights alone"
+              % type(_exc).__name__)
 
     print("\n[verify] reloading from disk")
     # FREE THE IN-MEMORY MODEL FIRST. The verify step reloads the whole

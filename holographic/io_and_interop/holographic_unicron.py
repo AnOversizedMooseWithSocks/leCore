@@ -1473,7 +1473,8 @@ def source_dtypes(model_dir_or_file):
     return out
 
 
-def export_portable(weights, out_path, n_refine=None, dtype=None, like=None):
+def export_portable(weights, out_path, n_refine=None, dtype=None, like=None,
+                    keep_f32=()):
     """Decode a compressed/lazy store back to a PLAIN safetensors file at a chosen
     fidelity -- the bridge to every standard harness.
 
@@ -1518,6 +1519,15 @@ def export_portable(weights, out_path, n_refine=None, dtype=None, like=None):
         src = source_dtypes(like)
         dts = {k: src.get(k, _MAP.get(str(np.asarray(v).dtype), "F32"))
                for k, v in out.items()}
+    # SOME TENSORS CARRY PACKED BYTES, NOT NUMBERS, and must not be narrowed.
+    # bf16 has EIGHT mantissa bits; the boot record's manifest needs more, so a
+    # bf16 round trip returns zeros and boot() raises "no leCore substrate
+    # header here". Field-caught on a real bf16 Qwen3.5-0.8B: the install said
+    # boot_record ok (true in memory) and the audit on the SAVED model said NO
+    # BOOT RECORD (true on disk).
+    for _k in (keep_f32 or ()):
+        if _k in dts and dts[_k] in ("BF16", "F8_E4M3", "F8_E5M2"):
+            dts[_k] = "F32"
     else:
         dts = {k: _MAP.get(str(np.asarray(v).dtype), "F32")
                for k, v in out.items()}
@@ -1631,8 +1641,7 @@ def delta_encode(base, finetuned, energy=0.9999, bits=8, tol=1e-12, mode="lowran
             q1 = alpha * sign
             resid = d - q1
             Ur, Sr, Vtr = np.linalg.svd(resid, full_matrices=False)
-            # energy fraction over singular values (** 2 = the sanctioned energy-fraction spelling)
-            er = np.cumsum(Sr ** 2) / max(np.sum(Sr ** 2), 1e-300)
+            er = np.cumsum(Sr * Sr) / max(np.sum(Sr * Sr), 1e-300)
             rr = int(np.searchsorted(er, energy)) + 1
             sz = d.size / 8.0 + rr * (d.shape[0] + d.shape[1]) * (bits / 8.0)
             if sz < dense_sz:
@@ -1643,7 +1652,7 @@ def delta_encode(base, finetuned, energy=0.9999, bits=8, tol=1e-12, mode="lowran
                 rep["delta_bytes"] += sz
                 continue
         U, S, Vt = np.linalg.svd(d, full_matrices=False)
-        e = np.cumsum(S ** 2) / max(np.sum(S ** 2), 1e-300)
+        e = np.cumsum(S * S) / max(np.sum(S * S), 1e-300)
         r = int(np.searchsorted(e, energy)) + 1
         lr_sz = r * (d.shape[0] + d.shape[1]) * (bits / 8.0)
         if lr_sz < dense_sz:
