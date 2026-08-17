@@ -60,7 +60,33 @@ def build_fixture(n_has=60, n_no=20, seed=0, min_tokens=4):
                    if getattr(c, "method", None) and len(_tokens(a)) >= min_tokens})
     rng = random.Random(seed)
     rng.shuffle(pool)
-    return pool[:n_has], pool[n_has:n_has + n_no]
+    # REMOVAL ONLY MAKES A NO-TOOL TASK IF NO NEAR-TWIN REMAINS. The set is
+    # built by hiding ONE capability and asking whether the system abstains --
+    # which is only a fair question when nothing ELSE in the catalog can
+    # honestly serve the task.
+    # MEASURED FAILURE: "closed form ray integral through a cloud" belongs to
+    # "Gabor field volumes (oriented primitives, CLOSED-FORM RAYS, free LOD)",
+    # and with that hidden the router found "Cloud stack (CLOSED-FORM SHADOW
+    # RAYS)" -- scored as a FALSE ACTION when it is a correct answer to the
+    # question asked. The router was right and the FIXTURE was wrong.
+    # So a candidate whose task still routes confidently after its own removal
+    # is not a no-tool task at all, and is skipped rather than counted against
+    # the system. TESTING ABSTENTION REQUIRES A QUESTION WITH NO GOOD ANSWER.
+    has_tool = pool[:n_has]
+    rest = pool[n_has:]
+    no_tool, i = [], 0
+    while len(no_tool) < n_no and i < len(rest):
+        task, name = rest[i]
+        i += 1
+        try:
+            v = catalog_without([name]).route_or_abstain(task, z_min=0.8,
+                                                         seed=seed)
+            if not v.get("abstain"):
+                continue          # a twin survives -- not a no-tool task
+        except Exception:
+            pass
+        no_tool.append((task, name))
+    return has_tool, no_tool
 
 
 def run_benchmark(mind, n_has=60, n_no=20, seed=0, z_min=0.8):

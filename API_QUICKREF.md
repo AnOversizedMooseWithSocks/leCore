@@ -211,17 +211,11 @@
     - `run_on_vm(self, machine=None, scene=None, seed=0, prev_frame=None, renderer=None)` -- Phase 6: RUN the pipeline ON the VM instead of a Python for-loop.
 
 ### `holographic_session`
-*holographic_session.py -- ONE render session that ties the disconnected rendering threads together.*
+*SESSION -- never compute the same conversation prefix twice.*
 
-- `sdf_surface_points(sdf, bounds, n=2000, seed=0, eps=0.02, oversample=8)` -- Sample points that lie ON an SDF's surface -- the front half of the SDF->splat bridge that was missing.
-- **class `RenderSession`** -- One scene, every renderer.
-    - `preview(self, width=None, height=None, reuse_margin=None, **kw)` -- FAST path: the material preview via render_surface (Lambert + spec + env reflection + one transparency layer), resolving every SurfaceMaterial channel per hit.
-    - `cache_stats(self)` -- {hits, rebuilds, hit_rate, margin} for the preview's fat-margin cache, or None if it is not in use.
-    - `invalidate_preview(self)` -- Drop the preview cache -- call after any scene edit.
-    - `render_final(self, spp=64, on_progress=None, progress_every=8, width=None, height=None, max_bounce=4, sky=None, seed=0, should_stop=None)` -- SLOW path: the photoreal final via path_trace, using the SAME SurfaceMaterials as the preview (through the material adapter).
-    - `to_splats(self, n=2000, radius=0.12, seed=0)` -- PROXY path: sample the SDF surface and fit splats (field_to_splats) so the scene can be drawn by a lightweight browser billboard shader -- no three.js scene graph, no mesh pipeline.
-    - `set_material(self, obj_id, material)` -- Replace one object's material.
-    - `edit_channel(self, obj_id, channel, value)` -- Edit ONE channel of one object's material (colour/roughness/reflect/emission/opacity) -- the value can be a constant, a Param, a pattern field, or a map.
+- **class `PrefixCache`** -- A radix tree over token sequences, holding inference states.
+    - `forward(self, token_ids)` -- Logits for this sequence, computing only the uncached tail.
+    - `report(self)` -- 
 
 ### `holographic_cancel`
 *holographic_cancel.py -- COOPERATIVE CANCELLATION for long operations (modeling-app backlog, item F).*

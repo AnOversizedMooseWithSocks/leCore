@@ -69840,3 +69840,56 @@ selftests are the second net under that: six ran green across both sides' code,
 including their memorymountain ("peak 75 GB/s @ 256 KB").
 STATED PLAINLY BECAUSE "CI PASSES" AND "I RAN A FIFTH OF CI" ARE DIFFERENT
 CLAIMS, and only the second one is true.
+
+## FOUR CI FAILURES: one was my merge, one was theirs, two were latent
+
+Moose sent the CI run. Four distinct failures, and the useful part is that they
+had four different owners.
+
+1. A MERGE REGRESSION I CAUSED. test_numerics_adoption flagged
+   `np.cumsum(Sr * Sr)` in holographic_unicron. THEIR branch had already fixed
+   this to `Sr ** 2`, and MY WHOLE-FILE TAKEOVER REVERTED IT. The merge check I
+   ran -- "every line theirs has that I lack is the PRE-EDIT form of something I
+   changed" -- was true and INSUFFICIENT: `Sr ** 2` IS the pre-edit form of
+   nothing I touched, it is a fix they made to a line I happened to own.
+   A WHOLE-FILE TAKEOVER IS SAFE ONLY IF THE OTHER SIDE CHANGED NOTHING IN THAT
+   FILE, and I verified they added nothing rather than that they changed
+   nothing. Restored, with the reasoning: these are SINGULAR VALUES, already
+   non-negative and sorted, so the cancellation the guard exists to prevent
+   cannot arise -- but the guard is a TEXT rule and the right move is to write
+   the line as an energy fraction.
+
+2. THEIRS, AND A REAL DUPLICATION. `_unbind_many` was BYTE-IDENTICAL in
+   semanticrig and shufflebrain. The test's own instruction is the correct one
+   -- "unify them (one home, an import) or add the entry with the reasoning; do
+   NOT raise the budget" -- and they are the same algorithm, so there was
+   nothing to reason about. semanticrig is the home; shufflebrain imports. THE
+   TWO-TABLES LESSON, which this project already has on record.
+
+3. LATENT, AND THE MOST INTERESTING. API_QUICKREF drifted between CI and my box
+   with no code change. Cause: THERE ARE TWO MODULES NAMED
+   holographic_transform.py -- io_and_interop (rebuild a model) and misc (4x4
+   matrices) -- and apiquickref resolved the name with an UNSORTED os.walk. The
+   generated file was a function of DIRECTORY ORDER.
+   The comment directly below that code already warns about this exact class of
+   bug in another disguise: a date stamp made the output "a function of the
+   CALENDAR". A GENERATED FILE MUST BE A FUNCTION OF THE CODE AND NOTHING ELSE
+   -- not the calendar, not the inode order. Fixed with a sorted walk; verified
+   identical across runs under PYTHONHASHSEED=random.
+
+4. LATENT, ARRIVED WITH THEIR BRANCH, AND THE FIXTURE WAS WRONG NOT THE ROUTER.
+   The agent benchmark builds its no-tool set BY REMOVAL: hide one capability,
+   check the system abstains. It scored a false action on "closed form ray
+   integral through a cloud" -- whose capability is "Gabor field volumes
+   (oriented primitives, CLOSED-FORM RAYS, free LOD)" -- because with that
+   hidden the router found "Cloud stack (CLOSED-FORM SHADOW RAYS)".
+   THAT IS A CORRECT ANSWER TO THE QUESTION ASKED. Verified it is theirs and not
+   mine: 0 false actions on my pre-merge tree, 1 on their branch alone.
+   REMOVAL ONLY MAKES A NO-TOOL TASK IF NO NEAR-TWIN REMAINS. build_fixture now
+   skips a candidate whose task still routes confidently after its own removal,
+   because TESTING ABSTENTION REQUIRES A QUESTION WITH NO GOOD ANSWER. Raising
+   the tolerance would have hidden a router doing its job.
+
+VERIFIED AFTER: all four tests pass, the docs drift gate is clean, skill_lint
+and usage_audit read 0, and a fresh random sample of 26 test files gives 229
+passed / 0 failed under PYTHONHASHSEED=random.

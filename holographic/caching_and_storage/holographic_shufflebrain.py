@@ -54,15 +54,15 @@ def _unit(v):
 
 
 
-def _unbind_many(T, K):
-    """Batched unbind of ONE trace against MANY keys -- the house pattern (see
-    holographic_superposed.score_all): unbind(T, k) == bind(T, involution(k)), so one
-    bind_fixed call over the involuted key stack replaces a Python loop of unbinds. The
-    strict batchable-site scan (tests/test_holographic_batched_bind.py) enforces this."""
-    from holographic.agents_and_reasoning.holographic_ai import bind_fixed
-    K = np.asarray(K)
-    Ki = np.concatenate([K[:, :1], K[:, :0:-1]], axis=1)   # circular involution per row
-    return bind_fixed(T, Ki)
+# ONE HOME, AN IMPORT. This function was byte-identical in semanticrig and
+# here -- the duplication audit caught it, and its instruction is the right one:
+# "either unify them (one home, an import) or add the entry with the reasoning.
+# Do NOT raise the budget to make the test pass." They are the same algorithm,
+# not two that share a shape, so there is nothing to reason about -- semanticrig
+# is the home and this is the import. The TWO-TABLES LESSON, which this project
+# has on record: one shared implementation of any algorithm, never two.
+from holographic.caching_and_storage.holographic_semanticrig import (  # noqa: E402
+    _unbind_many)
 
 
 def build_trace(keys, vals):

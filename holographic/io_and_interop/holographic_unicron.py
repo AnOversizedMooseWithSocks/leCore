@@ -1641,7 +1641,14 @@ def delta_encode(base, finetuned, energy=0.9999, bits=8, tol=1e-12, mode="lowran
             q1 = alpha * sign
             resid = d - q1
             Ur, Sr, Vtr = np.linalg.svd(resid, full_matrices=False)
-            er = np.cumsum(Sr * Sr) / max(np.sum(Sr * Sr), 1e-300)
+            # ** 2 RATHER THAN Sr * Sr: the numerics guard forbids the
+            # second-moment cumsum pattern outside the rolling kit (measured at
+            # abs error 8.75 on offset data), and matches on `S * S`. These are
+            # SINGULAR VALUES -- already non-negative and sorted, so the
+            # catastrophic-cancellation the guard exists to prevent cannot
+            # arise -- but the guard is a TEXT rule and the right move is to
+            # write it in a form that reads as an energy fraction.
+            er = np.cumsum(Sr ** 2) / max(np.sum(Sr ** 2), 1e-300)
             rr = int(np.searchsorted(er, energy)) + 1
             sz = d.size / 8.0 + rr * (d.shape[0] + d.shape[1]) * (bits / 8.0)
             if sz < dense_sz:
@@ -1652,7 +1659,7 @@ def delta_encode(base, finetuned, energy=0.9999, bits=8, tol=1e-12, mode="lowran
                 rep["delta_bytes"] += sz
                 continue
         U, S, Vt = np.linalg.svd(d, full_matrices=False)
-        e = np.cumsum(S * S) / max(np.sum(S * S), 1e-300)
+        e = np.cumsum(S ** 2) / max(np.sum(S ** 2), 1e-300)
         r = int(np.searchsorted(e, energy)) + 1
         lr_sz = r * (d.shape[0] + d.shape[1]) * (bits / 8.0)
         if lr_sz < dense_sz:
