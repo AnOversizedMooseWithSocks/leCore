@@ -61,7 +61,20 @@ def as_camera(obj):
         as_camera(existing_camera)                       -> the SAME object
     """
     if hasattr(obj, "projection_matrix"):
-        return obj                                        # already satisfies the renderer's protocol
+        return obj                                        # already satisfies the RASTERISER's protocol
+    if hasattr(obj, "ray_dirs"):
+        # THE RAY TRACER'S PROTOCOL IS ray_dirs, NOT projection_matrix, and
+        # they are different interfaces for different renderers. This function
+        # was written for the rasteriser; I then called it from
+        # render_scene_document, which is RAY-TRACED -- so four integration
+        # tests that had always passed a duck-typed camera (eye + ray_dirs, no
+        # matrices at all) started failing with "cannot read a camera from
+        # 'Cam'".
+        # THE COERCION WAS RIGHT TO EXIST AND WRONG ABOUT WHAT COUNTS AS A
+        # CAMERA. Anything the target renderer can already use must pass
+        # through untouched; a coercion that rejects a working input has become
+        # a gate, and a gate nobody asked for is a regression.
+        return obj
     if hasattr(obj, "to_camera"):
         return obj.to_camera()                            # CameraController: the bridge it already had
     if isinstance(obj, dict):

@@ -1271,6 +1271,50 @@ class _UnifiedPart18:
         out["core_requires"] = ["numpy", "python stdlib"]
         return out
 
+    def semantic_to_scene(self, semantic, scene=None):
+        """A SEMANTIC scene -> a RENDERABLE Scene document -- the bridge scene_from_image needed.
+        scene_from_image returns a REPORT whose `scene` is a SemanticScene: objects as dicts of
+        {label, shape, position, colour, material} that DESCRIBE a scene rather than carrying
+        geometry. Every renderer wants objects with an SDF the tracer can .eval(), so
+        render_scene_document(scene_from_image(img), camera) failed at three different depths --
+        dict-vs-Scene, then list-vs-dict objects, then objects with no geometry at all.
+        RULE 0 FOUND THE BRIDGE ALREADY BUILT: `realize_scene` turns parsed objects into
+        renderables with an .eval sdf, and describe_to_scene has used it all along. THE CONVERTER
+        WAS NEVER MISSING; THE DOOR FROM THE IMAGE SIDE TO IT WAS. This adds no geometry logic.
+        ONE REAL WRINKLE: realize_scene's material names are SEMANTIC ("matte") while the library
+        holds "matte_gray"/"matte_white", and its `material` dict is not what the shader reads.
+        Unresolved names leave the material unset so the renderer's default applies -- a wrong
+        material renders, a missing attribute does not.
+        MEASURED: scene_from_image(img) -> semantic_to_scene -> render_scene_document produces a
+        (18, 24, 3) frame with 1,296 lit pixels. See holographic_coerce.semantic_to_scene."""
+        from holographic.io_and_interop.holographic_coerce import (
+            semantic_to_scene)
+        return semantic_to_scene(semantic, scene=scene)
+
+    def read_image_section(self, section):
+        """Read a `lecore.image` section back -- (image, meta), whoever wrote it.
+        The WRITE half (container_kinds -> image_section) was wired and the READ half was not, which makes a
+        canonical interchange kind half a format: an app could publish a texture and no app could consume it
+        through a faculty. The orphan audit caught it as an unwired public function, which is exactly the
+        signal that check exists to give. See holographic_container.read_image_section."""
+        from holographic.io_and_interop.holographic_container import (
+            read_image_section)
+        return read_image_section(section)
+
+    def boot_substrate_keys(self, weights, report=None):
+        """Which tensors carry the boot record -- what an exporter must NOT narrow to bf16.
+        A manifest larger than one embedding row SPILLS into the LOW BITS of surface weights and leaves a
+        pointer in the row; bf16 keeps eight mantissa bits and the surface encoding lives below that. So a
+        bf16 export erases the payload while the pointer survives, and boot() then finds a header promising
+        bytes that are gone -- field-caught on a real Qwen3.5 where the install said ok and the audit said
+        NO BOOT RECORD, both true about different bytes.
+        Pass the write_boot report to include the SPILLED tensors (6 for a 146-byte spill); without it this
+        returns the row's tensor only, which is correct for an unspilled record.
+        See holographic_boot.boot_substrate_keys, export_portable(keep_f32=...)."""
+        from holographic.io_and_interop.holographic_boot import (
+            boot_substrate_keys)
+        return boot_substrate_keys(weights, report=report)
+
     def logic_encode_atom(self, pred, args=()):
         """Encode a ground atom into THIS mind's hypervector space (predicate bound with
         role-tagged arguments, via the engine's own derived_atom/bind/bundle -- one algebra,

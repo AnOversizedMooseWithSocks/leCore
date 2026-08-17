@@ -916,6 +916,20 @@ _METHOD_ALIASES = {
                           "how do I turn on gpu acceleration",
                           "is anything missing from my install",
                           "what would make this faster"),
+    "read_image_section": ("read an image another app published",
+                           "get the picture out of a container",
+                           "consume a lecore.image section"),
+    "boot_substrate_keys": ("which tensors hold the boot record",
+                            "what must not be quantized to bf16",
+                            "protect the model identity when exporting"),
+    # A BARE-NAME FACULTY IS SHADOWED BY ITS DESCRIPTIVELY-TITLED SIBLINGS:
+    # searching "grow_at" returned the morphogenesis and crystal entries and
+    # never grow_at itself, so the auto-registered capability was DARK. Aliases
+    # written from a user's mouth, not the implementer's.
+    "grow_at": ("what does the growth look like partway through",
+                "sample a growth at a point in time",
+                "the state of a grower at progress t",
+                "scrub a growth animation"),
     "unicron_bios": ("what kind of model is this",
                      "probe a checkpoint before touching it",
                      "will this fit in my model", "enumerate a model's layout",

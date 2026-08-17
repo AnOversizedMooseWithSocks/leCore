@@ -1891,26 +1891,6 @@ class _UnifiedPart09:
             save_gif(gif, frames, fps=fps)
         return frames
 
-    def semantic_to_scene(self, semantic, scene=None):
-        """A SEMANTIC scene -> a RENDERABLE Scene document -- the bridge scene_from_image needed.
-        scene_from_image returns a REPORT whose `scene` is a SemanticScene: objects as dicts of
-        {label, shape, position, colour, material} that DESCRIBE a scene rather than carrying
-        geometry. Every renderer wants objects with an SDF the tracer can .eval(), so
-        render_scene_document(scene_from_image(img), camera) failed at three different depths --
-        dict-vs-Scene, then list-vs-dict objects, then objects with no geometry at all.
-        RULE 0 FOUND THE BRIDGE ALREADY BUILT: `realize_scene` turns parsed objects into
-        renderables with an .eval sdf, and describe_to_scene has used it all along. THE CONVERTER
-        WAS NEVER MISSING; THE DOOR FROM THE IMAGE SIDE TO IT WAS. This adds no geometry logic.
-        ONE REAL WRINKLE: realize_scene's material names are SEMANTIC ("matte") while the library
-        holds "matte_gray"/"matte_white", and its `material` dict is not what the shader reads.
-        Unresolved names leave the material unset so the renderer's default applies -- a wrong
-        material renders, a missing attribute does not.
-        MEASURED: scene_from_image(img) -> semantic_to_scene -> render_scene_document produces a
-        (18, 24, 3) frame with 1,296 lit pixels. See holographic_coerce.semantic_to_scene."""
-        from holographic.io_and_interop.holographic_coerce import (
-            semantic_to_scene)
-        return semantic_to_scene(semantic, scene=scene)
-
     def describe_to_scene(self, text, scene=None):
         """Words -> the CANONICAL Scene document: 'a red cube on the left and a green sphere on the right'
         becomes real, named, handled objects you can then texture, place, keyframe, and path-trace.

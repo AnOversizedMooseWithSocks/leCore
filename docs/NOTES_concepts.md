@@ -70509,3 +70509,90 @@ package RESOLVES, not that the capabilities survived packaging. Added three
 commands, each verified against the real wheel: capabilities.json parses and is
 non-empty; eighteen load-bearing faculties across the families are callable; and
 two of them RUN, because present is not working.
+
+## SIX CI FAILURES, FIVE OF THEM MINE
+
+FOUR INTEGRATION TESTS: MY CAMERA COERCION REJECTED WORKING CAMERAS. as_camera
+accepts anything with `projection_matrix` -- THE RASTERISER'S protocol -- and I
+called it from render_scene_document, which is RAY-TRACED. Four tests that had
+always passed a duck-typed camera (eye + ray_dirs, no matrices at all) started
+failing with "cannot read a camera from 'Cam'".
+THE COERCION WAS RIGHT TO EXIST AND WRONG ABOUT WHAT COUNTS AS A CAMERA.
+Anything the TARGET renderer can already use must pass through untouched --
+a coercion that rejects a working input has become a gate, and a gate nobody
+asked for is a regression. Added the ray_dirs branch.
+
+test_io_shape_pipeline: THE TIE-BREAK MOVED AND THE TEST WAS RIGHT TO NOTICE.
+Its own comment says "assert the CONTRACT, not a hardcoded name" -- and the
+contract genuinely changed in P1-4: among equal-length routes, prefer the
+capability whose NAME IS ITS METHOD, then alphabetical, so a doc entry stops
+outranking render_mesh. Updated all THREE derivations to use one shared ranker
+rather than three copies of the rule.
+
+p09 REACHED 2005 LINES against a 2000 cap, because semantic_to_scene landed
+there. Moved to p18. The cap exists precisely so the shim does not grow back one
+faculty at a time, and I was the one faculty.
+
+ORPHANS 52 AGAINST A BUDGET OF 50 -- and the overage was exactly my two:
+read_image_section and boot_substrate_keys. WIRED RATHER THAN BUDGETED, which is
+what the test's own message asks for. read_image_section is the telling one: the
+WRITE half of lecore.image was wired and the READ half was not, which makes a
+canonical interchange kind HALF A FORMAT -- an app could publish a texture and
+no app could consume it through a faculty.
+
+grow_at WAS DARK, and this one was not mine: a merged faculty auto-registered
+with no aliases, shadowed in its own search by descriptively-titled siblings
+(searching "grow_at" returned the morphogenesis and crystal entries). Aliases
+written from a user's mouth.
+
+VERIFIED: 520 integration tests pass, all four audits at 0, docs drift clean.
+THE PATTERN ACROSS FIVE OF THE SIX: each was a correct change applied one step
+past where it belonged -- a coercion into a different renderer's protocol, a
+faculty into a full file, a ranker documented in one place and derived in three.
+
+## THE FULL SWEEP: all 24 shards, all 8 gates, the slow tests too -- 0 failures
+
+Moose asked for one more sweep so CI would not be wack-a-mole. The point of
+doing it exhaustively rather than by sampling is the reason the earlier rounds
+looked clean and were not.
+
+EVERY GATE, RUN INDIVIDUALLY:
+    regen_docs --check    9 outputs up to date
+    apiquickref           regenerates clean
+    skill_lint            0 invocation gaps
+    catalog_gaps          0 gaps
+    reachability_audit    0 duplicate faculties
+    usage_audit           0 unused modules
+    semantic lint         0 errors
+    bump_version          0.9.0
+
+EVERY AUDIT-STYLE TEST, 92 of them: orphan_audit, buried_audit,
+duplication_audit, unified_split, numerics_adoption, unifier_adoption,
+agent_workflow_contract, decomposition_contract, skill_lint, tiercontract,
+mixture_drift, volint. These are the ones that bit last round, because they
+encode INVARIANTS rather than behaviour -- a behaviour test fails when you break
+its subject, an invariant test fails when you break something two families away.
+
+ALL 24 SHARDS, each file exactly once:
+    0  520 (test_integration.py in full)   12  260
+    1  133   6  377                        13  251
+    2  283   7  220                        14  257
+    3  203   8  274                        15  278
+    4  189   9  222                        16  308
+    5  184  10  268                        17  254
+           11  250                         18  280
+    19 282  20 263  21 308  22 265  23 297
+    ------------------------------------------------
+    6,426 passed, ~90 skipped, 0 FAILED
+
+AND THE 37 SLOW TESTS, which every shard DESELECTS and CI's full-suite job runs
+-- 15 passed, 22 skipped for missing optional deps. THAT WAS THE LAST PLACE A
+FAILURE COULD HIDE: a suite that is green in 24 shards and red in CI is exactly
+what a deselect marker produces, and I would have shipped without noticing.
+
+WHY THIS IS DIFFERENT FROM THE EARLIER ROUNDS, stated plainly: I had been
+sampling ~10% at random and calling it evidence. A random tenth reliably MISSES
+A SINGLE-FILE FAILURE, which is the shape of every failure Moose has sent.
+Sharding covers each file exactly once and costs about forty minutes.
+SAMPLING ANSWERS "IS THE TREE BROADLY OK"; SHARDING ANSWERS "WILL CI PASS", AND
+ONLY THE SECOND ONE WAS EVER THE QUESTION.
