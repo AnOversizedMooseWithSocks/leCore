@@ -72,3 +72,31 @@ A module-level constant that references a name defined **lower** in the same fil
 moment the module is imported (before any function runs). This bit the garage demo repeatedly. It shows up
 instantly as an import failure — which is exactly why `tools/demo_kit.smoke_test` catches it: it *imports* the
 backend as its first step, so a use-before-def surfaces immediately rather than at request time.
+
+## The save-path contract (F19 -- practiced in the leaves, now stated once)
+
+A save path stores NO bytes that a pure function of (seed, config, stored-state) can
+regenerate. SuperposedMemory.save stores codebooks as five scalars; HoloForest.to_state
+regrows trees from (seed, items); TieredMemory.save replays pairs. Derived views are
+REBUILT ON LOAD in canonical (sorted-key) order; the contract is DECISION EQUIVALENCE,
+never bit-identity of a derived view (float sums reorder -- the bind_batch lesson).
+Before writing any new save path: name what is irreducible, regenerate the rest.
+
+## The reference-beside-the-fast-path rule (F22)
+
+Ship the naive baseline verbatim next to every optimized path (`_scores_reference`,
+`flat_recall`). It is three things at once: the correctness oracle (bit-identity where
+the contract is EXACT), the admissibility evidence for review, and the MERGE ARBITER --
+two independent optimizations compose safely when both match one verbatim reference
+(proven in practice by the two BM25 PRs). A fast path without its reference is a claim
+without a witness.
+
+## The install-aware build rule (F33/F34 -- measured, not declared)
+
+Every faculty is an ARITHMETIC CORE (matvec / sign / linear / a pure fold step) wrapped
+in a CONTROL SHELL (loops, tiling, eviction). The projector's verdict is the ground
+truth for which is which -- probe_project certifies linear cores into installed form
+and REFUSES the rest; the docstring RECORDS the verdict rather than declaring one.
+Loops expose their step as `step(state, x) -> state` so REPEAT can carry them;
+load-bearing decisions land as ISA contracts (topk_det), so any substrate verifies
+against the same rule instead of shipping Python.

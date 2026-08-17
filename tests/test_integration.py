@@ -13064,8 +13064,13 @@ def test_io_shape_pipeline_hierarchy():
     # documented DETERMINISTIC TIE-BREAK: among equal-length routes the alphabetically-first capability wins, so the
     # exact name shifts when a new mesh->selection producer is added -- assert the CONTRACT (a valid single mesh->
     # selection edge = the alphabetically-first such producer), not a hardcoded name that rots on every merge.
-    mesh_sel_producers = sorted(cap.name for cap in c.all()
-                                if cap.consumes and cap.produces and "mesh" in cap.consumes and "selection" in cap.produces)
+    def _rank(cap):                       # ONE ranker, used by every derivation below
+        return (0 if getattr(cap, "method", None) == cap.name else 1, cap.name)
+
+    mesh_sel_producers = [cap.name for cap in sorted(
+        (cap for cap in c.all()
+         if cap.consumes and cap.produces and "mesh" in cap.consumes and "selection" in cap.produces),
+        key=_rank)]
     one = mind.suggest_pipeline("mesh", "selection")
     assert one and len(one) == 1 and one[0]["name"] == mesh_sel_producers[0], (one, mesh_sel_producers[:3])
     multi = mind.suggest_pipeline("transform", "selection")               # transform->mesh->selection
@@ -13081,8 +13086,15 @@ def test_io_shape_pipeline_hierarchy():
     # is the alphabetically-first mesh->image PRODUCER, which is the deterministic tie-break among equal-length
     # routes. Hardcoding "render_mesh" rots the moment another mesh->image producer is registered (a coercion-alias
     # capability now sorts ahead of it), and it is platform-independent, so assert the CONTRACT.
-    mesh_img_producers = sorted(cap.name for cap in c.all()
-                                if cap.consumes and cap.produces and "mesh" in cap.consumes and "image" in cap.produces)
+    # THE TIE-BREAK MOVED, DELIBERATELY (P1-4). It was purely alphabetical, which made the first mesh->image step
+    # "JSON-drivable objects (mesh/camera coercion)" -- a DOC ENTRY whose method IS render_mesh, outranking
+    # render_mesh itself because "J" precedes "r". The route was never wrong (same method, same result); it was
+    # UNREADABLE, and a plan a person cannot recognise is a plan they will not trust. The rule is now: among equal
+    # length routes, prefer the capability whose NAME IS ITS METHOD, then alphabetical.
+    # Derived here with the same rule rather than hardcoded, which is the lesson this comment already carried.
+    mesh_img_producers = [cap.name for cap in sorted(
+        (cap for cap in c.all()
+         if cap.consumes and cap.produces and "mesh" in cap.consumes and "image" in cap.produces), key=_rank)]
     p2i = mind.suggest_pipeline("points", "image")
     assert p2i and [s["name"] for s in p2i] == ["points_to_mesh", mesh_img_producers[0]], (p2i, mesh_img_producers[:3])
     assert mind.suggest_pipeline("sdf", "mesh")[0]["name"] == "mesh_from_sdf"
@@ -13102,8 +13114,9 @@ def test_io_shape_pipeline_hierarchy():
     # (deterministic tie-break). More field->field ops now exist than just the fill trio (e.g. the quantum solvers
     # legitimately map a field to a field), so assert the CONTRACT, not a fixed shortlist -- and separately confirm
     # the classical fill ops are still reachable field->field producers.
-    ff_producers = sorted(cap.name for cap in c.all()
-                          if cap.consumes and cap.produces and "field" in cap.consumes and "field" in cap.produces)
+    ff_producers = [cap.name for cap in sorted(
+        (cap for cap in c.all()
+                                   if cap.consumes and cap.produces and "field" in cap.consumes and "field" in cap.produces), key=_rank)]
     fill = mind.suggest_pipeline("field", "field", require_step=True)
     assert fill and fill[0]["name"] == ff_producers[0], (fill, ff_producers[:3])
     assert {"harmonic_fill", "inpaint", "majority_fill"} & set(ff_producers), "the classical fill ops must still route field->field"

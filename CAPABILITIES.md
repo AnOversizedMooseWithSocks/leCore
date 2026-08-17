@@ -101,7 +101,7 @@ from holographic.scene_and_pipeline.holographic_coordinator import serve_worker;
 *Find it by:* farm, distributed compute, cluster, network farm, worker node, serve_worker, render farm, compute across machines
 
 ### Encoders (number to vector)
-turn raw values into hypervectors: scalar & fractional-power encoding (encoders/fpe -- nearby numbers map to nearby vectors), N-D coordinate fields (fpefield), complex-phasor FHRR (fhrr), sparse block codes (sbc), geometric-algebra Clifford (clifford), and exact integer arithmetic over phasors (rns). How data ENTERS the substrate.
+turn raw values into hypervectors: scalar & fractional-power encoding (taper='kaiser:beta' shapes similarity SIDELOBES by aperture-taper design -- measured -13 -> -37.5 dB, weak-item margin 1.5x -> 18.2x beyond the mainlobe, price 2.7x mainlobe width -- redistribution not creation), N-D coordinate fields (fpefield), complex-phasor FHRR (fhrr), sparse block codes (sbc), geometric-algebra Clifford (clifford), and exact integer arithmetic over phasors (rns). How data ENTERS the substrate.
 
 ```python
 from holographic.io_and_interop.holographic_encoders import ScalarEncoder; from holographic.sampling_and_signal.holographic_fpe import ...
@@ -460,6 +460,14 @@ from holographic.simulation_and_physics.holographic_loadmemory import AdaptiveRo
 ```
 *Find it by:* adaptive record, role filler memory, fhrr, phasor, tensor, exact recall, load, capacity
 
+### Bake persistence (screens to_state / restore, hash-guarded)
+Index.screens_state() / screens_restore(state): persist the Lloyd bake (centroids, blocks, contiguous rows, radii) so the ~40s 1M bake is paid ONCE EVER; restore is seconds. A sha256 of the corpus travels with the state -- restoring onto different items REFUSES loudly (a bake is a derived fact about one exact corpus). Round-trip answers bit-equal, pinned. Includes the BULK-FINISH worst-case guard: when 32 blocks prune nothing, sphere delegates to the exact fast path -- 1M dust measured 8527 -> 55 ms/q, recall 1.000. HoloForest's to_state convention, applied to screens..
+
+```python
+import numpy as np; from holographic.caching_and_storage.holographic_index import Index; X=np.random.default_rng(0).standard_normal((512,16)); a=Index(X, method='sphere'); st=a.screens_state(); Index(X, method='sphere').screens_restore(st).nearest(X[0], k=2) == a.nearest(X[0], k=2)
+```
+*Find it by:* save the index bake, persist the screens, restore a baked index, bake once query forever, hash guarded index state
+
 ### Behavior pool (LOD for minds: tick 50k NPCs on one box)
 mind.behavior_pool() manages a population of ticking agents with behavior level-of-detail: an agent whose recent output stream certifies as an EXACT CYCLE (the symbolic surrogate contract) is demoted to a served cycle at near-zero cost; any input to that agent promotes it back to live ticking instantly; agents that never certify -- driven, chaotic, LEARNING -- are never demoted, and report() says which and why. pool.add(name, tick_fn, state); pool.step_all(inputs); pool.report().behavior costs what its information content costs..
 
@@ -500,6 +508,22 @@ ci=mind.causal_index(); import numpy as np; r=np.random.default_rng(0); [ci.appe
 ```
 *Find it by:* nearest neighbour search restricted to the past, recall only older items, time filtered index, append only memory before t, history matching without look ahead, what did similar past states lead to, analog lookup that cannot see the future, knn over trailing history only
 
+### Cell-aggregate morphogenesis (grow a body from soft cells, analytic gradients)
+morphogenesis_grow proliferates soft cells into a compact genus-0 aggregate (NO autodiff: closed-form gradients vs fd_gradient to 2e-9; soft-then-inflate anneal). morphogenesis_differentiate breaks symmetry by DIFFERENTIAL ADHESION (Mode 2: Gray-Scott RD modulated by a Wolpert gradient; control 0.824 vs 0.257 sphericity). genome_encode/decode/locality/interpolate make a body plan ONE searchable vector (locality measured monotone; noise abstains). shape_memory_* hold morphologies as attractors: 1.00 recall vs 0.00 for a depth-matched scrambled control..
+
+```python
+r=mind.morphogenesis_grow(n_cells=48, seed=3, steps=150); print(len(r['positions']), round(r['sphericity'],3))
+```
+*Find it by:* morphogenesis, grow a creature body, cell aggregate, reaction diffusion on cells, turing pattern on a body, morphogen gradient, limb bud, symmetry breaking
+
+### Celled memory (domain repetition over the capacity law -- unbounded pairs, bounded cells)
+mind.celled_memory() escapes the capacity wall the HONEST way: cells of EXACTLY n* pairs (the measured limit IS the tile size -- Quilez opRep applied to memory), one shared seed-derived codebook, warm/cold cell tiers with the crossing cost measured, exact key->cell directory. MEASURED on real corpus pairs at dim 4096: ONE memory 70x past the law recalls at 0.007 (interference collapse, as the law predicts); celled recalls 1.000 across 71 cells. Kept negative: a holographic directory would re-buy the interference the cells escape..
+
+```python
+cm=mind.celled_memory(dim=2048, vocab=4096); import numpy as np; ks=np.arange(500); cm.store(ks,(ks*7)%4096); print((cm.recall(ks)==(ks*7)%4096).mean(), cm.stats())
+```
+*Find it by:* store more pairs than the capacity law allows, escape the capacity limit, unbounded associative memory, tile memory into cells, domain repetition for memory, memory beyond the interference wall, millions of key value pairs holographically, scale superposed memory
+
 ### Certified surrogate layer (serve computation from a model, never fabricate)
 mind.make_surrogate(fn, sample_inputs) runs fn ONCE over the samples and returns a callable with a three-way contract: CERTIFIED EXTENSION where the ladder certifies a generator (measured 9078x on a fine-step simulation, NRMSE 0.041), EXACT hash-replay on seen inputs, and the real computation (memoised) otherwise -- never fabrication. .provenance states which contract is in force and why. For big-vocab context stores, mind.big_pair_memory streams seed-derived codebooks in chunks (the MQAR pattern) so the state is ONE vector and materialised codebooks cost nothing..
 
@@ -525,12 +549,28 @@ mind.set_file_root('.'); mind.file_find_definition('make_cloud'); mind.file_repl
 *Find it by:* edit file, edit code, modify file, modify code, write file, read file, replace in file, patch
 
 ### Cold storage (compress inactive data)
-shrink INACTIVE data to save memory and disk, and inflate it back on demand: store = mind.cold_store(keep_warm=8) keeps only the K most-recently-used values live and compresses the rest, warming any of them transparently on get(); mind.cool(big_table) wraps ONE value so c.cool() frees its RAM and c.get() brings it back bit-identical. Works on tables, whole databases, big arrays, any picklable structure; codec='lzma' packs smaller, spill_dir=... writes cold blobs to disk. Honest: high-entropy VSA vectors barely compress (the win there is freeing the live object / spilling to disk); redundant/text/structured data compresses a lot. The query Database can auto-cool its own idle tables: db.enable_cold_storage(keep_warm=K) then db.cool_idle() compresses tables you haven't queried lately and a query warms them back -- and a DB shipped to a distributed worker arrives warm + cooling-off, so a shared read-only cache is never mutated..
+shrink INACTIVE data to save memory and disk, and inflate it back on demand: store = mind.cold_store(keep_warm=8) keeps only the K most-recently-used values live and compresses the rest, warming any of them transparently on get(); mind.cool(big_table) wraps ONE value so c.cool() frees its RAM and c.get() brings it back bit-identical. Works on tables, whole databases, big arrays, any picklable structure; codec='lzma' packs smaller; codec='fast' is the numeric-array fast path (byte-plane shuffle + zlib-1: MEASURED 0.72 vs zlib's 0.95 ratio AND ~2x faster both ways on a structured float64 field; non-arrays fall back to pickle); spill_dir=... writes cold blobs to disk. Honest: high-entropy VSA vectors barely compress (the win there is freeing the live object / spilling to disk); redundant/text/structured data compresses a lot. The query Database can auto-cool its own idle tables: db.enable_cold_storage(keep_warm=K) then db.cool_idle() compresses tables you haven't queried lately and a query warms them back -- and a DB shipped to a distributed worker arrives warm + cooling-off, so a shared read-only cache is never mutated..
 
 ```python
 store = mind.cold_store(keep_warm=4); store.put('t1', big_table); store.get('t1')  # transparently warmed
 ```
-*Find it by:* cold storage, compress inactive, evict, spill to disk, cool, warm, fold up, shrink memory
+*Find it by:* cold storage, compress inactive, evict, spill to disk, cool, fast file compression, compress a file on disk quickly, speed up compression
+
+### Composable index (merge and ablate corpora without rebuild)
+Index.merge(other) / Index.ablate(source): HDRIFT's compose/ablate applied to retrieval -- THE INDEX AS A COMMUTATIVE MONOID. Baked block families concatenate with provenance; every sphere bound is a fact about its own members so CERTIFIED EXACTNESS survives union untouched (zero re-Lloyd). MEASURED LAWS (pinned): exact-over-union; merge(A,B).ablate(B) answers == A alone; commutative up to tie order; merge 2.8 ms vs rebuild. Pruning after merge = the bakes side by side, never re-optimized (priced). Sphere/ladder family..
+
+```python
+import numpy as np; from holographic.caching_and_storage.holographic_index import Index; a=Index(np.eye(8)[:4], method='sphere'); b=Index(np.eye(8)[4:], method='sphere'); a.nearest(np.eye(8)[0]); b.nearest(np.eye(8)[7]); len(a.merge(b).items) == 8
+```
+*Find it by:* merge two indexes, combine corpora without rebuild, ablate a corpus source, composable index, index algebra, add and remove corpora
+
+### Conjecture & refute (learn Horn rules from examples, prove them in Lean)
+mind.logic_induce learns Horn clauses from positive/negative examples -- learning-from-failures (Cropper & Morel 2021, generate/test/constrain; LFF-style on the finite fragment, not Popper parity). Test is the engine's own T_P fixpoint, so RECURSIVE rules learn free (ancestor from parent, measured). Then deduces the theory's consequences, refutes vs negatives (count reported), and emits Lean 4 proving a positive FROM THE LEARNED RULES. rules=None when the space exhausts -- never a guess. See Formal logic for deduction..
+
+```python
+out=mind.logic_induce([{'head':['parent',['tom','bob']],'name':'p0'},{'head':['parent',['bob','liz']],'name':'p1'}], [['ancestor',['tom','bob']],['ancestor',['tom','liz']]], [['ancestor',['bob','tom']]], 'ancestor', {'parent':2,'ancestor':2}); print(len(out['rules']), out['refuted_count'])
+```
+*Find it by:* learn rules from examples, rule induction, inductive logic programming, ILP, conjecture and refute, induce a law from data, learn horn clauses, find a rule that explains observations
 
 ### Creature readability: proportion as a SEARCH, not a rule table
 per Togelius et al.'s search-based PCG, quality comes from an evaluation function you SEARCH, so this scores specs with the metric already trusted for the field rebuild rather than hand-coding proportions. TWO TERMS, because one is degenerate: negative space alone is MONOTONE in limb thickness (0.470 -> 0.332), so maximising it yields a spider-legged wisp; mass dominance runs the other way (0.817 -> 0.516), giving an interior optimum. Webbing is a hard GATE, not a term. Also grounds a creature (A-4) so it reads as an animal..
@@ -579,6 +619,14 @@ the engine's ARGMAX CONTRACT: the index of the maximum with ties resolved to the
 from holographic.misc.holographic_determinism import argmax_tiebreak; idx = argmax_tiebreak(codebook @ query)
 ```
 *Find it by:* break ties deterministically, argmax, argmax tiebreak, tie break, which atom wins, deterministic decision, lowest index wins, bit-exact decision
+
+### Deterministic top-k (the tie-safe shortlist rule, stated once)
+holographic_determinism.topk_det(scores, k): indices of the k best, descending, ties to the LOWEST index -- argmax_tiebreak extended to a list, and the ISA-1 pattern applied at k>1 (the same shortlist rule had been hand-copied into THREE sites, each with its own kept-negative comment about the k+1 boundary bug). Index.nearest, Index.nearest_batch and BM25.rank now DELEGATE here; planted discrete-tie traps pin bit-identity. Conformance home for ANY substrate's top-k..
+
+```python
+import numpy as np; from holographic.misc.holographic_determinism import topk_det; print(topk_det(np.array([3.,1.,3.,2.]), 2))
+```
+*Find it by:* stable top k, tie safe shortlist, deterministic ranking rule, top k contract, ties resolve lowest index, reproducible AI, deterministic machine learning, bit identical results
 
 ### Enriched capability search (dictionary-augmented routing) + recipe replay
 mind.find_capability_enriched(q): words the catalog does not know are looked up in the in-tree 144k dictionary and their definition tokens (suffix-stemmed) join the search -- 'prognosticate the morrow' reaches forecasting, 'an augury of my ledgers' reaches drift/fingerprints. Additive by construction (tokens only added: raw hits can never be lost); expansions reported, never silent. Also mind.replay_model_recipe(recipe, data): retrain from a stored synthesis recipe and ASSERT the stage choices reproduce -- a recipe is a contract, drift raises with the diff..
@@ -688,6 +736,30 @@ lib=mind.nested_memory(n_bases=2, facts_per_base=3); import numpy as np; lib.add
 ```
 *Find it by:* many databases in one vector, library of memories, nested knowledge bases, memory of memories, query across model shelf, holographic library, two level lookup one operation, shelve a trained memory
 
+### Ouroboros (the closed memory loop: leCore eats the installed model's memory)
+THE NAMED PROCESS: a model with leCore installed in its weights OUTPUTS memory -- GDN head state (an outer-product accumulator, leCore's own HRR trace) and durable notes -- and server-side leCore CONSUMES it as an ordinary data structure, then feeds it back. MEASURED on exact GDN algebra: read 0.935; external write reads 0.951 by the model's own readout (zero forward passes); delete -> -0.24; capacity 0.932 pred / 0.905 meas; transcript consolidation 0.767 -> 0.918 (self-rehearsal = pollution, kept negative). Durable side: memory_write/memory_search per-tenant partition. docs/ZOO.md 7-8..
+
+```python
+from holographic_mcp import MCPServer; import tempfile; s=MCPServer(memory_root=tempfile.mkdtemp()); s.handle({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'memory_write','arguments':{'text':'ouroboros lives'}}})['result']['isError']
+```
+*Find it by:* ouroboros, closed memory loop, feed the model's memory back, manage the installed model's memory, the snake eats its tail, external memory of the installed model, the leap, leap outside the training data
+
+### Out-of-core exact search (top-k over on-disk arrays of any size)
+mind.out_of_core_search(path, queries, k) runs EXACT tie-safe top-k over an .npy file WITHOUT loading it: np.memmap + the tiled fold stream tiles from disk, so memory is bounded by the tile whatever the file size. MEASURED: 600 MB file, 40.5 ms/q k=5, peak RSS 0.75 GB. The 2026 ANN consensus calls exact 'not applicable' at scale and ships approximate+rerank; this is the honest inversion -- exact all the way down, recall 1.0 by construction, deterministic ties..
+
+```python
+import numpy as np; np.save('/tmp/d.npy', np.random.default_rng(0).standard_normal((5000,64))); v,i = mind.out_of_core_search('/tmp/d.npy', np.random.default_rng(1).standard_normal(64), k=3); print(i[:,0])
+```
+*Find it by:* search a file bigger than memory, exact search on disk, top k over a huge npy, streaming nearest neighbours, dataset does not fit in ram
+
+### Precision ladder (certified int8 rung: exact answers at quantized speed)
+Index(method='int8') and the auto ladder: row-scaled int8 scan (numba OPT-IN kernel; absent numba the route does not exist) with a SPECTRUM-IMMUNE certified dot-error bound (s_r/2)|q|1 + (qs/2)|x|1 + (s_r qs/4)D -- conservative candidates PROVABLY contain every true top-k row incl ties; f64 rescore; near-tie storms fall to exact. THE BENCHMARK: 100k x768 hard: recall 1.000 @ 9.7 ms (FAISS Flat exact: 27.1); 1M x128: 1.000 @ 34.8 ms (only exactness in the table). Whitened data killed dimension-domain bounds twice; PRECISION-domain lifting is the lever the spectrum cannot touch..
+
+```python
+import numpy as np; from holographic.caching_and_storage.holographic_index import Index; X=np.random.default_rng(0).standard_normal((2000,64)); i8=Index(X, method='int8'); ex=Index(X, method='exact'); q=X[3]+0.05*np.random.default_rng(1).standard_normal(64); [i for i,_ in i8.nearest(q,k=8)] == [i for i,_ in ex.nearest(q,k=8)]
+```
+*Find it by:* int8 index, quantized exact search, precision ladder, certified quantized scan, exact recall at quantized speed
+
 ### Purity & effect analysis (the gate a cache needs)
 decide whether a Python function is PURE -- side-effect free and deterministic -- so a shape-keyed cache can safely memoize it. mind.function_purity(source, name) is the verdict; mind.purity_report(source) explains every function; mind.purity_scan(root) runs the whole tree. Built from stdlib `ast` alone: no linter dependency, no constitutional exception. CONSERVATIVE BY CONTRACT -- a wrong 'impure' costs a cache miss; a wrong 'pure' silently corrupts a cache and everything downstream, so an unresolved callee, an unrecognised method and any attribute write are impure. Escape analysis is implemented: mutating a container the function itself allocated is invisible from outside, so `out = []; out.append(x)` is pure. THE CORRECTION: the analysis is closed over the CALL GRAPH, because a function that calls an impure function is impure however clean its own body looks. Measured on this tree (2,154 module-level functions): a LOCAL rule that ignores calls reports 54.3% pure; the sound fixpoint reports 32.1%. The backlog's '76.0% with escape analysis' is a local-rule number, and a local purity rule is unsound for a cache -- so purity_report carries BOTH figures and never lets the flattering one travel alone..
 
@@ -696,6 +768,14 @@ src = 'def f(xs):\n    out = []\n    for x in xs: out.append(x*2)\n    return ou
 ```
 *Find it by:* purity, pure function, side effects, effect analysis, decide whether a python function is pure, is this function pure, can i cache this function, memoization gate
 
+### Recall-budgeted vector index (the forest carries a measured honesty label)
+Index(fast=True): TWO-STAGE f32 engine -- f32 scan, f64 rescore of an over-fetched shortlist, margin ARBITER falling back to full f64 whenever f32 could flip the boundary (counted). IDENTICAL to f64: indices bit-equal, scores<1e-10, boundary-tie plant pinned. MEASURED (36k x 768 real): exact 10.4 -> 5.1 ms/q; screens 5.6 -> 1.9 (5.5x) at recall 0.97. recall_budget=: approximate routes NEVER serve below budget -- recall MEASURED ON YOUR VECTORS, demote-to-exact with the number. Coherent screens default (0.97 order-independent)..
+
+```python
+import numpy as np; from holographic.caching_and_storage.holographic_index import Index; X=np.random.default_rng(0).standard_normal((3000,128)); i=Index(X, method='forest', forest_threshold=0, forest_trees=1, recall_budget=0.9); i.nearest(X[3], k=1); print(i.method, i.recall_note)
+```
+*Find it by:* is the approximate index accurate on my data, forest recall guarantee, nested descent retrieval, screens index, read the boundary before the volume, search only promising blocks, prevent hallucination, know when it doesn't know
+
 ### Resonator restart budget advisor
 how many restarts does YOUR factoring problem need -- measured on your own codebooks. The F>=4 'capacity cliff' is a SEARCH BUDGET, not a capacity limit: same network, same dimension, 25% at restarts=4 and 100% at 256. The default was NOT raised, and the reason is the cost profile: a bigger cap is nearly free when an answer exists (early exit) and 13x slower when there is NONE, because a refusal must exhaust the budget. The sequence is PREFIX-STABLE, so raising it could not flip an existing answer -- the objection is cost alone.
 
@@ -703,6 +783,14 @@ how many restarts does YOUR factoring problem need -- measured on your own codeb
 mind.advise_restarts([bookA, bookB], targets=(0.95,))
 ```
 *Find it by:* how many restarts does my resonator need, pick a search budget, how long should i search before giving up, advise a restart count, is my factoring failing from budget or capacity
+
+### Retrieval dispute harness (FAISS + HoloForest + leCore, hard data only)
+tools/benchmarks_faiss.py: the NEUTRAL INSTRUMENT for benchmark disputes -- same hard data (real anchors + on-manifold offspring cliques at EVERY scale; a friendliness gate REFUSES near-orthogonal separable data), exact float64 ground truth computed by the harness, leCore pays its full ingest, FAISS configs stated in the output. MEASURED 100k x768: leCore fast recall 1.000 @ 23.4ms BEATS FAISS Flat exact (27.1ms); IVF 0.875 / HNSW 0.853 -- approximate engines drop 12-15%% recall on clique data where friendly benchmarks show ~0.99. Three gate bugs kept as negatives in the module docstring..
+
+```python
+import subprocess; r=subprocess.run(['python3','tools/benchmarks_faiss.py','--scales','1000','--queries','8'],capture_output=True,text=True,timeout=600); 'recall' in r.stdout
+```
+*Find it by:* faiss benchmark, retrieval dispute harness, benchmark against faiss, independent benchmark harness, recall benchmark hard data, compare index engines
 
 ### Scatter bake & level of detail (measured)
 bake a scattered population once, then serve any distance from the cache: thin the population and drop to a coarser blade as it recedes. Thinning is deterministic and NESTED, so the far set is a subset of the near set and blades never flicker as the camera moves. Reports exact triangle counts against the full-resolution baseline.
@@ -728,6 +816,14 @@ import lecore; m=lecore.UnifiedMind(); [l for l,_s in m.code_search('subdivide a
 ```
 *Find it by:* find similar code, search the codebase semantically, what other function looks like this one, code similarity, semantic search over my own source, find near duplicate functions, what else does what this does, search my source
 
+### Semantic rig (bones, hinges, and IK handles for the memory itself)
+mind.semantic_rig(): rig the framework like a bound mesh. Bones from each substrate's SYMMETRY GROUP: Givens hinges (GDN, full orthogonal) / rfft band-phase bones (HRR, cyclic; Nyquist excluded). IK = closed-form CCD under limits (planted pose 1e-16 rad). POSE = a new edit primitive: isometry, zero capacity cost (write pays crosstalk). SKINNING: key-space regions -- ortho topology exact; random keys leak at sqrt(nA/D); CANDY-WRAPPER quantitative (0.707 at full coverage), pinned not patched. Family: solve_ik / skin_mesh..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); r=m.semantic_rig(dim=96, hrr_dim=1024, n_items=12); r['gdn']['restore_err'] < 1e-12
+```
+*Find it by:* semantic rig, rig the memory like a mesh, pose the memory, ik handles for the framework, bones and joints for hypervectors, memory with a skeleton, adaptive shape with trigger response, skin weights for memory
+
 ### Semantic word index (find words by meaning)
 the fuzzy REVERSE of a dictionary: describe an idea and get the words whose definitions mean it. mind.build_semantic_index(words=...) places words in a meaning space by RANDOM INDEXING over their glosses, then idx.find('unexpected good luck') -> 'serendipity' and idx.similar('puppy') -> 'dog','kitten'. OPT-IN and separate: nothing loads or builds until you call it. Approximate by design (this is where leCore's geometry-preserving/lossy side belongs) -- reliable for the top hit, noisy in the tail, and word-sense sensitive..
 
@@ -735,6 +831,14 @@ the fuzzy REVERSE of a dictionary: describe an idea and get the words whose defi
 idx = mind.build_semantic_index(words=my_vocab); idx.find('a young dog'); idx.similar('ocean')
 ```
 *Find it by:* semantic index, find words by meaning, reverse dictionary, words like, similar words, meaning search, word similarity, describe a word
+
+### Shufflebrain (Pietsch's surgeries on holographic memory, measured)
+mind.shufflebrain_battery(): Pietsch's surgeries, measured. Rotation = COHERENT TRANSFORM; focal lesion: holographic keeps all items, localized loses half; cleanup identifies 24/24 at half-brain; GDN orthogonal-covariant vs HRR cyclic-only. GRAFT (S2): a CHANNEL, not a destination -- identify through it, consolidate FRESH = full transfer, host untouched; in-place pays the capacity law (kept negative, with mincing). docs/PANEL_pietsch_hologramic.md.
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); r=m.shufflebrain_battery(dim=512, n_items=12); abs(r['rotation']['vs_rotated']-r['rotation']['baseline'])<0.01
+```
+*Find it by:* shufflebrain, pietsch battery, rotate the memory trace, does memory survive brain surgery, hologramic memory test, lesion the memory and measure recall, memory graft experiment, graft amplification
 
 ### Spatial memory (position hypervectors: closest-point as associative recall)
 EVERY CLOSEST-POINT IS A RECALL (H5): positions become hypervectors via fractional power encoding (nearby points -> similar vectors, spearman 0.967); nearest-point queries are argmax cosine over an item store -- one matmul, no spatial hash. m.spatial_recall(points, queries, payloads=, k=) returns (indices, resonant payload readout, report). Measured 4.1x vs brute at scan scale; recalled points within 1% of true nearest (p95); colour readout 0.034 RGB. KEPT NEGATIVE: no bundle mode -- FPE keys are correlated and cross-talk in superposition (33% at K=128)..
@@ -753,7 +857,7 @@ import numpy as np; x=np.tile(np.arange(4),5000); print(mind.state_demand(x)['ra
 *Find it by:* how much state does this stream need, count causal states, bond dimension of a process, entropy rate of a signal, how many bits to remember this, is this stream predictable, excess entropy, memory demand before allocating
 
 ### Superposed key-value memory (capacity law + allocator + gated resonator decode)
-mind.superposed_memory(vocab=V) stores pairs as ONE vector (sum of bind(k,v)); mind.memory_capacity_law(dim,V,alpha) PREDICTS how many fit in closed form (the V-scaling is the Qinv((1-a)/V)^2 term, measured); mind.allocate_memory_dim(n,V) inverts it BEFORE storing. recall(decoder='pic') is resonator-style interference cancellation, exact to ~1.5x the one-shot wall, and LOAD-GATED: past its phase transition it refuses and answers matched-filter (kept negative: undamped PIC there is WORSE than one-shot). int8 memory is decision-free; sign keeps ~70% capacity..
+mind.superposed_memory(vocab=V) stores pairs as ONE vector (sum of bind(k,v)). codebook='hadamard' GENERATES atoms (O(dim), zero crosstalk; vocab<=2*dim refused); 'lazy' seeds rows per-index for unbounded vocab (1M measured: O(1) build, recall 1.0, 0.6 vs 32 GB dense). memory_capacity_law PREDICTS how many pairs fit; allocate_memory_dim inverts it BEFORE storing. recall(decoder='pic') cancels interference to ~1.5x the one-shot wall, LOAD-GATED past its phase transition (kept negative: undamped PIC there is worse). int8 decision-free; sign keeps ~70%..
 
 ```python
 import numpy as np; mem=mind.superposed_memory(vocab=256); n=mind.memory_capacity_law(vocab=256); ks=np.arange(n); vs=(ks*7)%256; r=mem.store(ks,vs).recall(ks, decoder='pic'); print(n, (r['values']==vs).mean(), r['decoder'])
@@ -767,6 +871,38 @@ THE SPEC SHEET, and the first thing to read before building anything that smells
 sheet = mind.machine_spec_sheet(); print(mind.machine_place_unit('t2_baked_grid', baseline_ns=50_000, n_calls=10**6, sheet=sheet)); print(mind.machine_unit('gather_unit')['do_not_use_when'])
 ```
 *Find it by:* machine model, hardware units, spec sheet, cost model, what hardware units does this engine have, gpu equivalent, what is the gpu equivalent here, memory hierarchy
+
+### The memory mountain (measure your own cache tiers; the tiers predict the benchmarks)
+mind.memory_mountain(): streaming GB/s vs working set, tier detection (peak / knee / floor), predict_streaming_ms from the measured floor. THIS box: peak ~90 GB/s @ 0.5-1 MB (L2), floor ~26 GB/s from 4 MB -- and bytes/floor REPRODUCED the fast-arbiter table to ~15% (exact f64 9.1 pred / 10.4 meas; f32 4.5/5.1; screens 1.6/1.9): the fast-path wins ARE the mountain wearing different working sets. KEPT NEGATIVES: the left flank is DISPATCH overhead (a Python probe cannot see L1, and says so); L3/RAM merge to ONE floor on a virtualized host..
+
+```python
+import lecore; m=lecore.UnifiedMind(); curve,tiers=m.memory_mountain(sizes=[256e3,1e6,8e6,32e6]); tiers['peak_gbs'] > tiers['floor_gbs']
+```
+*Find it by:* measure cache bandwidth, detect cache size, memory mountain, L1 L2 L3 boundaries, how fast is my ram, why is the matvec this slow
+
+### Tier contracts (certify a memory plan BEFORE it runs, fidelity clause included)
+NINE CERTIFY-OR-REFUSE contracts, one shape: certify, or refuse with the failing clause NAMED. tier_certify_plan (capacity, Horn-derived tier ban, FIDELITY from the measured D/M law), bake_certify (hypergeometric spot-check bound), differential_agreement, schedule_certify, demux_gated (measured 5% noise envelope), pose_certify, conservation_ledger (exact vs BOUNDED tested differently), lyapunov_certify (settle CERTIFIED for a true gradient flow), plan_certify (a GOAP plan's preconditions and goal)..
+
+```python
+print(mind.tier_certify_plan({'hot':{'capacity':8,'cost':1},'trace':{'capacity':10**6,'cost':10,'holographic':True,'dim':4096}}, [{'item':'b','tier':'trace','count':256}], min_recall=0.98)['violations'])
+```
+*Find it by:* tier contract, certify a plan, memory budget check, will this fit in cache, roofline, precondition check, refuse a plan, memory hierarchy contract
+
+### Tiered memory (adaptive short-term / long-term with promotion & demotion)
+mind.tiered_memory(hot_capacity=K) is the ST/LT conductor over existing levers: a bounded EXACT hot dict (O(1), zero loss -- low overhead for what matters), and demoted items in a CONSTANT-size superposed trace plus zlib-compressed exact spill (low disk/RAM for what doesn't). Demotion picks the lowest importance = recency-decay x (1+hits), with a recency-window veto (kept negative: pure frequency ordering starved every new item, twice). LT access verifies trace vs spill, then PROMOTES back to hot. get() returns (value, tier)..
+
+```python
+tm=mind.tiered_memory(hot_capacity=4); [tm.put(k,(k*7)%256) for k in range(9)]; print(tm.get(0), tm.stats())
+```
+*Find it by:* short term and long term memory, adaptive memory tiers, consolidate short term into long term, promote important memories, demote stale memories, move memories between tiers, low overhead for what matters, spend less disk on unimportant data
+
+### Tiled matmul-reduce (exact per-query max/argmax/sum, memory bounded by the tile)
+holographic_tiledreduce.tiled_matreduce(items, Q) reduces an (N x D)x(D x Q) product per query WITHOUT the (N,Q) matrix: a pure FOLD (step(state, tile) -> state over a commutative monoid), so peak memory is tile x Q whatever N is, and the step is REPEAT-expressible for the installed side. MEASURED: bit-identical argmax to dense on 12k REAL text vectors (strict-> preserves the first-index tie rule -- planted cross-tile ties pinned), FASTER than dense at these shapes (0.13 vs 0.22s), 3 MB vs 19 MB. This is what turned calibrated abstention's 7.45 GiB death at N=500k into a 0.9 GB loop..
+
+```python
+import numpy as np; from holographic.sampling_and_signal.holographic_tiledreduce import tiled_matreduce; X=np.random.default_rng(0).standard_normal((5000,64)); b,a=tiled_matreduce(X, X[:3].T); print(a)
+```
+*Find it by:* argmax over a huge matrix without memory, chunked similarity max, tiled reduction, exact search bounded memory, abstention at large scale, blockwise matmul reduce
 
 ### Transit hunter (box-matched period search with a matched null)
 mind.transit_search: phase-coherent period search with Box Least Squares -- the BOX-matched filter, measured 6.3x more peak contrast than the sinusoid template near the detection floor, where planets are lost. Verdicts vs the block-shuffle null (red noise survives, phase coherence dies; the iid null flags red noise as planets -- reported, not used); harmonic families reported; an impassable p-floor refuses. mind.transit_detection_floor: the detection-limit curve with per-transit SNR. The ladder gained a fold rung: comb detects, BLS names, the folded median consumes.
@@ -783,6 +919,14 @@ the codebook similarity is 98-100% of a cleanup's cost at any real M (the argmax
 idx, sc = mind.wgsl_cleanup_batch(codebook, queries); mind.wgsl_matmul(codebook, queries)
 ```
 *Find it by:* cleanup on the gpu, matrix times vector on the gpu, codebook similarity on any gpu, nearest atom on the graphics card, matvec on the gpu, vsa recall on the gpu, clean up many cues at once, batched cleanup on the gpu
+
+### Verified-knowledge memory (proofs as hypervectors, provenance kept)
+mind.proof_store proves a goal, runs the INDEPENDENT checker (unproven claims never enter), stores indexed rows in the substrate: goal atom, proof TREE (encode_tree_carrier), rule TRACE (seq_encode, complex kept complex). verify='external' records an installed Lean's verdict -- provenance ('checked'/'lean_verified') travels with each record; the binary stays optional, its verdict is kept. mind.proof_recall: exact or k-nearest by goal/tree/trace cosine (self excluded), provenance-filtered, honest empties. Rows not bundles, per the fact_capacity negative..
+
+```python
+mind.proof_store(['mortal',['socrates']], [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]); print(mind.proof_recall(['mortal',['socrates']])['exact']['provenance'])
+```
+*Find it by:* remember a proof, store verified knowledge, recall a proof, similar proofs, proof memory, verified knowledge base, knowledge with provenance, find proofs like this
 
 ### bank_or_formula
 decide whether to BANK computed values or keep the FORMULA and regenerate on demand (holographic_ladder, Quilez Q1 'store the formula not the samples'). The demoscene economy as a measured gate: banking pays iff hit_rate*eval - lookup > 0 (a miss must build the entry, so only reused evals amortize; break-even = lookup/eval). A bank of things a cheap formula gives for free is negative storage.
@@ -1180,6 +1324,14 @@ print(mind.explain_code('def lerp(a: float, b: float, t: float) -> float:\n    r
 ```
 *Find it by:* explain code, explain what code does in english, summarize a function, describe the logic flow of a program, find variables in source code, what does this code do, code to english, verbalize code
 
+### Face as a landmark graph + parts (procedural, no scans, non-human friendly)
+mind.face_landmarks places skull-canon landmarks (crown/brow/eye/nose/mouth/chin/jaw/cheek/ear/temple), bilateral pairs mirrored STRUCTURALLY. face_part_graph says which rigblock goes where as DATA, so a four-eyed noseless face is a list edit not a code path; face_expression gives per-landmark displacements driving blend_corrective. WHY NOT FLAME: 3DMMs fix topology and expression basis at scan time and assume adult human anatomy, fitting stylized/non-human assets unstably. NOT a likeness and NOT photo reconstruction -- no scan basis to fit..
+
+```python
+lm = mind.face_landmarks((0.0,1.6,0.0), 0.24, 0.10); print(len(lm), sorted(lm)[:3], len(mind.face_part_graph(lm)))
+```
+*Find it by:* face, facial landmarks, head features, expression, eyes nose mouth, character face, make a face
+
 ### Faraday sky map (telescope as observer)
 the TELESCOPE AS OBSERVER: Faraday rotation on a whole sky (holographic_rmsynth). faraday_rotate is the forward model -- rotate an intrinsic polarized signal by rm*lambda^2 across a band, the sky a radio dish receives (intensity + circular untouched). faraday_rm_map is the inverse -- recover a per-pixel Faraday-depth (line-of-sight magnetism) MAP from a sky Stokes cube (...,nchan,4) in one call, by rm synthesis over the whole field. The SAME polarization core reads a mantis eye and a radio telescope (the sensor unifier). faraday_rotate / faraday_rm_map.
 
@@ -1227,6 +1379,14 @@ m.fit_camera(mesh, direction, width, height) FRAMES a subject: the camera dict {
 import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; cam = m.fit_camera(box(), width=640, height=360); sorted(cam.keys())
 ```
 *Find it by:* fit the camera to the model, frame the subject in a render, my model is tiny in the frame, model is cut off at the edges, auto framing for a preview, camera distance to fit the bounding box
+
+### Fixed-topology template wrap (vertex i means the same thing on every body)
+mind.template_wrap deforms ONE template mesh onto any target field KEEPING ITS FACE ARRAY -- the precondition for blendshapes, shared textures and cross-species morphing, none of which work while each creature meshes from scratch. Annealed projection (non-rigid ICP schedule, Amberg 2007) + Taubin no-shrink relaxation; an analytic field gives exact correspondence, not a nearest-point search. MEASURED: improves triangle quality 66.6 -> 38.3. template_wrap_quality reports landing error, ROBUST p95/p5 bunching, degenerate edges, flipped faces. NEGATIVE: needs matching topology..
+
+```python
+import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; t=mind.mesh_from_sdf(sph,((-1.4,)*3,(1.4,)*3),res=24,vectorized=True); ax=np.array([1.3,0.8,1.0]); ell=lambda P:(np.linalg.norm(P/ax,axis=1)-1.0)*ax.min(); V=mind.template_wrap(t.vertices,t.faces,ell,rounds=4); print(round(mind.template_wrap_quality(V,t.faces,ell)['surface_error'],4))
+```
+*Find it by:* template wrap, shrink wrap a mesh, fixed topology, vertex correspondence, retopology, same mesh new body, morph between creatures
 
 ### Frequency-lifted (Gabor) splats
 mind.splat_field(img, k, basis='gabor') gives each splat a FREQUENCY, ORIENTATION and PHASE -- a Gabor atom, seven numbers instead of four. A Gabor atom is a BANDPASS primitive, so it buys you exactly the band it is tuned to. Measured at equal PARAMETER budget against a jointly-refit Gaussian fit: +7.0 dB on a narrowband oriented grating, +0.2 dB on a sharp broadband edge, +0.1 dB on noise-like texture -- and it costs 89x the fitting time (a 196-atom dictionary per placement against 4). The extra dimensions are a levy paid up front, so the win grows with budget (+0.6 dB at 224 numbers, +7.5 dB at 1,344). KEPT NEGATIVE, against the prediction that motivated it: this does NOT dissolve the splatsharpen negative, which was recorded on a sharp edge -- an edge is not a band, it is every band at once. And the Gaussian basis it was supposed to beat was never saturated: that flat-in-K curve was greedy matching pursuit's overlap double-counting, which splat_refit already fixed (12.9 -> 20.9 dB across K). Use mind.spectral_detail to check whether a fit STORED the sharpness, since PSNR will not tell you..
@@ -1461,6 +1621,14 @@ import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_ge
 ```
 *Find it by:* laplacian eigenvectors of a mesh, eigenfunctions of the mesh laplacian, spectral embedding of a surface, cotan laplace beltrami spectrum, harmonic basis for a mesh, shape descriptor from the laplacian
 
+### Mesh codec at a budget (and the measured refs-cost-what-deltas-save negative)
+mind.mesh_encode(mesh, max_error) compresses a triangle mesh: vertices quantized at a per-coordinate |err|<=max_error contract (verified on the decoded artifact), connectivity BIT-EXACT as varint index-deltas, all zlib'd -- MEASURED 2.5-2.7x vs zlib(raw). It prices the classic base+displacement hypothesis (decimate + closest-point refs + deltas) against this fair uniform coder and ships the smaller. KEPT NEGATIVE, the headline: explicit refs carry the information the anchors subtract, so uniform wins on every mesh measured; implicit refs are the deferred rung. mind.mesh_decode inverts..
+
+```python
+import numpy as np; mesh=mind.mesh_from_sdf(lambda p: np.linalg.norm(np.atleast_2d(p),axis=1)-0.8, bounds=((-1,-1,-1),(1,1,1)), res=20); r=mind.mesh_encode(mesh, max_error=2e-3, try_base=False); V,F=mind.mesh_decode(r['blob']); print(r['report']['mode'], round(r['report']['ratio_vs_zlib'],2))
+```
+*Find it by:* compress a mesh, mesh codec, store a mesh smaller, coarse mesh plus displacement, compress geometry with a base and details, quantize mesh vertices at a budget, shrink a mesh file
+
 ### Mesh editing (DCC)
 modeling/DCC edits on a Mesh: extrude/inset faces (meshpoly; extrude/inset quad_walls=True emit pure-quad side/ring walls for a Catmull-Clark cage; loop_cut takes cuts=N + factor for N spaced parallel loops), subdivide + smooth (meshsubdiv, Catmull-Clark), deform/warp (deform), rig-skin-pose a skeleton (blendpose), UV unwrap (chart), decimate/QEM, booleans, and mesh<->SDF. Blender-parity polygon editing.
 
@@ -1500,6 +1668,14 @@ MESH REPORT: one-call topology + shape scoreboard as a DICT (holographic_meshtoo
 import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; r=m.mesh_report(box()); (r['quad_fraction'], r['is_closed'], r['euler_characteristic'])
 ```
 *Find it by:* mesh report, topology scoreboard, mesh statistics, inspect a mesh, quad percentage and valence, is my mesh watertight, mesh quality check
+
+### Mesh through the weights, OBJ out the mouth (installed 3D program)
+mind.mesh_program_obj(machine, program, verts, faces): compile FAC steps (rigid transforms certify BLOCKDIAG -- 9+3 params/step), run the chain INSTALLED with the mesh's flattened vertices as the state, and get the transformed mesh back as an OBJ TEXT DUMP -- the token stream is the output device, no file I/O anywhere. BYTE-EXACT vs the live-faculty path (pinned). host_fallback=True lets refused steps ride as marked HOST:APPLY links..
+
+```python
+import numpy as np; from holographic.agents_and_reasoning.holographic_machine import HoloMachine; from holographic.agents_and_reasoning.holographic_compileinstall import mesh_program_obj; mm=HoloMachine(dim=12,seed=3,data=['a']); mm.functions_symbolic={}; obj,_=mesh_program_obj(mm,[('FAC',('s',lambda f: f*2.0)),('HALT',None)],np.eye(4,3),[(0,1,2)]); print(obj[:60])
+```
+*Find it by:* run a mesh through installed weights, obj from the model, 3d program in the weights, emit a mesh as text, installed mesh transform
 
 ### Metaball mesh (soft-blob base mesh)
 METABALL MESH (Blender metaballs / soft-blob base mesh): sum-of-Gaussians field at `centers` (n,3), spread `radius`, marched at `level` -- overlapping blobs FUSE smoothly (faculty m.metaball_mesh). The organic-blob base-mesh route complementing skin_skeleton (blobs where branch-stitching gets ugly). Returns a watertight Mesh. MEASURED: two overlapping blobs fuse to one watertight shell. KEPT NEG: isotropic-triangle blob topology (retopo after); too high a `level` on far centers yields separate shells..
@@ -1645,6 +1821,14 @@ import lecore; m=lecore.UnifiedMind(); s=m.build_scene('a red sphere and a blue 
 ```
 *Find it by:* which object did each pixel hit, per object mask from a render, trace a pixel to its object, object id pass, cryptomatte, g-buffer, render passes, per object coverage matte
 
+### Physically-based TISSUE materials (organs, bone, fat, skin -- not flat)
+mind.tissue_pbr gives base colour, roughness, metallic, SSS weight and a PER-CHANNEL subsurface radius for bone/skin/fat/muscle/organ/liver/lung/gut/spleen/chitin/keratin. Per-channel matters: red scatters deeper than blue in every soft tissue, and a scalar radius cannot give the warm silhouette that separates meat from red plastic. Christensen-Burley parameterisation; the ORDERING is grounded in measured SDOCT coefficients (bone/skin 1.95-2.13 /mm, liver 1.30-1.46, spleen 0.52-0.63) so viscera scatter furthest. NEGATIVE: single medium per tissue..
+
+```python
+v = mind.tissue_pbr('skin'); print([round(x,2) for x in v['sss_radius']], v['sss_weight'])
+```
+*Find it by:* tissue material, subsurface scattering, organ material, skin shader, bone material, realistic flesh, SSS
+
 ### Pipeline (render/sim)
 compose a render or sim run as ordered stages that declare what they need/produce; dispatch among render strategies (pathtrace/raymarch/prt/radiance) and catch a missing input before running.
 
@@ -1716,6 +1900,14 @@ grow branching plants and trees from rewrite rules: expand an L-system, walk it 
 ls = mind.lsystem('F', {'F': 'F[+F]F[-F]F'}); mesh, segs, scene = mind.grow_plant(ls, 3)
 ```
 *Find it by:* branching plant generator, make a bush, vegetation generator, procedural tree, grow a tree from rules, l-system, turtle graphics, foliage generation
+
+### Procedural storage (store the program, verify pointwise, or refuse)
+mind.store_procedural(y, tol=0.02) stores a 1-D signal as its PROGRAM, two tiers cheapest first: the generator bank + Gauss-Newton polish (blob CONSTANT in n -- MEASURED 76x at n=4k and 310x at n=16k from the SAME bytes; regenerable at any length, valid=False past 2x the verified window) or decompose_piecewise recipes (11.4x, original length only -- extension on per-segment axes is refused). Every tier is VERIFIED pointwise at tol*amplitude BEFORE commit; when both miss it refuses with measured errors and routes to residual_encode/codec_place. mind.regen_procedural(blob[, n]) plays it back..
+
+```python
+import numpy as np; y=2.5*np.sin(2*np.pi*np.arange(3000.)/333)+7; r=mind.store_procedural(y); g=mind.regen_procedural(r['blob'], n=5000); print(r['report']['mode'], round(r['report']['ratio_vs_zlib']), g['valid'])
+```
+*Find it by:* compress by storing the program not the data, store the generator instead of the output, save a signal as a formula and regenerate it, fit a generator and store only the recipe, procedural storage round trip, program as compression, constant size compression for lawful signals
 
 ### Procedural texture menu (2D + 3D standard set)
 The texture menu every 3D app ships, by NAME: mind.proc_texture(name, **params) -> a field f(P (M,3)); mind.texture_image(name, size) -> a 2D image; mind.texture_volume(name, res) -> a 3D grid (cloud densities). Menu: noise, fbm, white, voronoi (f1/f2/f2f1/cell/smooth), musgrave (ridged/hybrid), wave (bands/rings), marble, wood, brick, magic, checker, stripes, gradient, dots. ONE field serves all three samplers -- 2D texturing is the 3D solid on a plane (slide z through the marble). Deterministic in seed; the direct-eval costume of texturehome's VSA fields..
@@ -1812,6 +2004,14 @@ the PIPELINE composing the texture/material/scene graphs: mind.render_graph() re
 rg = mind.render_graph(); rg.add_texture('rust', graph, static=True).set_scene(scene); rg.plan(); prep = rg.prepare()
 ```
 *Find it by:* render graph, bake texture, bake vs live, prepare scene, resolve textures, orchestrate render, material lod, precompute texture
+
+### Render to text from the weights (installed image formation -> PGM)
+mind.raster_program_pgm(machine, program, params, w, h): run an installed image-formation chain (RECTANGULAR linear maps certify -- 3 lights -> 64 pixels) and emit the frame as PGM P2 ASCII -- the picture leaves through the mouth, no file I/O; byte-exact vs the live path (pinned). Quantization to 0..255 ints is the SERIALIZER's job, stated in the docstring..
+
+```python
+import numpy as np; from holographic.agents_and_reasoning.holographic_machine import HoloMachine; import lecore; m=lecore.UnifiedMind(); W=np.full((4,2),40.0); mm=HoloMachine(dim=2,seed=7,data=['a']); mm.functions_symbolic={}; pgm,_=m.raster_program_pgm(mm,[('FAC',('f',lambda q: W@q)),('HALT',None)],np.ones(2),2,2); print(pgm)
+```
+*Find it by:* render from the weights, picture out of the model, installed render, emit an image as text, pgm from the model
 
 ### Render-ready texture + uvs from a loaded mesh
 Get the render-ready (texture, uvs, base_color) from a LOADED mesh -- the pointer from an imported (or self-decimated / retopologised) model to a TEXTURED render_mesh call WITHOUT a file path. m.asset_base_texture(loaded_mesh) returns (texture image in [0,1] or None, per-vertex uvs, base_color fallback); feed the pair straight to render_mesh(mesh, cam, texture=, uvs=). Picks the base-colour map by face COVERAGE (a multi-material scan renders in the skin most of its surface wears), 8-bit normalised. Same logic preview_asset uses, factored out so a mesh you built yourself can be textured too..
@@ -1989,6 +2189,14 @@ import lecore, numpy as np; from holographic.io_and_interop.holographic_assetimp
 ```
 *Find it by:* split a mesh by material, separate a glb into per-material meshes, group faces by material, per material submesh, one mesh per material, multi-material scan wrong texture, split loaded mesh, extract submesh for each material
 
+### Stable neo-Hookean tet elasticity + muscle fibers (hand-derived gradients)
+mind.fem_simulate solves a tet mesh quasistatically under STABLE neo-Hookean elasticity (Smith/De Goes/Kim 2018) plus activation-dependent muscle springs. Chosen over the classical log-J neo-Hookean because log J is UNDEFINED for inverted elements and generated meshes DO invert -- this energy stays finite and differentiable through inversion (pinned). NO autodiff: Piola-Kirchhoff stress hand-derived, checked vs fd_gradient to 2e-11, rest stress-free to 7e-17. fem_select_fibers picks axis-aligned edges; fem_rest_quality reports degenerate/INVERTED elements before you trust a solve..
+
+```python
+a=mind.morphogenesis_grow(n_cells=30,seed=0,steps=60); mesh=mind.tetrahedralize(a['positions'],a['radii']); fib,rl=mind.fem_select_fibers(a['positions'],mesh['tets']); r=mind.fem_simulate(a['positions'],mesh['tets'],steps=60,fibers=fib,rest_lengths=rl,activation=0.7,pinned=[0]); print(round(r['history'][0],2), round(r['history'][-1],2))
+```
+*Find it by:* neo hookean, hyperelastic material, FEM tetrahedron, soft body FEM, muscle actuation, deformation gradient, piola kirchhoff stress, element inversion
+
 ### Star cluster (many systems)
 a STAR CLUSTER -- many star systems in a field (holographic_starsystem; the UP direction of star_system). Masses come from a Salpeter IMF (mostly red dwarfs, a few blue giants) and colour each star by its main-sequence temperature, so it looks like a real population. Even low-discrepancy placement by default, or pass a density_field (e.g. a cosmic-web map from the maze/Physarum solver) to cluster systems along large-scale structure (Burchett 2020 MCPM). Deterministic recipe. star_cluster / sample_imf / mass_to_temperature.
 
@@ -2036,6 +2244,14 @@ Make one image FEEL like another: mind.color_transfer(img, reference, mode, stre
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=np.random.default_rng(0).uniform(0,1,(32,32,3)); ref=np.random.default_rng(1).uniform(0,1,(24,24,3)); out=m.color_transfer(img, ref, strength=0.8); out.shape
 ```
 *Find it by:* style transfer, apply the style of one image to another, make my render look like a painting, match the colors of a reference image, stylize an image, transfer the look of a photo, neural style transfer, post process with a style
+
+### Tetrahedralize a point set with PROVED topology (limb-connection certificates)
+mind.tetrahedralize turns points into a volumetric tet mesh (Bowyer-Watson + alpha-complex, NumPy only) reporting adjacency, boundary, NON-MANIFOLD faces, components, Euler. mind.tet_connectivity_certificate PROVES every limb reaches the torso as a derivation (not a flood fill) and names orphans; mind.tet_certificate_lean exports a claim for external Lean. mind.tet_lod_chain makes each LOD level a RULE (nested prefix, 9.1x smaller than stored meshes) and REFUSES levels that orphan a limb. SCOPE: clean point sets, not TetGen. LAW: an attachment 1-2 cells across is NOT connected; 3 is minimum..
+
+```python
+a=mind.morphogenesis_grow(n_cells=40,seed=0,steps=80); mesh=mind.tetrahedralize(a['positions'],a['radii']); print(mesh['T'], mesh['components'], mind.tet_connectivity_certificate(mesh,0,list(range(mesh['T'])))['ok'])
+```
+*Find it by:* tetrahedral mesh, delaunay triangulation, tetrahedralize, certified LOD, volumetric LOD, LOD without storing meshes, decimate without breaking topology, volumetric mesh from points
 
 ### Texture (domain)
 procedural + example-based surface detail as FIELDS you plug into a Material channel: fbm noise, Voronoi/cellular cracks, divergence-free curl, patch synthesis; plus the weathering set (burn/oxidation/inclusions).
@@ -2092,6 +2308,22 @@ sdf_parse has always taken a compact s-expression for a whole shape tree -- (kin
 import lecore; m=lecore.UnifiedMind(); print(m.sdf_grammar()['example'])
 ```
 *Find it by:* how do I write an sdf string, what nodes does the sdf dsl have, sdf syntax, shape language reference, what can I put in sdf_parse, csg operators available, union two shapes together, subtract one shape from another
+
+### The inner eye (render, look, iterate, THEN speak the picture)
+mind.render_critique_loop: swarm-role members propose scene params, an INSTALLED chain renders, the frame goes through the model's OWN vision (eye is injectable: the assimilated Qwen3.5-VL tower on the host; ReferenceEye in CI -- the seam IS the honesty), a critic scores in EYE SPACE (kept negative: pixel-space critics reward changes the eye cannot see -- pinned with a checkerboard the eye pools away), loop until satisfied, emit PGM through the mouth. Deterministic: same intent, same picture, every run. Stalls stop honestly..
+
+```python
+import numpy as np; from holographic.agents_and_reasoning.holographic_machine import HoloMachine; from holographic.agents_and_reasoning.holographic_innereye import ReferenceEye; import lecore; m=lecore.UnifiedMind(); Wf=np.abs(np.random.default_rng(0).standard_normal((16,2)))*50; eye=ReferenceEye(4,4,embed_dim=8,patch=2); mm=HoloMachine(dim=2,seed=9,data=['a']); mm.functions_symbolic={}; pgm,rep=m.render_critique_loop(mm,[('FAC',('f',lambda p: Wf@p)),('HALT',None)],np.zeros(2),[('d',lambda p,s,r: p+0.1)],eye,eye(Wf@np.array([0.6,0.6])),4,4,satisfy=0.99,max_rounds=20); rep['satisfied']
+```
+*Find it by:* look at a render before outputting, inner eye loop, render critique iterate, model looks at its own render, design render look loop, swarm renders and inspects
+
+### The inner eye's 2D toolset (image ops as installed chain steps)
+mind.image_op_library(h, w): the classic editing bench as FAC-ready callables, verdicts MEASURED AT IMAGE SCALE (probe scale= names the certification DOMAIN -- at unit scale a threshold certified linear on the zero function): blur/unsharp/sobel certify, flip/rot90/warp are PERMUTATIONS (D ints), brightness/contrast install; threshold/gamma REFUSE and ride HOST:APPLY. Chains track state dim across rectangular steps. Compose with render_critique_loop: the eye can look at ANY pipeline's output..
+
+```python
+import lecore; m=lecore.UnifiedMind(); lib=m.image_op_library(4,4); import numpy as np; sorted(lib.keys())[:5]
+```
+*Find it by:* blur inside the weights, image pipeline installed, 2d editing in the model, installed image filters, which image ops install, flip is a permutation
 
 ### The scene's own SDF, emitted (brain/muscle, realised)
 the backlog's brain/muscle claim is 'the compute shaders the demos hand-write become a PROJECTION of the authoritative Python kernel -- one source of truth, two runtimes, no drift.' It was NOT realised: sdf.to_glsl() emitted GLSL for a tree, emit_kernel emitted WGSL from a scalar function's SOURCE TEXT, and THE TWO NEVER MET -- so RealtimeSession.payload('shader') carried whatever kernel_src the caller passed: a shader written by hand, about a scene the engine never saw. That is drift by construction. mind.sdf_dialect(tree, dialect) walks the SAME tree that _eval walks and emits map(p) -> distance in wgsl | glsl | c_f64 | c_f32, and payload('shader') now emits the SCENE's own map(). THE BAR IS EXECUTED: WGSL cannot run here, so mind.sdf_validate_c COMPILES the C twin with cc and RUNS it against the Python _eval. MEASURED on a scaled smooth-union of a translated sphere and a rotated box, 200 points: c_f64 agrees to 6.7e-16 and is NOT bit-identical -- because np.linalg.norm rescales to avoid overflow and sums in a different order than sqrt(x*x+y*y+z*z), so the emitted C computes the same FUNCTION by a different summation (K8's scalar kernel WAS bit-identical, because it emitted the same expression). c_f32 differs by 3.3e-07, which IS the tolerance a WGSL port is judged against -- and the `f` literal suffix is LOAD-BEARING: unsuffixed, a C literal is a DOUBLE and the whole expression evaluates in double before truncating, so the first table published an optimistic 2.83e-07. An audit found it because holographic_emit's dialect table used `f` and this one did not: TWO TABLES FOR ONE CONCEPT WILL DISAGREE, AND THE DISAGREEMENT WILL BE A BUG IN ONE OF THEM. A test now pins the shared dialects to agree, field by field. And mind.sdf_dialect takes an SDF tree OR ITS DSL TEXT, because a live tree does not survive JSON and parse_dsl(to_dsl(t)) round-trips to 0.0e+00 -- the kernel is text; so is the scene. THREE KEPT NEGATIVES: (1) `menger` and `repeat` fold the domain ITERATIVELY -- unrolling makes the shader's size a parameter -- and `twist`/`displace` are inexact distance warps; all four are REFUSED by name, and mind.sdf_emit_coverage asserts emitted + refused == every one of the 18 node kinds, because a gap there is a shader that silently omits geometry. (2) `scale` is not `p / s`, it is `map(p / s) * s`; drop the outer factor and the shape renders correctly with WRONG DISTANCES, and a raymarcher oversteps it. (3) WGSL IS NOT C: it infers a local's type with `let`, and rejects `vec3<f32> name = ...`. The first emitter wrote the C form for every dialect and the structural test -- which checked only the signature and the brace balance -- passed the invalid WGSL. An emitted shader is not a rendered image: this validates the DISTANCE FUNCTION, not WGSL's precision rules, its fast-math latitude, or whether it compiles..
@@ -2585,6 +2817,14 @@ import lecore; m=lecore.UnifiedMind(); s=m.build_scene('a green cone'); s.adjust
 ```
 *Find it by:* rotate an object, tilt a shape, tilt the cone, rotate the box, lean an object, turn an object, spin it, orient at an angle
 
+### Routed roles (the semantic system staffs the swarm)
+mind.dispatch_roles(tasks, spec): task phrases ('leave a map of the target', 'move along the shared map', 'adjust the texture gains') route to registry roles (scout/mover/texturer) via the engine's OWN BM25 -- leCore staffing leCore; nobody hand-builds member stacks. Builders close over spec (targets, steps, channels), so dispatch COMPOSES. AMBIGUITY IS AN ERROR: no match or two tasks claiming one role raises WITH NAMES -- silent misstaffing is a ghost. Pinned end-to-end: routed members converge in the workspace loop..
+
+```python
+import lecore, numpy as np; m=lecore.UnifiedMind(); [r for r,_ in m.dispatch_roles(['leave a map of the target direction','adjust the texture gains'], {'target_params': np.ones(3)})]
+```
+*Find it by:* route tasks to swarm roles, staff the swarm, assign agent roles, texture the scene routes to texturer, role dispatch
+
 ### Segment a photo into object regions (demux)
 DEMUX a photo into per-object REGIONS -- the segmentation front end of the photo->3D pipeline. mind.segment_image(rgb, k) k-means-clusters pixels in (r,g,b,x,y), splits each colour cluster into 4-connected components, merges tiny regions. Returns region dicts largest-first: id, mask, area, fraction, bbox, centroid, mean_color, shape (circle/rectangle/line/triangle), circularity/extent/aspect. Deterministic; numpy+stdlib. HONEST: splits on APPEARANCE not semantics (a shadow can split a floor) -- the per-region stats are a coarse guess the primitive-fit stage refines..
 
@@ -2724,6 +2964,22 @@ a shared STEP LOOP over any solver (fluids/smoke, fire/combustion, softbody/clot
 grid = mind.run_simulation('fluid', 30)   # step a fresh fluid and return its density
 ```
 *Find it by:* simulation, solver, fluid, smoke, fire, cloth, softbody, step
+
+### Simulation in the weights (installed physics step, drift-audited)
+mind.sim_program_run(machine, step_program, init, n_steps): compile ONE physics step (linear projections install certified; clamps ride as marked HOST:APPLY links), iterate it installed with the state fed back -- the chain IS the integrator. Returns (trajectory, manifest, DRIFT curve vs the live step): measured 100-step PBD chain at drift identically 0.0. Any nonzero drift is the certificate residual compounding -- visible, never hidden..
+
+```python
+import numpy as np; from holographic.agents_and_reasoning.holographic_machine import HoloMachine; import lecore; m=lecore.UnifiedMind(); mm=HoloMachine(dim=6,seed=7,data=['a']); mm.functions_symbolic={}; tr,man,dr=m.sim_program_run(mm,[('FAC',('s',lambda f: f*0.9)),('HALT',None)],np.ones(6),10); (tr.shape, float(dr.max()))
+```
+*Find it by:* run a physics sim in the weights, installed simulation, physics step as a model, drift curve, simulate inside the model
+
+### The HRNN collapse (n timesteps as ONE installed operator)
+mind.collapse_recurrence(machine, step_program, n): a linear recurrence x_t = M x_(t-1) + b IS leCore's HRNN (decay inside M) -- and n applications of one operator ARE one operator, so 100 sim steps collapse to a single certified affine matvec. MEASURED: 156x on endpoint queries at 2e-15 vs the stepped trajectory; affine drift+decay collapses exactly (geometric-series offset); the certificate prices the SPECTRUM (eig_max^n -- explosive recurrences announce themselves at compile); HOST links (clamps, branches) REFUSE with names -- sim_program_run stays the referee and the drift instrument..
+
+```python
+import numpy as np; from holographic.agents_and_reasoning.holographic_machine import HoloMachine; import lecore; m=lecore.UnifiedMind(); mm=HoloMachine(dim=6,seed=7,data=['a']); mm.functions_symbolic={}; run,cert=m.collapse_recurrence(mm,[('FAC',('d',lambda f: 0.9*f)),('HALT',None)],40); (round(float(run(np.ones(6))[0]),6), round(cert['eign_max'],6))
+```
+*Find it by:* collapse a recurrence, n steps in one matvec, hrnn in the weights, fast forward the simulation, skip to the end state, decay gate installed
 
 ### frame_server
 server-side REAL-TIME FRAME SERVING (holographic_framebudget) for front-end clients that PULL frames -- the request/response form of a frame stream (the HTTP service's POST /frame delegates to this). Keeps one frame-budget controller PER SESSION; next_frame(session, target_fps, last_frame_ms) returns the quality preset to render/simulate with, holding each client's target fps closed-loop. Two clients can run at different rates (a phone at 30, a desktop at 60).
@@ -3084,6 +3340,14 @@ rv = mind.residual_verdict(y); g = mind.support_gauge(y); hd = mind.hidden_drive
 ```
 *Find it by:* noise is not noise, structure hidden in the noise, puppet strings in market data, the noise has patterns, is the leftover signal meaningful, structure in my residuals, common cause across my sensors, hidden influences across many series
 
+### SCALIS scale-invariant surfaces (thin features survive beside thick ones)
+mind.convolution_field_scalis integrates over the HOMOTHETIC measure ds/tau instead of absolute arc length, so a long thick segment no longer deposits more field than a short thin one. Plain convolution 'failed to reconstruct prescribed radii and was unable to model large shapes with fine details' (Zanni et al. 2013). MEASURED: exactly invariant (0.13241) across a 16x scale range where plain scales by lam; and on a spike 5.7x thinner than its trunk, plain renders it at 9% of the asked radius -- swallowed -- while SCALIS gives 123%. Default-off; opt in per field..
+
+```python
+f = mind.convolution_field_scalis([((0,0,-0.5),(0,0,0.5),0.15,(1.,1.,1.))]); import numpy as np; print(round(float(f(np.array([[0.1,0.0,0.0]]))[0]),4))
+```
+*Find it by:* SCALIS, scale invariant surface, thin feature lost, convolution radius control, tail tip vanishes, blend thin into thick
+
 ### Scale (distribute)
 make something bigger than one box / one pass can hold: partition a job, run the pieces independently, reassemble with a commutative monoid -- map_reduce, load-balanced partition, image tiles / volume bricks; strategies tiling/octree/multires/superposed/sparsefield.
 
@@ -3139,6 +3403,14 @@ recover structure symbolically: symbolic regression to find a formula (symbolic)
 from holographic.agents_and_reasoning.holographic_symbolic import ...; mind.climb('dog'); from holographic.misc.holographic_sbc import ...
 ```
 *Find it by:* symbolic regression, find a formula, factor a vector, resonator, factorization, decompose a signal, reason, reasoning
+
+### Trace energy partition (the saturation ledger: signal / crosstalk / damage)
+mind.trace_partition(trace, atoms[, stored_idx]) splits a bundle's FIXED energy into signal (least-squares onto stored atoms), the law's ~n/dim crosstalk floor, and damage above it. Fractions SUM TO 1 by construction -- the ledger attributes power, never creates it. Membership MAD-gated when stored_idx unknown (estimated=True). Selftest: clean~all-signal; injected damage moves only the damage account..
+
+```python
+import numpy as np; A=np.random.default_rng(0).standard_normal((128,512)); A/=np.linalg.norm(A,axis=1,keepdims=True); t=A[:9].sum(0); print(mind.trace_partition(t, A))
+```
+*Find it by:* how much of this bundle is signal, signal versus crosstalk fraction, is my trace damaged or just loaded, memory health report, energy budget of a superposition, saturation ledger
 
 ### auto_scale
 automatic scaling (holographic_scalinglaw): repeatedly diagnose from the current operating point and double the most responsive knob until the target error is met, a WALL is diagnosed (no knob helps -- stop and say so), or the round budget is spent. Every step carries the probe that justified it. The capacity-adaptive pattern (octree, load-gated record) generalised to any workload with declared knobs.
@@ -3224,6 +3496,14 @@ import lecore; m=lecore.UnifiedMind(); print(m.workflow_propagate({'mesh': 1.0},
 
 *shrink data losslessly or by rate-distortion, and handle temporal image sequences.*
 
+### Byte-plane float packing (compress the 'incompressible', byte-exact)
+mind.float_pack_bytes / float_unpack_bytes: general codecs get ~1.08x on float embeddings (interleaved sign/exponent/mantissa reads as noise). Byte-plane TRANSPOSE groups like bytes before lzma: 1.19x on the same real bytes, byte-exact round trip (f32/f64, any shape, F-order handled). KEPT NEGATIVE, measured: row-delta before planing adds NOTHING -- embedding rows are not sequentially correlated; the filter ships without it..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); A=(np.random.default_rng(0).standard_normal((50,16))*0.1).astype(np.float32); b=m.float_pack_bytes(A); (np.array_equal(m.float_unpack_bytes(b), A), len(b) < A.nbytes)
+```
+*Find it by:* compress embeddings lossless, float compression byte exact, byte plane shuffle, pack float arrays smaller, embeddings wont compress
+
 ### Code as canonical shape + name delta (exact, not a codec)
 a statement is (canonical SHAPE) + (name DELTA): erase the identity-carrying leaves -- names, attributes, constants, argument names -- and what remains is pure structure; what you erased is the delta. Part C's triangle, applied to code. mind.code_decompose(stmt) splits it, mind.code_recompose inverts it EXACTLY (a delta of the wrong length RAISES rather than short-reading into plausible wrong code), mind.code_structure(src) / mind.code_rebuild(cb, stream) do a whole module, and mind.code_shape_census(src) measures the split. THE BAR, MET: 63,121 of 63,121 statement subtrees reconstruct bit-exactly, and 421 of 421 modules rebuild to a byte-identical normalized source -- 'normalized' being precise, because ast.unparse is a FIXED POINT on every module here and the reparsed AST is identical. MEASURED census: identifiers kept 1.19x reuse, identifiers erased 2.34x -- erasing them collapses ~49% of distinct statements. STATE THE UNIT WITH THE NUMBER: the same census over FUNCTIONS reads 1.13x, and reading one as a refutation of the other is a unit error. KEPT NEGATIVE: this is NOT a compressor. mind.code_byte_report(src) reports the structure at 1.12x LARGER than zlib on the whole tree, because 83.2% of shapes occur exactly once -- code's tail is long. The shape is a semantic KEY (structural search, duplicate detection, refactor targeting), and never a cache key..
 
@@ -3232,6 +3512,14 @@ import ast; tmpl, delta = mind.code_decompose('total = a + 7'); print(delta); pr
 ```
 *Find it by:* code structure, canonical shape and name delta, decompose code into shape and names, ast round trip, reconstruct source from a structure, statement shape, structural search, find duplicate code
 
+### Codec atlas + honest router (which compressor, measured on YOUR data)
+machine_map applied to compression: mind.codec_atlas() is the SPEC SHEET -- every codec unit (zlib/lzma, low-rank/tucker/tt, rate-distortion, pack_images, event codec, sequence-predictive, generator rung, cold storage) with its real module+symbol, pays-condition, and kept negatives in one table. mind.codec_place(x, max_error=...) MEASURES every applicable unit on x and ranks by bytes, priced against the zlib baseline, with 'store raw' a first-class row. Lossy units run ONLY under a stated error budget (never 99% energy; loss is never volunteered). Refusal on incompressible data is the finding..
+
+```python
+r = mind.codec_place(__import__('numpy').add.outer(__import__('numpy').sin(__import__('numpy').arange(64)/7.), __import__('numpy').cos(__import__('numpy').arange(64)/9.)), max_error=1e-6); print(r['best'], r['rows'][0])
+```
+*Find it by:* which codec should I use, compare compressors on my data, benchmark all compressors, pick a compression method automatically, codec atlas, route data to the best compressor, will my data compress and how, compression spec sheet
+
 ### Compression & codec
 shrink data losslessly or by rate-distortion: a sequence/entropy codec (codec), general compression (compress), rate-distortion quantization (ratedistortion), and content-addressed storage (storage). How the engine fits vectors into bytes.
 
@@ -3239,6 +3527,14 @@ shrink data losslessly or by rate-distortion: a sequence/entropy codec (codec), 
 from holographic.misc.holographic_codec import ...; from holographic.misc.holographic_ratedistortion import ...
 ```
 *Find it by:* compress, compression, codec, entropy coding, rate distortion, quantize, content addressed storage, encode data
+
+### Distributional codec (store the distribution, not the samples)
+mind.distribution_encode(points, bits=6) compresses a sample bank to its drift model's d+1 moment hypervectors, quantized at 4/6/8 bits with per-array scales -- MEASURED 10.5x (6-bit) / 21.5x (4-bit) vs zlib at coverage 1.0 on a 1500-point two-cluster bank. Decode returns a DriftModel to SAMPLE from: points LIKE the originals, never the originals (exactness wants codec_place/residual_encode). The report prices break_even_n (below it, pays=False) and carries the post-quantization generation audit, so a broken distribution is visible at encode time. mind.distribution_decode inverts..
+
+```python
+import numpy as np; rng=np.random.default_rng(0); pts=np.vstack([c+0.05*rng.standard_normal((800,2)) for c in ([0.3,0.3],[0.7,0.7])]); r=mind.distribution_encode(pts); mdl=mind.distribution_decode(r['blob']); print(round(r['report']['ratio_vs_zlib'],1), r['report']['audit'])
+```
+*Find it by:* compress a point cloud to distribution moments, shrink this point cloud for storage, store distribution not samples, distributional codec, summarize samples as a density model, replace a sample bank with a model, ship the moments not the points, moment based compression
 
 ### Frame-source protocol (temporal media seam)
 the CONTRACT for temporal media (holographic_framesource): a FrameSource is any object with get() -> (frame, seq) plus seekable/pausable flags; seq changes IFF the frame changes (cheap invalidation). The engine owns the contract, NOT decoding (cv2/ffmpeg stay host-side). mind.map_frames(source, fn, cache) pulls a host source's current frame and memoises fn(frame) by seq; mind.frame_key signs it; mind.synthetic_frame_source is a decoder-free synthetic clip. The seam for video colour transfer / temporal NCA / optical flow.
@@ -3263,6 +3559,22 @@ compress data with structure along SEVERAL axes -- a field over (x,y,t), a frame
 code = mind.compress_tensor(field, energy=0.999); X = mind.decompress_tensor(code)
 ```
 *Find it by:* tensor compression, tucker, hosvd, tensor train, low rank tensor, compress a volume, compress a frame stack, multiway svd
+
+### Predictive residual codec (model + coded error, exact or budgeted)
+mind.residual_encode(y) compresses a 1-D signal as its piecewise LAWS plus the coded error: decompose_piecewise fits per-segment formulas (stored as exact recipes), the residual is byte-plane shuffled and entropy-coded. Exact by default -- decode is bit-identical (float fixup + verbatim patch list). With max_error, near-lossless within the budget (measured 8.5x vs zlib on a noisy 3-regime signal; exact mode caps at ~1.1x -- irreducible mantissa planes). Self-refuses into mode='raw' when the model head does not pay. mind.residual_decode(blob) inverts; codec_place routes 1-D here..
+
+```python
+import numpy as np; y=np.sin(2*np.pi*np.arange(600.)/23); r=mind.residual_encode(y, max_error=1e-4); out=mind.residual_decode(r['blob']); print(r['report']['mode'], r['report']['ratio_vs_zlib'], float(np.abs(out-y).max()))
+```
+*Find it by:* pack this array smaller than zlib, beat zlib on a float array, quantize my weights, quantize model weights with an error bound, entropy code residuals after a model predicts, predictive residual codec, compress a signal exactly with a model plus error, lossless model based compression
+
+### Surprise-weighted rate allocation (code the news finely, the expected coarsely)
+mind.surprise_code(batch, reference, fine_step) spends bits where the information is: the reference corpus's drift model reads density in one dot product (z=<enc(x),mu>), points in its VOID (the news) are quantized at fine_step, predicted points at fine_step*coarsen -- same news fidelity as uniform-fine coding, MEASURED 1.71x fewer bytes (coarsen sweep 16/64/128/256 -> 1.17/1.36/1.57/1.71x; the varint floor caps it). A chance gate refuses the split when the news share sits at the quantile's own expected level. Lossy by design on the predicted mass. mind.surprise_decode inverts..
+
+```python
+import numpy as np; rng=np.random.default_rng(0); ref=rng.standard_normal((100,2))*0.05+0.5; batch=np.vstack([ref[:60], rng.uniform(0,1,(25,2))]); r=mind.surprise_code(batch, ref, fine_step=1e-4); print(r['report']['mode'], round(r['report']['ratio_vs_uniform_fine'],2))
+```
+*Find it by:* allocate bits where the information is, spend more bits on surprising samples, code the news finely and the expected coarsely, surprise weighted compression, importance weighted quantization, variable rate coding by predictability, bit allocation by surprise
 
 ### Video (temporal)
 temporal image sequences: video compression with keyframe/delta coding (video), temporal compression, motion/phase morph between frames (phasemorph), and frame interpolation. Moving pictures on the substrate.
@@ -3344,6 +3656,14 @@ import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); s=m.measure(la
 
 *find paths, plan routes, and run stored vector programs on the VSA machine.*
 
+### Compile a VM program into installed form (conformance + manifest)
+mind.compile_program_installed(machine, program): a symbolic HoloMachine program becomes a chain of projector-CERTIFIED matvecs + register slots; REPEAT of a linear body collapses to ONE operator power (spectral, exact). CONFORMANCE PINNED: VM and installed chain agree NUMERICALLY (allclose, not cosine) on a REPEAT+STORE/RECALL program. Nonlinear bodies refuse. Every compile yields the manifest (kind, payload SHAPE, residual per op); save_manifest writes the sidecar..
+
+```python
+from holographic.agents_and_reasoning.holographic_machine import HoloMachine; mach=HoloMachine(dim=512, seed=7, data=['a','k']); mach.functions_symbolic={}; run,man=mind.compile_program_installed(mach, [('LOAD','a'),('BIND','k'),('HALT',None)]); print(man['chain'])
+```
+*Find it by:* run a program in the weights, compile to installed opcodes, manifest schema, model card fields, what installs into weights, which units cannot install, vm conformance installed, repeat as operator power
+
 ### Fleet anomaly (compare sensors by STRUCTURE, across units)
 summarise a whole cohort of streams as ONE hypervector, then ask whether a stream behaves unlike its cohort. Compares STRUCTURE, not values, so it is EXACTLY invariant to scale, offset and sign -- a pressure sensor and a temperature sensor are directly comparable with no normalisation and no per-sensor calibration, and the signature does not grow with cohort size. Catches DRIFT, which amplitude and spectral baselines miss. Kept negative: a FLATLINE is not caught (a constant IS a generator) -- pair it with an amplitude check.
 
@@ -3359,6 +3679,14 @@ reachability over a table's edges -- neighbors, descendants, reachable, shortest
 from holographic.agents_and_reasoning.holographic_querygraph import EdgeGraph; EdgeGraph(t,'src','dst').path(a,b)
 ```
 *Find it by:* graph, reachable, descendants, shortest path, traversal, adjacency, recursive cte, edges
+
+### Native holographic micro-model (baked; the model IS the program)
+mind.native_model(dim, seed, program): a from-scratch model, no pretrained host -- layers are the certified parameterizations (circulant/permutation/dense), registers are recurrent state, forward() = the compiled program (pinned == VM). BAKED: save() writes a ~250-byte RULE file; load() re-bakes bit-identical weights. unitary=True bakes norm-preserving atoms for DEEP programs (depth-256 error 7.8e82 -> 6e-15 measured; the conditioning warning names this switch). to_dense(op) exports the literal host matrix..
+
+```python
+mdl=mind.native_model(512, 7, [('LOAD','a'),('BIND','k'),('HALT',None)], data=['a','k']); y=mdl.forward(); print(mdl.layers())
+```
+*Find it by:* model without pretrained weights, bake a model from a program, deep bind chain explodes, norm preserving atoms, unitary bake, neurosymbolic, interpretable by construction, white box model
 
 ### Navigation & planning
 find a way through a space or structure: A*/shortest-path route planning (plan), slime-mould flow networks (flow), tree/graph navigation (navigator), and maze solving. Pathfinding on the VSA substrate.
@@ -3376,6 +3704,14 @@ from holographic.agents_and_reasoning.holographic_machine import HoloMachine; fr
 ```
 *Find it by:* virtual machine, stored program, run a program, vm, recipe, template, recipe with holes, compile
 
+### Roles as powers of one shift (the affordable role machine)
+mind.roles_by_shift(pairs, dim=): encode role-filler pairs where role k IS the k-th power of ONE cyclic shift -- the oldest VSA trick, and the fix that made the in-weights role machine affordable (one permutation instead of one circulant PER role: the circulant design wanted 228 percent of a 3584-wide MLP for eight roles). Roles are INTEGERS (shift counts); decode via holographic_vsaroles.decode_structure; capacity() measures the load law. The origin design behind the weight installs..
+
+```python
+import numpy as np, lecore; m = lecore.UnifiedMind(dim=64, seed=0); m.roles_by_shift([(0, np.ones(32)), (1, 0.5 * np.ones(32))], dim=32).shape == (32,)
+```
+*Find it by:* roles as shifts, role filler machine, cheap role binding, powers of one operator, affordable roles in weights
+
 ### Run an allowlisted external command
 mind.run_command(name, args) runs an external program that an OPERATOR put on the allowlist (ffmpeg, a solver, a shell script, an API client), returning {stdout, stderr, returncode, ok}. It joins the same VSA fabric as an internal faculty -- mind.command_tool wraps one as an orchestrator Tool the Planner can select and chain, with the CircuitBreaker tripping on a flaky one. SECURITY: the allowlist is the boundary and it is set IN PROCESS (registration is private, so it is not reachable over /invoke -- measured: an agent could register `sh` before that was fixed). run_command can only run a name already on the list; values fill {placeholders} one token in one token out with NO shell, so an injection attempt in a value is a literal value..
 
@@ -3391,6 +3727,14 @@ a PERSISTENT process pool -- each worker its own interpreter with its own GIL, s
 pool = mind.local_pool(n=4); mind.distribute_compute(buckets, my_fn, backend=pool); pool.close()
 ```
 *Find it by:* spin up another instance, start a second worker, use more cores, launch a local worker pool, run work in parallel across processes, parallel execution on one machine, balance load across instances, make it use all my cpus
+
+### The time machine (unitary dynamics: reversible, random-access, superposable time)
+mind.time_machine(): for UNITARY steps (|spectrum|=1) time is an ADDRESSABLE AXIS: time_jump reaches step 977 in one spectral power (5e-13) and t<0 REVERSES exactly (1.4e-15 back; decaying steps refuse WITH eig_min^t -- the probe measured 1.4e+121 first). bundle_sims: K sims in ONE vector (circulant steps commute with binding, 1.6e-15); members read at the 1/sqrt(K) LAW; evolve_functional: a PRECOMMITTED ensemble readout, EXACT. KEPT NEGATIVE: keyed functionals are NOT exact (cosine 0.34 -- crosstalk survives weighting)..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); tm=m.time_machine(); spec=tm.make_unitary_step(64, seed=3); x=np.random.default_rng(0).standard_normal(64); y=tm.time_jump(x, spec, 500); back=tm.time_jump(y, spec, -500); float(np.max(np.abs(back-x)))
+```
+*Find it by:* run the simulation backwards, jump to timestep t, time travel state, reverse the dynamics, many simulations one vector, ensemble in superposition, undo n steps
 
 ## Run it as a service / distributed
 
@@ -3532,6 +3876,14 @@ import lecore; m=lecore.UnifiedMind(dim=64,seed=0); jid=m.job_submit('infer_sema
 ```
 *Find it by:* job submit, run in background, async, background job, run a faculty asynchronously, start a job, queue work, non-blocking call
 
+### Shared workspace for swarm roles (coordinate through slots, not chatter)
+mind.shared_workspace() + render_critique_loop(workspace=): named slots the roles read and write while deliberating -- the designer leaves the layout, the texturer reads it and leaves gains. Writes BUFFER within a round and commit together (even on no-improvement rounds: a scout that only leaves a map IS the round's progress -- the first pin run proved bootstrap dies otherwise); collisions resolve to the LOWEST member index and are LOGGED, never silent. Pinned: coordination is LOAD-BEARING (the mover fails without the scout's slot)..
+
+```python
+import lecore; m=lecore.UnifiedMind(); ws=m.shared_workspace(); ws.write(0,'layout',[1,2]); ws.commit(1); ws.read('layout')
+```
+*Find it by:* shared workspace between agents, swarm scratchpad, roles coordinate, blackboard for the swarm, agents share scene state
+
 ### Single-writer concurrency
 B8 concurrency: one writer at a time (serialised by an exclusive lock; a second writer waits or fails fast) plus lock-free reader SNAPSHOTS (a consistent point-in-time view immune to later writes). MVCC deferred, stated honestly.
 
@@ -3555,6 +3907,14 @@ np.random carries STATE, so the n-th draw depends on every draw before it -- fat
 from holographic.misc.holographic_determinism import hash_unit, hash_direction; u = hash_unit(x, y, bounce, seed)
 ```
 *Find it by:* stateless random, hash noise, coordinate keyed, no seed coordination, reproducible random, farm parallel sampling, hash_unit, random number per thread without a seed stream
+
+### Tabled goal-directed query (bindings for a goal with variables)
+mind.logic_query answers a goal containing variables (['ancestor',['tom','?w']]) backward from the goal, returning every ground binding with a checkable proof. TABLING (Chen & Warren 1996; XSB/SWI) makes it terminate on LEFT RECURSION and CYCLES where plain SLD diverges. MEASURED LAW: speedup tracks the goal's DEMAND CLOSURE not graph size -- 304x at demand 1, 0.3x (SLOWER) at demand 690 -- so budget caps the tabled answers and fallback=True reruns as a seminaive fixpoint, reporting which route ran. Never the silent default; see Formal logic to derive everything instead..
+
+```python
+print(mind.logic_query(['ancestor',['tom','?w']], [{'head':['parent',['tom','bob']],'name':'p0'},{'head':['parent',['bob','liz']],'name':'p1'},{'head':['ancestor',['?x','?y']],'body':[['parent',['?x','?y']]],'name':'ab'},{'head':['ancestor',['?x','?z']],'body':[['parent',['?x','?y']],['ancestor',['?y','?z']]],'name':'as'}])['answers'])
+```
+*Find it by:* query with variables, tabling, tabled resolution, backward chaining, goal directed search, SLD resolution, answer a logic query, what does X reach
 
 ### Typed-section container (app-neutral workspace file)
 an app-neutral CONTAINER file (holographic_container): a zip of a manifest + numeric array payloads, its body a list of TYPED SECTIONS {kind, id, meta, arrays}. A section whose kind a reader does not understand ROUND-TRIPS UNTOUCHED, so an image editor, a 3D app, and a video editor share ONE forward-compatible file, each registering its own kinds. save_container(sections, meta) -> bytes; load_container(bytes) -> {meta, sections}. Numeric-only (no pickle); byte-identical save/load/save. Not workspace_manager (a live-DB checkpoint) -- the file FORMAT for typed data.
@@ -3682,6 +4042,13 @@ combine things into one: bundle (superposition, weighted = soft mixture), lerp /
 from holographic.misc.holographic_blendhome import Blend; Blend.bundle(vectors, weights)
 ```
 
+### Blendshape basis with DECLARED local support (STAR's fix, without the scans)
+mind.blend_corrective authors one blendshape target that displaces only vertices within a GEODESIC radius of an anchor -- geodesic because a hand on a hip is millimetres away in space and a metre across the surface. SMPL's dense correctives capture spurious long-range coupling; STAR spends scan data LEARNING each joint's activation region, but an authored basis DECLARES it -- free and exact (measured overreach 0.000e+00; 8-15% of the mesh moves). blend_locality_report checks it. NEGATIVE: locality guaranteed, anatomical realism not..
+
+```python
+import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; msh=mind.mesh_from_sdf(sph,((-1.3,)*3,(1.3,)*3),res=18,vectorized=True); V=np.asarray(msh.vertices); s=int(np.argmax(V[:,1])); t=mind.blend_corrective(msh,s,0.8,'normal',0.2); print(mind.blend_locality_report(V,[t],msh,[s],[0.8])['max_overreach'])
+```
+
 ### Bundle capacity as a measured load ratio
 how many things fit in a bundle -- answered with its THREE VARIABLES attached (readout, dimension, quality floor), measured at call time, never a constant. The folklore '20-32 instructions' was a LINEAR-readout artifact: naive cosine holds safe M/D = 0.02 while cosamp/amp hold 0.17 (44 items at D=256, 174 at D=1024 -- 8.7x more, and the ratio COLLAPSES across dims, which is why capacity is m/D not a count). Reference numbers are for an INCOHERENT dictionary; coherence inverts the ranking, so pass codebook= for your atoms. Gate is mean minus sd: a lucky-seed capacity is not a capacity.
 
@@ -3736,6 +4103,13 @@ IMPORT GRAPH with positions (holographic_deptrace.trace / import_edges): m.trace
 
 ```python
 import lecore; m=lecore.UnifiedMind(); t=m.trace_imports('holographic.io_and_interop.holographic_ccrun'); (t['modules'], t['edges_by_kind'])
+```
+
+### Cleanup as one attention head (certified agreement, priced ties)
+mind.cleanup_as_attention(codebook, beta) expresses exact cleanup as y = A^T softmax(beta*Ax) -- ONE attention head, codebook as keys AND values: the host's own mechanism. mind.attention_read_certificate(codebook, queries, beta) MEASURES agreement vs exact cleanup on YOUR queries (real wiki: 0.575 @beta=4, 1.000 @beta>=16). PRE-REGISTERED NEGATIVE, held by theorem: softmax averages exactly-tied rows -- the lowest-index tie rule is inexpressible; ties are the agreement floor..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(); rng=np.random.default_rng(0); A=rng.standard_normal((50,16)); A/=np.linalg.norm(A,axis=1,keepdims=True); q=A[:8]+0.05*rng.standard_normal((8,16)); m.attention_read_certificate(A,q,beta=64.0)
 ```
 
 ### Code health: complexity x exposure x exercise (risk, not size)
@@ -3948,11 +4322,25 @@ attach points on a LIMB -- at a fraction along it, angle around it, and optional
 feet = mind.auto_feet(cr, ed.field(), part='foot', scale=1.2); ed.spec['sockets'].extend(feet)
 ```
 
+### Flagship benchmarks (real data, SOTA context, negatives loud)
+tools/benchmarks_flagship.py + docs/BENCHMARKS.md: calibrated abstention realized-vs-promised FA on SHUFFLED-REAL noise (0.013 @ alpha=0.01, power 1.000 -- within binomial CI; no SOTA ships the promise); screens recall 0.97 [0.94,0.99] self-measured with honest demotion (context: DARTH SLOs; 2026 HNSW silent-degradation post-mortems); 175-byte model re-bakes 2048 params bit-identically (Tracr stores weights, we store the rule); codec baselines set as the honest bar. KEPT NEGATIVE: screens wall-clock LOSES to exact BLAS at 36k -- scan savings != latency there..
+
+```python
+import subprocess; print(subprocess.run(['python3','tools/benchmarks_flagship.py'],capture_output=True,text=True).stdout[:300])
+```
+
 ### Fluid boundaries & performance (leStudio backlog: dtype, RGB, walls, ROI)
 The fluid stack is float32-clean end to end (P1: advect 2.62 -> 1.25 ms at 144x192; projection and diffuse preserve input dtype -- every float32 pipeline stays float32). advect accepts (H,W,C) fields sharing one backtrace (P2: RGB dye 7.23 -> 3.01 ms/step combined with P1), plus out= buffer reuse and roi=(y0,y1,x0,x1) windows (P4: sound for advection -- the backtrace is local; projection stays global; coarse-global + fine-local is the standard hybrid).projection only..
 
 ```python
 import numpy as np; z=np.zeros((32,32),np.float32); print(mind.fluid_step(z,z.copy(),z.copy(),boundary='wall')[0].dtype)
+```
+
+### Formal logic & Lean 4 export (prove, check, hand to an external authority)
+logic_prove: Horn forward chaining, proof tree, honest None (strategy='seminaive': same atoms, >=22x on large bases); logic_check_proof re-verifies INDEPENDENTLY (forged premises raise); lean_export emits Lean 4 (check='external' = both checkers agree); lean_verify runs installed lean; logic_consequences: least fixpoint + absurdity smoke (Lean never checks rule CONSISTENCY); logic_proof_measure sizes a checked proof; encode/decode_atom round-trip atoms (decode abstains); fact_capacity's NEGATIVE: bundled recall cliffs by load 8 independent of D -- INDEX fact bases. Deduction, not regression..
+
+```python
+p=mind.logic_prove(['mortal',['socrates']], [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]); print(mind.logic_check_proof(p, [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]))
 ```
 
 ### Function-granularity reachability (the engine audits itself)
@@ -4081,6 +4469,20 @@ The JOIN BUTTON in one call: admit a guest from EITHER a pasted invite LINK (...
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); inv=m.create_invite_link(workspace='lab'); g=m.join_from_link(inv['link'], 'alice'); g.id
 ```
 
+### LBS volume-loss bound (predict the candy wrapper, then refuse the pose)
+mind.skin_twist_shrink gives the CLOSED FORM |sum_b w_b exp(i theta_b)| for how much volume linear blend skinning loses under twist -- the two-bone case reduces to |cos(theta/2)|, so 90 deg keeps 0.707 and 180 deg collapses to ZERO (the candy wrapper). VERIFIED against the shipped skinning path to 1.1e-16, so it is a theorem about the code. mind.skin_pose_is_safe refuses a pinching pose BEFORE deforming; mind.skin_max_safe_twist inverts it (even 50/50 weights allow only 63.6 deg at a 0.85 floor). Exact for pure twist, conservative for bending..
+
+```python
+import numpy as np; print(round(float(mind.skin_twist_shrink([0.5,0.5],[0.0,np.pi/2])),4), mind.skin_pose_is_safe([[0.5,0.5]],[0.0,np.pi])['ok'])
+```
+
+### Learn this codebase (the map, the menu, and the method)
+Reading order for new eyes, human or AI: (1) docs/ARCHITECTURE.md -- the whole system then the parts; (2) CAPABILITIES.md -- the auto-generated menu of every capability with runnable examples (this very catalog, exported); (3) tools/showcase.py -- the flagship claims as live assertions. THE METHOD: it is often easier to use leCore to learn leCore -- find_capability/suggest/route ARE semantic search over this catalog and beat grep for 'where does X live'. llms.txt/AGENTS.md carry the same guidance for AI assistants landing on the repo..
+
+```python
+print(open('docs/ARCHITECTURE.md').read()[:400])
+```
+
 ### Learned chunk codebook (iterated pair promotion)
 learn the RECURRING CHUNKS of a symbol stream by iterated pair promotion (BPE -- Gage 1994; Sennrich et al. 2016), where the merged chunks are factoring and storage codebooks, not tokenizer vocabulary. mind.learn_chunks(stream) returns a plain-data codebook; mind.chunk_encode / mind.chunk_decode round-trip it LOSSLESSLY; mind.structure_score(stream) is the one-number probe for whether a stream has reusable structure at all. THE ONE CODEBOOK FAMILY (R3): the same codebook feeds recursive factoring (R2), hierarchical superposition's mid-level cleanup (W5) and the edit codec (DL8) -- three consumers, one structure. MEASURED: a workflow stream of 6,000 symbols tokenizes to 1,392 (4.3x) with mean chunk depth 4.31 and max depth 16; a uniform control stalls at 1.3x, mean depth 1.34, max depth 2. No structure, no recursion dividend -- and this measures it before anything is built on top. KEPT NEGATIVE: it is NOT a byte compressor. On the same stream zlib takes 1,820 bytes and the codebook+tokens take 3,578; mind.chunk_byte_report(...) reports both so the token ratio cannot be mistaken for a compression claim. Deterministic: count ties break on the pair, never on dict insertion order..
 
@@ -4100,6 +4502,13 @@ The k LOWEST eigenvectors of a Hermitian PSD operator from its MATVEC alone (m.l
 
 ```python
 import numpy as np, lecore; m=lecore.UnifiedMind(); A=np.random.default_rng(0).standard_normal((30,30)); A=A@A.T; w,U=m.low_eigenvectors(lambda x:A@x,30,float(np.abs(A).sum(1).max()),k=4,dtype=float,shift=float(np.linalg.eigvalsh(A)[0]-0.5),iters=80); np.allclose(np.sort(w),np.linalg.eigvalsh(A)[:4],atol=1e-2)
+```
+
+### MCP server (mount leCore in any Model Context Protocol host)
+holographic_mcp.py: JSON-RPC 2.0 over stdio, stdlib-only, delegating to /tools + /invoke. Tools: lecore_map/find/describe/invoke; corpus_bind/ask; void_explore(handle_b=...) = the FEDERATED LEAP (A's licensed gaps instantiated in B, warrant attached); memory_write/search per-tenant partition; receipt_verify + lecore.receipt sha256 pair on EVERY call -- determinism is the proof system (charge once, serve the hash). Cost in _meta..
+
+```python
+from holographic_mcp import MCPServer; s=MCPServer(); r=s.handle({'jsonrpc':'2.0','id':1,'method':'tools/list'}); [t['name'] for t in r['result']['tools']]
 ```
 
 ### Make the attached LLM a planner-visible tool
@@ -4364,6 +4773,13 @@ mind.rolling_stats(x, window, stats=(...)): trailing mean/std/min/max/range/quan
 import numpy as np; x=np.cumsum(np.random.default_rng(0).standard_normal(100)); r=mind.rolling_stats(x, 20, stats=('std','drawdown')); s=mind.streaming_stats(window=20).warm_start(x); print(round(r['std'][-1],6), round(s.std(),6))
 ```
 
+### Safe offset / wrap injectivity (the reach, both conditions)
+mind.wrap_is_injective says whether an offset or shrink-wrap will FOLD the mesh through itself -- a folded wrap still reads clean on surface error. Checks BOTH causes: LOCAL (offset under the smallest concave radius) and GLOBAL (collinear normals closer than twice the offset). The global term bites: armpits and finger gaps are LOW-curvature surfaces FACING each other, so a curvature-only check passes exactly the cases that fail. NEGATIVE: samples the reach, no medial axis..
+
+```python
+import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; msh=mind.mesh_from_sdf(sph,((-1.3,)*3,(1.3,)*3),res=14,vectorized=True); print(mind.wrap_is_injective(msh.vertices,msh.faces,0.05,sph,samples=200)['ok'])
+```
+
 ### Sampling
 Monte-Carlo sampling: low-discrepancy / blue-noise patterns, cosine-hemisphere directions, MIS weighting, firefly-clamped accumulation -- one home over the shipped samplers.
 
@@ -4483,6 +4899,34 @@ sweep a circular cross-section whose RADIUS varies along the path, in a rotation
 import numpy as np; P = np.stack([np.zeros(6), np.zeros(6), np.linspace(0, 1, 6)], 1); m = mind.sweep_profile(P, np.linspace(0.1, 0.01, 6))
 ```
 
+### The installed generative model (HDRIFT head: model == one certified matrix)
+mind.drift_head(model): a drift generative model's readout is its (d+1) x D moment matrix [mu; nu_j] -- certified DENSE at 0.0, so the model ships as ONE weight matrix. MODEL ARITHMETIC IN WEIGHT SPACE, exact: head(A)+head(B) == head(compose(A,B)) at 0.0; subtract == ablate; transport == a certified linear action on rows (3.6e-16). drift_head_load inverts (field bit-identical). HONEST BOUNDARY: the sampling recurrence is nonlinear -- the projector refuses it (residual 8e-2); enc = host-feature lane, generation stays host-shape..
+
+```python
+import numpy as np, lecore; from holographic.sampling_and_signal.holographic_hdrift import DriftModel, drift_moments, drift_compose; from holographic.sampling_and_signal.holographic_fpe import VectorFunctionEncoder; m=lecore.UnifiedMind(); r=np.random.default_rng(0); e=VectorFunctionEncoder(2, dim=512, bounds=[(-3,3),(-3,3)], bandwidth=6.0, seed=1); A=DriftModel(e, *drift_moments(r.standard_normal((80,2))*0.3, e), 80); B=DriftModel(e, *drift_moments(r.standard_normal((80,2))*0.3+1.0, e), 80); float(np.max(np.abs(m.drift_head(drift_compose(A,B)) - (m.drift_head(A)+m.drift_head(B)))))
+```
+
+### The projector (measure a faculty into installed form, or refuse)
+mind.project_faculty(f, dim): probe a callable, CERTIFY on held-out inputs: permutation / circulant / blockdiag / dense / rectangular; refusals retry HOST vocabulary (rmsnorm, gated/SwiGLU) then ENGINE kinds (powerlaw: gamma/tone certify at 1e-16 -- render chains lost their last host links). scale= names the DOMAIN. Census: 8.8% facade / 8.6% module verdict rate -- frame hypothesis REFUTED; the ore is the 11.4% module refusals (vocabulary targets); FAC closures make this a LOWER bound..
+
+```python
+import numpy as np; p=mind.project_faculty(lambda v: np.roll(v,3), 64); print(p['kind'], p['residual'])
+```
+
+### The showcase (runnable proof of what makes this engine different)
+tools/showcase.py executes the six flagship claims as LIVE assertions in ~2 s on a laptop CPU: calibrated abstention (0/100 noise passed at alpha=0.01), the recall budget demoting honestly with the measurement attached, exact tiled search with cross-tile tie identity, the ~250-byte model file re-baking bit-identical weights, VM==installed==symbolic three-referee conformance, and the one determinism tie rule. docs/SHOWCASE.md is the companion for new eyes: run the proof before summarizing the project..
+
+```python
+import subprocess; print(subprocess.run(['python3','tools/showcase.py'],capture_output=True,text=True).stdout[-200:])
+```
+
+### The thesis (one data type, many costumes -- why none of this is junk)
+docs/THE_THESIS.md: for visitors who see 600 modules and conclude bloat. Everything -- data AND functionality -- is a hypervector or an operator on them, one algebra; modules MULTIPLY. The junk test w/ receipts: cleanup IS a denoiser (24/24 at half-brain); IK/PBD/PnP/resonator = one solver (rig CCD 8e-17 rad); mesh subdivision ran on symbol sequences; a mince is block_shuffle; sphere tracing became a certified retrieval bound. Plus the discipline that keeps sprawl honest, and a ten-minute skeptic tour..
+
+```python
+import pathlib; t = pathlib.Path('docs/THE_THESIS.md').read_text(); 'one algebra wearing 600 costumes' in t
+```
+
 ### Tighten a selection to opaque pixels (auto-shrink marquee)
 SHRINK a rectangular raster selection to its NON-TRANSPARENT content -- the auto-shrink-to-opaque-pixels Photoshop/GIMP do, so a rotate/scale pivots about the DRAWING's centre, not the loose marquee's empty centre. mind.tighten_selection(alpha, bbox, threshold): alpha is (H,W) 0..1 or 0..255, an (H,W,4) RGBA image, or a bool mask; bbox=(r0,c0,r1,c1) inclusive is the marquee (None=whole image). Returns {empty, bbox, centre, area}: bbox is the tight box, centre the (row,col) pivot. empty=True means KEEP the original selection. Deterministic, numpy-only..
 
@@ -4586,6 +5030,13 @@ the engine's cross-cutting UTILITY tools: content addressing & hashing (uri), ta
 
 ```python
 from holographic.io_and_interop.holographic_uri import address_from_content, make_key; from holographic.misc.holographic_verify import CompositionTree
+```
+
+### VSA load-bearing audit (the ablation table)
+mind.ablation_table(seeds=...): for each subsystem, run the DUMBEST honest non-holographic baseline on the SAME task, data, and metric; measure both across seeds with the variance harness; confidence intervals decide the verdict -- load-bearing (holo lower CI above baseline upper), decorative (baseline wins), or tie. The honest answer to 'where is VSA actually the reason it works', system-wide. FDR-corrected verdicts included..
+
+```python
+import holographic.misc.holographic_ablate as ab; ab.verdict({'mean': 0.9, 'ci': (0.88, 0.92)}, {'mean': 0.5, 'ci': (0.48, 0.52)})['verdict']
 ```
 
 ### Void explorer (what the corpus implies but does not contain)
@@ -4989,4 +5440,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*638 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*696 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

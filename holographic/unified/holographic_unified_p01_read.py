@@ -333,6 +333,27 @@ class _UnifiedPart01:
         from holographic.agents_and_reasoning.holographic_ai import cosine
         return cosine(self.perceive(a, "axial"), self.perceive(b, "axial"))
 
+    def semantic_rig(self, dim=128, hrr_dim=2048, n_items=20, seed=0):
+        """Rig the memory like a bound mesh (holographic_semanticrig): bones from each
+        substrate's own symmetry group (Givens hinges for the GDN matrix memory, rfft
+        band-phase bones for HRR), IK handles solved by closed-form CCD under joint limits,
+        and the pose as a LOSSLESS edit primitive -- recall exactly preserved, inverse exact,
+        far targets floored honestly at the hinges. Returns the full measured battery.
+        See holographic_semanticrig.semantic_rig_battery."""
+        from holographic.caching_and_storage.holographic_semanticrig import semantic_rig_battery
+        return semantic_rig_battery(dim=dim, hrr_dim=hrr_dim, n_items=n_items, seed=seed)
+
+    def shufflebrain_battery(self, dim=2048, n_items=24, seed=0, shift=613):
+        """Pietsch's salamander surgeries on holographic memory (panel session,
+        docs/PANEL_pietsch_hologramic.md): rotation (a coherent transform -- rotated trace
+        recalls rotated values at exact baseline), mincing (the kept negative: fine block
+        shuffles kill HRR readout), focal lesion (holographic: whole retained; localized: half
+        the items dead), cleanup rescue (24/24 identification at half-brain), graft (real but
+        faint), and the GDN symmetry contrast (matrix memory is exactly orthogonal-covariant;
+        HRR is cyclic-only). See holographic_shufflebrain.shufflebrain_battery."""
+        from holographic.caching_and_storage.holographic_shufflebrain import shufflebrain_battery
+        return shufflebrain_battery(dim=dim, n_items=n_items, seed=seed, shift=shift)
+
     def damage_mask(self, destroy_fraction, seed=0, dim=None):
         """GRACEFUL-DEGRADATION PROBE: a keep-mask that zeroes a random `destroy_fraction` of a vector's slots.
         Multiply a stored hypervector by it to simulate real damage -- a scratched plate, a dropped shard, a lossy

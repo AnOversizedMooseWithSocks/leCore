@@ -15,6 +15,14 @@ Result: the area-light soft shadows come out NOISE-FREE at a fraction of the per
 speckle is gone. Kept scope: this is the SOFT/diffuse term. A genuinely HARD contact shadow (penumbra narrower than
 the anchor spacing) is caught by the cold tier and recomputed exactly; view-dependent glossy highlights are not
 cached (keep those on the tracer). NumPy only, deterministic (seeded rng).
+
+KEPT NEGATIVE (measured on the shader-ball preview, 192px A/B): on a curved MIRROR (metallic ~1, low roughness)
+the cached term paints FALSE SHADOWS -- a large dark crescent plus milky streaks on a copper sphere. The cache's
+premise ("the shaded soft-light term is a smooth field over the SURFACE") holds for diffuse receivers, but a
+mirror's response to an area light rides the REFLECTION vector, which spins rapidly across a curved surface --
+exactly the view-dependent term the scope note above says to keep on the tracer, and the smooth-field assumption
+breaks. Do not enable this cache on scenes whose hero surfaces are curved mirrors; the preview scene turned it
+off for this reason (holographic_preview.preview_scene).
 """
 import numpy as np
 

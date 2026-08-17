@@ -85,6 +85,75 @@ def _writestr(z, name, data, compress):
     z.writestr(zi, data)
 
 
+# ---- L-3: A SECTION-KIND REGISTRY, and L-4: the canonical image kind.
+# save_container accepts ANY kind string, and nothing could tell you which ones
+# a build understands -- so an app hardcoded the kinds it recognised and could
+# not tell a user WHY a section was inert. It carried them silently instead.
+_KINDS = {}
+
+
+def register_kind(kind, describe=""):
+    """Declare a section kind this build understands. Returns the kind."""
+    _KINDS[str(kind)] = str(describe)
+    return kind
+
+
+def known_kinds():
+    """{kind: description} for every kind this build understands.
+
+    A UI can now say "this file also contains 3 polystudio.object sections (not
+    editable here)" instead of carrying them silently -- which is the difference
+    between a format that survives round-trips and one a user trusts."""
+    return dict(_KINDS)
+
+
+def describe_sections(container):
+    """Per-section {kind, known, describe} for a loaded container. What a UI shows."""
+    out = []
+    for sec in (container or {}).get("sections", ()):
+        k = sec.get("kind")
+        out.append({"kind": k, "known": k in _KINDS,
+                    "describe": _KINDS.get(k, "")})
+    return out
+
+
+#: L-4: THE CANONICAL IMAGE SECTION. Every app wants to publish "here is an
+#: image to use as a texture", and without one name each app PAIR needs its own
+#: adapter -- lestudio.document to polystudio.texture to whatever a video editor
+#: writes, N^2 adapters for N apps. One documented kind makes it N.
+#: Contract: `arrays["image"]` is (H, W, 4) float 0..1 STRAIGHT alpha (the same
+#: convention composite_layers uses, so a composite result is publishable
+#: unchanged), and meta carries colour_space (default "srgb") and dpi.
+IMAGE_KIND = register_kind(
+    "lecore.image",
+    "an RGBA float 0..1 image any app can use as a texture; meta: "
+    "{colour_space, dpi}")
+register_kind("lestudio.document", "leStudio layer document")
+register_kind("polystudio.object", "Poly Studio scene object")
+
+
+def image_section(image, colour_space="srgb", dpi=72.0, name=None):
+    """Build a `lecore.image` section from an RGB or RGBA float array."""
+    a = np.asarray(image, np.float32)
+    if a.ndim != 3 or a.shape[-1] not in (3, 4):
+        raise ValueError("image must be (H, W, 3) or (H, W, 4), got %r"
+                         % (a.shape,))
+    if a.shape[-1] == 3:
+        a = np.concatenate([a, np.ones(a.shape[:2] + (1,), np.float32)], -1)
+    return {"kind": IMAGE_KIND, "arrays": {"image": a},
+            "meta": {"colour_space": str(colour_space), "dpi": float(dpi),
+                     "name": name or "image"}}
+
+
+def read_image_section(section):
+    """(image, meta) from a `lecore.image` section, whoever wrote it."""
+    if section.get("kind") != IMAGE_KIND:
+        raise ValueError("not a %s section: %r" % (IMAGE_KIND,
+                                                   section.get("kind")))
+    return np.asarray(section["arrays"]["image"], np.float32), dict(
+        section.get("meta") or {})
+
+
 def save_container(sections, meta=None, compress=True):
     """Serialise a list of typed SECTIONS into one container file -> bytes.
 

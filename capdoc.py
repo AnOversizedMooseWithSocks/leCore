@@ -175,7 +175,19 @@ def generate(root=None):
 
 # Schema version for the machine-readable artifact. BUMP THIS (and update any consumer) whenever the JSON
 # shape changes in a backward-incompatible way -- consumers should refuse a major version they don't know.
-CAPABILITIES_SCHEMA_VERSION = "1.0"
+# ONE SOURCE, NOT TWO. This constant and mind.version()["capabilities_schema"]
+# were independent literals and had already drifted apart -- the engine reported
+# 1.1 after the step/edge formats moved while the JSON contract still announced
+# 1.0 to every client that reads it WITHOUT importing the engine, which is
+# exactly the audience the file exists for.
+# Read it from the engine when the engine is importable (this generator already
+# imports it), and keep a literal fallback so capdoc still runs standalone.
+try:
+    import lecore as _lc_schema
+    CAPABILITIES_SCHEMA_VERSION = _lc_schema.UnifiedMind(
+        dim=16, seed=0).version()["capabilities_schema"]
+except Exception:
+    CAPABILITIES_SCHEMA_VERSION = "1.1"
 
 
 def generate_json(root=None):

@@ -43,7 +43,12 @@ def converged_mask(variance_of_mean, tolerance, z=Z95):
     so the escalation is strict (`u > t`), where coarse-first's default refines on a tie (`u >= t`). Verified
     bit-identical to the old inline comparison on 100,000 random variances including exact ties."""
     from holographic.misc.holographic_coarsefirst import escalate_mask
-    return ~escalate_mask(ci_half_width(variance_of_mean, z), threshold=float(tolerance), inclusive=False)
+    t = np.asarray(tolerance, float)
+    if t.ndim == 0:
+        return ~escalate_mask(ci_half_width(variance_of_mean, z), threshold=float(t), inclusive=False)
+    # PER-PIXEL tolerance (additive; the upscale door demands native-grade convergence only on smooth-metal
+    # pixels): same strict tie convention as the scalar path -- a pixel exactly AT its tolerance has converged.
+    return ~(ci_half_width(variance_of_mean, z) > t)
 
 
 def samples_to_target(variance_of_mean, current_n, target_half_width, z=Z95):

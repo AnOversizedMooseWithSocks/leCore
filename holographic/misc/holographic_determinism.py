@@ -100,6 +100,32 @@ def argmax_tiebreak(a, axis=None):
 _HASH_ODD = np.uint64(0x9E3779B97F4A7C15)          # golden-ratio odd constant (splitmix64's increment)
 
 
+def topk_det(scores, k):
+    """THE tie-safe top-k rule, stated once (ISA-1's pattern at k>1): indices of the k best scores,
+    descending, ties broken by LOWEST INDEX -- exactly argmax_tiebreak's rule extended to a list.
+
+    WHY THIS EXISTS (the four-sign-rules failure, relived): the tie-safe shortlist (argpartition on
+    -scores, keep everything >= the k-th value, stable sort) was hand-copied into THREE sites in one
+    week (Index.nearest, Index.nearest_batch, BM25.rank), each carrying its own kept-negative comment
+    about the k+1 boundary bug (an argpartition(k+1) shortlist DROPS tied winners at the k-th value --
+    shipped once, caught by planted discrete ties). One contract, one implementation, three delegates;
+    conformance-pinned so any substrate's top-k (NumPy, WGSL reduce, an installed argmax cascade)
+    verifies against the same EXACT decision. Contract: len(out) == min(k, len(scores)); out is
+    descending by score; among equal scores, ascending by index; equals a stable sort of the whole
+    array truncated to k (asserted in the selftest against exactly that reference)."""
+    s = np.asarray(scores)
+    n = s.shape[0]
+    kk = int(min(k, n))
+    if kk <= 0:
+        return np.empty(0, dtype=np.int64)
+    if kk == n:
+        short = np.arange(n)
+    else:
+        part = np.argpartition(-s, kk - 1)
+        short = np.where(s >= s[part[kk - 1]])[0]            # EVERYTHING tied at the k-th value survives
+    return short[np.lexsort((short, -s[short]))][:kk].astype(np.int64)
+
+
 def _fold_str(text):
     """A deterministic uint64 for a STRING key (a domain separator like "sphere_z"). An FNV-1a byte fold in pure
     integer arithmetic -- NEVER Python's hash(), which is salted per process and would break reproducibility."""

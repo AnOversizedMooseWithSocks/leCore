@@ -219,10 +219,43 @@ class CurlWind:
         return self.strength * (turb + self.base[None, :])
 
 
+
+def clump(strands, n_clumps=400, tightness=0.55, seed=0):
+    """CLUMP a coat: real fur gathers into tufts (guide hairs), it does not stay uniformly combed. Pick
+    `n_clumps` guide strands deterministically, assign every strand to its nearest guide by root distance,
+    and pull each strand's points toward its guide's -- by zero at the root growing to `tightness` at the
+    tip (roots stay planted in the skin; tips gather). The single biggest groom-realism verb after combing:
+    a clumped coat catches light as TUFTS with shadowed valleys instead of as a uniform shell."""
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(len(strands), size=min(n_clumps, len(strands)), replace=False)
+    groots = np.stack([strands[i].root for i in idx])
+    guides = [strands[i] for i in idx]
+    out = []
+    roots = np.stack([s.root for s in strands])
+    near = np.argmin(((roots[:, None, :] - groots[None, :, :]) ** 2).sum(-1), axis=1)
+    for s, gi in zip(strands, near):
+        gpts = guides[gi].points
+        m = len(s.points)
+        # resample the guide to this strand's point count so the pull is per-point
+        gs = np.stack([np.interp(np.linspace(0, 1, m), np.linspace(0, 1, len(gpts)), gpts[:, d])
+                       for d in range(3)], axis=1)
+        w = (tightness * np.linspace(0.0, 1.0, m) ** 1.5)[:, None]     # zero at root -> tightness at tip
+        pts = (1 - w) * s.points + w * (gs + (s.points[0] - gpts[0]) * (1 - np.linspace(0, 1, m))[:, None])
+        out.append(Strand(pts, root_normal=s.root_normal, width=s.width, attrs=s.attrs))
+    return out
+
+
 def _selftest():
     """Roots land on the surface with outward normals; strands have the right length; a pinned strand swings down
     under gravity without stretching and stays outside the body; guide interpolation plants render strands near
     their guides and clumping tightens them; curl-noise wind is divergence-free and moves hair. Deterministic."""
+    # CLUMP: roots stay planted; tip spread SHRINKS (tufts gather)
+    base = [Strand(np.stack([[x, 0, 0], [x, 0.5, 0], [x, 1.0, 0]]).astype(float)) for x in np.linspace(-1, 1, 40)]
+    cl = clump(base, n_clumps=4, tightness=0.8, seed=0)
+    assert all(np.allclose(a.points[0], b.points[0]) for a, b in zip(base, cl)), "clump must not move roots"
+    tip0 = np.std([s.points[-1][0] for s in base]); tip1 = np.std([s.points[-1][0] for s in cl])
+    assert tip1 < tip0 * 0.9, "clumping must gather tips (%.3f -> %.3f)" % (tip0, tip1)
+
     from holographic.mesh_and_geometry.holographic_sdf import sphere
     s = sphere(1.0)
     bounds = ([-1.6, -1.6, -1.6], [1.6, 1.6, 1.6])   # (lo_vec, hi_vec)

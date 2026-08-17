@@ -1,0 +1,12 @@
+{
+ "test_agent_benchmark.py": 9.0,
+ "test_duplication_audit.py": 31.0,
+ "test_holographic_adaptive_resonator.py": 2.5,
+ "test_holographic_collide.py": 8.0,
+ "test_holographic_market.py": 45.0,
+ "test_holographic_scene.py": 16.0,
+ "test_holographic_sdfbake.py": 1.5,
+ "test_holographic_shader.py": 34.5,
+ "test_holographic_slime.py": 20.0,
+ "test_scenegen_geometry_integration.py": 7.0
+}

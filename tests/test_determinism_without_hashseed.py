@@ -89,3 +89,28 @@ def test_the_core_paths_were_already_salt_independent():
     )
     outs = {_run_with_salt(snippet, s) for s in ("0", "7", "424242")}
     assert len(outs) == 1, outs
+
+
+def test_the_planner_surface_is_salt_independent():
+    """**The io-kind graph, the planner and the pipeline map, under a random salt.**
+
+    The core-paths test above pins hashing/routing/tagging/rendering. It does NOT
+    touch the PLANNER, whose edge set is built by iterating a dict of capabilities
+    and whose BFS tie-breaks by name -- exactly the shape that goes salt-dependent
+    when someone iterates a set instead of a sorted list. The scene/camera kinds and
+    the leStudio door pass grew that edge set from 125 to 147, so the surface this
+    guards is bigger than when it was last checked.
+    Everything here is ORDER-SENSITIVE by construction: a route, the first step of a
+    route, the edge count, and the source-only gap set. If any of it moves under a
+    salt, a plan would differ between two machines running the same engine."""
+    snippet = (
+        "import lecore;"
+        "m = lecore.UnifiedMind(dim=128, seed=0);"
+        "pm = m.pipeline_map();"
+        "print([s['method'] for s in (m.suggest_pipeline('mesh','image') or [])],"
+        " [s['method'] for s in (m.suggest_pipeline('mesh','scene') or [])],"
+        " len(pm['edges']), sorted(pm['gaps']['source_only']),"
+        " sorted(m.io_kinds()))"
+    )
+    outs = {_run_with_salt(snippet, s) for s in ("0", "7", "424242")}
+    assert len(outs) == 1, outs

@@ -308,6 +308,53 @@ def subsurface(sdf, P, N, Ldir, depth=0.6, steps=10, sigma=4.0, jitter=None):
     return np.exp(-sigma * inside)                            # Beer-Lambert transmission: thin -> bright
 
 
+def subsurface_emission(sdf, material, P, N, depth=0.25, steps=14, sigma=4.0, jitter=None):
+    """The INTERIOR-EMISSION half of translucency: from just under the surface, march INWARD along -N,
+    measure the wall thickness (interior path until the field first goes positive -- the air gap), find the
+    body BEHIND the wall (first re-entry), and return that body's EMISSIVE radiance attenuated by
+    Beer-Lambert over the wall: rgb = emissive(back body) * exp(-sigma * wall). Thin walls glow with the
+    core's light; thick walls stay dark -- the candle/mouse-with-an-LED look that the light-directed
+    `subsurface` term (external light only) cannot produce, because an emissive NEIGHBOUR is not a light
+    the tracer samples. Points with no body behind them (nothing re-entered within `depth`) return zero.
+    Same anti-banding contract as `subsurface`: fixed steps quantize the march; pass `jitter` in [0,1) to
+    dither the quantum into denoiser-friendly noise. Vectorised; loops only over march steps."""
+    # ADAPTIVE interior stepping, not fixed steps -- the hard-won reason: a fixed dl = depth/steps SKIPS any
+    # air gap thinner than dl (measured: dl 0.021 stepped clean over the preview's 0.010 gap and the term
+    # returned zero everywhere while every ingredient probed healthy). Sphere-tracing by |SDF| lands ON each
+    # crossing instead of hoping to sample near it -- the same fix _march_through uses for glass traversal.
+    # `steps` bounds the total evals; `jitter` is accepted for signature stability but unused (thickness is
+    # now an exact crossing measure, so there is no quantization to dither).
+    P = np.asarray(P, float); N = np.asarray(N, float)
+    n = len(P)
+    pos = P - N * 1e-2                                        # just inside the surface
+    t = np.zeros(n)                                           # distance marched
+    wall = np.zeros(n)                                        # interior path length of the WALL
+    phase = np.zeros(n, dtype=int)                            # 0 = in wall, 1 = in gap, 2 = re-entered (done)
+    for _ in range(int(steps)):
+        live = (phase < 2) & (t < depth)
+        if not live.any():
+            break
+        d = sdf.eval(pos[live])
+        step = np.maximum(np.abs(d), 2e-3)                    # sphere-trace by distance-to-surface, floored
+        inside = d < 0.0
+        li = np.where(live)[0]
+        wall[li] += np.where((phase[li] == 0) & inside, step, 0.0)
+        phase[li] = np.where((phase[li] == 0) & ~inside, 1, phase[li])          # crossed into the gap
+        phase[li] = np.where((phase[li] == 1) & inside, 2, phase[li])           # re-entered: the back body
+        pos[li] = pos[li] - N[li] * step[:, None]
+        t[li] += step
+    glow = np.zeros((n, 3))
+    hit = phase == 2
+    if hit.any():
+        probeP = pos[hit] - N[hit] * 3e-3                     # safely inside the back body
+        out = material(probeP)
+        emis = np.asarray(out[3], float)                      # material() contract: emissive is field 3
+        if emis.ndim == 1:
+            emis = np.repeat(emis[:, None], 3, 1)
+        glow[hit] = emis * np.exp(-sigma * np.clip(wall[hit], 0.0, None))[:, None]
+    return glow
+
+
 def render_sdf(sdf, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3), base_color=(0.85, 0.5, 0.35),
                sky=None, ao=True, shadows=True, reflect=0.25, refract=0.0, ior=1.5, sss=0.0,
                sss_color=(1.0, 0.4, 0.3), ambient=0.25, pbr=None, sun_intensity=3.14159, jit_expr=None,
@@ -489,6 +536,24 @@ def _selftest():
     assert np.allclose(curv_r2, 1.0, atol=0.1)                 # 2/r = 1 for r=2 (curvature falls with size)
     curv_plane = sdf_curvature(_plane(0.0), np.array([[0.5, 0.0, 0.3]]))
     assert abs(curv_plane[0]) < 0.05                           # flat -> ~0
+
+    # subsurface_emission: the interior-emission half of translucency. Pinned on ordering and zeros, on the
+    # exact rig measured at build time: emissive core behind a shell -- THIN wall glows MORE than thick
+    # (Beer-Lambert on wall thickness); a SOLID with nothing behind it returns exactly zero (no re-entry, no
+    # invented glow). If the wall/gap/re-entry bookkeeping breaks, one of these flips.
+    from holographic.mesh_and_geometry.holographic_sdf import sphere as _sph
+    _shell = _sph(0.60).subtract(_sph(0.52)); _core = _sph(0.51)
+    def _mat(P):
+        r = np.linalg.norm(np.asarray(P, float), axis=1); n = len(P)
+        emis = np.where(r < 0.515, 1.0, 0.0)[:, None] * np.array([[0.1, 0.6, 1.0]])
+        return (np.ones((n, 3)) * 0.8, np.zeros(n), np.ones(n) * 0.8, emis, np.ones(n), np.zeros(n))
+    _P = np.array([[0.0, 0.0, 0.60]]); _N = np.array([[0.0, 0.0, 1.0]])
+    g_thick = subsurface_emission(_shell.union(_core), _mat, _P, _N, depth=0.30, steps=20, sigma=4.0)
+    g_thin = subsurface_emission(_sph(0.535).subtract(_sph(0.52)).union(_core), _mat,
+                                 np.array([[0.0, 0.0, 0.535]]), _N, depth=0.30, steps=20, sigma=4.0)
+    g_none = subsurface_emission(_sph(0.60), _mat, _P, _N, depth=0.30, steps=20, sigma=4.0)
+    assert g_thin[0, 2] > g_thick[0, 2] > 0.0, "thin wall must transmit MORE interior emission than thick"
+    assert float(np.abs(g_none).max()) == 0.0, "a solid with no body behind it must glow exactly zero"
 
     print(f"raymarch selftest ok: render {img.shape}, AO crease {ao_crease:.2f} < open {ao_open:.2f}, "
           f"shadow under-sphere {shad:.2f} < open {lit:.2f}, orbit-trap march identical + near {near:.2f} < far {far:.2f}")

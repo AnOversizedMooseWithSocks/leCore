@@ -94,7 +94,7 @@ def _march_through(sdf, O, D, max_steps=32, surf_eps=1e-3):
 def path_trace(sdf, camera, width=96, height=96, spp=16, max_bounce=4, rr_start=2,
                material=None, sky=None, seed=0, return_variance=False, active=None,
                on_progress=None, progress_every=0, should_stop=None, antialias=False,
-               sss_dir=None, sss_depth=0.6, sss_sigma=4.0, lights=None):
+               sss_dir=None, sss_depth=0.6, sss_sigma=4.0, lights=None, sss_interior=False):
     """Render an SDF scene by path tracing. `material(P)` -> (albedo(n,3), metallic(n,), roughness(n,),
     emission(n,3)[, ior(n,)]); `sky(D)` -> (n,3) environment radiance for escaped rays. Returns an (H,W,3) HDR image
     (un-tonemapped). spp = samples per pixel; max_bounce = path length; rr_start = bounce after which Russian
@@ -217,6 +217,17 @@ def path_trace(sdf, camera, width=96, height=96, spp=16, max_bounce=4, rr_start=
                     glow = _sss_transmit(sdf, Ph[st], Nf[st], sss_dir, depth=sss_depth, sigma=sss_sigma,
                                          steps=n_steps, jitter=np.abs(jit))   # (k,)
                     radiance[ghit[st]] += throughput[ghit[st]] * (sss[st] * glow)[:, None] * alb[st]
+                if sss_interior and (sss > 0).any():
+                    # INTERIOR-EMISSION translucency (default OFF -- additive; existing SSS scenes unchanged):
+                    # the light-directed `subsurface` term above only sees the EXTERNAL sss_dir light; an
+                    # emissive body BEHIND the wall is not a light the tracer samples, so its glow needs this
+                    # dedicated term -- march inward, Beer-Lambert over the wall, take the back body's emissive.
+                    from holographic.rendering.holographic_raymarch import subsurface_emission as _sss_emit
+                    se = np.where(sss > 0)[0]
+                    jit2 = np.modf(np.sin(Ph[se] @ np.array([26.651, 41.223, 63.719])) * 24634.6345)[0] % 1.0
+                    eglow = _sss_emit(sdf, material, Ph[se], Nf[se], depth=min(sss_depth, 0.35),
+                                      sigma=sss_sigma, steps=14, jitter=np.abs(jit2))          # (k,3)
+                    radiance[ghit[se]] += throughput[ghit[se]] * sss[se][:, None] * eglow * alb[se]
                 glass = ior > 1.0
                 surf = ~glass
                 if surf.any():                                  # opaque: GGX/diffuse BRDF bounce

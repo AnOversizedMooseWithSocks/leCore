@@ -481,6 +481,145 @@ class _UnifiedPart15:
         return _dv.generate_video(model, meta, n=n, n_frames=n_frames, seed=self.seed,
                                   steps=steps, coupling=coupling)
 
+    def codec_atlas(self):
+        """The compression family's SPEC SHEET (machine_map applied to codecs): every codec
+        unit -- zlib/lzma, low-rank/tucker/tt, rate-distortion, pack_images, event codec,
+        sequence-predictive, generator rung, cold storage -- with its real module+symbol,
+        preconditions, pays-condition, and kept negatives. Static contracts; measure on YOUR
+        data with codec_place. See holographic_codecatlas.codec_atlas."""
+        from holographic.caching_and_storage.holographic_codecatlas import codec_atlas as _ca
+        return _ca()
+
+    def codec_place(self, x, max_error=None, try_lossy=None):
+        """Which codec should this data use? MEASURES every applicable unit on x and returns a
+        ranked table priced against the zlib baseline, with 'store raw' as a first-class row.
+        Lossy units run ONLY when a max_error budget is stated (loss is never volunteered) and
+        are gated by the error budget, never 99% energy. Refusal on incompressible data is the
+        finding, not a failure. See holographic_codecatlas.codec_place."""
+        from holographic.caching_and_storage.holographic_codecatlas import codec_place as _cp
+        return _cp(x, max_error=max_error, try_lossy=try_lossy)
+
+    def residual_encode(self, y, max_error=None, min_seg=64, penalty=3.0, max_terms=6):
+        """Compress a 1-D signal as MODEL + CODED ERROR: decompose_piecewise fits per-segment
+        laws, the residual is byte-plane-shuffled and entropy-coded. Exact by default
+        (bit-identical decode, pinned); with max_error, near-lossless within the budget
+        (measured 8.5x vs zlib). Self-refuses into mode='raw' when the model does not pay --
+        a codec that cannot say 'store raw' is not honest.
+        See holographic_residualcodec.residual_encode."""
+        from holographic.sampling_and_signal.holographic_residualcodec import residual_encode as _re
+        return _re(y, max_error=max_error, min_seg=min_seg, penalty=penalty,
+                   max_terms=max_terms, mind=self)
+
+    def residual_decode(self, blob):
+        """Invert residual_encode: rebuild the prediction from the stored recipes, add the
+        coded error back (exact mode bit-identical; quant mode within its stated budget;
+        raw mode inflates the refused baseline). See holographic_residualcodec.residual_decode."""
+        from holographic.sampling_and_signal.holographic_residualcodec import residual_decode as _rd
+        return _rd(_as_blob(blob))
+
+    def surprise_code(self, points, reference, fine_step, coarsen=128.0, dim=2048,
+                      news_quantile=0.10):
+        """Allocate bits by SURPRISE: points a reference corpus's drift model predicts get a
+        coarse step, points in its void (the news, judged by z=<enc(x),mu> against the
+        reference's own support scale) get fine_step -- same news fidelity as uniform-fine
+        coding, measured 1.71x fewer bytes. Falls back to mode='uniform' when the news share
+        sits at chance level (the split cannot pay). Lossy by design on the predicted mass --
+        for bit-exact contracts use residual_encode or codec_place.
+        See holographic_surprisecodec.surprise_code."""
+        from holographic.sampling_and_signal.holographic_surprisecodec import surprise_code as _sc
+        return _sc(points, reference, fine_step, coarsen=coarsen, dim=dim,
+                   news_quantile=news_quantile, mind=self)
+
+    def surprise_decode(self, blob):
+        """Invert surprise_code: read the per-point news flags and dequantize each point at
+        its own step (uniform mode: one step everywhere).
+        See holographic_surprisecodec.surprise_decode."""
+        from holographic.sampling_and_signal.holographic_surprisecodec import surprise_decode as _sd
+        return _sd(_as_blob(blob))
+
+    def distribution_encode(self, points, bits=6, dim=2048, n_audit=64, k_modes=2):
+        """Compress a sample bank to its DISTRIBUTION: the drift model's d+1 moment
+        hypervectors, quantized at 4/6/8 bits (measured 10.5x/21.5x vs zlib at coverage 1.0).
+        Decode returns a DriftModel to sample from -- points LIKE the originals, never the
+        originals; the report prices break_even_n and carries the post-quantization
+        generation audit. Need exactness? codec_place / residual_encode.
+        See holographic_distcodec.distribution_encode."""
+        from holographic.sampling_and_signal.holographic_distcodec import distribution_encode as _de
+        return _de(points, bits=bits, dim=dim, n_audit=n_audit, k_modes=k_modes, mind=self)
+
+    def distribution_decode(self, blob):
+        """Rebuild the DriftModel from a distribution blob (encoder from its numeric recipe,
+        moments dequantized per-array); sample with mind.drift_generate(model, ...).
+        See holographic_distcodec.distribution_decode."""
+        from holographic.sampling_and_signal.holographic_distcodec import distribution_decode as _dd
+        return _dd(_as_blob(blob))
+
+    def store_procedural(self, y, tol=0.02):
+        """Store a 1-D signal as its PROGRAM: generator-bank tier (constant-size blob --
+        MEASURED 76x at n=4k and 310x at n=16k from the SAME bytes -- extendable past the
+        data with a validity flag) or piecewise-recipe tier (11.4x, original length only);
+        each tier VERIFIED pointwise at tol*amplitude before commit, refused with the
+        measured errors and a route hint when both miss.
+        See holographic_proccodec.store_procedural."""
+        from holographic.sampling_and_signal.holographic_proccodec import store_procedural as _sp
+        return _sp(y, tol=tol, mind=self)
+
+    def regen_procedural(self, blob, n=None):
+        """Regenerate a signal from its program blob: generator tier at ANY length
+        (valid=False past 2x the verified window -- the reprojection-ghost bound); recipe
+        tier at the original length only (extension on per-segment axes is refused, not
+        extrapolated). See holographic_proccodec.regen_procedural."""
+        from holographic.sampling_and_signal.holographic_proccodec import regen_procedural as _rp
+        return _rp(_as_blob(blob), n=n)
+
+    def mesh_encode(self, mesh, max_error, grid=12, try_base=True):
+        """Compress a triangle mesh at a stated budget: vertices per-coordinate
+        |err| <= max_error, connectivity BIT-EXACT, measured 2.5-2.7x vs zlib(raw). Always
+        prices the base+displacement hypothesis against the fair uniform-quant coder and
+        ships the smaller -- MEASURED NEGATIVE on record: explicit refs cost what the deltas
+        save, so uniform wins on every mesh class tried (the module docstring carries the
+        sweep). try_base=False skips pricing the known loser.
+        See holographic_meshcodec.mesh_encode."""
+        from holographic.mesh_and_geometry.holographic_meshcodec import mesh_encode as _me
+        return _me(mesh, max_error, grid=grid, try_base=try_base, mind=self)
+
+    def mesh_decode(self, blob):
+        """Invert mesh_encode -> (vertices, faces): budget-honored vertices, bit-exact
+        connectivity. See holographic_meshcodec.mesh_decode."""
+        from holographic.mesh_and_geometry.holographic_meshcodec import mesh_decode as _md
+        return _md(_as_blob(blob))
+
+
+
+
+    def ablation_table(self, seeds=range(3)):
+        """Run the VSA-load-bearing audit: for each subsystem, the dumbest honest non-holographic
+        baseline on the SAME task/data/metric, both measured across seeds, confidence intervals
+        deciding the verdict (load-bearing / decorative / tie). The honest answer to 'where is
+        VSA actually the reason it works'. See holographic_ablate.ablation_table."""
+        import holographic.misc.holographic_ablate as _ab
+        return _ab.ablation_table(seeds=seeds)
+
+    def roles_by_shift(self, pairs, dim=None):
+        """Encode role-filler pairs with ROLES AS POWERS OF ONE SHIFT OPERATOR -- the trick that
+        made the in-weights role machine affordable (one permutation instead of one circulant
+        per role; the origin design behind the weight installs). Returns the trace; decode with
+        holographic_vsaroles.decode_structure. See holographic_vsaroles.encode_structure."""
+        import holographic.io_and_interop.holographic_vsaroles as _vr
+        return _vr.encode_structure(pairs, dim=dim)
+
+
+def _as_blob(blob):
+    """Wire-tolerant blob coercion: bytes pass through; a base64 str or the service's
+    {"__bytes_b64__": ...} sentinel (see holographic_service._jsonable) decode to bytes --
+    so a blob that crossed HTTP feeds straight back into any *_decode faculty."""
+    import base64
+    if isinstance(blob, dict) and "__bytes_b64__" in blob:
+        return base64.b64decode(blob["__bytes_b64__"])
+    if isinstance(blob, str):
+        return base64.b64decode(blob)
+    return bytes(blob)
+
 
 def _selftest():
     """Delegates to holographic.unified.check_part -- one home for the shared contract -- then proves

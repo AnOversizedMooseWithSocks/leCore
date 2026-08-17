@@ -106,6 +106,16 @@ def bundle_capacity(dim, method="cosamp", floor=0.95, seeds=range(4), codebook=N
             "dim": int(dim), "floor": float(floor), "curve": curve}
 
 
+def prepare_codebook(codebook):
+    """Bake a codebook once for repeated cleanup_batch calls: float32, C-contiguous. Passing the
+    result makes every subsequent call ZERO-COPY (measured: the conversion was 40x the matmul at
+    100k x 512 single-query). Decisions are bit-identical to the unprepared path -- both compute in
+    float32; this only moves WHEN the one conversion happens (setup vs marginal)."""
+    return np.ascontiguousarray(np.asarray(codebook), dtype=np.float32) \
+        if not (np.asarray(codebook).dtype == np.float32 and np.asarray(codebook).flags["C_CONTIGUOUS"]) \
+        else np.asarray(codebook)
+
+
 def cleanup_batch(codebook, queries, backend=None, workgroup=64):
     """Clean up a STACK of cues against a codebook -> (indices, scores), one per cue.
 
@@ -125,8 +135,19 @@ def cleanup_batch(codebook, queries, backend=None, workgroup=64):
     without editing the engine.
 
     INDICES RESOLVE BY LOWEST INDEX on both paths, so the backend cannot change which atom wins a tie."""
-    cb = np.ascontiguousarray(np.asarray(codebook, dtype=np.float32))
-    qs = np.ascontiguousarray(np.asarray(queries, dtype=np.float32))
+    # F3 FIX (measured): the f64->f32 conversion COPIED the whole codebook every call -- 0.959s of a
+    # 1.17s single-query call at 100k x 512 (cProfile), a 40x overhead over the matmul itself. The fix
+    # is a NO-COPY fast path when the input is already float32-contiguous, plus prepare_codebook() as
+    # the bake-once door (machine-model setup-vs-marginal, in miniature). Compute stays float32 on
+    # EVERY path -- a silent f64 upgrade would flip near-tie argmaxes (the bind_batch lesson), so the
+    # fast path is bit-identical by construction: it skips a conversion that would have been identity.
+    def _f32c(a):
+        a = np.asarray(a)
+        if a.dtype == np.float32 and a.flags["C_CONTIGUOUS"]:
+            return a                                        # zero copies: the prepared/baked case
+        return np.ascontiguousarray(a, dtype=np.float32)    # one conversion: the unprepared case
+    cb = _f32c(codebook)
+    qs = _f32c(queries)
     if cb.ndim != 2 or qs.ndim != 2:
         raise ValueError("cleanup_batch needs a 2-D codebook and 2-D queries, got %r and %r"
                          % (cb.shape, qs.shape))
@@ -143,6 +164,44 @@ def cleanup_batch(codebook, queries, backend=None, workgroup=64):
     # argmax by FIRST index attaining the max -- the canonical tie rule, identical on both backends.
     idx = np.array([int(np.flatnonzero(row == row.max())[0]) for row in sims], dtype=int)
     return idx, sims[np.arange(len(idx)), idx]
+
+
+def trace_partition(trace, atoms, stored_idx=None):
+    """THE SATURATION LEDGER (F31, the phased-array/holocap partition made a readable object):
+    split a bundle's fixed energy into {signal, crosstalk, damage} fractions -- the radiated-power
+    budget of the trace. NOTHING NEW is computed here: the signal read is the least-squares
+    projection onto the stored atoms (the matched-filter family every decoder already uses), the
+    crosstalk floor is the capacity law's own expectation for n atoms in dim (n/dim of off-member
+    energy under near-orthogonality), and damage is what remains above that floor. Delegation, not
+    invention -- the pieces are bundle_capacity's math, cleanup's projections, and the law.
+
+    With stored_idx given the split is exact-in-model; without it, membership is estimated by
+    matched-filter margin against ALL atoms (honest note in the result: estimated=True).
+    Returns {'signal': f, 'crosstalk': f, 'damage': f, 'n_used': int, 'estimated': bool} with the
+    three fractions summing to 1.0 of the trace's energy -- conservation by construction: the
+    ledger cannot create power, only attribute it."""
+    t = np.asarray(trace, float).reshape(-1)
+    A = np.asarray(atoms, float)
+    tot = float(t @ t) + 1e-12
+    est = stored_idx is None
+    if est:
+        sims = A @ t
+        # matched-filter membership: keep atoms whose response clears the crosstalk-noise scale
+        thr = 3.0 * np.median(np.abs(sims)) / 0.6745          # robust sigma (MAD) -> 3-sigma gate
+        stored_idx = np.where(np.abs(sims) > thr)[0]
+    S = A[np.asarray(stored_idx, dtype=int)]
+    if len(S) == 0:
+        return {"signal": 0.0, "crosstalk": 0.0, "damage": 1.0, "n_used": 0, "estimated": bool(est)}
+    coef, *_ = np.linalg.lstsq(S.T, t, rcond=None)
+    recon = S.T @ coef
+    sig = float(recon @ recon) / tot
+    resid = 1.0 - sig
+    # the law's crosstalk expectation for n members in dim: the off-projection energy a CLEAN
+    # bundle of n near-orthogonal atoms leaves outside any single member's direction is ~n/dim
+    # of the total -- below that, residual is interference physics, not damage.
+    floor = min(resid, len(S) / max(1, S.shape[1]))
+    return {"signal": sig, "crosstalk": float(floor), "damage": float(resid - floor),
+            "n_used": int(len(S)), "estimated": bool(est)}
 
 
 def drop_budget(dim, n_items, safe_ratio=0.02, floor=0.95):
@@ -179,7 +238,30 @@ def drop_budget(dim, n_items, safe_ratio=0.02, floor=0.95):
             "safe": keep <= dim and (n_items / keep) <= float(safe_ratio)}
 
 
+def _selftest_trace_partition():
+    """Planted-fraction traps (dedicated RNG per plant): a clean bundle reads ~all signal with
+    crosstalk at the law's floor and ~zero damage; adding a known damage fraction moves ONLY the
+    damage account; the three fractions always sum to 1 (conservation by construction)."""
+    rng = np.random.default_rng(31001)
+    dim, n = 2048, 24
+    A = rng.standard_normal((512, dim)); A /= np.linalg.norm(A, axis=1, keepdims=True)
+    idx = rng.choice(512, n, replace=False)
+    clean = A[idx].sum(0)
+    r0 = trace_partition(clean, A, stored_idx=idx)
+    assert r0["signal"] > 0.95 and r0["damage"] < 0.03, r0
+    assert abs(r0["signal"] + r0["crosstalk"] + r0["damage"] - 1.0) < 1e-9
+    rng_d = np.random.default_rng(31002)
+    noise = rng_d.standard_normal(dim); noise /= np.linalg.norm(noise)
+    dam = clean + 0.6 * np.linalg.norm(clean) * noise          # inject ~26% energy of damage
+    r1 = trace_partition(dam, A, stored_idx=idx)
+    assert r1["damage"] > r0["damage"] + 0.15, (r0, r1)
+    assert abs(r1["signal"] + r1["crosstalk"] + r1["damage"] - 1.0) < 1e-9
+    r2 = trace_partition(dam, A)                               # estimated membership path
+    assert r2["estimated"] and abs(r2["signal"] - r1["signal"]) < 0.15, (r1, r2)
+
+
 def _selftest():
+    _selftest_trace_partition()
     # 1. THE FOLKLORE CONSTANT IS A LINEAR ARTIFACT, shown rather than asserted: at the same dim and floor,
     #    a sparse decoder must hold a strictly higher load ratio than the naive cosine readout.
     lin = bundle_capacity(256, "linear", floor=0.95, seeds=range(3))

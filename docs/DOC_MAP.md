@@ -27,25 +27,25 @@ The generators it runs, read from that list at generation time so this page cann
 - `apiquickref.py` -> `API_QUICKREF.md`
 - `facultymap.py` -> `docs/FACULTY_MAP.md`
 - `docmap.py` -> `docs/DOC_MAP.md`
-- `pipelinemap.py` -> `docs/PIPELINE_MAP.md`, `pipelines.json`
+- `holographic/caching_and_storage/holographic_pipelinemap.py` -> `docs/PIPELINE_MAP.md`, `pipelines.json`
 - `tools/unifiers.py --write` -> `docs/UNIFIERS.md`
 
-## Family layout (619 modules)
+## Family layout (734 modules)
 
 ```mermaid
 graph LR
     H[holographic/]
     H --> misc["misc (150)"]
-    H --> mesh["mesh_and_geometry (98)"]
+    H --> mesh["mesh_and_geometry (109)"]
+    H --> agen["agents_and_reasoning (86)"]
+    H --> io_a["io_and_interop (86)"]
     H --> rend["rendering (65)"]
-    H --> agen["agents_and_reasoning (63)"]
-    H --> samp["sampling_and_signal (52)"]
-    H --> simu["simulation_and_physics (50)"]
-    H --> io_a["io_and_interop (40)"]
+    H --> samp["sampling_and_signal (58)"]
+    H --> simu["simulation_and_physics (53)"]
+    H --> cach["caching_and_storage (52)"]
     H --> scen["scene_and_pipeline (32)"]
-    H --> cach["caching_and_storage (30)"]
-    H --> mate["materials_and_texture (17)"]
-    H --> unif["unified (15)"]
+    H --> unif["unified (18)"]
+    H --> mate["materials_and_texture (18)"]
     H --> sema["semantic_router (7)"]
 ```
 

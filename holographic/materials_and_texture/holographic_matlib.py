@@ -151,13 +151,19 @@ RENDER_MATERIALS = {
     "mud":          ("liquid", (0.25, 0.18, 0.12), 0.0, 0.80, None, 1.0),
     "blood":        ("liquid", (0.35, 0.02, 0.02), 0.0, 0.30, None, 1.0),
     # --- emissive ----------------------------------------------------------------------------------
-    "lamp_warm":    ("emissive", (0.90, 0.80, 0.60), 0.0, 0.60, (1.00, 0.85, 0.60), 1.0),
-    "lamp_cool":    ("emissive", (0.80, 0.85, 0.90), 0.0, 0.60, (0.80, 0.90, 1.00), 1.0),
-    "neon_pink":    ("emissive", (0.30, 0.05, 0.20), 0.0, 0.40, (1.00, 0.10, 0.60), 1.0),
-    "neon_blue":    ("emissive", (0.05, 0.15, 0.30), 0.0, 0.40, (0.10, 0.60, 1.00), 1.0),
-    "neon_green":   ("emissive", (0.05, 0.30, 0.10), 0.0, 0.40, (0.20, 1.00, 0.30), 1.0),
-    "led_white":    ("emissive", (0.95, 0.95, 0.95), 0.0, 0.30, (1.00, 1.00, 1.00), 1.0),
-    "lava":         ("emissive", (0.20, 0.05, 0.02), 0.0, 0.80, (1.00, 0.35, 0.05), 1.0),
+    # RETUNED (deliberate, visible change): these presets are LIGHTS, and at peak emissive 1.0 they were only
+    # colours -- an HDR path tracer tone-maps a lit white diffuse to ~1.0 too, so a "neon" could never out-glow
+    # the wall behind it. Lights must sit well above diffuse range to bloom and to transmit visibly through
+    # translucent media (the shader-ball wax lens made this measurable: at x6 the lens dent read pale; at x15
+    # it reads as a backlit panel). Lamps x6 (soft sources), neon/LED x15 (hard sources, matching the 10-50x
+    # over diffuse white of real tubes), lava x8. Renders using these presets get brighter; that is the fix.
+    "lamp_warm":    ("emissive", (0.90, 0.80, 0.60), 0.0, 0.60, (6.00, 5.10, 3.60), 1.0),
+    "lamp_cool":    ("emissive", (0.80, 0.85, 0.90), 0.0, 0.60, (4.80, 5.40, 6.00), 1.0),
+    "neon_pink":    ("emissive", (0.30, 0.05, 0.20), 0.0, 0.40, (15.0, 1.50, 9.00), 1.0),
+    "neon_blue":    ("emissive", (0.05, 0.15, 0.30), 0.0, 0.40, (1.50, 9.00, 15.0), 1.0),
+    "neon_green":   ("emissive", (0.05, 0.30, 0.10), 0.0, 0.40, (3.00, 15.0, 4.50), 1.0),
+    "led_white":    ("emissive", (0.95, 0.95, 0.95), 0.0, 0.30, (15.0, 15.0, 15.0), 1.0),
+    "lava":         ("emissive", (0.20, 0.05, 0.02), 0.0, 0.80, (8.00, 2.80, 0.40), 1.0),
     "ember":        ("emissive", (0.15, 0.04, 0.02), 0.0, 0.85, (1.00, 0.30, 0.05), 1.0),
     "plasma":       ("emissive", (0.10, 0.05, 0.20), 0.0, 0.30, (0.60, 0.40, 1.00), 1.0),
     "sun_surface":  ("emissive", (1.00, 0.90, 0.60), 0.0, 1.00, (1.00, 0.85, 0.45), 1.0),

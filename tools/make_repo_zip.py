@@ -38,7 +38,16 @@ from pathlib import Path
 
 # Always excluded regardless of .gitignore: git's own metadata is not source, and the zip must never contain
 # a previous zip (that is how an archive doubles in size every round trip).
-ALWAYS = [".git/", "repo.zip"]
+# VERSION IS EXCLUDED BECAUSE DELIVERY_NOTES.md SAYS IT IS, and it was not --
+# the archive shipped a VERSION file the notes state must never travel, holding
+# 0.9.0 while the release was described as 0.2.10. PACKAGING.md names VERSION as
+# the single source of truth for build identification, so a recipient who
+# trusted the one in the zip recorded the WRONG BUILD against their results.
+# CI owns this file (package.yml auto-bumps the patch digit); a copy in an
+# archive can only be stale or contradictory, never authoritative.
+# IDENTIFY A SNAPSHOT BY MODULE COUNT AND capabilities.json's schema instead --
+# both travel in the archive and both describe what is actually inside it.
+ALWAYS = [".git/", "repo.zip", "VERSION"]
 
 
 def repo_root():

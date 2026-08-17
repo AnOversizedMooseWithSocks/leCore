@@ -426,6 +426,26 @@ class _UnifiedPart03:
         return self.orchestrator.register_llm(fn, name=name, description=description, in_type=in_type,
                                               out_type=out_type, on_error=on_error)
 
+    def out_of_core_search(self, path, queries, k=1, tile=8192):
+        """F8 -- THE BIG-DATA FRONT DOOR, wired not built: exact top-k over an on-disk .npy of ANY
+        size. np.memmap IS an array and tiled_topk slices tiles lazily, so the fold already streams
+        -- this door just names the composition (Rule 0: the sweep found the story existed in
+        pieces with no entrance). MEASURED: 600 MB file, 40.5 ms/q at k=5, peak RSS 0.75 GB --
+        memory bounded by the tile, never the file. Same tie contract as everything else
+        (topk_det's, global indices). Returns (values, indices) arrays, one column per query."""
+        import numpy as _np
+        from holographic.sampling_and_signal.holographic_tiledreduce import tiled_topk
+        M = _np.load(path, mmap_mode="r")
+        Qm = _np.atleast_2d(_np.asarray(queries, dtype=_np.float64))
+        return tiled_topk(M, Qm.T, k=k, tile=tile)
+
+    def trace_partition(self, trace, atoms, stored_idx=None):
+        """The saturation ledger: split a bundle's fixed energy into {signal, crosstalk, damage}
+        fractions -- conservation by construction (they sum to 1). Delegates to
+        holographic_capacity.trace_partition; see there for the law's crosstalk floor."""
+        import holographic.sampling_and_signal.holographic_capacity as _cap
+        return _cap.trace_partition(trace, atoms, stored_idx=stored_idx)
+
     def bundle_capacity(self, dim=None, method="cosamp", floor=0.95, seeds=range(4), codebook=None,
                         ratios=(0.02, 0.05, 0.10, 0.17, 0.25, 0.33, 0.40)):
         """HOW MANY THINGS FIT IN A BUNDLE -- answered as a MEASURED LOAD RATIO with its variables attached,

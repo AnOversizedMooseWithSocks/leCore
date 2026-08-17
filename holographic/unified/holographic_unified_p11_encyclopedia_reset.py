@@ -1358,6 +1358,72 @@ class _UnifiedPart11:
         from holographic.misc.holographic_preview import material_ball
         return material_ball(material, res=res, base_color=base_color)
 
+    def preview_thumbnail_batch(self, materials, res=96, quality="draft", seed=None, fmt="png", out_res=None,
+                                size=None, upsample=False):
+        """MANY material thumbnails, fast: the camera and geometry are fixed, so the neutral reference frame
+        and the active-pixel mask are rendered ONCE per (res, quality, seed) and cached for the process
+        lifetime; each material then re-renders only the ~48% of pixels that can see the ball and composites
+        the rest from the reference in linear light. Returns a list (PNG bytes by default, fmt='array' for
+        floats) aligned with `materials` (matlib names / material objects / PBR dicts). Measured at res=96
+        draft: 36 s full -> 26 s per material with the cache warm; first call pays one extra reference render.
+        Composite-vs-full difference sits below the draft sampler's own seed-to-seed noise. out_res=N returns
+        N-px images at res-px lighting cost (demodulated upscale with 2x-carrier coverage AA -- the
+        anti-aliasing happens AFTER the upscale; transmissive outers
+        auto-route to a native render -- refraction detail mushes under demod, measured). For a single
+        never-composited frame use preview_thumbnail."""
+        import holographic.misc.holographic_preview as _hp
+        return _hp.preview_thumbnail_batch(materials, res=res, quality=quality,
+                                           seed=self.seed if seed is None else seed, fmt=fmt, out_res=out_res,
+                                           size=size, upsample=upsample)
+
+    def preview_thumbnail(self, material=None, res=96, quality="draft", seed=None, fmt="png",
+                          core=None, trim=None, trim_top=None, trim_bottom=None, base=None, out_res=None,
+                          size=None, upsample=False):
+        """ONE call: feed a material (matlib name, material object, or plain PBR dict {'base_color':...,
+        'roughness':..., 'metallic':..., 'emissive':...}), get a THUMBNAIL of it on the shader ball back.
+        Every fixture slot stays the neutral grey diffuse unless overridden, so the thumbnail is about the
+        material. fmt='png' (default) returns PNG bytes -- over HTTP /invoke they travel as
+        {'__bytes_b64__': ...}, ready to write to disk or hand to a UI; fmt='array' returns the raw float
+        image. size=N asks for ANY delivery size: upsample=False (default) renders NATIVE at N (exact door);
+        upsample=True takes the fast cached path, routing each material by where its detail lives --
+        diffuse/rough get the demod upscale, transmissive and smooth-metal outers get a masked NATIVE
+        render at N (measured: sampling metal reflections back on the upscale path costs more than native).
+        Warm at 160: wax ~21 s, chrome ~37 s. res/out_res remain for direct control."""
+        import holographic.misc.holographic_preview as _hp
+        return _hp.preview_thumbnail(material, res=res, quality=quality,
+                                     seed=self.seed if seed is None else seed, fmt=fmt, core=core, trim=trim,
+                                     trim_top=trim_top, trim_bottom=trim_bottom, base=base, out_res=out_res,
+                                     size=size, upsample=upsample)
+
+    def preview_scene(self, material=None, core=None, trim=None, base=None, floor="matte_white",
+                      res=192, quality="fast", seed=None, view="display", lighting="studio", floor_grid=True,
+                      aa="fxaa", trim_top=None, trim_bottom=None):
+        """Render the shader-ball PREVIEW SCENE: `material` on the classic COMPLEX preview object -- a hollow
+        outer shell with a camera-facing cutaway window, a THIN LENS dish (translucency/SSS test region; see the core with almost no
+        refraction), a CORE flush against the shell interior (its mesh light toggles ON automatically when the
+        outer is translucent/SSS -- wax/skin/jade -- and stays OFF for glass/refractive/transparent and
+        opaque outers), TWO FLUSH INLAY BELTS (trim_top above the window
+        and lens, trim_bottom below -- cut into the ball, no outward bumps) and a wide thin puck base --
+        on a graph-paper floor (floor_grid=False for plain), PATH-TRACED under a STUDIO RIG -- key/fill/rim
+        softboxes, gradient backdrop with fluorescent ceiling panels in the reflections, off-axis
+        window (lighting='plain' keeps the bare-renderer look; preview_material
+        is the fast flat-lit thumbnail). The core slot is for the interacting cases:
+        an emissive core glows THROUGH a glass shell (transmission) and through TRANSLUCENT outers (wax/skin/
+        jade -- the interior-emission subsurface term, brightest at the thin lens), and the cutaway keeps the
+        core visible under opaque outers. SLOT RULE: `material` dresses the OUTER; core and base default to the
+        dark grey "90s mouse ball" diffuse, both belts to dark silicone; trim= dresses BOTH belts,
+        trim_top=/trim_bottom= override each belt individually (e.g. glass top + chrome bottom); material=None -> neutral default diffuse on the outer;
+        floor= styles the environment. Materials: matlib names, material objects, or plain PBR dicts.
+        aa='fxaa' (default) cleans edge stair-stepping for milliseconds; 'ssaa2' true-supersamples (~4x
+        time); 'off' is raw. Returns (res,res,3) float in [0,1]. Cost: ~75 s at res=160 opaque with the distance proxy, more with glass belts (the
+        soft-light cache is OFF -- it paints false shadows on curved mirrors, measured); drop res to iterate.
+        See holographic_preview.preview_scene / preview_scene_document (geometry + camera, no pixels)."""
+        from holographic.misc.holographic_preview import preview_scene as _ps
+        return _ps(material=material, core=core, trim=trim, base=base, floor=floor, res=res,
+                   trim_top=trim_top, trim_bottom=trim_bottom,
+                   quality=quality, seed=self.seed if seed is None else seed, view=view, lighting=lighting,
+                   floor_grid=floor_grid, aa=aa)
+
     def quick_material(self, color=(0.8, 0.8, 0.8), roughness=0.5, metallic=0.0, res=192):
         """The material-editor SHORTCUT: plain numbers in, MATERIAL BALL image out -- no encoders, no channel
         fields. quick_material(color=(1,0.2,0.1), roughness=0.15, metallic=1.0) renders a polished red metal ball.

@@ -140,10 +140,29 @@ class RecallNull:
         and keep that sorted null. O(n_null * N * dim) once, then pvalue() is a binary search."""
         C = np.asarray(codebook, float)
         units = C / (np.linalg.norm(C, axis=1, keepdims=True) + 1e-12)
-        rng = np.random.default_rng(seed)
-        Q = rng.standard_normal((n_null, units.shape[1]))
-        Q /= np.linalg.norm(Q, axis=1, keepdims=True) + 1e-12
-        self.null = np.sort((units @ Q.T).max(axis=0))      # best match per random query
+        # SEED-COLLISION FIX (found when the F1 fix exposed it): seeding the null with the caller's
+        # plain seed meant that data generated from the SAME small seed (rng(0) data + seed=0 index --
+        # the commonest possible case) made the 'random' null queries EQUAL the first index atoms:
+        # null saturated at cosine ~1.0 and abstention rejected every true signal. The null seed is
+        # now hashlib-derived (never a raw stream anyone uses for data), and a SATURATION GUARD
+        # applies the perfect-score rule in code: a null query matching an atom at ~1.0 is an
+        # instrument collision, so the salt bumps deterministically and the fit retries (bounded).
+        import hashlib
+        for salt in range(8):
+            h = hashlib.sha256(f"recall-null:{seed}:{salt}".encode()).digest()
+            rng = np.random.default_rng(int.from_bytes(h[:8], "little"))
+            Q = rng.standard_normal((n_null, units.shape[1]))
+            Q /= np.linalg.norm(Q, axis=1, keepdims=True) + 1e-12
+            from holographic.sampling_and_signal.holographic_tiledreduce import tiled_matreduce
+            best, _ = tiled_matreduce(units, Q.T)
+            if best.max() < 0.999:                            # no query IS an atom -> a real null
+                break
+        else:
+            raise RuntimeError("recall-null saturated at every salt -- index atoms look like iid "
+                               "gaussians from the null's own stream; inspect the data")
+        # F1 (memory): the fold above already produced max-per-query WITHOUT the (N, n_null)
+        # matrix (7.45 GiB at N=500k under the old dense product) -- tile-bounded, max bit-identical.
+        self.null = np.sort(best)                            # best match per random query
         return self
 
     def pvalue(self, score):

@@ -396,13 +396,24 @@ class _UnifiedPart10:
         return CurlWind(strength=strength, res=res, bounds=bounds, octaves=octaves, seed=seed, base=base)
 
     def render_hair(self, strands, camera, light_dir=(0.3, 0.6, 0.6), width=400, height=400,
-                    shader="kajiya", hair_color=(0.55, 0.35, 0.15), smooth_levels=2, lod_stride=1):
+                    shader="kajiya", hair_color=(0.55, 0.35, 0.15), smooth_levels=2, lod_stride=1,
+                    specular_tint=0.0, specular_strength=1.0):
         """RENDER HAIR (H4/H5/H6): project each strand's smoothed centerline and shade its segments by their
         TANGENT -- `shader`='kajiya' (anisotropic sheen) or 'marschner' (physical R/TT/TRT with a colored
-        secondary highlight). Returns an (H,W,3) image. See holographic_hairshade.render_hair."""
+        secondary highlight). Returns an (H,W,3) image.
+
+        DARK HAIR NEEDS `specular_tint`. Kajiya-Kay adds its specular lobe WHITE at full amplitude regardless
+        of hair colour, so dark hair renders silver -- MEASURED over 4,000 strand orientations at
+        hair_color=(0.075,0.048,0.034): 61% of strands brighter than the hair colour and 17.5% reading as
+        white, peaking at 1.079 (a 14x overshoot). Marschner 2003 measured that the secondary highlight is
+        COLOURED by the fibre; `specular_tint` (0=white, 1=fully hair-tinted) and `specular_strength` apply
+        that. Defaults reproduce the published model bit-for-bit, so no existing render changes. Dark hair
+        wants tint~0.7, strength~0.35: white-reading strands drop 17.5% -> 0.00%.
+        See holographic_hairshade.render_hair."""
         from holographic.mesh_and_geometry.holographic_hairshade import render_hair
         return render_hair(strands, camera, light_dir=light_dir, width=width, height=height, shader=shader,
-                           hair_color=hair_color, smooth_levels=smooth_levels, lod_stride=lod_stride)
+                           hair_color=hair_color, smooth_levels=smooth_levels, lod_stride=lod_stride,
+                           specular_tint=specular_tint, specular_strength=specular_strength)
 
     def solve_pde(self, sdf, boundary_value, points, source=None, n_walks=256, eps=1e-3, seed=0):
         """WALK ON SPHERES: solve Laplace (Delta u = 0) or Poisson (-Delta u = source) on the interior of an SDF,

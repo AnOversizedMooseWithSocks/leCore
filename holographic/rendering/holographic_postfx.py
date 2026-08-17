@@ -371,6 +371,33 @@ def resample(img, scale=2.0):
     return a * (1 - fy) * (1 - fx) + b * (1 - fy) * fx + c * fy * (1 - fx) + d * fy * fx
 
 
+def fxaa(img, threshold=0.05, strength=0.75):
+    """Cheap edge-masked ANTI-ALIASING at the same resolution -- the SUBPIXEL term of FXAA (Lottes 2009): find
+    pixels sitting on a luminance edge, and blend each toward its 3x3 tent average by an amount that grows with
+    the local contrast. Flat regions (contrast < `threshold`) are returned BIT-IDENTICAL -- texture and grain
+    survive; only the stair-stepped edges soften. Milliseconds on a preview frame, versus 4x render time for
+    true 2x supersampling (`supersample` is still the quality answer when you can afford to over-render).
+    KEPT NEGATIVE: this is deliberately NOT the full FXAA edge-walk (end-of-edge search + directional blend);
+    the subpixel term alone was measured to remove the visible staircase on the preview renders, and the walk's
+    extra cost/complexity did not pay there."""
+    img = np.asarray(img, float)
+    if img.ndim != 3 or img.shape[2] < 3:
+        raise ValueError("fxaa expects an (H, W, 3) image, got %s" % (img.shape,))
+    L = 0.299 * img[:, :, 0] + 0.587 * img[:, :, 1] + 0.114 * img[:, :, 2]      # perceptual luma
+    Lp = np.pad(L, 1, mode="edge")
+    # local contrast over the 4-neighbour cross -- the FXAA edge detector
+    stack = np.stack([Lp[0:-2, 1:-1], Lp[2:, 1:-1], Lp[1:-1, 0:-2], Lp[1:-1, 2:], L])
+    contrast = stack.max(0) - stack.min(0)
+    # 3x3 tent average of the colour (centre-weighted, so the blend never overshoots to a plain box blur)
+    P = np.pad(img, ((1, 1), (1, 1), (0, 0)), mode="edge")
+    tent = (4.0 * img
+            + 2.0 * (P[0:-2, 1:-1] + P[2:, 1:-1] + P[1:-1, 0:-2] + P[1:-1, 2:])
+            + 1.0 * (P[0:-2, 0:-2] + P[0:-2, 2:] + P[2:, 0:-2] + P[2:, 2:])) / 16.0
+    # blend amount: 0 below threshold (bit-identical), then rising with contrast, capped by `strength`
+    t = np.clip((contrast - threshold) / max(threshold, 1e-6), 0.0, 1.0) * float(strength)
+    return img * (1.0 - t[:, :, None]) + tent * t[:, :, None]
+
+
 def supersample(img, factor=2):
     """Anti-alias by downsampling a higher-res frame: average factor x factor blocks. Pass the frame you rendered at
     `factor` times the target resolution. (Cheap SSAA when you can afford to over-render.)"""
@@ -526,7 +553,7 @@ EFFECTS = {
     "color_grade": color_grade, "vignette": vignette, "pbr_neutral": pbr_neutral, "bloom": bloom, "glare": glare,
     "lens_flare": lens_flare, "chromatic_aberration": chromatic_aberration, "dof": dof,
     "motion_blur": motion_blur, "denoise": denoise, "sharpen": sharpen, "film_grain": film_grain,
-    "resample": resample, "supersample": supersample, "style_transfer": style_transfer,
+    "resample": resample, "supersample": supersample, "style_transfer": style_transfer, "fxaa": fxaa,
 }
 _NEEDS_DEPTH = {"dof"}                                       # effects that read the depth buffer
 
@@ -911,6 +938,24 @@ def _selftest():
     # KEPT NEGATIVE: bloom/glare/dof/chromatic_aberration are NOT emitted -- a single fragment shader has only the
     # INPUT texture, not a prior stage's output, so a neighbour-sampling stage after a pointwise one cannot be fused
     # faithfully (multi-pass / depth-texture territory). Deferred, not shipped as a silent quality regression.
+
+    # fxaa: the SUBPIXEL AA term. Pinned on the exact contract: a hard diagonal staircase (0 intermediate-luma
+    # pixels) gains blended edge pixels; FLAT regions below threshold come back BIT-IDENTICAL (texture survives);
+    # output stays in range; it registers as a PostChain step; and a non-image input fails legibly.
+    stair = np.zeros((32, 32, 3))
+    for _y in range(32):
+        stair[_y, :max(0, _y):, :] = 1.0
+    aa = fxaa(stair)
+    n_inter = int(((aa[:, :, 0] > 0.05) & (aa[:, :, 0] < 0.95)).sum())
+    assert n_inter > 30, "fxaa left the staircase un-blended (%d intermediate pixels)" % n_inter
+    assert np.array_equal(aa[2:8, 20:28], stair[2:8, 20:28]), "fxaa touched a flat region -- the threshold is broken"
+    assert float(aa.min()) >= 0.0 and float(aa.max()) <= 1.0 and aa.shape == stair.shape
+    assert np.array_equal(PostChain().then("fxaa").apply(stair), aa), "the 'fxaa' chain step must equal the function"
+    try:
+        fxaa(np.zeros((8, 8)))
+        raise AssertionError("fxaa on a 2-D array must raise")
+    except ValueError as exc:
+        assert "H, W, 3" in str(exc)
 
     print("postfx selftest ok: tonemap/bloom/vignette/gamma/grain/dof/resample + PostChain program all behave; "
           "to_glsl emits the pointwise pipeline matching .apply to <1e-9 and refuses neighbour/blur/depth stages; "

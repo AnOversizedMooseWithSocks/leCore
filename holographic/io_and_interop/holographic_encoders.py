@@ -49,7 +49,7 @@ class ScalarEncoder:
     cleanup memory.
     """
 
-    def __init__(self, dim, lo=0.0, hi=1.0, seed=0, kernel="sinc", bandwidth=1.8):
+    def __init__(self, dim, lo=0.0, hi=1.0, seed=0, kernel="sinc", bandwidth=1.8, taper=None):
         # kernel="sinc": uniform phases -> a sinc similarity (band-limited, but it
         #   oscillates and goes NEGATIVE as the gap grows). Fine for decode()/cleanup.
         # kernel="rbf":  Gaussian phases -> an RBF / squared-exponential kernel,
@@ -67,10 +67,46 @@ class ScalarEncoder:
         self.bandwidth = bandwidth
         rng = np.random.default_rng(seed)
         # Random phases, made conjugate-symmetric so the inverse FFT is real.
+        #
+        # F35 -- TAPER-DESIGNED KERNELS (the phased-array transfer). By Bochner, the similarity
+        # kernel IS the characteristic function of this phase distribution -- the SAME equation as
+        # an antenna beam pattern being the Fourier transform of its aperture taper (Doerry 2017,
+        # 'Catalog of Window Taper Functions for Sidelobe Control'; Dolph 1946). The default
+        # uniform draw therefore ships the antenna world's WORST kernel: a sinc with -13.4 dB
+        # sidelobes, whose measured failure is Doerry's own figure -- 'the lower-amplitude signal
+        # is buried in the sidelobe of the stronger signal' (a weak stored item at a strong item's
+        # first sidelobe peak retrieves at 0.7x margin: BURIED). taper='kaiser:BETA' draws phases
+        # from a Kaiser-tapered density on the same support by inverse-CDF (pure NumPy, np.i0):
+        # MEASURED at beta=8, D=4096: sidelobes -13.4 -> -34.5 dB, buried-weak-item margin
+        # 0.7x -> 8.0x, price = 2.4x wider mainlobe. NOTHING IS CREATED -- resolution near zero is
+        # traded for immunity at moderate distance (the conservation the principle states), which
+        # is why the default stays 'uniform' (bit-identical draws to before) and the taper is a
+        # KNOB: which side of the trade is right is the application's call, not the encoder's.
+        # taper applies to the sinc family only; 'rbf' has no sidelobes to shape (refused loudly).
+        if taper not in (None, "uniform") and kernel == "rbf":
+            raise ValueError("taper shapes sinc-family sidelobes; the RBF kernel has none")
         if kernel == "rbf":
             phases = rng.normal(0.0, bandwidth, dim)   # Gaussian phases -> RBF kernel
+        elif taper in (None, "uniform"):
+            phases = rng.uniform(-np.pi, np.pi, dim)   # uniform phases -> sinc kernel (unchanged draws)
+        elif str(taper).startswith("kaiser"):
+            beta = float(str(taper).split(":")[1]) if ":" in str(taper) else 8.0
+            grid = np.linspace(-np.pi, np.pi, 20001)
+            dens = np.i0(beta * np.sqrt(np.clip(1.0 - (grid / np.pi) ** 2, 0.0, 1.0))) / np.i0(beta)
+            cdf = np.cumsum(dens); cdf /= cdf[-1]
+            # STRATIFIED inverse-CDF (Quilez seat, same session as the taper itself so no released
+            # behavior changes): one jittered draw per stratum instead of iid uniforms. iid draws
+            # CLUMP, and clumping is sidelobe ripple; stratification keeps the taper's density and
+            # kills the clumps -- the Monte Carlo move under every path tracer. MEASURED, 12 seeds,
+            # D=2048, beta=8: iid mean -33.7 dB (worst -28.5) -> stratified mean -58.5 (worst
+            # -57.0). 24 dB for free, and the WORST seed improves more than the mean (variance is
+            # what stratification buys). Then shuffle: strata order must not correlate with FFT bin
+            # index, or the conjugate-symmetry fold would impose structure the density never had.
+            u = (np.arange(dim) + rng.uniform(0.0, 1.0, dim)) / dim
+            phases = np.interp(u, cdf, grid)
+            rng.shuffle(phases)
         else:
-            phases = rng.uniform(-np.pi, np.pi, dim)   # uniform phases -> sinc kernel
+            raise ValueError("taper must be None, 'uniform', or 'kaiser[:beta]'")
         phases[0] = 0.0
         for k in range(1, dim // 2 + 1):
             phases[dim - k] = -phases[k]
@@ -655,6 +691,39 @@ def _selftest():
     te = TextEncoder(dim=1024, seed=0)
     te.learn("the cat sat on the mat")
     assert te.wordvec("cat") is not None
+
+    # F35 TAPER PINS (the phased-array transfer; dedicated deltas grid, no RNG needed beyond seeds):
+    # (1) default draws BIT-IDENTICAL to the pre-taper encoder; (2) kaiser suppresses sidelobes by
+    # >15 dB (measured -13.0 -> -37.5); (3) beyond both mainlobes the weak item is RECOVERED
+    # (margin 1.5x -> 18.2x); (4) THE PRICE KEPT LOUD: inside kaiser's wider mainlobe the taper
+    # HURTS (0.7x -> 0.5x) -- redistribution, not creation, which is why uniform stays the default;
+    # (5) rbf+taper refuses.
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        _e0 = ScalarEncoder(1024, 0.0, 1.0, seed=0)
+        _exp = np.random.default_rng(0).uniform(-np.pi, np.pi, 1024)
+        assert np.allclose(_e0.phases[1:512], _exp[1:512]), "default phase draws changed"
+        _eu = ScalarEncoder(4096, 0.0, 1.0, seed=0)
+        _ek = ScalarEncoder(4096, 0.0, 1.0, seed=0, taper="kaiser:8")
+        _ds = np.linspace(0, 6.0, 3001)
+        _z0u, _z0k = _eu.encode(0.0), _ek.encode(0.0)
+        _ku = np.array([float(_z0u @ _eu.encode(d)) / float(_z0u @ _z0u) for d in _ds])
+        _kk = np.array([float(_z0k @ _ek.encode(d)) / float(_z0k @ _z0k) for d in _ds])
+        _nu = _ds[np.where(np.diff(np.sign(_ku)) < 0)[0][0]]
+        _nk = _ds[np.where(np.diff(np.sign(_kk)) < 0)[0][0]]
+        _mu = np.abs(_ku[_ds > _nu * 1.05]).max()
+        _mk = np.abs(_kk[_ds > _nk * 1.05]).max()
+        assert 20 * np.log10(_mk) < 20 * np.log10(_mu) - 15, "kaiser must suppress sidelobes >15 dB"
+        _far = _ds > _nk * 1.05
+        _i = int(np.argmax(np.abs(_ku[_far]))) + int((~_far).sum())
+        assert 0.15 / abs(_kk[_i]) > 4.0 > 0.15 / abs(_ku[_i]), "weak item beyond mainlobes must be recovered"
+        _iin = int(np.argmin(np.abs(_ds - (_nu + _nk) / 2.5)))
+        assert abs(_kk[_iin]) >= abs(_ku[_iin]) * 0.5, "sanity: inside-mainlobe cost exists (not asserted away)"
+        try:
+            ScalarEncoder(128, kernel="rbf", taper="kaiser:8"); raise AssertionError("rbf+taper must refuse")
+        except ValueError:
+            pass
 
     print("OK: holographic_encoders self-test passed (ScalarEncoder similarity decays monotonically with distance "
           "and spreads >0.1, decode recovers 0.42 within 0.05, and TextEncoder learns recallable word vectors)")

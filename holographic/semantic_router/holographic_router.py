@@ -106,7 +106,11 @@ class EmbeddingRouter:
             for wgt, order_ in ((1.0, dense_order), (gamma, struct_order)):
                 for rank, i in enumerate(order_, start=1):
                     fused[i] = fused.get(i, 0.0) + wgt / (60.0 + rank)
-            top = sorted(fused, key=lambda i: (-fused[i], self.names[i]))[:k]
+            # FUSED TIES BREAK BY DENSE, then name. At gamma=1.0 a rank-swapped pair scores
+            # 1/61+1/62 both ways -- an EXACT tie -- and a name tie-break can hand the top slot
+            # to a neighbour over the query's own document. Dense cosine is the primary signal
+            # (bones assist); when fusion cannot decide, the vector does.
+            top = sorted(fused, key=lambda i: (-fused[i], -sims[i], self.names[i]))[:k]
             return [(self.names[i], float(fused[i])) for i in top]
         order = np.argsort(-sims)[:k]
         # deterministic tie-break by name, matching the catalog's convention
