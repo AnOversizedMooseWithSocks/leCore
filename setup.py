@@ -51,6 +51,16 @@ setup(
             "definitions/*.md",
             "definitions/native/materials/*.json",
             "definitions/standards/generic_table/*.json",
+            "routing/*.npz",                                # the semantic routing index
+            # THE MACHINE-READABLE CATALOG, bundled by build_package.sh. Its
+            # whole purpose is being read WITHOUT importing the engine, so
+            # leaving it out of the wheel excluded exactly the audience it
+            # exists for -- a pip user has no repo to read it from and no
+            # capdoc.py to regenerate it with.
+            # Listed EXPLICITLY rather than relying on include_package_data,
+            # because MANIFEST.in-driven inclusion is the rule that silently
+            # dropped pipelinemap for seven releases.
+            "capabilities.json",
         ],
     },
     python_requires=">=3.9",

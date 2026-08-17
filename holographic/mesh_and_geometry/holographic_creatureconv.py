@@ -41,7 +41,7 @@ is the same metaball-groups rule the creature body already uses.
 import numpy as np
 
 
-def _seg_convolution(P, a, b, r, aniso=None, samples=24, kernel=2.2):
+def _seg_convolution(P, a, b, r, aniso=None, samples=24, kernel=2.2, scalis=False):
     """Convolution of one skeletal SEGMENT with a Gaussian-like kernel, evaluated at points `P`.
 
     Numerically integrated along the segment rather than solved in closed form: the closed forms in
@@ -79,10 +79,23 @@ def _seg_convolution(P, a, b, r, aniso=None, samples=24, kernel=2.2):
         s = np.asarray(aniso, float)
         Q = (Q @ M.T) / s[None, None, :]
     d2 = np.einsum("ijk,ijk->ij", Q, Q)
+    if scalis:
+        # SCALIS (Zanni et al. 2013). The plain convolution integrates over ABSOLUTE arc
+        # length, so a long thick segment deposits more total field than a short thin one --
+        # which is precisely why "thin shape components are excessively smoothed out when
+        # blended into larger ones" and why prescribed radii are not reconstructed. SCALIS
+        # and Hornus et al. "modify the distance from the point to the curve before
+        # evaluating the kernel, the difference is in the NORMALIZATION FACTOR introduced in
+        # SCALIS": integrate over ds/tau, the HOMOTHETIC measure.
+        #
+        # WHY THIS IS EXACTLY SCALE-INVARIANT, in one line: under r->lam*r, L->lam*L,
+        # d->lam*d the exponent d^2/r^2 is unchanged and the weight L/(n*r) is unchanged, so
+        # the whole field is. The plain weight L/n picks up a factor lam and is not.
+        w = w / max(float(r), 1e-12)
     return (np.exp(-float(kernel) * d2 / (float(r) ** 2)) * w[None, :]).sum(axis=1)
 
 
-def convolution_field(segments, iso=0.35, samples=24, kernel=2.2):
+def convolution_field(segments, iso=0.35, samples=24, kernel=2.2, scalis=False):
     """A field from a CONTIGUOUS skeleton: sum the convolution of every segment, then subtract `iso`.
 
     `segments` is a list of (a, b, radius) or (a, b, radius, aniso). Returns a callable f(P) that is
@@ -98,11 +111,12 @@ def convolution_field(segments, iso=0.35, samples=24, kernel=2.2):
         raise ValueError("a convolution field needs at least one segment")
     scale = float(np.mean([s[2] for s in segs]))
 
-    def f(P, _s=tuple(segs), _iso=float(iso), _sc=scale):
+    def f(P, _s=tuple(segs), _iso=float(iso), _sc=scale, scalis=bool(scalis)):
         Q = np.atleast_2d(np.asarray(P, float))
         acc = np.zeros(len(Q))
         for a, b, r, an in _s:
-            acc += _seg_convolution(Q, a, b, r, aniso=an, samples=samples, kernel=kernel)
+            acc += _seg_convolution(Q, a, b, r, aniso=an, samples=samples, kernel=kernel,
+                                    scalis=scalis)
         # Normalised so `iso` means the same thing regardless of how many segments contributed, and
         # negated so the result reads as a distance-like field (negative inside).
         return (_iso - acc / max(_sc, 1e-9)) * _sc
@@ -424,3 +438,66 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+# ---------------------------------------------------------------------------
+# O4: RADIUS CALIBRATION -- making the iso-surface land where the caller asked.
+#
+# SOTA states this weakness plainly (Zanni et al., SCALIS; and the 2026 continuous-LOD
+# follow-up): "While convolution surfaces eliminate bulge artifacts, they also reduce
+# geometric control, since the target iso-surface is NO LONGER LOCATED AT THE EXPECTED
+# DISTANCE FROM THE SKELETON." That is the price paid for the bulge-free joints.
+#
+# MEASURED here, one straight segment, iso=0.35: the surface lands ~26% INSIDE the requested
+# radius at kernel 2.2 (ratio 0.74), and the shortfall is a function of the KERNEL, not of
+# the radius:
+#     kernel 1.6 -> 0.926    kernel 2.2 -> 0.742    kernel 3.0 -> 0.590
+# Within a kernel the ratio varies only 0.4% (k=1.6) to 4.4% (k=3.0) across a 7x radius
+# range. So it is a one-dimensional constant, which makes it LEVER 1 (bake once, sample
+# O(1)): solve the ratio per kernel, bake it, divide the requested radius by it.
+#
+# THE RESIDUAL IS THE SCALIS EFFECT, and it is not fixed here. SCALIS's whole point is that
+# blending should be SCALE-INVARIANT so "thin shape components are not excessively smoothed
+# out when blended into larger ones". Our residual scale-dependence (0.4-4.4%) is exactly
+# that effect, small at the kernels creatures use and growing with kernel. Calibration
+# removes the CONSTANT error; only a scale-invariant kernel removes the rest, and this
+# module does not claim to be SCALIS.
+# ---------------------------------------------------------------------------
+
+_RADIUS_RATIO_CACHE = {}
+
+
+def radius_ratio(kernel=2.2, iso=0.35, probe_radius=0.15):
+    """Where does the iso-surface actually land, as a fraction of the requested radius?
+
+    Solved once per (kernel, iso) by marching outward from a straight probe segment and
+    finding the zero crossing, then CACHED -- the ratio is a property of the kernel, not of
+    the model, so paying for it per creature would be paying for the same number twice."""
+    key = (round(float(kernel), 6), round(float(iso), 6), round(float(probe_radius), 6))
+    hit = _RADIUS_RATIO_CACHE.get(key)
+    if hit is not None:
+        return hit
+    r = float(probe_radius)
+    f = convolution_field([((0.0, 0.0, -4.0 * r), (0.0, 0.0, 4.0 * r), r, (1.0, 1.0, 1.0))],
+                          iso=float(iso), kernel=float(kernel))
+    t = np.linspace(1e-4, 5.0 * r, 1200)
+    P = np.stack([t, np.zeros_like(t), np.zeros_like(t)], axis=1)
+    v = np.asarray(f(P), float).ravel()
+    s = np.where(np.sign(v[:-1]) != np.sign(v[1:]))[0]
+    ratio = float(t[s[0]] / r) if len(s) else 1.0
+    _RADIUS_RATIO_CACHE[key] = ratio
+    return ratio
+
+
+def calibrated_segments(segments, kernel=2.2, iso=0.35):
+    """Rescale segment radii so the surface lands at the radius the CALLER asked for.
+
+    Returns a new segment list; the original is untouched. Use with the same kernel/iso you
+    pass to convolution_field, or the correction is for a different surface."""
+    k = radius_ratio(kernel=kernel, iso=iso)
+    out = []
+    for seg in segments:
+        a, b, r = seg[0], seg[1], float(seg[2])
+        rest = tuple(seg[3:])
+        out.append((a, b, r / max(k, 1e-6)) + rest)
+    return out

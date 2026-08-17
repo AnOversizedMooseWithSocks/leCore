@@ -1426,82 +1426,6 @@ def register_p06(c):
                               "install the drift head", "merge distributions by adding weights",
                               "generative model as a matrix", "ship the model as weights"))
 
-    c.register_capability("Material thumbnail (one call: material in, PNG out)",
-                          "mind.preview_thumbnail(material) -- name, material object, or PBR dict in; "
-                          "small shader-ball render out; fmt='png' bytes (HTTP {'__bytes_b64__':...}) or 'array'. "
-                          "Fixture slots stay grey unless overridden. size=N delivers ANY size; upsample=True optional: diffuse/rough demod-upscale "
-                          "(lighting ~2N/3); transmissive+smooth-metal auto-route masked NATIVE (metals "
-                          "cannot win upscaled, measured). Warm@160: wax 21s, chrome 37s. MANY materials: "
-                          "mind.preview_thumbnail_batch([...]) caches the fixed-camera reference + active "
-                          "mask per process, re-rendering only ball pixels: 26s/material warm at res=96.",
-                          example="import lecore; m=lecore.UnifiedMind(dim=128,seed=0); png=m.preview_thumbnail('gold', res=16); (isinstance(png, bytes), png[:4])",
-                          native=True, module="preview",
-                          aliases=("material thumbnail", "render a thumbnail of a material",
-                                   "batch of material thumbnails", "thumbnails for many materials",
-                                   "material thumbnail cache",
-                                   "preview this material", "thumbnail render", "quick material preview image",
-                                   "png of a material", "show me what this material looks like",
-                                   "material swatch render"))
-
-    c.register_capability("Preview scene (shader ball with core, path-traced, material slots)",
-                          "mind.preview_scene(material) renders the SHADER BALL -- "
-                          "hollow shell with cutaway, THIN LENS dish (translucency/SSS test), flush core, TWO "
-                          "FLUSH inlay belts (trim_top/trim_bottom, own materials), puck base -- graph-paper floor, "
-                          "studio rig (softboxes, gradient, ceiling panels; "
-                          "lighting='plain' for the bare renderer). An emissive core glows through glass and "
-                          "translucent outers (brightest at the lens). material dresses "
-                          "the OUTER; defaults: mouse-ball grey core+base, silicone belts; trim= dresses both "
-                          "belts, trim_top=/trim_bottom= each. preview_scene_document -> (scene, camera). ~75s res=160.",
-                          example="import lecore; m=lecore.UnifiedMind(dim=128,seed=0); img=m.preview_scene('glass_clear', core='neon_blue', res=32); img.shape",
-                          native=True, aliases=("preview scene", "shader ball", "material preview scene",
-                                                "subsurface scattering test", "translucency preview", "thin wall test",
-                                                "default preview scene", "render material in a scene",
-                                                "test scene for materials", "preview object with slots",
-                                                "show my material on the shader ball", "material ball with floor",
-                                                "emissive core preview", "translucent material preview",
-                                                "see the material with reflections", "core and shell preview"))
-
-    c.register_capability("Emissive objects cast light (auto mesh lights)",
-                          "Any object with an EMISSIVE material becomes a real light: render_scene_document(..., "
-                          "emissive_mesh_lights=True) meshes each emitter's SDF (surface_nets) into a "
-                          "MeshLight -- NEE-sampled area source: glowing objects pool light and cast soft "
-                          "shadows. emissive_mesh_lights_fn(scene) returns the lights to compose "
-                          "by hand. SCOPE, measured: EXPOSED emitters only (sealed = binary-occluded; sss_interior "
-                          "covers glow THROUGH walls). The shader-ball preview auto-toggles the core mesh "
-                          "light ON for translucent/SSS outers, OFF for glass/transparent.",
-                          example="import lecore; m=lecore.UnifiedMind(dim=128,seed=0); from holographic.scene_and_pipeline.holographic_scene_doc import Scene; from holographic.mesh_and_geometry.holographic_sdf import sphere, plane; sc=Scene(seed=0); sc.add(name='floor',geometry=plane(0.0),material='matte_white'); sc.add(name='bulb',geometry=sphere(0.2).translate((0,0.5,0)),material='neon_blue'); from holographic.rendering.holographic_scene_render import emissive_mesh_lights_fn; len(emissive_mesh_lights_fn(sc))",
-                          native=True, module="scene_render",
-                          aliases=("mesh light", "use a mesh as a light", "emissive object as light",
-                                   "geometry light", "glowing object casts light", "area light from geometry",
-                                   "make my emissive material illuminate", "light shaped like an object"))
-
-    c.register_capability("Cheap anti-aliasing (FXAA subpixel pass + SSAA)",
-                          "Two AA doors, priced honestly. postfx.fxaa(img) (also a PostChain step 'fxaa'): the "
-                          "SUBPIXEL term of FXAA -- edge-masked blend toward a 3x3 tent, milliseconds at the same "
-                          "resolution, flat regions returned BIT-IDENTICAL so texture and grain survive. "
-                          "postfx.supersample(img, factor): true SSAA when you can afford to over-render (~factor^2 "
-                          "render time). mind.preview_scene defaults to aa='fxaa'; aa='ssaa2' renders 2x and "
-                          "box-averages down; aa='off' is raw. KEPT NEG: the full FXAA edge-walk did not pay on "
-                          "preview renders; the subpixel term alone removed the visible staircase.",
-                          example="import lecore, numpy as np; from holographic.rendering.holographic_postfx import fxaa; img=np.zeros((16,16,3)); img[:, 8:]=1.0; fxaa(img).shape",
-                          native=True, module="postfx",
-                          aliases=("antialiasing", "anti aliasing", "fxaa", "smooth jagged edges",
-                                   "jaggies in my render", "stair stepped edges", "supersample an image",
-                                   "clean up render edges", "aa post process", "edge smoothing pass",
-                                   "my render looks pixelated", "ssaa"))
-
-    c.register_capability("Film-grade fur shading (deep opacity + dual scattering + medulla)",
-        "render_hair(..., self_shadow=, dual_scatter=, medulla=): the film rung over the single-"
-        "scattering Marschner lobes. Deep-opacity self-shadow (Yuksel-Keyser structure: a light-"
-        "aligned voxel grid, filtered, exclusive-cumsum along the light axis) darkens buried "
-        "fibers; a compact dual-scattering term (Zinke structure) adds the forward-scatter glow "
-        "and backscatter fill single scattering cannot produce; medulla lobes (Yan fur structure) "
-        "widen and desaturate for animal fur. All default OFF; zero strengths ARE marschner, "
-        "pinned. Plus holographic_groom.clump: tuft the coat (roots planted, tips gather).",
-        example="import numpy as np; from holographic.mesh_and_geometry.holographic_hairshade import fur_shade; fur_shade(np.array([0.,1.,0.]), np.array([0.,0.,1.]), np.array([0.3,0.1,1.0])/1.05, 6.0).shape == (3,)",
-        native=True, aliases=("pixar quality fur", "movie fur rendering", "hair self shadowing",
-                              "dual scattering hair", "fur looks flat and dark", "clump fur into tufts"))
-
     c.register_capability("VSA load-bearing audit (the ablation table)",
         "mind.ablation_table(seeds=...): for each subsystem, run the DUMBEST honest non-"
         "holographic baseline on the SAME task, data, and metric; measure both across seeds with "
@@ -2949,6 +2873,272 @@ def register_p06(c):
                               "coarse mesh plus displacement",
                               "compress geometry with a base and details",
                               "quantize mesh vertices at a budget", "shrink a mesh file"))
+
+    c.register_capability(
+        "Formal logic & Lean 4 export (prove, check, hand to an external authority)",
+        "logic_prove: Horn forward chaining, proof tree, honest None (strategy="
+        "'seminaive': same atoms, >=22x on large bases); logic_check_proof re-verifies "
+        "INDEPENDENTLY (forged premises raise); lean_export emits Lean 4 "
+        "(check='external' = both checkers agree); lean_verify runs installed lean; "
+        "logic_consequences: least fixpoint + absurdity smoke (Lean never checks rule "
+        "CONSISTENCY); logic_proof_measure sizes a checked proof; encode/decode_atom "
+        "round-trip atoms (decode abstains); fact_capacity's NEGATIVE: bundled recall "
+        "cliffs by load 8 independent of D -- INDEX fact bases. Deduction, not regression.",
+        example="p=mind.logic_prove(['mortal',['socrates']], [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]); print(mind.logic_check_proof(p, [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]))",
+        native=True, aliases=("lean4", "lean 4", "prove a theorem", "theorem prover",
+                              "formal verification", "check a proof", "proof assistant",
+                              "export to lean", "horn clauses", "forward chaining",
+                              "unification", "verify a logical claim", "deduce a fact from rules",
+                              "logic inference", "first-order logic",
+                              "all consequences of rules", "everything derivable",
+                              "fixpoint of rules", "detect inconsistent rules",
+                              "contradiction in rules", "how complex is a proof",
+                              "proof size", "decode a fact vector",
+                              "how many facts fit", "fact capacity"))
+
+
+    c.register_capability(
+        "Conjecture & refute (learn Horn rules from examples, prove them in Lean)",
+        "mind.logic_induce learns Horn clauses from positive/negative examples -- "
+        "learning-from-failures (Cropper & Morel 2021, generate/test/constrain; LFF-"
+        "style on the finite fragment, not Popper parity). Test is the engine's own T_P "
+        "fixpoint, so RECURSIVE rules learn free (ancestor from parent, measured). Then "
+        "deduces the theory's consequences, refutes vs negatives (count reported), and "
+        "emits Lean 4 proving a positive FROM THE LEARNED RULES. rules=None when the "
+        "space exhausts -- never a guess. See Formal logic for deduction.",
+        example="out=mind.logic_induce([{'head':['parent',['tom','bob']],'name':'p0'},{'head':['parent',['bob','liz']],'name':'p1'}], [['ancestor',['tom','bob']],['ancestor',['tom','liz']]], [['ancestor',['bob','tom']]], 'ancestor', {'parent':2,'ancestor':2}); print(len(out['rules']), out['refuted_count'])",
+        native=True, aliases=("learn rules from examples", "rule induction",
+                              "inductive logic programming", "ILP", "conjecture and refute",
+                              "induce a law from data", "learn horn clauses",
+                              "find a rule that explains observations",
+                              "learning from failures", "learn a recursive rule",
+                              "generalize from examples", "hypothesis search"))
+
+
+    c.register_capability(
+        "Verified-knowledge memory (proofs as hypervectors, provenance kept)",
+        "mind.proof_store proves a goal, runs the INDEPENDENT checker (unproven claims "
+        "never enter), stores indexed rows in the substrate: goal atom, proof TREE "
+        "(encode_tree_carrier), rule TRACE (seq_encode, complex kept complex). "
+        "verify='external' records an installed Lean's verdict -- provenance "
+        "('checked'/'lean_verified') travels with each record; the binary stays "
+        "optional, its verdict is kept. mind.proof_recall: exact or k-nearest by "
+        "goal/tree/trace cosine (self excluded), provenance-filtered, honest empties. "
+        "Rows not bundles, per the fact_capacity negative.",
+        example="mind.proof_store(['mortal',['socrates']], [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]); print(mind.proof_recall(['mortal',['socrates']])['exact']['provenance'])",
+        native=True, aliases=("remember a proof", "store verified knowledge",
+                              "recall a proof", "similar proofs", "proof memory",
+                              "verified knowledge base", "knowledge with provenance",
+                              "find proofs like this", "proof cache",
+                              "store theorems", "recall by structure"))
+
+
+    c.register_capability(
+        "Tabled goal-directed query (bindings for a goal with variables)",
+        "mind.logic_query answers a goal containing variables (['ancestor',['tom','?w']]) "
+        "backward from the goal, returning every ground binding with a checkable proof. "
+        "TABLING (Chen & Warren 1996; XSB/SWI) makes it terminate on LEFT RECURSION and "
+        "CYCLES where plain SLD diverges. MEASURED LAW: speedup tracks the goal's DEMAND "
+        "CLOSURE not graph size -- 304x at demand 1, 0.3x (SLOWER) at demand 690 -- so "
+        "budget caps the tabled answers and fallback=True reruns as a seminaive fixpoint, "
+        "reporting which route ran. Never the silent default; see Formal logic to derive "
+        "everything instead.",
+        example="print(mind.logic_query(['ancestor',['tom','?w']], [{'head':['parent',['tom','bob']],'name':'p0'},{'head':['parent',['bob','liz']],'name':'p1'},{'head':['ancestor',['?x','?y']],'body':[['parent',['?x','?y']]],'name':'ab'},{'head':['ancestor',['?x','?z']],'body':[['parent',['?x','?y']],['ancestor',['?y','?z']]],'name':'as'}])['answers'])",
+        native=True, aliases=("query with variables", "tabling", "tabled resolution",
+                              "backward chaining", "goal directed search", "SLD resolution",
+                              "answer a logic query", "what does X reach",
+                              "bindings for a goal", "memoize subgoals", "occurs check"))
+
+
+    c.register_capability(
+        "Cell-aggregate morphogenesis (grow a body from soft cells, analytic gradients)",
+        "morphogenesis_grow proliferates soft cells into a compact genus-0 aggregate "
+        "(NO autodiff: closed-form gradients vs fd_gradient to 2e-9; soft-then-inflate "
+        "anneal). morphogenesis_differentiate breaks symmetry by DIFFERENTIAL ADHESION "
+        "(Mode 2: Gray-Scott RD modulated by a Wolpert gradient; control 0.824 vs "
+        "0.257 sphericity). genome_encode/decode/locality/interpolate make a body plan "
+        "ONE searchable vector (locality measured monotone; noise abstains). "
+        "shape_memory_* hold morphologies as attractors: 1.00 recall vs 0.00 for a "
+        "depth-matched scrambled control.",
+        example="r=mind.morphogenesis_grow(n_cells=48, seed=3, steps=150); print(len(r['positions']), round(r['sphericity'],3))",
+        native=True, aliases=("morphogenesis", "grow a creature body", "cell aggregate",
+                              "reaction diffusion on cells", "turing pattern on a body",
+                              "morphogen gradient", "limb bud", "symmetry breaking",
+                              "genome encoding", "creature genome", "interpolate designs",
+                              "encoding locality", "shape memory", "regeneration",
+                              "recover from perturbation", "target morphology",
+                              "soft cell simulation", "differential adhesion",
+                              "particle relaxation packing", "pack soft spheres",
+                              "body plan generation", "grow cells", "cell division growth",
+                              "energy minimization on positions"))
+
+
+    c.register_capability(
+        "Tetrahedralize a point set with PROVED topology (limb-connection certificates)",
+        "mind.tetrahedralize turns points into a volumetric tet mesh (Bowyer-Watson + "
+        "alpha-complex, NumPy only) reporting adjacency, boundary, NON-MANIFOLD faces, "
+        "components, Euler. mind.tet_connectivity_certificate PROVES every limb reaches "
+        "the torso as a derivation (not a flood fill) and names orphans; "
+        "mind.tet_certificate_lean exports a claim for external Lean. mind.tet_lod_chain "
+        "makes each LOD level a RULE (nested prefix, 9.1x smaller than stored meshes) and "
+        "REFUSES levels that orphan a limb. SCOPE: clean point sets, not TetGen. LAW: an "
+        "attachment 1-2 cells across is NOT connected; 3 is minimum.",
+        example="a=mind.morphogenesis_grow(n_cells=40,seed=0,steps=80); mesh=mind.tetrahedralize(a['positions'],a['radii']); print(mesh['T'], mesh['components'], mind.tet_connectivity_certificate(mesh,0,list(range(mesh['T'])))['ok'])",
+        native=True, aliases=("tetrahedral mesh", "delaunay triangulation", "tetrahedralize",
+                              "certified LOD", "volumetric LOD", "LOD without storing meshes",
+                              "decimate without breaking topology",
+                              "volumetric mesh from points", "alpha shape",
+                              "limb attachment", "is my limb connected",
+                              "mesh topology proof", "certify a mesh", "circumsphere",
+                              "points to volume mesh"))
+
+
+    c.register_capability(
+        "Stable neo-Hookean tet elasticity + muscle fibers (hand-derived gradients)",
+        "mind.fem_simulate solves a tet mesh quasistatically under STABLE neo-Hookean "
+        "elasticity (Smith/De Goes/Kim 2018) plus activation-dependent muscle springs. "
+        "Chosen over the classical log-J neo-Hookean because log J is UNDEFINED for "
+        "inverted elements and generated meshes DO invert -- this energy stays finite and "
+        "differentiable through inversion (pinned). NO autodiff: Piola-Kirchhoff stress "
+        "hand-derived, checked vs fd_gradient to 2e-11, rest stress-free to 7e-17. "
+        "fem_select_fibers picks axis-aligned edges; fem_rest_quality reports "
+        "degenerate/INVERTED elements before you trust a solve.",
+        example="a=mind.morphogenesis_grow(n_cells=30,seed=0,steps=60); mesh=mind.tetrahedralize(a['positions'],a['radii']); fib,rl=mind.fem_select_fibers(a['positions'],mesh['tets']); r=mind.fem_simulate(a['positions'],mesh['tets'],steps=60,fibers=fib,rest_lengths=rl,activation=0.7,pinned=[0]); print(round(r['history'][0],2), round(r['history'][-1],2))",
+        native=True, aliases=("neo hookean", "hyperelastic material", "FEM tetrahedron",
+                              "soft body FEM", "muscle actuation", "deformation gradient",
+                              "piola kirchhoff stress", "element inversion",
+                              "simulate a creature body", "strain energy density",
+                              "lame parameters"))
+
+
+    c.register_capability(
+        "Tier contracts (certify a memory plan BEFORE it runs, fidelity clause included)",
+        "NINE CERTIFY-OR-REFUSE contracts, one shape: certify, or refuse with the "
+        "failing clause NAMED. tier_certify_plan (capacity, Horn-derived tier ban, "
+        "FIDELITY from the measured D/M law), bake_certify (hypergeometric spot-check "
+        "bound), differential_agreement, schedule_certify, demux_gated (measured 5% "
+        "noise envelope), pose_certify, conservation_ledger (exact vs BOUNDED tested "
+        "differently), lyapunov_certify (settle CERTIFIED for a true gradient flow), "
+        "plan_certify (a GOAP plan's preconditions and goal).",
+        example="print(mind.tier_certify_plan({'hot':{'capacity':8,'cost':1},'trace':{'capacity':10**6,'cost':10,'holographic':True,'dim':4096}}, [{'item':'b','tier':'trace','count':256}], min_recall=0.98)['violations'])",
+        native=True, aliases=("tier contract", "certify a plan", "memory budget check",
+                              "will this fit in cache", "roofline", "precondition check",
+                              "refuse a plan", "memory hierarchy contract",
+                              "eviction SLA", "fidelity guarantee",
+                              "certify a bake", "spot check", "detection probability",
+                              "how many samples to verify", "verify a lookup table",
+                              "differential testing", "do two implementations agree",
+                              "cross check backends", "compare implementations",
+                              "schedule conflict", "is my schedule safe",
+                              "race free schedule", "parallel wave check",
+                              "estimate noise level", "is this answer trustworthy",
+                              "gate a demux", "refuse outside the envelope",
+                              "pose validity", "joint limit check", "certify a pose",
+                              "conservation audit", "energy drift", "is my sim leaking",
+                              "lyapunov", "has it really converged", "certify a settle",
+                              "GOAP", "validate an action plan", "precondition missing"))
+
+
+    c.register_capability(
+        "Fixed-topology template wrap (vertex i means the same thing on every body)",
+        "mind.template_wrap deforms ONE template mesh onto any target field KEEPING ITS "
+        "FACE ARRAY -- the precondition for blendshapes, shared textures and cross-species "
+        "morphing, none of which work while each creature meshes from scratch. Annealed "
+        "projection (non-rigid ICP schedule, Amberg 2007) + Taubin no-shrink relaxation; an "
+        "analytic field gives exact correspondence, not a nearest-point search. MEASURED: "
+        "improves triangle quality 66.6 -> 38.3. template_wrap_quality reports landing "
+        "error, ROBUST p95/p5 bunching, degenerate edges, flipped faces. NEGATIVE: needs "
+        "matching topology.",
+        example="import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; t=mind.mesh_from_sdf(sph,((-1.4,)*3,(1.4,)*3),res=24,vectorized=True); ax=np.array([1.3,0.8,1.0]); ell=lambda P:(np.linalg.norm(P/ax,axis=1)-1.0)*ax.min(); V=mind.template_wrap(t.vertices,t.faces,ell,rounds=4); print(round(mind.template_wrap_quality(V,t.faces,ell)['surface_error'],4))",
+        native=True, aliases=("template wrap", "shrink wrap a mesh", "fixed topology",
+                              "vertex correspondence", "retopology", "same mesh new body",
+                              "morph between creatures"))
+
+
+    c.register_capability(
+        "Blendshape basis with DECLARED local support (STAR's fix, without the scans)",
+        "mind.blend_corrective authors one blendshape target that displaces only vertices "
+        "within a GEODESIC radius of an anchor -- geodesic because a hand on a hip is "
+        "millimetres away in space and a metre across the surface. SMPL's dense correctives "
+        "capture spurious long-range coupling; STAR spends scan data LEARNING each joint's "
+        "activation region, but an authored basis DECLARES it -- free and exact (measured "
+        "overreach 0.000e+00; 8-15% of the mesh moves). blend_locality_report checks it. "
+        "NEGATIVE: locality guaranteed, anatomical realism not.",
+        example="import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; msh=mind.mesh_from_sdf(sph,((-1.3,)*3,(1.3,)*3),res=18,vectorized=True); V=np.asarray(msh.vertices); s=int(np.argmax(V[:,1])); t=mind.blend_corrective(msh,s,0.8,'normal',0.2); print(mind.blend_locality_report(V,[t],msh,[s],[0.8])['max_overreach'])",
+        native=True, aliases=("blendshape", "morph target", "pose corrective",
+                              "local support", "shape basis", "sparse deformation",
+                              "make a blendshape"))
+
+
+    c.register_capability(
+        "Face as a landmark graph + parts (procedural, no scans, non-human friendly)",
+        "mind.face_landmarks places skull-canon landmarks (crown/brow/eye/nose/mouth/chin/"
+        "jaw/cheek/ear/temple), bilateral pairs mirrored STRUCTURALLY. face_part_graph "
+        "says which rigblock goes where as DATA, so a four-eyed noseless face is a list "
+        "edit not a code path; face_expression gives per-landmark displacements driving "
+        "blend_corrective. WHY NOT FLAME: 3DMMs fix topology and expression basis at scan "
+        "time and assume adult human anatomy, fitting stylized/non-human assets unstably. "
+        "NOT a likeness and NOT photo reconstruction -- no scan basis to fit.",
+        example="lm = mind.face_landmarks((0.0,1.6,0.0), 0.24, 0.10); print(len(lm), sorted(lm)[:3], len(mind.face_part_graph(lm)))",
+        native=True, aliases=("face", "facial landmarks", "head features", "expression",
+                              "eyes nose mouth", "character face", "make a face"))
+
+
+    c.register_capability(
+        "LBS volume-loss bound (predict the candy wrapper, then refuse the pose)",
+        "mind.skin_twist_shrink gives the CLOSED FORM |sum_b w_b exp(i theta_b)| for how "
+        "much volume linear blend skinning loses under twist -- the two-bone case reduces "
+        "to |cos(theta/2)|, so 90 deg keeps 0.707 and 180 deg collapses to ZERO (the candy "
+        "wrapper). VERIFIED against the shipped skinning path to 1.1e-16, so it is a "
+        "theorem about the code. mind.skin_pose_is_safe refuses a pinching pose BEFORE "
+        "deforming; mind.skin_max_safe_twist inverts it (even 50/50 weights allow only 63.6 "
+        "deg at a 0.85 floor). Exact for pure twist, conservative for bending.",
+        example="import numpy as np; print(round(float(mind.skin_twist_shrink([0.5,0.5],[0.0,np.pi/2])),4), mind.skin_pose_is_safe([[0.5,0.5]],[0.0,np.pi])['ok'])",
+        native=True, aliases=("candy wrapper", "volume loss", "skinning artifact",
+                              "collapsed elbow", "twist limit", "is this pose safe"))
+
+
+    c.register_capability(
+        "Safe offset / wrap injectivity (the reach, both conditions)",
+        "mind.wrap_is_injective says whether an offset or shrink-wrap will FOLD the mesh "
+        "through itself -- a folded wrap still reads clean on surface error. Checks BOTH "
+        "causes: LOCAL (offset under the smallest concave radius) and GLOBAL (collinear "
+        "normals closer than twice the offset). The global term bites: armpits and finger "
+        "gaps are LOW-curvature surfaces FACING each other, so a curvature-only check "
+        "passes exactly the cases that fail. NEGATIVE: samples the reach, no medial axis.",
+        example="import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; msh=mind.mesh_from_sdf(sph,((-1.3,)*3,(1.3,)*3),res=14,vectorized=True); print(mind.wrap_is_injective(msh.vertices,msh.faces,0.05,sph,samples=200)['ok'])",
+        native=True, aliases=("safe offset", "self intersection", "reach", "will this fold",
+                              "offset distance", "shrink wrap safety", "medial axis limit"))
+
+
+    c.register_capability(
+        "SCALIS scale-invariant surfaces (thin features survive beside thick ones)",
+        "mind.convolution_field_scalis integrates over the HOMOTHETIC measure ds/tau instead "
+        "of absolute arc length, so a long thick segment no longer deposits more field than "
+        "a short thin one. Plain convolution 'failed to reconstruct prescribed radii and "
+        "was unable to model large shapes with fine details' (Zanni et al. 2013). MEASURED: "
+        "exactly invariant (0.13241) across a 16x scale range where plain scales by lam; and "
+        "on a spike 5.7x thinner than its trunk, plain renders it at 9% of the asked radius "
+        "-- swallowed -- while SCALIS gives 123%. Default-off; opt in per field.",
+        example="f = mind.convolution_field_scalis([((0,0,-0.5),(0,0,0.5),0.15,(1.,1.,1.))]); import numpy as np; print(round(float(f(np.array([[0.1,0.0,0.0]]))[0]),4))",
+        native=True, aliases=("SCALIS", "scale invariant surface", "thin feature lost",
+                              "convolution radius control", "tail tip vanishes",
+                              "blend thin into thick"))
+
+
+    c.register_capability(
+        "Physically-based TISSUE materials (organs, bone, fat, skin -- not flat)",
+        "mind.tissue_pbr gives base colour, roughness, metallic, SSS weight and a "
+        "PER-CHANNEL subsurface radius for bone/skin/fat/muscle/organ/liver/lung/gut/"
+        "spleen/chitin/keratin. Per-channel matters: red scatters deeper than blue in every "
+        "soft tissue, and a scalar radius cannot give the warm silhouette that separates "
+        "meat from red plastic. Christensen-Burley parameterisation; the ORDERING is "
+        "grounded in measured SDOCT coefficients (bone/skin 1.95-2.13 /mm, liver 1.30-1.46, "
+        "spleen 0.52-0.63) so viscera scatter furthest. NEGATIVE: single medium per tissue.",
+        example="v = mind.tissue_pbr('skin'); print([round(x,2) for x in v['sss_radius']], v['sss_weight'])",
+        native=True, aliases=("tissue material", "subsurface scattering", "organ material",
+                              "skin shader", "bone material", "realistic flesh", "SSS"))
+
 
 
 _PART = "holographic_catalog_p06"

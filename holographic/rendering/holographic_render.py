@@ -120,7 +120,7 @@ class Light:
 # =====================================================================================================
 def rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=(0.8, 0.8, 0.8),
                    background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True, texture=None, uvs=None,
-                   smooth=False, two_sided=False, vertex_colors=None):
+                   smooth=False, two_sided=False, vertex_colors=None, pbr=None):
     """Rasterise a triangle mesh to an (H, W, 3) RGB image in [0,1] with a z-buffer and per-face Lambert shading.
     `lights` is a list of Light (defaults to one directional sun + ambient). `base_color` is the surface albedo
     (or pass a PBRMaterial's base_color). Frustum-clips and back-face culls.
@@ -302,7 +302,19 @@ def rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=
                 L = L / (np.linalg.norm(L, axis=1, keepdims=True) + 1e-12)
             ndl_raw = np.sum(fn * L, axis=1)
             ndl = np.abs(ndl_raw) if two_sided else np.clip(ndl_raw, 0.0, None)
-            sl += ndl[:, None] * lt.intensity * lt.color
+            if pbr is None:
+                sl += ndl[:, None] * lt.intensity * lt.color
+            else:
+                # PBR PATH (O6). The rasteriser was Lambert-only, so the best SHAPE and the
+                # best MATERIAL came from different renderers -- the mesh path could not do
+                # the wet sheen render_sdf gives. REUSES holographic_brdf.cook_torrance
+                # rather than writing a second GGX: one shared implementation of any
+                # algorithm, never two. Default-off, so every existing render is unchanged.
+                from holographic.rendering.holographic_brdf import cook_torrance
+                Vv = np.asarray(camera.eye, float) - centroids[fw]
+                Vv = Vv / (np.linalg.norm(Vv, axis=1, keepdims=True) + 1e-12)
+                mt, rg = float(pbr[0]), float(pbr[1])
+                sl += cook_torrance(fn, Vv, L, np.ones(3), mt, rg) * lt.intensity * lt.color
         smooth_light = ambient + sl                          # (n_win, 3)
     if vcol is not None:
         # VCOL: per-fragment colour = barycentric blend of the winning face's corner COLOURS, times the light

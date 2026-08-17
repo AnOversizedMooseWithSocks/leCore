@@ -70,7 +70,8 @@ def test_polymorphic_keeps_only_the_diagonal(mind):
 def test_both_edge_builders_agree(mind):
     """The duplicate that let the bug survive its own fix: two builders, one rule. If they drift again, a fix can
     land in one and the router keep believing the other."""
-    import pipelinemap
+    from holographic.caching_and_storage import (
+        holographic_pipelinemap as pipelinemap)
 
     cat = mind._capability_catalog()
     drawn = sorted((ci, po, n) for ci, po, n in pipelinemap._edges(cat))
@@ -249,3 +250,55 @@ def test_the_engine_can_plan_a_multistep_route(mind):
     assert len(route) >= 2, ("sdf->image should be a multi-step chain", [s["name"] for s in route])
     kinds = [(s["consumes"], s["produces"]) for s in route]
     assert kinds[0][0] == ["sdf"] and kinds[-1][1] == ["image"], kinds
+
+
+def test_no_top_level_module_is_imported_by_the_package():
+    """**Nothing in `holographic/` may import a module that lives at the repo root.**
+
+    pipelinemap.py sat beside setup.py and was imported by a faculty. From a repo
+    checkout that works -- cwd shadowing -- and from a pip-installed wheel it raises
+    ModuleNotFoundError, which is how it survived SEVEN releases (0.2.3 through
+    0.2.14): every release check ran from the repo root.
+    THE BUG CLASS IS "A PACKAGE THAT DEPENDS ON ITS CHECKOUT LAYOUT", and this test
+    is the door on it -- a manifest entry fixes one file, this fixes the category."""
+    import ast
+    import pathlib
+    import re
+
+    pkg = pathlib.Path(__file__).resolve().parent.parent / "holographic"
+    root = pkg.parent
+    # WHAT THE WHEEL SHIPS IS THE ANSWER, and setup.py already states it:
+    # py_modules=["lecore", "holographic_service"]. Those two ARE installed, so
+    # importing them is fine; every other root file is checkout-only. Reading
+    # the list rather than hardcoding it means the test stays right when the
+    # packaging changes -- which is the mistake that put pipelinemap here.
+    shipped = set()
+    try:
+        setup_src = (root / "setup.py").read_text(errors="replace")
+        m = re.search(r"py_modules\s*=\s*\[([^\]]*)\]", setup_src)
+        if m:
+            shipped = set(re.findall(r'"([^"]+)"', m.group(1)))
+    except Exception:
+        pass
+    top = {f.stem for f in root.glob("*.py")} - shipped
+    offenders = []
+    for f in pkg.rglob("*.py"):
+        if "__pycache__" in f.parts:
+            continue
+        try:
+            tree = ast.parse(f.read_text(errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                names = [node.module.split(".")[0]]
+            for n in names:
+                if n in top:
+                    offenders.append("%s:%d imports top-level %r"
+                                     % (f.name, node.lineno, n))
+    assert not offenders, (
+        "a packaged module imports something that only exists in a checkout -- "
+        "move it into holographic/:\n" + "\n".join(sorted(set(offenders))))

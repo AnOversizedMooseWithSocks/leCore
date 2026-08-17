@@ -37,6 +37,20 @@ cp VERSION "$STAGE"/
 
 echo ">> copying the runtime data package (lecore_data/: the dictionary + material JSON the engine needs at runtime)"
 cp -r lecore_data "$STAGE"/
+
+# capabilities.json IS THE ONE ARTIFACT WHOSE WHOLE POINT IS BEING READ WITHOUT
+# IMPORTING THE ENGINE -- the machine-readable sibling of CAPABILITIES.md, for
+# tools and apps that ingest the catalog. Leaving it out of the wheel means the
+# audience it exists for is exactly the audience that cannot get it: a pip user
+# has no repo to read it from and no capdoc.py to regenerate it with.
+# It rides inside lecore_data/ rather than at the top level so it travels with
+# the package_data rule that is already proven to work (the dictionary check in
+# package.yml would have caught a data file that did not ship).
+if [ -f capabilities.json ]; then
+  cp capabilities.json "$STAGE"/lecore_data/
+  echo ">> bundled capabilities.json ($(wc -c < capabilities.json) bytes) for "\
+       "consumers that read the catalog without importing the engine"
+fi
 # keep the distribution clean: no compiled caches or stray pyc leak into the wheel
 find "$STAGE" -name "__pycache__" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 find "$STAGE" -name "*.pyc" -delete 2>/dev/null || true

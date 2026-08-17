@@ -160,7 +160,13 @@ def test_primary_and_produces_are_served(mind):
     """The two fields the audit said kill client guessing: which param takes the piped input, and what comes out.
     A client that guesses `primary` wrong wires the wrong socket."""
     r = mind.describe_skill("render_mesh")
-    assert (r["primary"], r["consumes"], r["produces"]) == ("mesh", ["mesh"], ["image"])
+    # CONSUMES IS NOW ("mesh", "camera") because render_mesh's real signature
+    # is render_mesh(mesh, camera, ...) and the tag used to declare only the
+    # primary input -- which hid a REQUIRED one and made `camera` a dead end in
+    # the pipeline map. `primary` is still "mesh": that field exists precisely
+    # so a two-input step can say which one it is ABOUT.
+    assert (r["primary"], r["consumes"], r["produces"]) == (
+        "mesh", ["mesh", "camera"], ["image"])
     i = mind.describe_skill("image_to_3d")
     assert (i["primary"], i["consumes"], i["produces"]) == ("image", ["image"], ["mesh"])
 
@@ -229,7 +235,11 @@ def test_provisional_kinds_are_honest_about_their_gap(mind):
     """curve/skeleton have no tagged producer, and the docstring says so. If someone later tags a producer, this
     test fails LOUDLY -- prompting the doc to be corrected rather than quietly going stale."""
     src = mind.pipeline_map()["gaps"]["source_only"]
-    assert set(src) == {"curve", "skeleton"}, (src, "source_only changed -- update io_kinds' PROVISIONAL note")
+    # CURVE NOW HAS A PRODUCER: image_lines was tagged (("image",), ("curve",))
+    # in the leStudio door pass -- Hough lines ARE curves. That is the test
+    # working as designed ("if someone later tags a producer, this changes"),
+    # so the expectation moves rather than the tag.
+    assert set(src) == {"skeleton"}, (src, "source_only changed -- update io_kinds' PROVISIONAL note")
 
 
 def test_resolve_capability_uri_says_it_is_uri_only(mind):
@@ -251,3 +261,39 @@ def test_render_mesh_dtype_is_exact_and_default_off(mind):
     assert a.dtype == np.float64, "the default must not change"
     assert b.dtype == np.float32
     assert np.array_equal(a.astype("float32"), b), "dtype= must be a cast, not a different render"
+
+
+def test_the_reported_engine_version_matches_the_packaged_one(mind):
+    """**`version()['engine']` must equal what the wheel will be built as.**
+
+    The repo self-reported one number while PyPI carried another, and nothing
+    checked -- so a client asking the engine its version could be told something
+    no release ever had. Both come from the same VERSION file today; this pins
+    that they keep coming from it, which is the cheap half of "the wheel and the
+    repo have never agreed in any round so far"."""
+    import subprocess
+    import sys as _sys
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    out = subprocess.run([_sys.executable, "tools/bump_version.py", "--current"],
+                         cwd=str(root), capture_output=True, text=True)
+    packaged = out.stdout.strip()
+    assert packaged, out.stderr[:200]
+    assert mind.version()["engine"] == packaged, (mind.version()["engine"], packaged)
+
+
+def test_the_capabilities_schema_moved_when_the_formats_did(mind):
+    """**The schema version is not decorative.**
+
+    It sat at "1.0" through +900 capabilities, the `method` field, `primary`/`params`
+    and memoisation -- a field that never changes is a field clients learn to ignore.
+    It is 1.1 now because two contracts moved visibly: planner steps gained `method`,
+    and render edges declare their second input (`consumes` can carry two kinds).
+    If either of those regresses, this catches it; if a THIRD contract moves, bump
+    the schema and this line together."""
+    assert mind.version()["capabilities_schema"] == "1.1"
+    steps = mind.suggest_pipeline("mesh", "image") or []
+    assert steps and all("method" in s for s in steps), steps
+    r = mind.describe_skill("render_mesh")
+    assert "camera" in r["consumes"], r["consumes"]

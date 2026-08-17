@@ -1431,6 +1431,17 @@ class _UnifiedPart07:
         picture is wrong, but shipped output does not move without an explicit decision. mind.place() writes
         transforms that expect affine=True. See holographic_scene_render.render_scene_document."""
         from holographic.rendering.holographic_scene_render import render_scene_document
+        # COERCE THE CAMERA, like render_mesh already does. `fit_camera` and
+        # every JSON client hand back a dict, and this renderer raised
+        # "'dict' object has no attribute 'ray_dirs'" -- so the output of one
+        # faculty could not feed the input of another without a manual
+        # camera(...) call the caller had to know about.
+        # as_camera is the SHARED coercion render_mesh uses; there is no second
+        # implementation here, only a missing call.
+        from holographic.io_and_interop.holographic_coerce import (
+            as_camera, as_scene)
+        camera = as_camera(camera)
+        scene = as_scene(scene)          # accepts scene_from_image's report
         return render_scene_document(scene, camera, width=width, height=height, quality=quality,
                                      max_bounce=max_bounce, seed=seed, sky=sky,
                                      default_material=default_material, return_stats=return_stats, sss_dir=sss_dir,
@@ -1458,6 +1469,10 @@ class _UnifiedPart07:
         shadows, than the final. See holographic_scene_render.render_preview for the full measurements and
         for why bake_sdf is NOT used here (measured 0.5-0.6x on scenes like this)."""
         from holographic.rendering.holographic_scene_render import render_preview
+        from holographic.io_and_interop.holographic_coerce import (
+            as_camera, as_scene)
+        camera = as_camera(camera)          # same coercion as render_mesh
+        scene = as_scene(scene)
         return render_preview(scene, camera, width=width, height=height, scale=scale,
                               max_bounce=max_bounce, quality=quality, seed=seed, sky=sky,
                               lights=lights, view=view, **kw)

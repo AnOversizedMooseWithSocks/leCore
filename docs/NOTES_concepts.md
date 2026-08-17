@@ -69893,3 +69893,619 @@ had four different owners.
 VERIFIED AFTER: all four tests pass, the docs drift gate is clean, skill_lint
 and usage_audit read 0, and a fresh random sample of 26 test files gives 229
 passed / 0 failed under PYTHONHASHSEED=random.
+
+## THE BACKLOG WAS NOT DONE. Three items closed, the rest verified OPEN.
+
+Moose was told the backlog had been worked; he asked me to confirm. CHECKED
+EACH ITEM AGAINST THE TREE RATHER THAN TRUST EITHER ACCOUNT, and the answer is
+that almost none of it was done. The measurements:
+    P0-1 pipelinemap in the wheel   OPEN -- still at the repo root
+    P0-2 io-kind tagging            OPEN -- io_kinds is still the same 14, no
+                                    scene, no camera; register_capability
+                                    still takes no consumes/produces
+    P1-1 mesh in a scene document   OPEN
+    P1-2 one "scene" type           OPEN
+    P1-3 method on planner steps    OPEN -- steps were {consumes,name,produces}
+    P1-4 doc entry outranks         OPEN -- first mesh->image step was
+                                    "JSON-drivable objects (mesh/camera
+                                    coercion)"
+    P2-1 object handles over HTTP   ALREADY DONE, under another name -- we
+                                    built unicron_ref/ObjectRefs this session
+                                    and the service passes a registry into
+                                    _jsonable. The backlog greps for
+                                    __handle__ and finds 0; the KEY IS NAMED
+                                    "ref". Same capability, different spelling.
+    P2-2 camera dicts               OPEN
+    P3-1 hashseed-free determinism  OPEN (39 files)
+    P3-2 version/schema hygiene     OPEN
+
+CLOSED THIS PASS, with the backlog's own acceptance tests:
+
+P0-1. pipelinemap.py MOVED INTO holographic/caching_and_storage/. It had
+shipped broken across SEVEN releases (0.2.3 -> 0.2.14) because every release
+check ran from the repo root, where cwd shadowing makes it work.
+AND THE BUG CLASS IS NOW CLOSED, not just the file:
+tests/test_pipeline_edges.py::test_no_top_level_module_is_imported_by_the_package
+walks every packaged module's AST and fails on any import of a root-level
+file, reading the ALLOWED list from setup.py's own py_modules rather than
+hardcoding it. A manifest entry fixes one file; this fixes the category.
+
+P1-3. Planner steps now carry `method`. A client got {consumes,name,produces}
+and had to re-derive the name->method mapping before it could EXECUTE
+anything -- so the planner proposed routes nobody could run. Accept test as
+written: all(callable(getattr(m, s["method"]))) -> True.
+
+P1-4. When two edges share a method, the one NAMED for it now wins.
+"JSON-drivable objects (mesh/camera coercion)" is a DOC ENTRY whose method IS
+render_mesh, and it outranked render_mesh because the BFS tie-breaks
+alphabetically and "J" precedes "r". THE ROUTE WAS NEVER WRONG -- same method,
+same result -- IT WAS UNREADABLE, and a plan a person cannot recognise is a
+plan they will not trust. First mesh->image step is now `render_mesh`.
+
+AND A CONSEQUENCE WORTH THE LINE: moving the generator broke regen_docs, which
+runs generators BY PATH -- which puts the generator's own directory on
+sys.path instead of the repo root, so `import holographic` failed. THE EXACT
+MIRROR OF THE BUG I HAD JUST FIXED, one layer up. Packaged generators now run
+as `-m`.
+
+POSTSCRIPT: moving pipelinemap into the package made `generate` a THIRD
+colliding public name (with diffuse and hopfield) -- the name-collision audit
+only scans packaged modules, so a root-level file was invisible to it.
+Bodies read, as the budget requires: pipelinemap.generate WRITES
+docs/PIPELINE_MAP.md; the other two produce SIGNALS. Different-domain
+homonyms of the plainest kind. Recorded with the reason rather than budgeted
+away.
+A FILE THAT MOVES INTO THE PACKAGE BECOMES VISIBLE TO EVERY AUDIT THAT ONLY
+SCANNED THE PACKAGE -- which is an argument FOR the move, not against it: those
+audits had never been able to see it.
+
+## THE SHARD TIMEOUT: the bins were balanced by the WRONG UNIT
+
+Shard 3 of 4 cancelled at 19m52s, 93% through, while shards 0-2 passed. Not one
+slow test -- the shard's cost was BROAD, and the cause is in the sharder.
+
+IT WEIGHTED BY TEST COUNT. A file with three 15-second tests weighed 3; a file
+with thirty fast ones weighed 30. So shard 3 drew:
+    test_holographic_shader   17.38s + 15.00s in TWO tests
+    test_holographic_market   15.00 + 15.00 + 13.36
+    test_holographic_scene    15.00 in ONE test
+SIX FILES COSTING FOUR AND A HALF MINUTES, weighing almost nothing in a scheme
+that counts functions. The bins were perfectly balanced BY THE WRONG UNIT --
+and the sharder's own selfcheck reported "load spread 0% of mean" while doing
+it, which is what a proxy metric buys you.
+
+FIXED BY MEASURING, which is this project's standing answer. shard_tests.py now
+reads tools/test_durations.json -- MEASURED SECONDS PER FILE -- and falls back
+to the count proxy for files nobody has timed. `--measure` runs the suite with
+slow tests INCLUDED (-m "") and writes the file, because packing by a
+measurement that skipped the expensive half would reproduce the bug exactly.
+
+ONE DETAIL THAT MATTERED: the two branches had to be in the SAME UNIT.
+Measured files return centiseconds (thousands); an unmeasured file returning 30
+would sink to the bottom of every sort and every unmeasured file would land in
+one bin -- the same failure, inverted. The proxy now returns
+25 * (tests + 20*slow) centiseconds, 0.25 s per ordinary test being the
+observed median.
+
+RESULT: the three worst files now sit in three different shards, and the
+sharder is still exactly deterministic -- identical file list under
+PYTHONHASHSEED=0 and =random, exact cover, disjoint, 0% spread. Seeded with the
+ten files measured this session; the rest keep the proxy until someone runs
+--measure.
+
+## P0-2 CLOSED: the tagging door had no keyhole
+
+The backlog's biggest item, and the diagnosis is not what it looked like.
+
+(b) FIRST, BECAUSE IT EXPLAINS (c). The catalog's register_capability has taken
+`consumes`/`produces`/`method` ALL ALONG. THE MIND'S WRAPPER DROPPED THEM --
+six parameters silently discarded by a pass-through. So anything registered
+through the mind arrived UNTAGGED and invisible to suggest_pipeline. Coverage
+was not 3% because tagging is hard; it was 3% BECAUSE THE DOOR EVERYONE
+REGISTERS THROUGH HAD NO KEYHOLE FOR IT. Wrapper now forwards all of them.
+
+(a) SCENE AND CAMERA KINDS ADDED, and the scene layer tagged:
+    mesh -> scene    scene_graph
+    scene -> image   render_preview
+    mesh -> camera   fit_camera
+AND THE GAP TEST IMMEDIATELY CAUGHT A HALF-DONE JOB: `camera` was a DEAD END --
+fit_camera produced one and nothing consumed one. The cause was that
+render_mesh was tagged (("mesh",), ("image",)) while its real signature is
+render_mesh(mesh, camera, ...). DECLARING ONLY THE PRIMARY INPUT HID A REQUIRED
+ONE, which is how a planner proposes a route that cannot run. All four
+renderers now declare ("geometry", "camera") -> ("image",).
+A KIND NOTHING CONSUMES IS A KIND THAT WAS TAGGED HALFWAY.
+
+(c) leSTUDIO'S IMAGE DOORS, twelve of them, each read off the faculty's own
+first docstring line rather than guessed -- and two were tagged AGAINST the
+obvious: segment_image produces a `selection` not an image, image_corners
+produces `points`, image_lines produces `curve`. The tempting tag is the one
+that makes the number go up.
+    image->image edges   4 -> 13
+    total edges        125 -> 147
+
+TWO CONSEQUENCES OF MOVING THE GENERATOR (P0-1), both instructive:
+  regen_docs runs generators BY PATH, which puts the generator's directory on
+    sys.path instead of the repo root -- `import holographic` failed. Packaged
+    generators now run as `-m`.
+  AND REPO = dirname(__file__) STILL POINTED AT THE OLD DEPTH, so every output
+    landed in holographic/caching_and_storage/ while the stale copies at the
+    root kept failing the test. THE FILE REGENERATED SUCCESSFULLY AND THE TEST
+    STILL FAILED, which reads like a generator bug and was a PATH bug.
+    A PATH RELATIVE TO __file__ IS A PATH THAT MOVES WITH THE FILE.
+
+REMAINING OPEN: P1-1 (mesh into a scene document), P1-2 (one scene type), P2-2
+(camera dicts in the document renderers), P3-1 (39 files needing
+PYTHONHASHSEED), P3-2 (version/schema hygiene). P2-1 was already done under
+another name (unicron_ref).
+
+## P1-1, P1-2, P2-2 CLOSED: three scene bugs that were one bug in three layers
+
+P2-2 was one missing call. `as_camera` is a SHARED coercion render_mesh already
+used; render_scene_document and render_preview simply never called it, so
+fit_camera's output could not feed a renderer without a manual camera(...) the
+caller had to know about. Two lines, no new code.
+
+P1-1 WAS ACCEPT-THEN-CRASH, and the fix is a REFUSAL rather than a feature.
+scene_add took a Mesh happily and the renderer died several calls later with
+"'Mesh' object has no attribute 'eval'". The backlog offered three fixes and
+the other two -- an SDF(kind="grid") wrapper, or mesh_to_sdf -- ARE REAL
+FEATURES THAT WOULD SILENTLY CHANGE WHAT WAS RENDERED: a voxelised
+approximation where the caller passed exact geometry. scene_add now refuses at
+the door and NAMES THE MESH PATH (scene_graph to place, render_mesh to render).
+A conversion that loses information should be a choice the caller makes, not
+one a setter makes for them.
+
+P1-2 TOOK THREE LAYERS AND EACH WAS HIDDEN BY THE ONE ABOVE:
+    1. scene_from_image returns a REPORT {objects, regions, roles, scene};
+       renderers wanted the scene. Fixed by coercion at the consumer
+       (as_scene), because the report is not wrong to be a report -- regions
+       and roles are the interesting parts -- and changing its return would
+       break every reader.
+    2. Then: SemanticScene.objects is a LIST, Scene.objects is a DICT. The
+       renderer called .values(). Two classes both called a scene.
+    3. Then: SemanticScene's objects are DICTS with {label, shape, position,
+       colour} AND NO GEOMETRY AT ALL. IT DESCRIBES A SCENE; IT DOES NOT
+       CONTAIN ONE.
+So the backlog's acceptance test -- render_scene_document(scene_from_image(img),
+camera) renders -- CANNOT PASS WITHOUT A SEMANTIC->RENDERABLE CONVERTER THAT
+DOES NOT EXIST. describe_to_scene builds a canonical Scene from WORDS; nothing
+builds one from a semantic report. as_scene now refuses with that gap named,
+instead of failing deep in the tracer. THE HONEST CLOSE IS A CLEAR REFUSAL PLUS
+A NAMED MISSING FEATURE, not a green test.
+Verified the canonical path still works end to end: describe_to_scene('a red
+cube') -> render_scene_document(dict camera) -> (12, 16, 3).
+
+AND A GUARD BUG WORTH KEEPING: my first version checked only the FIRST object
+for geometry. A scene can be MIXED -- first object fine, a later one a bare
+dict -- so it passed the case it was written for and let through the case that
+motivated it. SAMPLING ONE ELEMENT IS NOT A CHECK. It now walks all of them,
+from one helper used by both entry points.
+
+POSTSCRIPT: two pinned tests moved, and BOTH had asked to be.
+  test_primary_and_produces_are_served pinned render_mesh's consumes as
+  ["mesh"]. It is now ["mesh", "camera"] -- the fix, not a break -- and
+  `primary` is still "mesh", which is exactly why that field exists: a
+  two-input step needs to say which input it is ABOUT.
+  test_provisional_kinds_are_honest_about_their_gap pinned source_only as
+  {curve, skeleton} and its own docstring says "if someone later tags a
+  producer, this changes". image_lines now produces `curve` (Hough lines ARE
+  curves), so curve has a producer and the set is {skeleton}.
+A TEST THAT TELLS YOU WHEN TO UPDATE IT IS DOING ITS JOB; the failure mode to
+avoid is updating one that does not.
+
+## P3-1 AND P3-2 CLOSED: the backlog is done
+
+P3-1, DETERMINISM WITHOUT PYTHONHASHSEED. The audit counted 39 files mentioning
+the variable and inferred a dependence. MEASURED INSTEAD: 34 of the mentions are
+comments and docstrings, no bare hash() survives in live code, and the engine
+core is byte-identical across salts --
+    io_kinds / suggest_pipeline / find_capability / pipeline_map    d7978a4a...
+    hadamard atoms / reserved keys / actr weights / declare_explain bfd3026b...
+identical at PYTHONHASHSEED 0, random, and 12345.
+AND THE WORK WAS ALREADY MOSTLY DONE: tests/test_determinism_without_hashseed.py
+exists, runs its checks in SUBPROCESSES (an in-process assertion cannot see a
+salt it inherited -- which is why the one real bug, hash() seeding
+holographic_sequence's atoms, lived so long), and pins the fix.
+WHAT WAS MISSING WAS COVERAGE OF THE PLANNER, whose edge set is built by
+iterating a capability dict and whose BFS tie-breaks by name -- exactly the
+shape that goes salt-dependent when someone iterates a set. And that surface
+GREW today, 125 edges to 147. Added
+test_the_planner_surface_is_salt_independent over routes, first steps, edge
+count, the source-only gap and io_kinds, at salts 0/7/424242.
+A COUNT OF MENTIONS IS NOT A MEASUREMENT OF DEPENDENCE.
+
+P3-2, VERSION AND SCHEMA. The version half was already true: version()['engine']
+and tools/bump_version.py both read VERSION and both say 0.9.0. The backlog's
+"PyPI's latest is 0.2.14" is a stale observation of the published wheel, not a
+disagreement inside the repo. Pinned anyway --
+test_the_reported_engine_version_matches_the_packaged_one -- because "they agree
+today" and "they cannot drift" are different claims.
+THE SCHEMA HALF WAS REAL. capabilities_schema sat at "1.0" through +900
+capabilities, the `method` field, primary/params and memoisation. A FIELD THAT
+NEVER CHANGES IS A FIELD CLIENTS LEARN TO IGNORE. It is 1.1 now, because two
+contracts moved visibly THIS SESSION: planner steps gained `method`, and render
+edges declare their second input so `consumes` can carry two kinds. Additive
+both times -- an old client that ignores `method` and reads consumes[0] still
+works -- which is why 1.1 and not 2.0.
+
+THE BACKLOG IS NOW CLOSED: P0-1, P0-2, P1-1, P1-2, P1-3, P1-4, P2-2, P3-1, P3-2
+done; P2-1 was already done under another name (unicron_ref). The one thing that
+did NOT close as a green test is P1-2's literal acceptance line, because it
+needs a semantic->renderable converter that does not exist -- recorded as a
+clear refusal plus a named missing feature rather than a passing assertion.
+
+## THE LAST NAMED GAP CLOSED: the converter was built, the DOOR was missing
+
+P1-2 closed as a refusal plus a named missing feature -- "there is no
+semantic->renderable converter". Went looking for what it would take to build
+one, and RULE 0 FOUND IT ALREADY BUILT.
+
+`realize_scene` (holographic_semantic) turns parsed objects into renderables:
+dicts with an `sdf` that has .eval, a colour and a material. describe_to_scene
+has called it all along -- which is exactly why words->Scene worked while
+image->Scene did not. THE CONVERTER WAS NEVER MISSING; THE DOOR FROM THE IMAGE
+SIDE TO IT WAS. semantic_to_scene adds NO GEOMETRY LOGIC of its own.
+
+MEASURED, the backlog's literal acceptance line, which had been recorded as
+unachievable:
+    scene_from_image(img) -> semantic_to_scene -> render_scene_document
+    -> (18, 24, 3) with 1,296 lit pixels
+and it accepts all three shapes -- the REPORT, the SemanticScene, or a bare
+object list.
+
+TWO REAL WRINKLES, both of the accept-then-crash family this file already
+guards:
+  MATERIAL NAMES ARE SEMANTIC, NOT MATLIB KEYS. realize_scene returns
+    mat_name="matte" -- the word a person says -- while the library holds
+    matte_gray / matte_white, and its `material` field is a loose dict like
+    {"reflect": 0.0} with no .base_color for the shader. Passing either through
+    died in the tracer. Now resolved against the library with a fallback:
+    an unresolved name leaves the material UNSET so the renderer's own default
+    applies. A WRONG MATERIAL RENDERS; A MISSING ATTRIBUTE DOES NOT.
+  AND MY FIRST UNWRAP FELL THROUGH. `getattr(report, "objects", report)`
+    returned the REPORT ITSELF -- a dict -- which realize_scene then indexed as
+    a list, "'SemanticScene' object is not subscriptable". A getattr default
+    that returns the input is a silent passthrough for exactly the type you
+    meant to convert.
+
+SO THE BACKLOG IS FULLY CLOSED, including the item I had recorded as
+structurally blocked. THE LESSON IS THE ONE THIS SESSION KEEPS PAYING FOR:
+"THIS NEEDS A FEATURE THAT DOES NOT EXIST" IS A CLAIM THAT DESERVES A find_capability
+BEFORE IT IS WRITTEN DOWN. I wrote it down twice today and it was wrong once.
+
+## THE APP-TEAM BACKLOG: six items, all closed
+
+Verified each against the tree before building -- all six reproduced exactly as
+filed, which is the most useful thing a bug report can do.
+
+N-2 (VERSION in the archive). DELIVERY_NOTES.md says VERSION must never travel
+("the version goes BACKWARDS... the upload is rejected") and the zip shipped it
+anyway, holding 0.9.0 while the release was called 0.2.10. Added to the zip
+builder's ALWAYS-excluded list.
+AND THE SAME DRIFT HAD A SECOND HALF NOBODY FILED: capabilities.json carried
+its own hardcoded schema_version "1.0" while the engine had moved to 1.1 -- two
+independent literals for one contract, announcing different numbers to the
+audience that reads the JSON WITHOUT importing the engine. capdoc now reads it
+from the engine.
+
+L-1 (no shared blend kernel) -- the one that produces WRONG OUTPUT over time.
+Ten modes plus the alpha-over loop now live in holographic_composite. softlight
+is the W3C form, not the cheap approximation: they differ visibly in the dark
+end, and A SHARED KERNEL THAT IS ALMOST THE SAME IS WORSE THAN NONE, because
+the discrepancy is unattributable. Two contracts pinned because both are
+commonly got wrong -- OPACITY FADES RATHER THAN DARKENS (scaling colour sends a
+half-opacity white layer over white to grey), and a multiply layer over
+transparency is ITSELF rather than black (which compositing-before-blending
+gets wrong).
+
+L-2 (no shared live session). Built transport-agnostic and that was the hard
+part to hold: no socket, no SSE, no thread, no Flask. THE MOMENT IT IMPORTS A
+WEB FRAMEWORK IT IS leSTUDIO'S IMPLEMENTATION WITH A DIFFERENT FILENAME and the
+second app is locked out again. Presence is a HEARTBEAT WITH A TIMEOUT rather
+than "an open stream", because an open stream is a property of one transport --
+a polling client is as present as a streaming one, and a wedged process with an
+open socket is not. compact() bounds the log and oldest_rev tells a client too
+far behind to reload rather than silently missing edits.
+
+L-3 / L-4 (kind registry, canonical image). register_kind/known_kinds/
+describe_sections, plus `lecore.image` as RGBA float 0..1 with colour_space and
+dpi. Without one name, each app PAIR needs an adapter -- N^2 for N apps, which
+is why leStudio writes lestudio.document, a modeller writes polystudio.texture,
+and neither can read the other's picture.
+
+N-1 (inf/nan diagnostics). The scatter path sets dist = inf where nothing was
+gathered -- "a coverage proxy, not a metric distance" by its own comment -- and
+the report averaged over it. AN AVERAGE OVER A SENTINEL IS NOT A MEASUREMENT.
+Now measured over the covered points, with projection_measured_fraction
+reported alongside so a caller can gate on coverage explicitly instead of
+inferring it from a poisoned mean. Verified finite, no RuntimeWarning.
+
+VERIFIED END TO END, the scenario the backlog is actually about: a painter
+composites two layers, publishes lecore.image, a modeller reads it back with no
+knowledge of who wrote it, both join one session, and each sees only the
+other's edits -- NEITHER IMPORTING THE OTHER.
+
+AND ONE REVIEWED COLLISION: composite.blend (image modes on colour arrays) vs
+opponent.blend (hypervectors through the opponent structure). Different
+domains, different arities, nothing shared -- recorded with the reason rather
+than budgeted away.
+
+## MERGE 2: a PARTIAL archive, and the first thing to check is whether it is one
+
+Second incoming branch. The survey read "252 files ONLY MINE", which for a repo
+update looks like a mass deletion and is not: THEIR ZIP IS A PARTIAL ARCHIVE --
+six top-level directories against my sixteen, no .github, no README, no
+setup.py. Of the 252, only 7 sit inside directories they DO ship, and 3 of those
+are files I created today.
+TREATING THAT AS DELETION WOULD HAVE THROWN AWAY THE ENTIRE HARNESS. The check
+that settles it costs one command: compare the top-level directory sets before
+comparing files.
+
+THEY FORKED BEFORE MOST OF TODAY: exit_calibration, the camera io kind and
+_shortest_rung are on both sides; the GPU xp conversion, the bf16 boot guard,
+the assess dual probe, atomic install, semantic_to_scene, and all four L-items
+are only mine. So this was an ADDITIVE merge in the other direction from last
+time.
+
+WHAT CAME IN, 49 files: LEAN 4 verification (holographic_lean, p18_lean, two
+.lean sources, install_lean.py), FEM soft bodies, morphogenesis, a face and
+creature pipeline (headspec, templatewrap, furshell, groommap, blendbasis,
+skinbound, offsetreach, sfsprior, tetmesh), a tier contract, and 30 tests.
+
+THE ONE STRUCTURAL EDIT: holographic_unified.py is the composition point, and
+each side had wired only its OWN pages -- theirs imports _UnifiedPart18, mine
+does not exist there. Taking either file whole would have dropped the other's
+faculties, so it was merged by hand: p18 imported and added to the class bases.
+Verified both sides live afterwards (logic_prove and lean_export from theirs;
+composite_layers, live_session, container_kinds, semantic_to_scene and
+unicron_branch from mine).
+
+AND THE LESSON FROM MERGE 1 PAID OFF. Last time I proved "every line theirs has
+that I lack is the pre-edit form of something I changed" and that was TRUE AND
+INSUFFICIENT -- it missed a fix they had made to a line I owned. This time I
+checked each candidate file for MY markers before overwriting, found two hits,
+and BOTH WERE FALSE POSITIVES: "np.memmap" inside a catalog description and the
+word "padded" in a docstring. Checking and then reading the hits is the whole
+procedure; the check alone would have blocked two correct takeovers.
+gdnruntime was 85 of 87 added lines being my np.->xp. conversion in reverse, so
+mine stands.
+
+TWO REVIEWED COLLISIONS, both from their new modules: lean.prove (Horn forward
+chaining) vs querytime.prove (a Merkle commitment), and fem.simulate (a
+finite-element soft body) vs smokepresets.simulate (the smoke solver). Logic vs
+cryptography, and two different solvers -- recorded with reasons rather than
+budgeted away.
+
+VERIFIED: 735 modules, four of their selftests and three of mine green, all four
+audits at 0 including the duplicate-faculty check that would catch a botched
+composition, their 30 new tests at 72 passed, and a 26-file random sample at 209
+passed under PYTHONHASHSEED=random.
+
+## MERGE 2 VERIFICATION: the file-level check passed and MISSED TWO REAL THINGS
+
+Moose asked me to confirm the merge was clean before trusting it. It was not,
+and the way it failed is the useful part.
+
+FILE-LEVEL SAID CLEAN: zero files of theirs absent, and every differing line
+they had was traceable to something I had replaced. That check has now been run
+twice across two merges and it is NOT SUFFICIENT.
+
+RUNNING THEIR TESTS FOUND WHAT IT MISSED:
+  tissue_pbr        9 failures -- holographic_creaturematerial has no
+                    tissue_pbr_table. I had read that file as "absent" while
+                    checking the WRONG DIRECTORY (mesh_and_geometry; it lives in
+                    materials_and_texture), so a 74-line pure addition was
+                    silently skipped.
+  mesh_pbr_specular 3 failures -- render_mesh gained a `pbr` parameter on their
+                    branch, in a file I had edited for the camera coercion, so
+                    MY version won the takeover and their two-line addition went
+                    with it. Ported by hand rather than overwriting, since the
+                    file holds my work too. The renderer underneath needed the
+                    same parameter and was pure addition, so that one was taken
+                    whole.
+
+THE CHECK THAT WOULD HAVE CAUGHT BOTH, and now does: a SYMBOL-LEVEL comparison
+-- for every shared .py that differs, which `def`/`class` names exist in theirs
+and appear NOWHERE in mine. It reports exactly two entries now:
+holographic_shufflebrain._unbind_many, which is the deliberate
+one-home-and-an-import from the last merge, and nothing else.
+COMPARING LINES ANSWERS "DID I DROP TEXT"; COMPARING SYMBOLS ANSWERS "DID I DROP
+A CAPABILITY", and only the second question matters. A line-level diff cannot
+see a function that was never in my file to begin with, which is precisely the
+shape of both misses.
+
+CI STATE AFTER: docs drift gate clean, skill_lint / catalog_gaps /
+reachability_audit (including the duplicate-faculty HARD ERROR) / usage_audit /
+semantic lint all 0, their 30 new tests at 71 passed, my guards
+(duplication_audit, determinism_without_hashseed, numerics_adoption) passing,
+and a 30-file random sample at 293 passed under PYTHONHASHSEED=random.
+
+THE STANDING RULE: RUN THE OTHER BRANCH'S TESTS BEFORE DECLARING A MERGE CLEAN.
+Their tests encode what their code is FOR; my audits only encode what mine is
+for, and neither set can speak for the other.
+
+## DISCOVERABILITY AUDIT AFTER THE MERGE: five modules had NO reach at all
+
+The three existing audits all read 0 -- but they check CATALOGUED things, and a
+freshly merged module that nothing ever registered is invisible to every one of
+them. So the audit that mattered was a different question: for each new module,
+how many of its public entry points can the MIND actually reach?
+
+    lean 26 public / 1 reachable      fem 5 / 0        skinbound 3 / 0
+    tiercontract 16 / 5              groommap 4 / 0    templatewrap 3 / 0
+    tetmesh 11 / 1                   sfsprior 4 / 0    blendbasis 3 / 0
+FIVE MODULES AT ZERO, holding real user-facing capability: a full neo-Hookean
+FEM solver with an exact gradient, template wrapping with a quality check,
+skinning-pinch bounds, the two ambiguities shape-from-shading cannot resolve on
+its own, and local blendshape correctives.
+
+WIRED SEVEN FACULTIES with catalog entries, 8/8 on the discoverability battery,
+and every one EXERCISED rather than just imported -- because a wired faculty
+that throws is worse than none. pose_is_safe on a real two-bone twist returns
+{ok: False, min_shrink: 0.825, worst_vertex: 1, max_safe_twist: 2.827}, which is
+the faculty doing its job on the first call.
+
+THREE MISTAKES, ALL CAUGHT BY THE AUDITS RATHER THAN BY ME:
+  MY SCAN ASKED THE WRONG QUESTION. It tested hasattr(mind, <module function
+    name>) -- but a faculty is named for what it DOES, not for the function it
+    delegates to. groom_region_map, fem_simulate and fem_rest_quality were
+    ALREADY WIRED under exactly those names, and I re-added all three.
+  THE DUPLICATE-FACULTY CHECK CAUGHT EACH ONE ("first is DEAD CODE"), which is
+    precisely the failure it exists for: a later definition silently shadowing
+    an earlier one, same name, different behaviour, no error anywhere.
+  RESOLVED BY EXTENDING, NOT SHADOWING. groom_region_map's optional surface
+    blur now lives on the ORIGINAL faculty as a default-off parameter; the two
+    fem duplicates were removed outright.
+  AND ONE CHAINING BUG: orient_convex returns (depth, flipped), not an array,
+    so chaining it into debas_relief raised on an inhomogeneous shape. The flag
+    is the interesting half anyway -- "we flipped your surface inside out" is
+    something a caller should be TOLD rather than have silently done -- so the
+    faculty returns {depth, flipped}.
+
+THE RULE: AUDIT BY WHAT A USER WOULD ASK FOR, NOT BY WHAT A MODULE EXPORTS.
+Both my scan and the three standing audits missed the same five modules for the
+same reason -- they each asked a question the gap could pass.
+
+## THE SIX LEVERS, OUROBOROS AND LEAN: making the reusable things findable
+
+Moose: the six levers should be easy to find, an LLM should be able to use
+leCore, Ouroboros should be powerful, and Lean should enhance what we have.
+Audited all four first.
+
+THE LEVERS WERE THE MOST GENERALISABLE THING IN THE ENGINE AND THE LEAST
+DISCOVERABLE. They lived as PRACTICE -- named in NOTES, applied correctly by
+whoever had read them, findable by nobody. Asked five ways a stranger would ask
+("what do I do when I hit a wall", "ways to beat a capacity limit", "the six
+levers"), find_capability returned advise_scale, crystal_habit and
+time_of_impact. Now a faculty, with each lever carrying ITS OWN MEASUREMENT from
+this repo (prefix cache 61x; registers from a seed; both branch arms at 128/128
+decisive; 4,096 facts at 100% recall) AND ITS OWN COST -- because a lever
+recommended without a case where it worked is advice, and one without a cost is
+a sales pitch.
+RANKING NEVER HIDES A LEVER, and that is deliberate: the doctrine is to walk
+them in COST ORDER and stop at the first that applies, so a ranker that returned
+only the best match would defeat the thing it was ranking. THE CHEAPEST LEVER
+THAT WORKS BEATS THE BEST-MATCHING ONE.
+This is the faculty an LLM driving leCore most needs, because it has exactly the
+problem the levers solve and no way to learn them: it hits a limit, concludes
+"impossible", and stops.
+
+OUROBOROS HAD NO NAME ON THE MIND. Every piece was wired -- delta_write,
+delta_read, reserve, the capacity law -- and searching "ouroboros" returned
+NOTHING, so the one word a caller would type was the one thing absent. Wired as
+the loop with its three verbs and their different prices, plus the kept negative
+that travels with it (rehearsing a state's own reads back into it DEGRADES it,
+0.767 -> 0.730).
+
+AND WRITING IT FOUND A REAL BUG IN MY OWN FIRST VERSION. I implemented erase as
+"write the negative" and MEASURED a residual norm of 1.0. delta_write is a GATED
+REPLACE -- S <- a S (I - b k k^T) + b v k^T -- not an accumulation: the
+(I - k k^T) term already removes whatever the key held, so writing -v then
+stores -v in the slot it just cleared. THAT READS BACK AS THE NEGATION OF THE
+FACT RATHER THAN ITS ABSENCE, which is the worst kind of wrong -- a confident
+answer pointing the opposite way. Erase is a write of ZERO and takes no value at
+all. Measured after the fix: 4 slots written all read 1.000; erase(1) leaves
+[1.000, -0.000, 1.000, 1.000].
+
+LEAN: I BUILT A DUPLICATE AND THE AUDIT DID NOT CATCH IT, because it called a
+function that did not exist and my try/except swallowed the AttributeError --
+the silent-fallback pattern I have fixed three times this session, written by me
+this time. lean_export ALREADY did the job, takes JSON WIRE FORMAT (which is
+exactly right for an LLM: ["pred", [args]]), and emits real Lean 4 with axioms
+and a term-mode theorem. Removed mine, moved the aliases onto the real faculty.
+A TRY/EXCEPT AROUND A CALL YOU HAVE NOT RUN ONCE IS A PLACE FOR A TYPO TO LIVE.
+
+## OPTIONAL-BACKEND AUDIT: Lean and GPU are both optional, and now both installable
+
+Moose asked to confirm Lean 4 and the GPU stack are OPTIONAL, and that each can
+be installed by one command when the system supports it.
+
+OPTIONAL: CONFIRMED, AND NOT BY GREP. A module-scope scan reads 0 optional
+imports across the whole tree -- but that only proves nobody imports them at the
+top, and a deferred import that every real call path hits is a dependency
+wearing a disguise. So the test HARD-BLOCKS cupy, numba, torch, scipy, sklearn,
+pyfftw, matplotlib, faiss and sympy at the import hook, in a subprocess, BEFORE
+`import lecore`, and then uses the engine: the mind boots, find_capability
+answers, the levers list, Ouroboros round-trips at cosine 1.0000, and
+lean_export emits 229 characters of LEAN 4 SOURCE WITH NO LEAN INSTALLED --
+which is the whole reason the emitter and the verifier are separable.
+
+INSTALLABLE: HALF TRUE, NOW WHOLE. Lean had tools/install_lean.py with --status
+and --remove, checksum-pinned, into a local prefix. THE GPU SIDE HAD A REPORT
+THAT NAMED THE PIP COMMAND AND NO WAY TO RUN IT -- gpu_report() would say "cupy
+is not installed (pip install cupy-cuda12x, NVIDIA only)" and leave the user to
+work out which wheel their driver takes, which is the research task an error
+message should not hand back.
+tools/install_gpu.py is the sibling: reads nvidia-smi for the driver's CUDA
+major, picks cuda11x vs cuda12x, offers wgpu for the vendor-neutral path, and
+REFUSES TO OFFER A CUDA WHEEL WHEN NO DRIVER IS VISIBLE -- because that install
+gives you a package that imports and finds no device, which is HARDER TO
+DIAGNOSE THAN AN ABSENCE. Report-only by default; --install and --remove are
+both explicit.
+
+AND ONE FACULTY ANSWERS THE QUESTION AN AGENT ACTUALLY ASKS.
+mind.optional_backends() returns {lean, gpu, core_requires} with the install
+command and what each one BUYS: Lean buys the lean_verified provenance tier (an
+external kernel's verdict), the GPU buys speed on array-parallel kernels.
+NEITHER BUYS A CAPABILITY, and core_requires is ["numpy", "python stdlib"].
+
+PINNED BY tests/test_optional_backends.py, five tests: no module-scope optional
+import; the engine RUNS with all of them blocked; each backend has an installer
+whose DEFAULT ACTION INSTALLS NOTHING (an installer that mutates the environment
+when run bare is a trap in a script people run to find out what it would do);
+each offers --remove, because an installer with no way back is not optional; and
+the mind can report all of it.
+
+POSTSCRIPT: the wide sample surfaced test_every_mesh_reducing_faculty_is_silhouette_guarded
+failing on tet_lod_chain and tet_lod_storage_cost -- both from the MERGED tetmesh
+work, not from this change. Read both bodies rather than pattern-matching the
+names: tet_lod_chain takes a POINT SET and re-tetrahedralises each level, so
+there is no input mesh whose silhouette could be eaten, and it already carries a
+STRICTER contract than the guard -- F3's certificate refuses a level that
+fragments or orphans a limb. tet_lod_storage_cost only MEASURES a chain and
+reduces nothing. Exempted with those reasons.
+THE TEST MATCHES ON "lod" IN THE NAME, which is the right net: it is supposed to
+over-catch and make a human justify each exemption. A net that only caught true
+positives would need to already know the answer.
+
+## PYPI AUDIT: built the wheel, installed it clean, and asked what SURVIVED
+
+Moose: we added functionality, make sure it is not left out of the next
+package. The only way to answer that is to build the artifact and interrogate
+it -- setup.py states an INTENTION, and pipelinemap proved for seven releases
+that an intention is not a wheel.
+
+BUILT via build_package.sh, installed into a fresh venv, RUN FROM /tmp so
+nothing resolves against the checkout:
+    version 0.9.0, 735 modules, dictionary + routing index present
+    ALL 21 FACULTIES ADDED THIS SESSION PRESENT AND EXECUTING -- levers (6),
+    ouroboros (cosine 1.0000), composite_layers, live_session, container_kinds,
+    semantic_to_scene, fem_simulate, wrap_to_field, pose_is_safe,
+    make_corrective, lean_export (229 chars of Lean 4), pipeline_map (147
+    edges), suggest_pipeline -> render_mesh
+    sdist clean too: 735 modules, ZERO test files leaked
+
+ONE REAL GAP, AND IT IS THE ONE WHOSE ABSENCE IS MOST IRONIC. capabilities.json
+-- 953 KB, 696 records -- was NOT in the wheel. Its documented purpose is being
+the machine-readable sibling of CAPABILITIES.md "for tools and apps that ingest
+the catalog", readable WITHOUT importing the engine. So the audience it exists
+for was exactly the audience that could not get it: a pip user has no repo to
+read it from and no capdoc.py to regenerate it with. Now bundled inside
+lecore_data/ (the package_data path already proven by the dictionary check) and
+listed EXPLICITLY in setup.py rather than left to include_package_data -- which
+is the MANIFEST-driven rule that silently dropped pipelinemap.
+Verified from the installed wheel: schema 1.1, 696 records, json.load with no
+engine import.
+
+CHECKED AND CORRECTLY ABSENT: no .wgsl or in-package .json files exist to ship
+(WGSL is generated as strings), so those were not gaps.
+
+AND CI NOW CHECKS WHAT IT WAS NOT CHECKING. The smoke test was already good --
+temp dir, version match against VERSION, the vendored dictionary -- but its
+faculty check was `hasattr(lecore, 'UnifiedMind')`. THAT PASSED FOR SEVEN
+RELEASES WHILE pipelinemap WAS MISSING FROM EVERY WHEEL: an import proves the
+package RESOLVES, not that the capabilities survived packaging. Added three
+commands, each verified against the real wheel: capabilities.json parses and is
+non-empty; eighteen load-bearing faculties across the families are callable; and
+two of them RUN, because present is not working.

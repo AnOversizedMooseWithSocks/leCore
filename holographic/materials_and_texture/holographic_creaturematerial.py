@@ -577,3 +577,77 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+# ---------------------------------------------------------------------------
+# PHYSICALLY-BASED TISSUE MATERIALS: organs, bone, fat and skin that are not flat.
+#
+# SOTA CHECK (searched 2026-08-16). Production subsurface scattering is Christensen-Burley
+# (Pixar TM 15-04, 2015) for the empirical profile, with offline renderers having moved to
+# RANDOM-WALK SSS (Chiang et al. 2016; RenderMan, Arnold). Both "require per-channel single
+# scattering albedo and scattering distance parameters", which is exactly the pair recorded
+# below. Skin specifically is LAYERED and the layers differ: "Epidermis: thin, little SSS ...
+# Dermis: thick layer with strong SSS, contains blood vessels (reddish) ... Hypodermis/fat:
+# deepest SSS, makes thick body parts more translucent." Blender's Principled BSDF makes the
+# radius PER-RGB because red light scatters deeper -- that wavelength split is the single
+# most recognisable signature of flesh, and a scalar SSS cannot produce it.
+#
+# GROUNDED IN MEASURED DATA, not invented. Spectral-domain OCT on 30 mice gives scattering
+# coefficients that "can be categorized into three groups: between 1.947 and 2.134 /mm: BONE
+# AND SKIN; between 1.303 and 1.461 /mm: LIVER AND BRAIN; between 0.523 and 0.634 /mm:
+# TESTIS AND SPLEEN", and the conclusion that matters here: "the scattering coefficient is
+# TISSUE SPECIFIC". Scattering distance is the reciprocal of that coefficient, so the
+# ORDERING below (viscera scatter furthest, bone least) is measured rather than art-directed.
+# Absolute values are scaled to model units; the RATIOS carry the measurement.
+#
+# KEPT NEGATIVE: these are single-medium approximations per tissue. Recent work is explicit
+# that "this single-medium approach is not expressive enough to capture both the profile
+# shape and the reflectance" for real skin, which needs a MIXTURE of media. Our layered
+# stack (epidermis over dermis over fat) recovers part of that by construction, but a
+# per-tissue fit against measured reflectance is NOT claimed.
+# ---------------------------------------------------------------------------
+
+# tissue -> (base_colour, roughness, metallic, sss_weight, sss_radius_rgb, scatter_mm_inv)
+# sss_radius is PER-CHANNEL: red scatters deepest in every soft tissue, which is why flesh
+# reads warm at the edges. scatter_mm_inv records the measured coefficient the radius came
+# from, so the provenance travels with the number.
+TISSUE_PBR = {
+    "bone":   ((0.87, 0.85, 0.78), 0.42, 0.0, 0.25, (0.60, 0.52, 0.44), 2.04),
+    "skin":   ((0.62, 0.44, 0.36), 0.48, 0.0, 0.75, (1.00, 0.42, 0.28), 2.03),
+    "fat":    ((0.90, 0.84, 0.62), 0.55, 0.0, 0.85, (1.40, 0.90, 0.60), 1.60),
+    "muscle": ((0.52, 0.14, 0.13), 0.44, 0.0, 0.70, (1.10, 0.35, 0.30), 1.75),
+    "organ":  ((0.46, 0.16, 0.22), 0.36, 0.0, 0.90, (2.20, 0.95, 0.85), 1.38),
+    "liver":  ((0.36, 0.13, 0.13), 0.34, 0.0, 0.90, (2.10, 0.80, 0.70), 1.38),
+    "lung":   ((0.68, 0.42, 0.44), 0.52, 0.0, 0.88, (1.90, 1.00, 0.95), 1.30),
+    "gut":    ((0.72, 0.55, 0.42), 0.46, 0.0, 0.85, (2.00, 1.10, 0.90), 1.35),
+    "spleen": ((0.34, 0.10, 0.14), 0.33, 0.0, 0.92, (2.60, 1.05, 0.95), 0.58),
+    "chitin": ((0.28, 0.20, 0.12), 0.22, 0.0, 0.10, (0.20, 0.16, 0.12), 3.00),
+    "keratin":((0.74, 0.68, 0.58), 0.35, 0.0, 0.30, (0.55, 0.40, 0.32), 2.40),
+}
+
+
+def tissue_pbr(tissue, scale=1.0):
+    """Physically-based material for one TISSUE -- the fix for flat-shaded interiors.
+
+    Returns {base_color, roughness, metallic, sss_weight, sss_radius, scatter_mm_inv,
+    source}. `sss_radius` is PER-CHANNEL because red light scatters deeper than blue in
+    every soft tissue; a scalar radius cannot make flesh read warm at the silhouette, which
+    is the difference between "red plastic" and "meat".
+
+    `scale` multiplies the radii for models in other units -- the SHAPE of the profile is
+    what the measurement fixes, not its size in your scene."""
+    key = str(tissue).lower()
+    if key not in TISSUE_PBR:
+        raise ValueError("unknown tissue %r; have %s" % (tissue, sorted(TISSUE_PBR)))
+    c, rough, metal, w, rad, mm = TISSUE_PBR[key]
+    return {"base_color": c, "roughness": rough, "metallic": metal, "sss_weight": w,
+            "sss_radius": tuple(x * float(scale) for x in rad),
+            "scatter_mm_inv": mm,
+            "source": "scattering coefficient from SDOCT tissue measurement; "
+                      "Christensen-Burley parameterisation"}
+
+
+def tissue_pbr_table(scale=1.0):
+    """Every tissue material at once -- what a renderer or an editor's material picker
+    enumerates."""
+    return {k: tissue_pbr(k, scale=scale) for k in TISSUE_PBR}

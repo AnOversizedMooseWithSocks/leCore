@@ -1,5 +1,11 @@
 {
   "consumed_by": {
+    "camera": [
+      "render_mesh",
+      "render_preview",
+      "render_scene",
+      "render_scene_document"
+    ],
     "curve": [
       "Curve-curve intersection",
       "sweep_tube"
@@ -32,11 +38,23 @@
       "Denoise multi-way data (low-rank tensor prior)",
       "Faraday sky map (telescope as observer)",
       "See what the mantis sees (false colour)",
+      "blend_images",
+      "depth_fog",
+      "depth_from_image",
       "depth_to_mesh",
+      "guided_filter",
       "holographic_archive",
+      "image_corners",
+      "image_edges",
+      "image_lines",
       "image_to_3d",
       "image_to_mesh",
-      "photo_to_3d"
+      "photo_to_3d",
+      "recolor_image",
+      "segment_image",
+      "sharpen_image",
+      "svgf_denoise",
+      "upscale"
     ],
     "mesh": [
       "JSON-drivable objects (mesh/camera coercion)",
@@ -48,6 +66,7 @@
       "Split a loaded mesh into per-material submeshes",
       "Voxelization",
       "field_displace",
+      "fit_camera",
       "mesh_auto_seam",
       "mesh_bevel_vertex",
       "mesh_fill_holes",
@@ -67,6 +86,7 @@
       "pivot_point",
       "ray_mesh_intersect",
       "render_mesh",
+      "scene_graph",
       "select_boundary_loops",
       "select_edge_loop",
       "select_face_ring",
@@ -101,6 +121,11 @@
       "Identify an element by its properties",
       "Name a contact type (bounce/slide/rest/jam)",
       "timeline"
+    ],
+    "scene": [
+      "render_preview",
+      "render_scene_document",
+      "scene_flatten"
     ],
     "sdf": [
       "Dialect emitters (WGSL / C / JS / Zig from the Python kernel)",
@@ -150,14 +175,15 @@
       "phase_fold"
     ],
     "transform": [
+      "camera",
       "snap_transform_delta",
       "transform_selection"
     ]
   },
   "coverage": {
     "percent": 3,
-    "tagged": 110,
-    "total": 3239
+    "tagged": 128,
+    "total": 3356
   },
   "edges": [
     {
@@ -395,6 +421,18 @@
       "produces": "field"
     },
     {
+      "capability": "blend_images",
+      "consumes": "image",
+      "method": "blend_images",
+      "produces": "image"
+    },
+    {
+      "capability": "camera",
+      "consumes": "transform",
+      "method": "camera",
+      "produces": "camera"
+    },
+    {
       "capability": "collide_sdf",
       "consumes": "points",
       "method": "collide_sdf",
@@ -405,6 +443,18 @@
       "consumes": "sdf",
       "method": "collide_sdf",
       "produces": "points"
+    },
+    {
+      "capability": "depth_fog",
+      "consumes": "image",
+      "method": "depth_fog",
+      "produces": "image"
+    },
+    {
+      "capability": "depth_from_image",
+      "consumes": "image",
+      "method": "depth_from_image",
+      "produces": "image"
     },
     {
       "capability": "depth_to_mesh",
@@ -455,6 +505,12 @@
       "produces": "mesh"
     },
     {
+      "capability": "fit_camera",
+      "consumes": "mesh",
+      "method": "fit_camera",
+      "produces": "camera"
+    },
+    {
       "capability": "fit_pose",
       "consumes": "points",
       "method": "fit_pose",
@@ -483,6 +539,12 @@
       "consumes": "field",
       "method": "grid_to_hypervector",
       "produces": "hypervector"
+    },
+    {
+      "capability": "guided_filter",
+      "consumes": "image",
+      "method": "guided_filter",
+      "produces": "image"
     },
     {
       "capability": "harmonic_fill",
@@ -525,6 +587,24 @@
       "consumes": "points",
       "method": "ifs_fit",
       "produces": "scalar"
+    },
+    {
+      "capability": "image_corners",
+      "consumes": "image",
+      "method": "image_corners",
+      "produces": "points"
+    },
+    {
+      "capability": "image_edges",
+      "consumes": "image",
+      "method": "image_edges",
+      "produces": "image"
+    },
+    {
+      "capability": "image_lines",
+      "consumes": "image",
+      "method": "image_lines",
+      "produces": "curve"
     },
     {
       "capability": "image_to_3d",
@@ -713,15 +793,57 @@
       "produces": "scalar"
     },
     {
+      "capability": "recolor_image",
+      "consumes": "image",
+      "method": "recolor_image",
+      "produces": "image"
+    },
+    {
       "capability": "render_mesh",
       "consumes": "mesh",
       "method": "render_mesh",
       "produces": "image"
     },
     {
+      "capability": "render_mesh",
+      "consumes": "camera",
+      "method": "render_mesh",
+      "produces": "image"
+    },
+    {
+      "capability": "render_preview",
+      "consumes": "scene",
+      "method": "render_preview",
+      "produces": "image"
+    },
+    {
+      "capability": "render_preview",
+      "consumes": "camera",
+      "method": "render_preview",
+      "produces": "image"
+    },
+    {
       "capability": "render_scene",
       "consumes": "sdf_scene",
       "method": "render_scene",
+      "produces": "image"
+    },
+    {
+      "capability": "render_scene",
+      "consumes": "camera",
+      "method": "render_scene",
+      "produces": "image"
+    },
+    {
+      "capability": "render_scene_document",
+      "consumes": "scene",
+      "method": "render_scene_document",
+      "produces": "image"
+    },
+    {
+      "capability": "render_scene_document",
+      "consumes": "camera",
+      "method": "render_scene_document",
       "produces": "image"
     },
     {
@@ -737,6 +859,18 @@
       "produces": "scalar"
     },
     {
+      "capability": "scene_flatten",
+      "consumes": "scene",
+      "method": "scene_flatten",
+      "produces": "mesh"
+    },
+    {
+      "capability": "scene_graph",
+      "consumes": "mesh",
+      "method": "scene_graph",
+      "produces": "scene"
+    },
+    {
       "capability": "sdf_scene",
       "consumes": "sdf",
       "method": "sdf_scene",
@@ -747,6 +881,12 @@
       "consumes": "sdf",
       "method": "sdf_to_mesh",
       "produces": "mesh"
+    },
+    {
+      "capability": "segment_image",
+      "consumes": "image",
+      "method": "segment_image",
+      "produces": "selection"
     },
     {
       "capability": "select_boundary_loops",
@@ -795,6 +935,12 @@
       "consumes": "selection",
       "method": "select_symmetric",
       "produces": "selection"
+    },
+    {
+      "capability": "sharpen_image",
+      "consumes": "image",
+      "method": "sharpen_image",
+      "produces": "image"
     },
     {
       "capability": "skin_bind_weights",
@@ -869,6 +1015,12 @@
       "produces": "points"
     },
     {
+      "capability": "svgf_denoise",
+      "consumes": "image",
+      "method": "svgf_denoise",
+      "produces": "image"
+    },
+    {
       "capability": "sweep_tube",
       "consumes": "curve",
       "method": "sweep_tube",
@@ -905,6 +1057,12 @@
       "produces": "mesh"
     },
     {
+      "capability": "upscale",
+      "consumes": "image",
+      "method": "upscale",
+      "produces": "image"
+    },
+    {
       "capability": "voxelize_mesh",
       "consumes": "mesh",
       "method": "voxelize_mesh",
@@ -914,12 +1072,18 @@
   "gaps": {
     "dead_end": [],
     "source_only": [
-      "curve",
       "skeleton"
     ],
     "untouched": []
   },
   "produced_by": {
+    "camera": [
+      "camera",
+      "fit_camera"
+    ],
+    "curve": [
+      "image_lines"
+    ],
     "field": [
       "Denoise multi-way data (low-rank tensor prior)",
       "Hydraulic terrain erosion (droplet simulation)",
@@ -949,9 +1113,20 @@
       "Observer (spectrum to sensor readings)",
       "Rendering (path trace)",
       "See what the mantis sees (false colour)",
+      "blend_images",
+      "depth_fog",
+      "depth_from_image",
+      "guided_filter",
       "holographic_archive",
+      "image_edges",
+      "recolor_image",
       "render_mesh",
-      "render_scene"
+      "render_preview",
+      "render_scene",
+      "render_scene_document",
+      "sharpen_image",
+      "svgf_denoise",
+      "upscale"
     ],
     "mesh": [
       "Make a mesh manifold (split non-manifold vertices)",
@@ -978,6 +1153,7 @@
       "occupancy_to_mesh",
       "photo_to_3d",
       "points_to_mesh",
+      "scene_flatten",
       "sdf_to_mesh",
       "skin_mesh",
       "skin_skeleton",
@@ -989,6 +1165,7 @@
       "N-body gravity simulation",
       "collide_sdf",
       "emit_from_surface",
+      "image_corners",
       "mesh_pack_uv",
       "snap_to_grid",
       "snap_to_vertices",
@@ -1015,6 +1192,9 @@
       "timeline",
       "to_shadertoy"
     ],
+    "scene": [
+      "scene_graph"
+    ],
     "sdf": [
       "domain_bend",
       "domain_fold",
@@ -1036,6 +1216,7 @@
       "mesh_auto_seam",
       "mesh_selection",
       "pick_mesh",
+      "segment_image",
       "select_boundary_loops",
       "select_edge_loop",
       "select_face_ring",

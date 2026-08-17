@@ -470,7 +470,20 @@ class Catalog:
         # nonsense route SURVIVED here). Both now apply the same rule; tests/test_pipeline_edges.py pins that
         # they agree edge-for-edge, so the claim is checked rather than asserted.
         edges = []                                               # (consume_kind, produce_kind, cap)
-        for cap in sorted(self._by_name.values(), key=lambda c: c.name):
+        # WHEN TWO EDGES SHARE A METHOD, PREFER THE ONE NAMED FOR IT. The
+        # first mesh->image step was "JSON-drivable objects (mesh/camera
+        # coercion)" -- a DOC ENTRY ABOUT a feature, whose method is
+        # render_mesh, outranking render_mesh itself because the BFS
+        # tie-breaks alphabetically and "J" precedes "r".
+        # The route was never wrong (same method, same result); it was
+        # UNREADABLE, and a plan a person cannot recognise is a plan they will
+        # not trust. Sorting the method-name match first makes the canonical
+        # entry win its own edge.
+        def _edge_rank(c):
+            meth = getattr(c, "method", None)
+            return (0 if meth and c.name == meth else 1, c.name)
+
+        for cap in sorted(self._by_name.values(), key=_edge_rank):
             if not cap.consumes or not cap.produces:
                 continue
             if getattr(cap, "polymorphic", False):
@@ -499,7 +512,15 @@ class Catalog:
                     # start==goal, the empty path was never accepted because start wasn't pre-marked visited, so the
                     # first self-edge (e.g. mesh->mesh via mesh_smooth) is the shortest valid answer.
                     step = path + [cap]
-                    return [{"name": c.name, "consumes": list(c.consumes), "produces": list(c.produces)}
+                    # `method` ON EVERY STEP. A planner client got
+                    # {consumes, name, produces} and had to re-derive the
+                    # name->method mapping from pipeline_map before it could
+                    # EXECUTE anything -- so the planner proposed routes nobody
+                    # could run. The capability already knows its method;
+                    # withholding it made the output prose rather than a plan.
+                    return [{"name": c.name, "method": getattr(c, "method", None),
+                             "consumes": list(c.consumes),
+                             "produces": list(c.produces)}
                             for c in step]
                 if po not in visited:
                     visited.add(po)
@@ -832,6 +853,69 @@ _METHOD_ALIASES = {
                        "an if statement in the weights",
                        "multi step reasoning inside the model",
                        "what kind of thinking can be installed"),
+    "semantic_to_scene": ("turn a described scene into a renderable one",
+                          "render what scene_from_image produced",
+                          "convert a semantic scene to sdf geometry",
+                          "make a described scene renderable"),
+    "composite_layers": ("blend a stack of layers into one image",
+                         "apply a blend mode like multiply or screen",
+                         "flatten a layered document",
+                         "the same compositing every app should use"),
+    "live_session": ("let two apps edit one document at once",
+                     "track revisions and who is present",
+                     "a change feed for collaborative editing",
+                     "coordinate concurrent editors"),
+    "container_kinds": ("what section kinds does this build understand",
+                        "publish an image any app can read",
+                        "why is this section not editable here",
+                        "the canonical image section kind"),
+    "fem_simulate": ("simulate a soft body with muscles",
+                     "finite element physics on a tet mesh",
+                     "make flesh deform under activation",
+                     "neo-hookean elasticity"),
+    "fem_rest_quality": ("check a tet mesh before simulating it",
+                         "are my tetrahedra degenerate",
+                         "element quality report",
+                         "why is my simulation stiff"),
+    "wrap_to_field": ("wrap a template mesh onto a shape",
+                      "fit a base mesh to a scanned field",
+                      "shrinkwrap without breaking the mesh",
+                      "did the wrap stay usable"),
+    "pose_is_safe": ("will this skinning pose pinch",
+                     "check a rig for candy wrapper collapse",
+                     "how far can this joint twist",
+                     "linear blend skinning volume loss"),
+    "shape_from_shading_prior": ("fix the convex concave flip in a depth map",
+                                 "remove bas relief ambiguity",
+                                 "combine shape from shading with a prior",
+                                 "my depth map is inside out"),
+    "groom_region_map": ("paint a per vertex weight from regions",
+                         "build a groom mask",
+                         "a falloff attribute over a mesh",
+                         "blur a weight map across the surface"),
+    "make_corrective": ("add a corrective blendshape",
+                        "one local blendshape target",
+                        "fix a deformation at a joint",
+                        "is my blendshape actually local"),
+    "levers": ("what do I do when I hit a wall",
+               "ways to beat a capacity limit",
+               "the six levers",
+               "I am blocked what are my options",
+               "how do I get past a memory limit",
+               "is this limit structural"),
+    "ouroboros": ("read and write a running model's memory",
+                  "the closed memory loop",
+                  "edit a state matrix with no forward pass",
+                  "write a fact into a model and delete it again"),
+    "lean_export": ("prove something and export it to lean 4",
+                    "get a machine checkable proof",
+                    "have an external kernel verify this",
+                    "formal certificate for a derivation"),
+    "optional_backends": ("what optional things can I install",
+                          "do I need lean or a gpu",
+                          "how do I turn on gpu acceleration",
+                          "is anything missing from my install",
+                          "what would make this faster"),
     "unicron_bios": ("what kind of model is this",
                      "probe a checkpoint before touching it",
                      "will this fit in my model", "enumerate a model's layout",
@@ -1370,9 +1454,46 @@ _IO_SHAPES = {
     "image_to_mesh":     (("image",), ("mesh",)),
     "depth_to_mesh":     (("image",), ("mesh",)),
     "photo_to_3d":       (("image",), ("mesh",)),
+    # ---- leSTUDIO'S IMAGE DOORS. Coverage sat at ~3% of the catalog, and the
+    # measurable symptom was that image->image returned FOUR ops on an engine
+    # with an entire 2-D editor in it. Each tag below was read off the
+    # faculty's own first docstring line, not guessed:
+    "sharpen_image":     (("image",), ("image",)),   # deblur/sharpen
+    "recolor_image":     (("image",), ("image",)),   # colour grade toward a reference
+    "guided_filter":     (("image",), ("image",)),   # edge-aware refine
+    "svgf_denoise":      (("image",), ("image",)),   # edge-aware denoise
+    "depth_fog":         (("image",), ("image",)),   # Beer-Lambert depth fog
+    "upscale":           (("image",), ("image",)),   # FSR1-style spatial upscale
+    "blend_images":      (("image",), ("image",)),   # crossfade/morph
+    "depth_from_image":  (("image",), ("image",)),   # a depth MAP is an image
+    "image_edges":       (("image",), ("image",)),   # boolean edge map
+    "segment_image":     (("image",), ("selection",)),  # regions, not pixels
+    "image_corners":     (("image",), ("points",)),  # (x,y) points, honestly
+    "image_lines":       (("image",), ("curve",)),   # lines are curves
+    # ---- THE SCENE LAYER. A mesh is one object's geometry; a SCENE is the
+    # ARRANGEMENT -- objects with transforms, materials and parenting. Without
+    # these kinds the planner could not express the route every renderer
+    # actually takes (place, then frame, then render), so mesh->image looked
+    # like a single hop and the framing step was invisible.
+    "scene_graph":       (("mesh",), ("scene",)),
+    "scene_flatten":     (("scene",), ("mesh",)),
+    # fit_camera is the step that makes render edges HONEST: a renderer needs
+    # geometry AND a viewpoint, and an edge that does not mention framing is
+    # hiding a required input.
+    "fit_camera":        (("mesh",), ("camera",)),
+    "camera":            (("transform",), ("camera",)),
     # rendering edges -- geometry -> image
-    "render_mesh":       (("mesh",), ("image",)),
-    "render_scene":      (("sdf_scene",), ("image",)),
+    # A RENDERER TAKES GEOMETRY AND A CAMERA, and saying so is the whole point
+    # of adding the kind. render_mesh's real signature is
+    # render_mesh(mesh, camera, ...) -- declaring only ("mesh",) hid a REQUIRED
+    # input, which is how a planner proposes a route that cannot run.
+    # It also made `camera` a DEAD END in the pipeline map: fit_camera produced
+    # one and nothing consumed one, which the gap test caught immediately.
+    # A KIND NOTHING CONSUMES IS A KIND THAT WAS TAGGED HALFWAY.
+    "render_mesh":       (("mesh", "camera"), ("image",)),
+    "render_scene":      (("sdf_scene", "camera"), ("image",)),
+    "render_scene_document": (("scene", "camera"), ("image",)),
+    "render_preview":    (("scene", "camera"), ("image",)),
     # field sampling
     "sample_field":      (("field", "points"), ("scalar",)),
     # field hole-filling (inpaint) -- field -> field, so a holed field can be repaired mid-pipeline

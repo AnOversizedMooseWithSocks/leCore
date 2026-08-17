@@ -508,6 +508,14 @@ ci=mind.causal_index(); import numpy as np; r=np.random.default_rng(0); [ci.appe
 ```
 *Find it by:* nearest neighbour search restricted to the past, recall only older items, time filtered index, append only memory before t, history matching without look ahead, what did similar past states lead to, analog lookup that cannot see the future, knn over trailing history only
 
+### Cell-aggregate morphogenesis (grow a body from soft cells, analytic gradients)
+morphogenesis_grow proliferates soft cells into a compact genus-0 aggregate (NO autodiff: closed-form gradients vs fd_gradient to 2e-9; soft-then-inflate anneal). morphogenesis_differentiate breaks symmetry by DIFFERENTIAL ADHESION (Mode 2: Gray-Scott RD modulated by a Wolpert gradient; control 0.824 vs 0.257 sphericity). genome_encode/decode/locality/interpolate make a body plan ONE searchable vector (locality measured monotone; noise abstains). shape_memory_* hold morphologies as attractors: 1.00 recall vs 0.00 for a depth-matched scrambled control..
+
+```python
+r=mind.morphogenesis_grow(n_cells=48, seed=3, steps=150); print(len(r['positions']), round(r['sphericity'],3))
+```
+*Find it by:* morphogenesis, grow a creature body, cell aggregate, reaction diffusion on cells, turing pattern on a body, morphogen gradient, limb bud, symmetry breaking
+
 ### Celled memory (domain repetition over the capacity law -- unbounded pairs, bounded cells)
 mind.celled_memory() escapes the capacity wall the HONEST way: cells of EXACTLY n* pairs (the measured limit IS the tile size -- Quilez opRep applied to memory), one shared seed-derived codebook, warm/cold cell tiers with the crossing cost measured, exact key->cell directory. MEASURED on real corpus pairs at dim 4096: ONE memory 70x past the law recalls at 0.007 (interference collapse, as the law predicts); celled recalls 1.000 across 71 cells. Kept negative: a holographic directory would re-buy the interference the cells escape..
 
@@ -555,6 +563,14 @@ Index.merge(other) / Index.ablate(source): HDRIFT's compose/ablate applied to re
 import numpy as np; from holographic.caching_and_storage.holographic_index import Index; a=Index(np.eye(8)[:4], method='sphere'); b=Index(np.eye(8)[4:], method='sphere'); a.nearest(np.eye(8)[0]); b.nearest(np.eye(8)[7]); len(a.merge(b).items) == 8
 ```
 *Find it by:* merge two indexes, combine corpora without rebuild, ablate a corpus source, composable index, index algebra, add and remove corpora
+
+### Conjecture & refute (learn Horn rules from examples, prove them in Lean)
+mind.logic_induce learns Horn clauses from positive/negative examples -- learning-from-failures (Cropper & Morel 2021, generate/test/constrain; LFF-style on the finite fragment, not Popper parity). Test is the engine's own T_P fixpoint, so RECURSIVE rules learn free (ancestor from parent, measured). Then deduces the theory's consequences, refutes vs negatives (count reported), and emits Lean 4 proving a positive FROM THE LEARNED RULES. rules=None when the space exhausts -- never a guess. See Formal logic for deduction..
+
+```python
+out=mind.logic_induce([{'head':['parent',['tom','bob']],'name':'p0'},{'head':['parent',['bob','liz']],'name':'p1'}], [['ancestor',['tom','bob']],['ancestor',['tom','liz']]], [['ancestor',['bob','tom']]], 'ancestor', {'parent':2,'ancestor':2}); print(len(out['rules']), out['refuted_count'])
+```
+*Find it by:* learn rules from examples, rule induction, inductive logic programming, ILP, conjecture and refute, induce a law from data, learn horn clauses, find a rule that explains observations
 
 ### Creature readability: proportion as a SEARCH, not a rule table
 per Togelius et al.'s search-based PCG, quality comes from an evaluation function you SEARCH, so this scores specs with the metric already trusted for the field rebuild rather than hand-coding proportions. TWO TERMS, because one is degenerate: negative space alone is MONOTONE in limb thickness (0.470 -> 0.332), so maximising it yields a spider-legged wisp; mass dominance runs the other way (0.817 -> 0.516), giving an interior optimum. Webbing is a hard GATE, not a term. Also grounds a creature (A-4) so it reads as an animal..
@@ -864,6 +880,14 @@ import lecore; m=lecore.UnifiedMind(); curve,tiers=m.memory_mountain(sizes=[256e
 ```
 *Find it by:* measure cache bandwidth, detect cache size, memory mountain, L1 L2 L3 boundaries, how fast is my ram, why is the matvec this slow
 
+### Tier contracts (certify a memory plan BEFORE it runs, fidelity clause included)
+NINE CERTIFY-OR-REFUSE contracts, one shape: certify, or refuse with the failing clause NAMED. tier_certify_plan (capacity, Horn-derived tier ban, FIDELITY from the measured D/M law), bake_certify (hypergeometric spot-check bound), differential_agreement, schedule_certify, demux_gated (measured 5% noise envelope), pose_certify, conservation_ledger (exact vs BOUNDED tested differently), lyapunov_certify (settle CERTIFIED for a true gradient flow), plan_certify (a GOAP plan's preconditions and goal)..
+
+```python
+print(mind.tier_certify_plan({'hot':{'capacity':8,'cost':1},'trace':{'capacity':10**6,'cost':10,'holographic':True,'dim':4096}}, [{'item':'b','tier':'trace','count':256}], min_recall=0.98)['violations'])
+```
+*Find it by:* tier contract, certify a plan, memory budget check, will this fit in cache, roofline, precondition check, refuse a plan, memory hierarchy contract
+
 ### Tiered memory (adaptive short-term / long-term with promotion & demotion)
 mind.tiered_memory(hot_capacity=K) is the ST/LT conductor over existing levers: a bounded EXACT hot dict (O(1), zero loss -- low overhead for what matters), and demoted items in a CONSTANT-size superposed trace plus zlib-compressed exact spill (low disk/RAM for what doesn't). Demotion picks the lowest importance = recency-decay x (1+hits), with a recency-window veto (kept negative: pure frequency ordering starved every new item, twice). LT access verifies trace vs spill, then PROMOTES back to hot. get() returns (value, tier)..
 
@@ -895,6 +919,14 @@ the codebook similarity is 98-100% of a cleanup's cost at any real M (the argmax
 idx, sc = mind.wgsl_cleanup_batch(codebook, queries); mind.wgsl_matmul(codebook, queries)
 ```
 *Find it by:* cleanup on the gpu, matrix times vector on the gpu, codebook similarity on any gpu, nearest atom on the graphics card, matvec on the gpu, vsa recall on the gpu, clean up many cues at once, batched cleanup on the gpu
+
+### Verified-knowledge memory (proofs as hypervectors, provenance kept)
+mind.proof_store proves a goal, runs the INDEPENDENT checker (unproven claims never enter), stores indexed rows in the substrate: goal atom, proof TREE (encode_tree_carrier), rule TRACE (seq_encode, complex kept complex). verify='external' records an installed Lean's verdict -- provenance ('checked'/'lean_verified') travels with each record; the binary stays optional, its verdict is kept. mind.proof_recall: exact or k-nearest by goal/tree/trace cosine (self excluded), provenance-filtered, honest empties. Rows not bundles, per the fact_capacity negative..
+
+```python
+mind.proof_store(['mortal',['socrates']], [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]); print(mind.proof_recall(['mortal',['socrates']])['exact']['provenance'])
+```
+*Find it by:* remember a proof, store verified knowledge, recall a proof, similar proofs, proof memory, verified knowledge base, knowledge with provenance, find proofs like this
 
 ### bank_or_formula
 decide whether to BANK computed values or keep the FORMULA and regenerate on demand (holographic_ladder, Quilez Q1 'store the formula not the samples'). The demoscene economy as a measured gate: banking pays iff hit_rate*eval - lookup > 0 (a miss must build the entry, so only reused evals amortize; break-even = lookup/eval). A bank of things a cheap formula gives for free is negative storage.
@@ -1092,14 +1124,6 @@ cols = mind.toon_shade(mesh, cols, cam['eye'], bands=3, rim=0.42); img = mind.re
 ```
 *Find it by:* cel shading, toon shading, flat cartoon look, outline the creature, posterize shading, non photorealistic render, comic book look, quantize shading bands
 
-### Cheap anti-aliasing (FXAA subpixel pass + SSAA)
-Two AA doors, priced honestly. postfx.fxaa(img) (also a PostChain step 'fxaa'): the SUBPIXEL term of FXAA -- edge-masked blend toward a 3x3 tent, milliseconds at the same resolution, flat regions returned BIT-IDENTICAL so texture and grain survive. postfx.supersample(img, factor): true SSAA when you can afford to over-render (~factor^2 render time). mind.preview_scene defaults to aa='fxaa'; aa='ssaa2' renders 2x and box-averages down; aa='off' is raw. KEPT NEG: the full FXAA edge-walk did not pay on preview renders; the subpixel term alone removed the visible staircase..
-
-```python
-import lecore, numpy as np; from holographic.rendering.holographic_postfx import fxaa; img=np.zeros((16,16,3)); img[:, 8:]=1.0; fxaa(img).shape
-```
-*Find it by:* antialiasing, anti aliasing, fxaa, smooth jagged edges, jaggies in my render, stair stepped edges, supersample an image, clean up render edges
-
 ### Closest point on a mesh (shared correspondence machine for transfer + bakes)
 Closest point on a mesh to each query point -- the shared correspondence machine behind uv/attribute transfer AND the high-to-low bakes (M14: one projection, many channels). Builds a uniform spatial hash over triangles ONCE and ring-searches it per point; returns (face_index, barycentric, distance) so the caller reads whatever it needs (position, normal, uv, weight) off the single projection instead of re-casting. m.mesh_closest_point(mesh, points). The dedup of four inline copies of the same grid+ring-search; bit-identical to each (same cell rule, ring order, first-seen tie-break)..
 
@@ -1284,14 +1308,6 @@ r=mind.synthesize_model((__import__('numpy').arange(40),(__import__('numpy').ara
 ```
 *Find it by:* build a model pipeline automatically, synthesize a model on the fly, emit a training recipe, why did it choose this model, dynamic model construction, model as a stored program
 
-### Emissive objects cast light (auto mesh lights)
-Any object with an EMISSIVE material becomes a real light: render_scene_document(..., emissive_mesh_lights=True) meshes each emitter's SDF (surface_nets) into a MeshLight -- NEE-sampled area source: glowing objects pool light and cast soft shadows. emissive_mesh_lights_fn(scene) returns the lights to compose by hand. SCOPE, measured: EXPOSED emitters only (sealed = binary-occluded; sss_interior covers glow THROUGH walls). The shader-ball preview auto-toggles the core mesh light ON for translucent/SSS outers, OFF for glass/transparent..
-
-```python
-import lecore; m=lecore.UnifiedMind(dim=128,seed=0); from holographic.scene_and_pipeline.holographic_scene_doc import Scene; from holographic.mesh_and_geometry.holographic_sdf import sphere, plane; sc=Scene(seed=0); sc.add(name='floor',geometry=plane(0.0),material='matte_white'); sc.add(name='bulb',geometry=sphere(0.2).translate((0,0.5,0)),material='neon_blue'); from holographic.rendering.holographic_scene_render import emissive_mesh_lights_fn; len(emissive_mesh_lights_fn(sc))
-```
-*Find it by:* mesh light, use a mesh as a light, emissive object as light, geometry light, glowing object casts light, area light from geometry, make my emissive material illuminate, light shaped like an object
-
 ### Exact planar cross-section (area / perimeter / contours)
 CROSS-SECTION a triangle mesh with a plane (holographic_meshtools.section): m.mesh_section(mesh, plane_point, plane_normal) returns the exact enclosed AREA (winding-signed shoelace over the triangle/plane segments -- holes subtract automatically), PERIMETER, CONTOUR count, and the world-space POLYLINES. No rasterising or field sampling -- the numeric contour, from the geometry itself. Unit cube at mid-height: area 1, perimeter 4, 1 contour, to 1e-12..
 
@@ -1307,6 +1323,14 @@ mind.explain_code(src) turns Python source into plain English under a strict hon
 print(mind.explain_code('def lerp(a: float, b: float, t: float) -> float:\n    return a + (b - a) * t\n')['text'])
 ```
 *Find it by:* explain code, explain what code does in english, summarize a function, describe the logic flow of a program, find variables in source code, what does this code do, code to english, verbalize code
+
+### Face as a landmark graph + parts (procedural, no scans, non-human friendly)
+mind.face_landmarks places skull-canon landmarks (crown/brow/eye/nose/mouth/chin/jaw/cheek/ear/temple), bilateral pairs mirrored STRUCTURALLY. face_part_graph says which rigblock goes where as DATA, so a four-eyed noseless face is a list edit not a code path; face_expression gives per-landmark displacements driving blend_corrective. WHY NOT FLAME: 3DMMs fix topology and expression basis at scan time and assume adult human anatomy, fitting stylized/non-human assets unstably. NOT a likeness and NOT photo reconstruction -- no scan basis to fit..
+
+```python
+lm = mind.face_landmarks((0.0,1.6,0.0), 0.24, 0.10); print(len(lm), sorted(lm)[:3], len(mind.face_part_graph(lm)))
+```
+*Find it by:* face, facial landmarks, head features, expression, eyes nose mouth, character face, make a face
 
 ### Faraday sky map (telescope as observer)
 the TELESCOPE AS OBSERVER: Faraday rotation on a whole sky (holographic_rmsynth). faraday_rotate is the forward model -- rotate an intrinsic polarized signal by rm*lambda^2 across a band, the sky a radio dish receives (intensity + circular untouched). faraday_rm_map is the inverse -- recover a per-pixel Faraday-depth (line-of-sight magnetism) MAP from a sky Stokes cube (...,nchan,4) in one call, by rm synthesis over the whole field. The SAME polarization core reads a mantis eye and a radio telescope (the sensor unifier). faraday_rotate / faraday_rm_map.
@@ -1340,14 +1364,6 @@ import numpy as np; N = 32; y, x = np.meshgrid(np.linspace(0,1,N), np.linspace(0
 ```
 *Find it by:* inpaint, inpaint a hole, impute missing values, fill in missing data, label propagation, hole filling, missing data, impute
 
-### Film-grade fur shading (deep opacity + dual scattering + medulla)
-render_hair(..., self_shadow=, dual_scatter=, medulla=): the film rung over the single-scattering Marschner lobes. Deep-opacity self-shadow (Yuksel-Keyser structure: a light-aligned voxel grid, filtered, exclusive-cumsum along the light axis) darkens buried fibers; a compact dual-scattering term (Zinke structure) adds the forward-scatter glow and backscatter fill single scattering cannot produce; medulla lobes (Yan fur structure) widen and desaturate for animal fur. All default OFF; zero strengths ARE marschner, pinned. Plus holographic_groom.clump: tuft the coat (roots planted, tips gather)..
-
-```python
-import numpy as np; from holographic.mesh_and_geometry.holographic_hairshade import fur_shade; fur_shade(np.array([0.,1.,0.]), np.array([0.,0.,1.]), np.array([0.3,0.1,1.0])/1.05, 6.0).shape == (3,)
-```
-*Find it by:* pixar quality fur, movie fur rendering, hair self shadowing, dual scattering hair, fur looks flat and dark, clump fur into tufts
-
 ### Fit a base mesh to a target
 FIT A BASE MESH TO A TARGET (the closed block-out loop): skin a skeleton into a watertight base mesh, SHRINKWRAP it onto a target, report the silhouette-fit gain (faculty m.fit_base_mesh). The block-out-then-snap loop, an OPTIMISATION target since it returns iou_base and iou_fitted. Returns {base, fitted, residual, iou_base, iou_fitted}. MEASURED: a crude 1-edge capsule fitted to a stretched-box target jumped 0.64 -> 0.97 mean IoU. KEPT NEG: closest-point shrinkwrap -- the skeleton must roughly COVER the target parts; fits SHAPE not TOPOLOGY (retopo after)..
 
@@ -1363,6 +1379,14 @@ m.fit_camera(mesh, direction, width, height) FRAMES a subject: the camera dict {
 import lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; cam = m.fit_camera(box(), width=640, height=360); sorted(cam.keys())
 ```
 *Find it by:* fit the camera to the model, frame the subject in a render, my model is tiny in the frame, model is cut off at the edges, auto framing for a preview, camera distance to fit the bounding box
+
+### Fixed-topology template wrap (vertex i means the same thing on every body)
+mind.template_wrap deforms ONE template mesh onto any target field KEEPING ITS FACE ARRAY -- the precondition for blendshapes, shared textures and cross-species morphing, none of which work while each creature meshes from scratch. Annealed projection (non-rigid ICP schedule, Amberg 2007) + Taubin no-shrink relaxation; an analytic field gives exact correspondence, not a nearest-point search. MEASURED: improves triangle quality 66.6 -> 38.3. template_wrap_quality reports landing error, ROBUST p95/p5 bunching, degenerate edges, flipped faces. NEGATIVE: needs matching topology..
+
+```python
+import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; t=mind.mesh_from_sdf(sph,((-1.4,)*3,(1.4,)*3),res=24,vectorized=True); ax=np.array([1.3,0.8,1.0]); ell=lambda P:(np.linalg.norm(P/ax,axis=1)-1.0)*ax.min(); V=mind.template_wrap(t.vertices,t.faces,ell,rounds=4); print(round(mind.template_wrap_quality(V,t.faces,ell)['surface_error'],4))
+```
+*Find it by:* template wrap, shrink wrap a mesh, fixed topology, vertex correspondence, retopology, same mesh new body, morph between creatures
 
 ### Frequency-lifted (Gabor) splats
 mind.splat_field(img, k, basis='gabor') gives each splat a FREQUENCY, ORIENTATION and PHASE -- a Gabor atom, seven numbers instead of four. A Gabor atom is a BANDPASS primitive, so it buys you exactly the band it is tuned to. Measured at equal PARAMETER budget against a jointly-refit Gaussian fit: +7.0 dB on a narrowband oriented grating, +0.2 dB on a sharp broadband edge, +0.1 dB on noise-like texture -- and it costs 89x the fitting time (a 196-atom dictionary per placement against 4). The extra dimensions are a levy paid up front, so the win grows with budget (+0.6 dB at 224 numbers, +7.5 dB at 1,344). KEPT NEGATIVE, against the prediction that motivated it: this does NOT dissolve the splatsharpen negative, which was recorded on a sharp edge -- an edge is not a band, it is every band at once. And the Gaussian basis it was supposed to beat was never saturated: that flat-in-K curve was greedy matching pursuit's overlap double-counting, which splat_refit already fixed (12.9 -> 20.9 dB across K). Use mind.spectral_detail to check whether a fit STORED the sharpness, since PSNR will not tell you..
@@ -1589,14 +1613,6 @@ mind.material_info('gold'); mind.find_materials('clear liquid'); mind.materials(
 ```
 *Find it by:* material library, materials, physical material, material properties, density, refractive index, render material, pbr preset
 
-### Material thumbnail (one call: material in, PNG out)
-mind.preview_thumbnail(material) -- name, material object, or PBR dict in; small shader-ball render out; fmt='png' bytes (HTTP {'__bytes_b64__':...}) or 'array'. Fixture slots stay grey unless overridden. size=N delivers ANY size; upsample=True optional: diffuse/rough demod-upscale (lighting ~2N/3); transmissive+smooth-metal auto-route masked NATIVE (metals cannot win upscaled, measured). Warm@160: wax 21s, chrome 37s. MANY materials: mind.preview_thumbnail_batch([...]) caches the fixed-camera reference + active mask per process, re-rendering only ball pixels: 26s/material warm at res=96..
-
-```python
-import lecore; m=lecore.UnifiedMind(dim=128,seed=0); png=m.preview_thumbnail('gold', res=16); (isinstance(png, bytes), png[:4])
-```
-*Find it by:* material thumbnail, render a thumbnail of a material, batch of material thumbnails, thumbnails for many materials, material thumbnail cache, preview this material, thumbnail render, quick material preview image
-
 ### Mesh Laplacian eigenmaps (cotan spectrum for spectral analysis)
 R6 foundation -- the low SPECTRUM of a mesh's cotan Laplace-Beltrami operator (m.mesh_laplacian_eigenmaps): the eigenfunctions a spectral analysis builds on (spectral segmentation, quadrangulation layout, shape descriptors). Cotan weights (Pinkall-Polthier) + lumped mass, solved as the symmetrised generalised eigenproblem via eigh (exact, fine to a few thousand verts). VALIDATED on a sphere: eigenvalues cluster at l(l+1)=0,2,6,12 and the first eigenspace recovers x,y,z at R2=1.000. SCALAR vertex operator, distinct from the crossfield CONNECTION Laplacian. Returns (eigenvalues, eigenfunctions)..
 
@@ -1805,6 +1821,14 @@ import lecore; m=lecore.UnifiedMind(); s=m.build_scene('a red sphere and a blue 
 ```
 *Find it by:* which object did each pixel hit, per object mask from a render, trace a pixel to its object, object id pass, cryptomatte, g-buffer, render passes, per object coverage matte
 
+### Physically-based TISSUE materials (organs, bone, fat, skin -- not flat)
+mind.tissue_pbr gives base colour, roughness, metallic, SSS weight and a PER-CHANNEL subsurface radius for bone/skin/fat/muscle/organ/liver/lung/gut/spleen/chitin/keratin. Per-channel matters: red scatters deeper than blue in every soft tissue, and a scalar radius cannot give the warm silhouette that separates meat from red plastic. Christensen-Burley parameterisation; the ORDERING is grounded in measured SDOCT coefficients (bone/skin 1.95-2.13 /mm, liver 1.30-1.46, spleen 0.52-0.63) so viscera scatter furthest. NEGATIVE: single medium per tissue..
+
+```python
+v = mind.tissue_pbr('skin'); print([round(x,2) for x in v['sss_radius']], v['sss_weight'])
+```
+*Find it by:* tissue material, subsurface scattering, organ material, skin shader, bone material, realistic flesh, SSS
+
 ### Pipeline (render/sim)
 compose a render or sim run as ordered stages that declare what they need/produce; dispatch among render strategies (pathtrace/raymarch/prt/radiance) and catch a missing input before running.
 
@@ -1868,14 +1892,6 @@ SEE what you composed: mind.preview_texture(graph) renders a CMP1 texture graph 
 img = mind.preview_texture(graph); ball = mind.preview_material(layered_material)
 ```
 *Find it by:* preview, swatch, material ball, material preview, texture preview, see the texture, render swatch, thumbnail
-
-### Preview scene (shader ball with core, path-traced, material slots)
-mind.preview_scene(material) renders the SHADER BALL -- hollow shell with cutaway, THIN LENS dish (translucency/SSS test), flush core, TWO FLUSH inlay belts (trim_top/trim_bottom, own materials), puck base -- graph-paper floor, studio rig (softboxes, gradient, ceiling panels; lighting='plain' for the bare renderer). An emissive core glows through glass and translucent outers (brightest at the lens). material dresses the OUTER; defaults: mouse-ball grey core+base, silicone belts; trim= dresses both belts, trim_top=/trim_bottom= each. preview_scene_document -> (scene, camera). ~75s res=160..
-
-```python
-import lecore; m=lecore.UnifiedMind(dim=128,seed=0); img=m.preview_scene('glass_clear', core='neon_blue', res=32); img.shape
-```
-*Find it by:* preview scene, shader ball, material preview scene, subsurface scattering test, translucency preview, thin wall test, default preview scene, render material in a scene
 
 ### Procedural plants & trees (L-system grammar)
 grow branching plants and trees from rewrite rules: expand an L-system, walk it with a 3-D turtle into branch segments, then mesh it as tapered limbs; also greebles, seeded procedural objects and terrain vegetation.
@@ -2173,6 +2189,14 @@ import lecore, numpy as np; from holographic.io_and_interop.holographic_assetimp
 ```
 *Find it by:* split a mesh by material, separate a glb into per-material meshes, group faces by material, per material submesh, one mesh per material, multi-material scan wrong texture, split loaded mesh, extract submesh for each material
 
+### Stable neo-Hookean tet elasticity + muscle fibers (hand-derived gradients)
+mind.fem_simulate solves a tet mesh quasistatically under STABLE neo-Hookean elasticity (Smith/De Goes/Kim 2018) plus activation-dependent muscle springs. Chosen over the classical log-J neo-Hookean because log J is UNDEFINED for inverted elements and generated meshes DO invert -- this energy stays finite and differentiable through inversion (pinned). NO autodiff: Piola-Kirchhoff stress hand-derived, checked vs fd_gradient to 2e-11, rest stress-free to 7e-17. fem_select_fibers picks axis-aligned edges; fem_rest_quality reports degenerate/INVERTED elements before you trust a solve..
+
+```python
+a=mind.morphogenesis_grow(n_cells=30,seed=0,steps=60); mesh=mind.tetrahedralize(a['positions'],a['radii']); fib,rl=mind.fem_select_fibers(a['positions'],mesh['tets']); r=mind.fem_simulate(a['positions'],mesh['tets'],steps=60,fibers=fib,rest_lengths=rl,activation=0.7,pinned=[0]); print(round(r['history'][0],2), round(r['history'][-1],2))
+```
+*Find it by:* neo hookean, hyperelastic material, FEM tetrahedron, soft body FEM, muscle actuation, deformation gradient, piola kirchhoff stress, element inversion
+
 ### Star cluster (many systems)
 a STAR CLUSTER -- many star systems in a field (holographic_starsystem; the UP direction of star_system). Masses come from a Salpeter IMF (mostly red dwarfs, a few blue giants) and colour each star by its main-sequence temperature, so it looks like a real population. Even low-discrepancy placement by default, or pass a density_field (e.g. a cosmic-web map from the maze/Physarum solver) to cluster systems along large-scale structure (Burchett 2020 MCPM). Deterministic recipe. star_cluster / sample_imf / mass_to_temperature.
 
@@ -2220,6 +2244,14 @@ Make one image FEEL like another: mind.color_transfer(img, reference, mode, stre
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=np.random.default_rng(0).uniform(0,1,(32,32,3)); ref=np.random.default_rng(1).uniform(0,1,(24,24,3)); out=m.color_transfer(img, ref, strength=0.8); out.shape
 ```
 *Find it by:* style transfer, apply the style of one image to another, make my render look like a painting, match the colors of a reference image, stylize an image, transfer the look of a photo, neural style transfer, post process with a style
+
+### Tetrahedralize a point set with PROVED topology (limb-connection certificates)
+mind.tetrahedralize turns points into a volumetric tet mesh (Bowyer-Watson + alpha-complex, NumPy only) reporting adjacency, boundary, NON-MANIFOLD faces, components, Euler. mind.tet_connectivity_certificate PROVES every limb reaches the torso as a derivation (not a flood fill) and names orphans; mind.tet_certificate_lean exports a claim for external Lean. mind.tet_lod_chain makes each LOD level a RULE (nested prefix, 9.1x smaller than stored meshes) and REFUSES levels that orphan a limb. SCOPE: clean point sets, not TetGen. LAW: an attachment 1-2 cells across is NOT connected; 3 is minimum..
+
+```python
+a=mind.morphogenesis_grow(n_cells=40,seed=0,steps=80); mesh=mind.tetrahedralize(a['positions'],a['radii']); print(mesh['T'], mesh['components'], mind.tet_connectivity_certificate(mesh,0,list(range(mesh['T'])))['ok'])
+```
+*Find it by:* tetrahedral mesh, delaunay triangulation, tetrahedralize, certified LOD, volumetric LOD, LOD without storing meshes, decimate without breaking topology, volumetric mesh from points
 
 ### Texture (domain)
 procedural + example-based surface detail as FIELDS you plug into a Material channel: fbm noise, Voronoi/cellular cracks, divergence-free curl, patch synthesis; plus the weathering set (burn/oxidation/inclusions).
@@ -3308,6 +3340,14 @@ rv = mind.residual_verdict(y); g = mind.support_gauge(y); hd = mind.hidden_drive
 ```
 *Find it by:* noise is not noise, structure hidden in the noise, puppet strings in market data, the noise has patterns, is the leftover signal meaningful, structure in my residuals, common cause across my sensors, hidden influences across many series
 
+### SCALIS scale-invariant surfaces (thin features survive beside thick ones)
+mind.convolution_field_scalis integrates over the HOMOTHETIC measure ds/tau instead of absolute arc length, so a long thick segment no longer deposits more field than a short thin one. Plain convolution 'failed to reconstruct prescribed radii and was unable to model large shapes with fine details' (Zanni et al. 2013). MEASURED: exactly invariant (0.13241) across a 16x scale range where plain scales by lam; and on a spike 5.7x thinner than its trunk, plain renders it at 9% of the asked radius -- swallowed -- while SCALIS gives 123%. Default-off; opt in per field..
+
+```python
+f = mind.convolution_field_scalis([((0,0,-0.5),(0,0,0.5),0.15,(1.,1.,1.))]); import numpy as np; print(round(float(f(np.array([[0.1,0.0,0.0]]))[0]),4))
+```
+*Find it by:* SCALIS, scale invariant surface, thin feature lost, convolution radius control, tail tip vanishes, blend thin into thick
+
 ### Scale (distribute)
 make something bigger than one box / one pass can hold: partition a job, run the pieces independently, reassemble with a commutative monoid -- map_reduce, load-balanced partition, image tiles / volume bricks; strategies tiling/octree/multires/superposed/sparsefield.
 
@@ -3868,6 +3908,14 @@ from holographic.misc.holographic_determinism import hash_unit, hash_direction; 
 ```
 *Find it by:* stateless random, hash noise, coordinate keyed, no seed coordination, reproducible random, farm parallel sampling, hash_unit, random number per thread without a seed stream
 
+### Tabled goal-directed query (bindings for a goal with variables)
+mind.logic_query answers a goal containing variables (['ancestor',['tom','?w']]) backward from the goal, returning every ground binding with a checkable proof. TABLING (Chen & Warren 1996; XSB/SWI) makes it terminate on LEFT RECURSION and CYCLES where plain SLD diverges. MEASURED LAW: speedup tracks the goal's DEMAND CLOSURE not graph size -- 304x at demand 1, 0.3x (SLOWER) at demand 690 -- so budget caps the tabled answers and fallback=True reruns as a seminaive fixpoint, reporting which route ran. Never the silent default; see Formal logic to derive everything instead..
+
+```python
+print(mind.logic_query(['ancestor',['tom','?w']], [{'head':['parent',['tom','bob']],'name':'p0'},{'head':['parent',['bob','liz']],'name':'p1'},{'head':['ancestor',['?x','?y']],'body':[['parent',['?x','?y']]],'name':'ab'},{'head':['ancestor',['?x','?z']],'body':[['parent',['?x','?y']],['ancestor',['?y','?z']]],'name':'as'}])['answers'])
+```
+*Find it by:* query with variables, tabling, tabled resolution, backward chaining, goal directed search, SLD resolution, answer a logic query, what does X reach
+
 ### Typed-section container (app-neutral workspace file)
 an app-neutral CONTAINER file (holographic_container): a zip of a manifest + numeric array payloads, its body a list of TYPED SECTIONS {kind, id, meta, arrays}. A section whose kind a reader does not understand ROUND-TRIPS UNTOUCHED, so an image editor, a 3D app, and a video editor share ONE forward-compatible file, each registering its own kinds. save_container(sections, meta) -> bytes; load_container(bytes) -> {meta, sections}. Numeric-only (no pickle); byte-identical save/load/save. Not workspace_manager (a live-DB checkpoint) -- the file FORMAT for typed data.
 
@@ -3992,6 +4040,13 @@ combine things into one: bundle (superposition, weighted = soft mixture), lerp /
 
 ```python
 from holographic.misc.holographic_blendhome import Blend; Blend.bundle(vectors, weights)
+```
+
+### Blendshape basis with DECLARED local support (STAR's fix, without the scans)
+mind.blend_corrective authors one blendshape target that displaces only vertices within a GEODESIC radius of an anchor -- geodesic because a hand on a hip is millimetres away in space and a metre across the surface. SMPL's dense correctives capture spurious long-range coupling; STAR spends scan data LEARNING each joint's activation region, but an authored basis DECLARES it -- free and exact (measured overreach 0.000e+00; 8-15% of the mesh moves). blend_locality_report checks it. NEGATIVE: locality guaranteed, anatomical realism not..
+
+```python
+import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; msh=mind.mesh_from_sdf(sph,((-1.3,)*3,(1.3,)*3),res=18,vectorized=True); V=np.asarray(msh.vertices); s=int(np.argmax(V[:,1])); t=mind.blend_corrective(msh,s,0.8,'normal',0.2); print(mind.blend_locality_report(V,[t],msh,[s],[0.8])['max_overreach'])
 ```
 
 ### Bundle capacity as a measured load ratio
@@ -4281,6 +4336,13 @@ The fluid stack is float32-clean end to end (P1: advect 2.62 -> 1.25 ms at 144x1
 import numpy as np; z=np.zeros((32,32),np.float32); print(mind.fluid_step(z,z.copy(),z.copy(),boundary='wall')[0].dtype)
 ```
 
+### Formal logic & Lean 4 export (prove, check, hand to an external authority)
+logic_prove: Horn forward chaining, proof tree, honest None (strategy='seminaive': same atoms, >=22x on large bases); logic_check_proof re-verifies INDEPENDENTLY (forged premises raise); lean_export emits Lean 4 (check='external' = both checkers agree); lean_verify runs installed lean; logic_consequences: least fixpoint + absurdity smoke (Lean never checks rule CONSISTENCY); logic_proof_measure sizes a checked proof; encode/decode_atom round-trip atoms (decode abstains); fact_capacity's NEGATIVE: bundled recall cliffs by load 8 independent of D -- INDEX fact bases. Deduction, not regression..
+
+```python
+p=mind.logic_prove(['mortal',['socrates']], [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]); print(mind.logic_check_proof(p, [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]))
+```
+
 ### Function-granularity reachability (the engine audits itself)
 the other audits reason about MODULES and all report zero gaps -- a module passes if it has a docstring, public exports and a reference from UnifiedMind. None looks INSIDE the file, so functions can be reachable by nothing while their module passes. This one partitions every public engine function into faculty / catalogued / called / TEST-ONLY / orphan. TEST-ONLY is the valuable bucket: works, tested, exposed nowhere -- so by this repo's own rule it does not exist. Conservative, never deletes.
 
@@ -4405,6 +4467,13 @@ The JOIN BUTTON in one call: admit a guest from EITHER a pasted invite LINK (...
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); inv=m.create_invite_link(workspace='lab'); g=m.join_from_link(inv['link'], 'alice'); g.id
+```
+
+### LBS volume-loss bound (predict the candy wrapper, then refuse the pose)
+mind.skin_twist_shrink gives the CLOSED FORM |sum_b w_b exp(i theta_b)| for how much volume linear blend skinning loses under twist -- the two-bone case reduces to |cos(theta/2)|, so 90 deg keeps 0.707 and 180 deg collapses to ZERO (the candy wrapper). VERIFIED against the shipped skinning path to 1.1e-16, so it is a theorem about the code. mind.skin_pose_is_safe refuses a pinching pose BEFORE deforming; mind.skin_max_safe_twist inverts it (even 50/50 weights allow only 63.6 deg at a 0.85 floor). Exact for pure twist, conservative for bending..
+
+```python
+import numpy as np; print(round(float(mind.skin_twist_shrink([0.5,0.5],[0.0,np.pi/2])),4), mind.skin_pose_is_safe([[0.5,0.5]],[0.0,np.pi])['ok'])
 ```
 
 ### Learn this codebase (the map, the menu, and the method)
@@ -4702,6 +4771,13 @@ mind.rolling_stats(x, window, stats=(...)): trailing mean/std/min/max/range/quan
 
 ```python
 import numpy as np; x=np.cumsum(np.random.default_rng(0).standard_normal(100)); r=mind.rolling_stats(x, 20, stats=('std','drawdown')); s=mind.streaming_stats(window=20).warm_start(x); print(round(r['std'][-1],6), round(s.std(),6))
+```
+
+### Safe offset / wrap injectivity (the reach, both conditions)
+mind.wrap_is_injective says whether an offset or shrink-wrap will FOLD the mesh through itself -- a folded wrap still reads clean on surface error. Checks BOTH causes: LOCAL (offset under the smallest concave radius) and GLOBAL (collinear normals closer than twice the offset). The global term bites: armpits and finger gaps are LOW-curvature surfaces FACING each other, so a curvature-only check passes exactly the cases that fail. NEGATIVE: samples the reach, no medial axis..
+
+```python
+import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; msh=mind.mesh_from_sdf(sph,((-1.3,)*3,(1.3,)*3),res=14,vectorized=True); print(mind.wrap_is_injective(msh.vertices,msh.faces,0.05,sph,samples=200)['ok'])
 ```
 
 ### Sampling
@@ -5364,4 +5440,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*686 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*696 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

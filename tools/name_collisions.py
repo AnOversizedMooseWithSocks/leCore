@@ -126,8 +126,31 @@ KNOWN_COLLISIONS = {
     "demo_organizer": frozenset({"navigator", "organizer"}),
     "demo_text": frozenset({"encoders", "text"}),
     "diffusion_transfer": frozenset({"laplacian", "simreadout"}),
+    # composite.blend applies an IMAGE blend mode (multiply/screen/overlay) to
+    # two colour arrays; opponent.blend mixes two HYPERVECTORS through the
+    # opponent structure (keep agreement, mix exclusives at a ratio). Bodies
+    # read: different domains, different arities, nothing shared. The English
+    # word "blend" is simply the right word in both places.
+    "blend": frozenset({"composite", "opponent"}),
+    # lean.prove derives a ground Atom from Horn rules by forward chaining;
+    # querytime.prove publishes a MERKLE ROOT as a tamper-evident commitment.
+    # Bodies read: one is logic, the other is cryptography, and "prove" is the
+    # ordinary word in both fields. Nothing to unify.
+    "prove": frozenset({"lean", "querytime"}),
+    # fem.simulate steps a finite-element soft body (activation, k_muscle,
+    # gravity, pinned); smokepresets.simulate runs the smoke solver under a
+    # named preset. Different solvers, different state, different physics --
+    # the shared name is the English verb.
+    "simulate": frozenset({"fem", "smokepresets"}),
     "gather": frozenset({"shader", "transfer"}),                 # deliberate aliases (recorded in dup audit)
-    "generate": frozenset({"diffuse", "hopfield"}),
+    # pipelinemap joined this set when it MOVED INTO THE PACKAGE (it was a
+    # root-level module the scan never saw, and never in the wheel either --
+    # that was the bug). Bodies read: pipelinemap.generate WRITES
+    # docs/PIPELINE_MAP.md from the live catalog; diffuse/hopfield.generate
+    # produce SIGNALS. Different-domain homonyms of the plainest kind -- the
+    # English word for "make one", used by a documentation tool and by two
+    # samplers. Nothing to unify.
+    "generate": frozenset({"diffuse", "hopfield", "pipelinemap"}),
     "geodesic_distances": frozenset({"chart", "meshgeodesic"}),
     "gradient": frozenset({"laplacian", "pattern", "vision"}),   # N-dim central-diff gradient vs an image
     # gradient (magnitude+orientation) vs a linear ramp field -- three domains, same English word. Read.

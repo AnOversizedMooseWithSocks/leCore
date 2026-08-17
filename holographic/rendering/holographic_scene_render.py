@@ -163,7 +163,17 @@ def scene_to_render(scene, default_material="matte_gray", affine=False, distance
     import holographic.materials_and_texture.holographic_matlib as ML
 
     placed = []                                                 # (placed_sdf, material_object, albedo_socket) per object
-    for obj in scene.objects.values():
+    # OBJECTS MAY BE A DICT OR A LIST, because TWO CLASSES CALL THEMSELVES A
+    # SCENE: Scene (handle -> object, so .values()) and SemanticScene (an
+    # ordered list, which is what scene_from_image builds). This line assumed
+    # the first and raised "'list' object has no attribute 'values'" on the
+    # second -- the SECOND HALF of the same bug as the dict/Scene mismatch, and
+    # invisible until the first half was fixed.
+    # Reading both shapes is two lines; unifying the classes is a refactor that
+    # would break every caller of either. THE CONSUMER COERCES, which is the
+    # same call this project made for cameras and for the scene report.
+    _objs = scene.objects
+    for obj in (_objs.values() if hasattr(_objs, "values") else _objs):
         if obj.geometry is None:
             continue
         mat = _resolve_material(obj.material) or ML.material(default_material)

