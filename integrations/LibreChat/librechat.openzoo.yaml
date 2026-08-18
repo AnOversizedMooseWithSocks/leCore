@@ -15,7 +15,7 @@ endpoints:
   custom:
     - name: "openzoo"
       # Local proxy (start with: npx openzoo). For hosted, e.g.:
-      # baseURL: "https://api.openzoo.fun/v1"
+      # baseURL: "https://x402-tokens.fly.dev/v1"
       baseURL: "http://localhost:8402/v1"
       apiKey: "sk-openzoo"          # or "${OPENZOO_KEY}" for hosted
       models:

@@ -30,7 +30,7 @@ pays per call via x402; the key field is sent but ignored.
 
 Open the function's **Valves** and set:
 
-- `OPENZOO_BASE_URL` → the hosted URL (e.g. `https://api.openzoo.fun/v1`)
+- `OPENZOO_BASE_URL` → the hosted URL (e.g. `https://x402-tokens.fly.dev/v1`)
 - `OPENZOO_API_KEY` → your real key
 
 Nothing else changes; the same file serves both rails.

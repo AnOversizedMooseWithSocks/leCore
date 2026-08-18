@@ -11,7 +11,7 @@ configuration — there is no file to install, so this folder is documentation o
 3. Set **API** → `Chat Completion`.
 4. Set **Chat Completion Source** → `Custom (OpenAI-compatible)`.
 5. **Custom Endpoint**: `http://localhost:8402/v1`
-   (hosted: `https://api.openzoo.fun/v1`)
+   (hosted: `https://x402-tokens.fly.dev/v1`)
    — stop at `/v1`; do NOT append `/chat/completions`, SillyTavern adds the route.
 6. **API Key**: `sk-openzoo` (any value for the local proxy; real key for hosted).
 7. Connect. Because the proxy implements `/v1/models`, the model dropdown fills

@@ -62,7 +62,7 @@ Every integration here targets one or both of openzoo's surfaces:
    short prompts price at a 3× passthrough markup — receipts name which base
    applied, and print on the proxy console per call.
 2. **MCP server** — `npx openzoo mcp` (stdio). Tools: `zoo_ask` (corpus up to
-   ~1M tokens + question → answer + receipt), `zoo_models`, `zoo_wallet`. MCP
+   ~9.8M tokens per call (~128M bound ceiling) + question → answer + receipt), `zoo_models`, `zoo_wallet`. MCP
    hosts (Cursor, Cline, Claude Desktop, Windsurf) should wire BOTH surfaces —
    chat for ordinary completions, MCP for the giant-corpus flagship.
 
