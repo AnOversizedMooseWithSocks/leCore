@@ -359,9 +359,17 @@ jobs:
 
       - name: Run shard ${{ matrix.shard }} of 10 (slow tests included, watchdog lifted)
         run: |
-          # MUST MATCH THE MATRIX LENGTH ABOVE. A matrix of 10 with --num-shards 4 asks for
-          # slices 0..9 of a 4-way partition: shards 4..9 come back EMPTY and 60% of the suite
-          # is silently not run, with ten green jobs to show for it. The self-check step above
-          # is what catches this -- it partitions with the same number and asserts exact cover.
+          # MUST MATCH THE MATRIX LENGTH ABOVE. A matrix of ten with a smaller shard count asks
+          # for slices 0..9 of a narrower partition: the high shards come back EMPTY and most of
+          # the suite is silently not run, with ten green jobs to show for it. The self-check
+          # step above catches that -- it partitions with the same number and asserts exact
+          # cover.
+          # AND THE NUMBER IS NOT SPELLED OUT IN THIS COMMENT ON PURPOSE:
+          # test_ci_gates_run_once_and_every_shard_is_covered greps the job body for
+          # `--num-shards N` and compares the SET it finds against the matrix length. A worked
+          # example in prose reads as a second, contradicting invocation -- which is exactly
+          # what it did, and the test was right to fail. A LINTER THAT READS TEXT CANNOT TELL
+          # DOCUMENTATION FROM CONFIGURATION, so configuration is the only thing that carries
+          # numbers here.
           SELECTED=$(python tools/shard_tests.py --shard ${{ matrix.shard }} --num-shards 10)
           pytest -q -n auto --run-slow --durations=15 $SELECTED

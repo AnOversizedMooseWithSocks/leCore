@@ -70732,3 +70732,38 @@ TWO MERGE DECISIONS WORTH THE LINE:
   parallelism, different deselects). UNDER-ESTIMATING IS WHAT BLOWS A 20-MINUTE
   BUDGET; over-estimating only packs conservatively. measure_durations.py's
   --merge now takes the max and says why. Shard spread improved 13% -> 10%.
+
+## TWO CI FAILURES, BOTH MINE, BOTH "THE CHECK WAS RIGHT"
+
+1. A COMMENT BROKE A LINT. test_ci_gates_run_once_and_every_shard_is_covered
+greps a job body for `--num-shards N` and compares the SET it finds against the
+matrix length. Both real invocations in full-suite say 10 -- but my explanatory
+comment contained the worked example "A matrix of 10 with --num-shards 4", and
+the grep found {4, 10}.
+A LINTER THAT READS TEXT CANNOT TELL DOCUMENTATION FROM CONFIGURATION. The
+comment now states the failure mode without spelling a second number, and says
+why. The test was right: prose that looks like config IS config to anything that
+greps, and the alternative -- teaching the linter to strip comments -- makes it
+weaker at catching a real stray flag inside a heredoc or a shell string.
+
+2. THE NO-TOOL ARM LEAKED A REAL REQUEST, and the router was correct to answer.
+declare_explain answered 1 of 60 "nonsense" queries. The query was the single
+word "dictionary" -- and leCore SHIPS a vendored dictionary, so that is a real
+request with a real capability behind it.
+THE CAUSE WAS A UNITS MISMATCH BETWEEN THE TWO ARMS. has_tool filtered aliases
+at `len(str(a).split()) >= 4` (RAW WORDS) while the no-tool salad drew
+`len(_tokens(a))` tokens (CONTENT WORDS, stopwords dropped). An alias like "get
+the dictionary out" passes the raw filter at four words and tokenizes to ONE --
+so its salad partner was a SINGLE TERM drawn from the catalog's own vocabulary,
+which is overwhelmingly likely to name something real.
+FIXED IN THE FILTER, NOT THE LENGTH. My first attempt floored the salad at four
+tokens and broke test_the_no_tool_arm_is_not_an_easier_arm, which insists the
+arms match on token count -- correctly, because a systematically longer no-tool
+arm lets the ladder refuse on LENGTH rather than on tool presence. Filtering
+has_tool in CONTENT TOKENS fixes the leak and keeps parity.
+VERIFIED ACROSS FIVE SEEDS rather than the committed one: 0/60 false actions at
+seeds 0/1/2/3/7, shortest salad 4 tokens everywhere. A fixture fix that only
+works on its own seed is a fixture that will leak again.
+SAME LESSON AS THE AGENT BENCHMARK, THIRD COSTUME: TESTING ABSTENTION REQUIRES A
+QUESTION WITH NO GOOD ANSWER, and any rule that can accidentally emit a
+meaningful query will eventually emit one.
