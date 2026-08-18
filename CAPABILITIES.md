@@ -352,6 +352,14 @@ mind.route('render a scene'); mind.suggest('edit an image'); mind.complete_metho
 ```
 *Find it by:* agent, agentic, skills, skill description, autocomplete, suggest, decision tree, route
 
+### Harness integrations for openzoo (integrations/ folder)
+Repo folder integrations/: per-app plugins/configs surfacing openzoo.fun (leCore-backed pay-per-call inference) in 10 harnesses -- OpenWebUI Pipe, LibreChat, Continue, aider, SillyTavern, AnythingLLM, Hermes, Cursor, Cline, GrokCLI. Import-only BY DESIGN: they run in the host app and talk HTTP to localhost:8402/v1, never import lecore (declared negative). Surfaces: OpenAI chat proxy + MCP (zoo_ask/zoo_models/zoo_wallet)..
+
+```python
+import pathlib; print(sorted(p.name for p in pathlib.Path('integrations').iterdir()))
+```
+*Find it by:* openzoo integration, OpenWebUI plugin, route chats to openzoo, harness integration, connect a chat app to the zoo, LibreChat endpoint, Cursor base url override, zoo_ask MCP
+
 ### Route a mesh to its minimal repair (defect-classified)
 ROUTE a mesh to the MINIMAL repair its defect needs (holographic_meshtools.route_repair), not the full pipeline: m.route_repair(mesh) diagnoses a categorical defect record {manifold, closed, duplicates}, MATCHES it against repair-strategy records (match_record), runs only the winning strategy ops -- a duplicate-only mesh welds with no hole-fill. Ambiguous defect -> decide_or_abstain falls back to full mesh_repair, so it never repairs LESS than needed. Returns (mesh, report) with {strategy, confident, defect}. Cheaper, self-explaining. KEPT NEG: categorical presence-of-defect, not hole SIZE..
 
@@ -5440,4 +5448,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*696 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*697 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

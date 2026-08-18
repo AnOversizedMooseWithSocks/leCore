@@ -1,0 +1,11 @@
+[
+  {
+    "provider": "openzoo",
+    "baseURL": "http://localhost:8402/v1",
+    "apiKey": "sk-openzoo",
+    "defaultModel": "nvidia/nemotron-3.5-lightning",
+    "models": [
+      "nvidia/nemotron-3.5-lightning"
+    ]
+  }
+]
