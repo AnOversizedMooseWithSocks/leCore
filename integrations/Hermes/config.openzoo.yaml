@@ -8,7 +8,7 @@
 #      -> base URL:  http://localhost:8402/v1   (ends in /v1; Hermes appends
 #                                                /chat/completions itself)
 #      -> API key:   sk-openzoo                 (any value for the local proxy)
-#      -> model id:  nvidia/nemotron-3.5-lightning          (or any zoo id; `npx openzoo models`)
+#      -> model id:  nvidia/nemotron-3.5-lightning          (or any zoo id; `curl localhost:8402/v1/models`)
 #
 #   B) Manual: merge the block below into ~/.hermes/config.yaml.
 #
@@ -19,5 +19,5 @@
 model:
   provider: custom
   name: nvidia/nemotron-3.5-lightning
-  base_url: http://localhost:8402/v1     # hosted: https://api.openzoo.fun/v1
+  base_url: http://localhost:8402/v1     # hosted: https://x402-tokens.fly.dev/v1
   api_key: sk-openzoo                    # any value for local proxy; real key for hosted
