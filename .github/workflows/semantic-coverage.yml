@@ -40,6 +40,13 @@ on:
     - cron: '17 5 * * 1'        # weekly full pass: catches drift with no code change
   workflow_dispatch: {}
 
+# ONE LIVE RUN PER REF, same reasoning as ci.yml: superseded pushes should not
+# keep running. docs.yml in particular COMMITS BACK, so two concurrent runs can
+# race each other to push the same regenerated files.
+concurrency:
+  group: semantic-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   coverage:
     runs-on: ubuntu-latest

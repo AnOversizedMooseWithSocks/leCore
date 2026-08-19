@@ -5279,6 +5279,27 @@
     },
     {
       "aliases": [
+        "openzoo integration",
+        "OpenWebUI plugin",
+        "route chats to openzoo",
+        "harness integration",
+        "connect a chat app to the zoo",
+        "LibreChat endpoint",
+        "Cursor base url override",
+        "zoo_ask MCP"
+      ],
+      "consumes": [],
+      "does": "Repo folder integrations/: per-app plugins/configs surfacing openzoo.fun (leCore-backed pay-per-call inference) in 10 harnesses -- OpenWebUI Pipe, LibreChat, Continue, aider, SillyTavern, AnythingLLM, Hermes, Cursor, Cline, GrokCLI. Import-only BY DESIGN: they run in the host app and talk HTTP to localhost:8402/v1, never import lecore (declared negative). Surfaces: OpenAI chat proxy + MCP (zoo_ask/zoo_models/zoo_wallet).",
+      "example": "import pathlib; print(sorted(p.name for p in pathlib.Path('integrations').iterdir()))",
+      "method": null,
+      "name": "Harness integrations for openzoo (integrations/ folder)",
+      "native": false,
+      "produces": [],
+      "semantic": null,
+      "theme": "Discover & drive it (for agents)"
+    },
+    {
+      "aliases": [
         "hierarchical superposition",
         "chunked memory",
         "mid-level cleanup",
@@ -16219,7 +16240,7 @@
       "theme": "Scenes you can describe & adjust"
     }
   ],
-  "count": 696,
+  "count": 697,
   "schema_version": "1.1",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

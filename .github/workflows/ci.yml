@@ -26,7 +26,27 @@ on:
     - cron: "0 6 * * 1"        # 06:00 UTC every Monday -- a weekly FULL-suite run, the safety net
   workflow_dispatch:            # a "Run workflow" button in the Actions tab -> full suite on demand
 
+# ONE LIVE RUN PER REF. Without this, pushing three times in five minutes leaves
+# THREE full matrices running the same suite on commits that are already
+# superseded -- burning runner minutes to test code nobody will ship, and
+# putting the useful run behind a queue of dead ones.
+# The full-suite/tag runs are EXCLUDED from cancellation by keying on run_id for
+# them: a weekly safety-net run or a release build must finish, and there is no
+# "superseding" push for a schedule anyway.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}
+
 jobs:
+  # GATES FIRST, THEN TESTS. `gates` (docs drift, apiquickref, skill_lint,
+  # catalog_gaps, reachability, usage audit) takes about a minute; the pytest
+  # matrix takes four jobs x up to 20. Running them in PARALLEL meant a stale
+  # REFERENCE.md burned the whole test matrix before anyone read the one-line
+  # failure that would have told them to run regen_docs -- and the same commit
+  # would burn it again on the next push.
+  # THE CHEAP CHECK THAT FAILS OFTEN GOES FIRST. That is the whole ordering
+  # rule; it costs ~1 minute of added latency on a green run and saves the
+  # entire matrix on a red one.
   pytest:
     # SHARDED, because the unscoped path is the whole suite in one 20-minute box and it started timing out.
     # `timeout-minutes` is PER JOB, so four shard jobs give the fast path 4x the budget -- the same reasoning
@@ -44,6 +64,7 @@ jobs:
     # GitHub's timeout-minutes budget is PER JOB, so one 20-minute job could never hold the true full run
     # (slow tests selected, watchdog lifted), but four parallel shard jobs give it 4x the budget. Branch protection
     # is unaffected: pushes and PRs still produce this same "pytest" check.
+    needs: [gates]                 # cheap checks first -- see the comment above
     if: (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -281,13 +302,28 @@ jobs:
           fi
 
   full-suite:
+    # GATES FIRST HERE TOO, and it matters MORE: this is ten jobs at up to 20
+    # minutes each. A release tag with stale generated docs would spend ~2 hours
+    # of runner time before reporting a drift failure that takes one second to
+    # detect. `gates` does not run on tags or schedules, so this needs the
+    # always()-guarded aggregator's inputs rather than gates directly -- run the
+    # cheap checks inline instead, which is one step and no cross-trigger.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
-      fail-fast: false          # one slow shard failing shouldn't cancel the other three -- we want the full picture
+      fail-fast: false          # one slow shard failing shouldn't cancel the others -- we want the full picture
       matrix:
-        shard: [0, 1, 2, 3]
+        # TEN, NOT FOUR. `full-suite (1)` ran 19m51s and was CANCELLED at 91%
+        # against the 20-minute budget. The packer was NOT at fault -- measured
+        # spread across the four bins is 1.00x, perfectly even -- there simply
+        # were not enough bins: ~2,200 s of local suite over 4 shards is 550 s
+        # each, and CI's runners are ~3x slower with --run-slow, which is 27
+        # minutes. Ten shards puts the heaviest at ~11 minutes, a bit over half
+        # the budget, which is the headroom a suite that keeps growing needs.
+        # RAISING THE SHARD COUNT IS THE SANCTIONED FIX (shard_tests.py's own
+        # docstring says so); the packer stays untouched.
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     env:
       MPLBACKEND: Agg
       # Same determinism pins as the per-change job (see the comment there): one BLAS thread, fixed hash seed.
@@ -311,10 +347,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Sanity-check the partition (exact cover, disjoint, deterministic)
-        run: python tools/shard_tests.py --selfcheck --num-shards 4
-
-      - name: Run shard ${{ matrix.shard }} of 4 (slow tests included, watchdog lifted)
+      - name: Gates first (docs drift + audits) -- one second here saves ten shard-jobs
         run: |
-          SELECTED=$(python tools/shard_tests.py --shard ${{ matrix.shard }} --num-shards 4)
+          python tools/regen_docs.py --check
+          python tools/skill_lint.py
+          python tools/catalog_gaps.py
+          python tools/usage_audit.py
+
+      - name: Sanity-check the partition (exact cover, disjoint, deterministic)
+        run: python tools/shard_tests.py --selfcheck --num-shards 10
+
+      - name: Run shard ${{ matrix.shard }} of 10 (slow tests included, watchdog lifted)
+        run: |
+          # MUST MATCH THE MATRIX LENGTH ABOVE. A matrix of ten with a smaller shard count asks
+          # for slices 0..9 of a narrower partition: the high shards come back EMPTY and most of
+          # the suite is silently not run, with ten green jobs to show for it. The self-check
+          # step above catches that -- it partitions with the same number and asserts exact
+          # cover.
+          # AND THE NUMBER IS NOT SPELLED OUT IN THIS COMMENT ON PURPOSE:
+          # test_ci_gates_run_once_and_every_shard_is_covered greps the job body for
+          # `--num-shards N` and compares the SET it finds against the matrix length. A worked
+          # example in prose reads as a second, contradicting invocation -- which is exactly
+          # what it did, and the test was right to fail. A LINTER THAT READS TEXT CANNOT TELL
+          # DOCUMENTATION FROM CONFIGURATION, so configuration is the only thing that carries
+          # numbers here.
+          SELECTED=$(python tools/shard_tests.py --shard ${{ matrix.shard }} --num-shards 10)
           pytest -q -n auto --run-slow --durations=15 $SELECTED
