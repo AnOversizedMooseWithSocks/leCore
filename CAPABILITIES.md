@@ -352,6 +352,14 @@ mind.route('render a scene'); mind.suggest('edit an image'); mind.complete_metho
 ```
 *Find it by:* agent, agentic, skills, skill description, autocomplete, suggest, decision tree, route
 
+### Harness integrations for openzoo (integrations/ folder)
+Repo folder integrations/: per-app plugins/configs surfacing openzoo.fun (leCore-backed pay-per-call inference) in 10 harnesses -- OpenWebUI Pipe, LibreChat, Continue, aider, SillyTavern, AnythingLLM, Hermes, Cursor, Cline, GrokCLI. Import-only BY DESIGN: they run in the host app and talk HTTP to localhost:8402/v1, never import lecore (declared negative). Surfaces: OpenAI chat proxy + MCP (zoo_ask/zoo_models/zoo_wallet)..
+
+```python
+import pathlib; print(sorted(p.name for p in pathlib.Path('integrations').iterdir()))
+```
+*Find it by:* openzoo integration, OpenWebUI plugin, route chats to openzoo, harness integration, connect a chat app to the zoo, LibreChat endpoint, Cursor base url override, zoo_ask MCP
+
 ### Route a mesh to its minimal repair (defect-classified)
 ROUTE a mesh to the MINIMAL repair its defect needs (holographic_meshtools.route_repair), not the full pipeline: m.route_repair(mesh) diagnoses a categorical defect record {manifold, closed, duplicates}, MATCHES it against repair-strategy records (match_record), runs only the winning strategy ops -- a duplicate-only mesh welds with no hole-fill. Ambiguous defect -> decide_or_abstain falls back to full mesh_repair, so it never repairs LESS than needed. Returns (mesh, report) with {strategy, confident, defect}. Cheaper, self-explaining. KEPT NEG: categorical presence-of-defect, not hole SIZE..
 
@@ -423,6 +431,14 @@ build a REGIME GATE (holographic_regimegate) -- route to a superior-but-NICHE me
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); g=m.regime_gate('sharp', lambda x: abs(x), 5.0, lambda x: ('hi',x*2), lambda x: ('lo',x)); print(g.apply(9.0)[1]['used'])
 ```
 *Find it by:* re-enable a niche method, route by regime with a fallback, gate a method behind a detector, use a method only in its regime, conditional dispatch with safe default, regime gate, shelved method behind a detector
+
+### retrieval_dispatch
+ADAPTIVE retrieval cascade (holographic_retrievaldispatch): exact-phrase short-circuit -> dense arm gated on top-1/top-2 margin (stop when proven, like adaptive path tracing) -> BM25 as a LAST-PASS denoise fit over the dense shortlist ONLY (O(shortlist), never the corpus), fused dense-dominant by RRF -> honest abstain. The lexical pass runs only on a narrow margin, only over the ambiguous window. Returns {ranked, stage, margin}. KEPT NEG: refine cannot rescue gold outside the shortlist; a confidently-wrong dense top-1 passes the gate un-refined..
+
+```python
+import lecore; m=lecore.UnifiedMind(); print(m.retrieval_dispatch('fluid solver', ['smooth a mesh','fluid solver','render'])['stage'])
+```
+*Find it by:* search my documents for the best match, rank documents for a query, adaptive search cascade, pick the right retrieval method, only run bm25 when needed, search that stops when the answer is proven, hybrid retrieval without scoring everything, route between dense and lexical search
 
 ### route_semantic
 route a request to the right MODULE by COSINE in nomic's embedding space instead of token overlap -- catches meaning when words don't match ('squish a big array down for storage' -> holographic_coldstore). Uses the shipped 96 KB 64d q8 index. Takes a query vector, a build-time-cached phrase, OR free text when the N31 offline embedder ships (SIF token-pool + ridge W, no model); returns None (caller falls back to token find_capability) rather than fabricate an embedding. Measured 7/12 top-1 vs token 2/12.
@@ -937,7 +953,7 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.bank_or_formula(eva
 *Find it by:* should I cache or recompute, is it worth precomputing this, bank versus formula decision, when to store versus recompute, should I bake this or regenerate it, amortize a precomputed bank, is precomputing worth it, cache or regenerate decision
 
 ### bm25_rank
-LEXICAL ranking by Okapi BM25 (holographic_bm25): rank a list of text docs by exact-term match to a query, with tf-saturation (k1) and length normalization (b). Pure NumPy/stdlib, no model. The complement to route_semantic's dense cosine -- catches asks whose query WORDS appear in the target text but whose embedding-geometry buries them (measured: 'bumpy surface'->meshsmooth, dense r22, BM25 top-5). Returns [(doc_index, score)]. KEPT NEG: cannot match a word absent from the docs (bag-of-words, no meaning)..
+INTERNAL ARM; front door is retrieval_dispatch. LEXICAL ranking by Okapi BM25 (holographic_bm25): rank a list of text docs by exact-term match to a query, with tf-saturation (k1) and length normalization (b). Pure NumPy/stdlib, no model. The complement to route_semantic's dense cosine -- catches asks whose query WORDS appear in the target text but whose embedding-geometry buries them (measured: 'bumpy surface'->meshsmooth, dense r22, BM25 top-5). Returns [(doc_index, score)]. KEPT NEG: cannot match a word absent from the docs (bag-of-words, no meaning)..
 
 ```python
 import lecore; m=lecore.UnifiedMind(); print(m.bm25_rank('smooth bumpy surface', ['smooth a bumpy surface mesh','fluid solver'])[:1])
@@ -959,6 +975,22 @@ RECIPROCAL RANK FUSION (holographic_bm25.reciprocal_rank_fusion): fuse several r
 import lecore; m=lecore.UnifiedMind(); print(m.fuse_rankings([[0,1,2],[0,2,1]])[:1])
 ```
 *Find it by:* combine ranked lists, reciprocal rank fusion, merge two rankings, fuse dense and sparse retrieval, hybrid search fusion, blend search results by rank
+
+### guard_candidates
+RECALL GUARD (holographic_recallguard): wrap any ranked list with exact-containment tiers from a perfect_recall_index until a budget fills, returning candidates + a CERTIFICATE of the coordination level down to which completeness is guaranteed (every doc sharing >= c query terms is present -- a theorem, verified exhaustively in the selftest). Ranked head preserved. MEASURED (real NFCorpus vs BM25 top-200): reachable misses 1165 -> 732, Recall@1000 0.278 -> 0.311. KEPT NEG: lexically-reachable docs only; oversized low tiers make the certificate admit less, never lie..
+
+```python
+import lecore; m=lecore.UnifiedMind(); ix=m.perfect_recall_index(tile=8); ix.add({'token':['cat','sat']}); ix.add({'token':['cat']}); print(m.guard_candidates([1],['cat','sat'],ix,budget=10))
+```
+*Find it by:* guarantee nothing relevant is missed, make search results provably complete, certificate of retrieval completeness, recover documents the ranker dropped, safety net under ranked search, exhaustive candidate generation with proof
+
+### perfect_recall_index
+GUARANTEED perfect recall (holographic_perfectrecall): exact AND-containment queries over any corpus size, zero false negatives (sparse binary superposition filters -- Bloom-as-VSA, Kleyko 2020) and zero false positives (sha256 verify, the depth test), under OR-baked tile probes with independent resolution (irradiance-map cull; probe saturation is a measured negative). Multi-channel (token/trigram/fields), instanced term codes, no BM25. Returns the EXACT ground-truth doc set. KEPT NEG: containment not relevance; ubiquitous terms degenerate to the timed scan..
+
+```python
+import lecore; m=lecore.UnifiedMind(); ix=m.perfect_recall_index(tile=64); ix.add({'token':['cat','sat']}); ix.add({'token':['dog']}); print(ix.query(['cat']))
+```
+*Find it by:* perfect recall search, find every document containing these words, exact match set no misses, guaranteed no false negatives index, bloom filter membership over documents, unlimited corpus exact retrieval, containment query which docs have all terms
 
 ### rectify_carrier
 REPAIR a nearly-boring carrier axis into a clean uniform index (holographic_axisrole): a non-monotone axis (delta sometimes negative) is lifted by cumulative ARC LENGTH -- the monotone/covering-lift from sign-as-rotation, absorbing small reversals into one-way progress -- then an irregular axis is RESAMPLED onto a uniform grid by interpolation. Marginal info measured before/after (after = 0.0, ideal carrier). monotone_fraction reports how much repair was needed; a largely-reversing axis (below ~0.9) means content is a PATH not a function of the axis -- inspect by hand.
@@ -5440,4 +5472,4 @@ import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors(
 
 ---
 
-*696 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*700 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
