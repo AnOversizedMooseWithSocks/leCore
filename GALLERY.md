@@ -63,8 +63,9 @@ shader can't do this — hair scatters around its tangent, not a surface normal.
 ![A floofy dog walking through a meadow](figures/floofy_dog_walking.gif)
 
 *A **100,000-strand floofy dog** built from leCore SDF shapes, groomed fur, materials, and sky. The animation
-keeps the coat opaque while four clean leg layers make a looping walk. The meadow moves past at different
-depths, the body rolls with each step, the ears and tail follow, and small dust puffs mark paw contact. Run
+keeps the coat opaque while a two-bone solver bends every knee and places each paw through a looping walk. The
+meadow moves past at different depths, the body rolls with each step, the ears and tail follow, and small dust
+puffs mark paw contact. Run
 `scripts/render_better_dog.py` and then `scripts/walk_floofy_dog.py` to rebuild the GIF.*
 
 ![An ocean in a box with a floating cube](gallery/render_ocean.png)

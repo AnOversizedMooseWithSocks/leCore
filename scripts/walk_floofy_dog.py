@@ -25,6 +25,7 @@ from scripts.animate_floofy_dog import (
     studio_background,
 )
 from scripts.place_floofy_dog_in_world import _foreground_grass, _meadow_base
+from holographic.misc.holographic_vision import _connected_components
 
 
 def _polygon_mask(size: tuple[int, int], points: list[tuple[float, float]], blur: float) -> np.ndarray:
@@ -35,23 +36,27 @@ def _polygon_mask(size: tuple[int, int], points: list[tuple[float, float]], blur
     return np.asarray(mask, float) / 255.0
 
 
-def _component_at(mask: np.ndarray, seed: tuple[float, float]) -> np.ndarray:
-    """Discard disconnected pieces accidentally enclosed by an overlapping limb polygon."""
-    binary = Image.fromarray(np.where(mask > 0.055, 255, 0).astype(np.uint8), mode="L")
-    x, y = int(round(seed[0])), int(round(seed[1]))
-    pixels = np.asarray(binary)
-    if not (0 <= x < binary.width and 0 <= y < binary.height and pixels[y, x] == 255):
-        x0, x1 = max(0, x - 24), min(binary.width, x + 25)
-        y0, y1 = max(0, y - 24), min(binary.height, y + 25)
-        nearby = np.argwhere(pixels[y0:y1, x0:x1] == 255)
-        if nearby.size == 0:
-            return mask
-        distances = (nearby[:, 1] + x0 - x) ** 2 + (nearby[:, 0] + y0 - y) ** 2
-        py, px = nearby[int(np.argmin(distances))]
-        x, y = int(px + x0), int(py + y0)
-    ImageDraw.floodfill(binary, (x, y), 128, thresh=0)
-    connected = np.asarray(binary) == 128
-    return mask * connected
+def _components_near(mask: np.ndarray, seeds: list[tuple[float, float]]) -> np.ndarray:
+    """Keep the leCore-labelled image parts closest to the hip, knee, and paw."""
+    binary = np.asarray(mask > 0.055, bool)
+    ys, xs = np.nonzero(binary)
+    if ys.size == 0:
+        return mask
+    y0, y1 = max(0, int(ys.min()) - 1), min(mask.shape[0], int(ys.max()) + 2)
+    x0, x1 = max(0, int(xs.min()) - 1), min(mask.shape[1], int(xs.max()) + 2)
+    cropped = binary[y0:y1, x0:x1]
+    labels, _ = _connected_components(cropped)
+    cy, cx = np.nonzero(cropped)
+    keep: set[int] = set()
+    for seed_x, seed_y in seeds:
+        distance = (cx + x0 - seed_x) ** 2 + (cy + y0 - seed_y) ** 2
+        nearest = int(np.argmin(distance))
+        label = int(labels[cy[nearest], cx[nearest]])
+        if label:
+            keep.add(label)
+    selected = np.zeros_like(binary)
+    selected[y0:y1, x0:x1] = np.isin(labels, list(keep))
+    return mask * selected
 
 
 def split_walking_layers(body: Image.Image):
@@ -60,42 +65,63 @@ def split_walking_layers(body: Image.Image):
     height, width = rgba.shape[:2]
     sx, sy = width / 768.0, height / 768.0
     specs = [
-        # name, polygon, hip pivot, depth, phase sign
-        ("front_far", [(190, 393), (267, 391), (281, 473), (271, 548), (227, 577), (188, 548)], (229, 406), "far", -1.0),
-        ("front_near", [(270, 394), (355, 398), (358, 510), (345, 594), (278, 610), (274, 516)], (310, 410), "near", 1.0),
-        ("rear_far", [(380, 371), (475, 374), (483, 433), (447, 479), (482, 519), (452, 555), (374, 529), (396, 455)], (431, 391), "far", 1.0),
-        ("rear_near", [(457, 370), (551, 378), (561, 466), (540, 548), (489, 579), (439, 551), (475, 500)], (505, 391), "near", -1.0),
+        # name, polygon, hip, knee, paw, depth, phase sign
+        ("front_far", [(180, 390), (270, 390), (290, 500), (285, 570), (220, 590), (175, 560)], (229, 406), (235, 480), (230, 553), "far", -1.0),
+        ("front_near", [(250, 390), (365, 395), (370, 540), (350, 620), (250, 620), (245, 500)], (310, 410), (315, 492), (305, 583), "near", 1.0),
+        ("rear_far", [(365, 365), (490, 365), (500, 450), (480, 500), (500, 550), (450, 580), (355, 545), (380, 440)], (431, 391), (444, 460), (421, 524), "far", 1.0),
+        ("rear_near", [(440, 360), (565, 370), (575, 490), (555, 565), (485, 600), (420, 560), (460, 490)], (505, 391), (520, 467), (500, 548), "near", -1.0),
     ]
     masks: list[np.ndarray] = []
-    for _, raw_points, _, _, _ in specs:
+    regions: list[np.ndarray] = []
+    for _, raw_points, _, _, _, _, _ in specs:
         points = [(x * sx, y * sy) for x, y in raw_points]
-        mask = _polygon_mask((width, height), points, max(1.0, 1.5 * sx))
-        mask *= rgba[..., 3]
-        masks.append(mask)
+        region = _polygon_mask((width, height), points, max(1.0, 1.5 * sx))
+        regions.append(region)
+        masks.append(region * rgba[..., 3])
 
     # Polygons overlap around the hips and crossed paws in the source render. Give every source pixel
     # to exactly one limb so no fragment is duplicated when the legs separate during the stride.
     mask_stack = np.stack(masks, axis=0)
     owner = np.argmax(mask_stack, axis=0)
     masks = [mask * (owner == index) for index, mask in enumerate(masks)]
+    removal_union = np.clip(np.maximum.reduce(regions), 0.0, 1.0)
     masks = [
-        _component_at(mask, (spec[2][0] * sx, spec[2][1] * sy))
+        _components_near(
+            mask,
+            [
+                (spec[2][0] * sx, spec[2][1] * sy),
+                (spec[3][0] * sx, spec[3][1] * sy),
+                (spec[4][0] * sx, spec[4][1] * sy),
+            ],
+        )
         for mask, spec in zip(masks, specs)
     ]
 
     legs = []
-    for (name, _, raw_pivot, depth, sign), mask in zip(specs, masks):
+    yy = np.arange(height, dtype=float)[:, None]
+    for (name, _, raw_hip, raw_knee, raw_paw, depth, sign), mask in zip(specs, masks):
+        hip = (raw_hip[0] * sx, raw_hip[1] * sy)
+        knee = (raw_knee[0] * sx, raw_knee[1] * sy)
+        paw = (raw_paw[0] * sx, raw_paw[1] * sy)
+        feather = max(7.0 * sy, 1.0)
+        upper_weight = np.clip((knee[1] + feather - yy) / (2.0 * feather), 0.0, 1.0)
+        lower_weight = 1.0 - upper_weight
         legs.append(
             {
                 "name": name,
-                "image": _rgba_layer(rgba[..., :3], mask),
-                "pivot": (raw_pivot[0] * sx, raw_pivot[1] * sy),
+                "upper": _rgba_layer(rgba[..., :3], mask * upper_weight),
+                "lower": _rgba_layer(rgba[..., :3], mask * lower_weight),
+                "hip": hip,
+                "knee": knee,
+                "paw": paw,
                 "depth": depth,
                 "sign": sign,
             }
         )
 
-    union = np.clip(np.maximum.reduce(masks), 0.0, 1.0)
+    # Remove every pixel inside the authored leg regions from the static body,
+    # including tiny source fragments that were rejected from the moving limbs.
+    union = removal_union
     body_alpha = rgba[..., 3] * (1.0 - union)
     body_core = _rgba_layer(rgba[..., :3], body_alpha)
 
@@ -108,13 +134,59 @@ def split_walking_layers(body: Image.Image):
     return body_core, torso_cover, legs
 
 
-def _rotate_leg(leg: Image.Image, pivot: tuple[float, float], angle: float, lift: float) -> Image.Image:
-    moved = leg.rotate(
-        float(angle),
+def _angle_delta(target: float, source: float) -> float:
+    return float(np.arctan2(np.sin(target - source), np.cos(target - source)))
+
+
+def _articulate_leg(leg: dict, target: tuple[float, float]) -> Image.Image:
+    """Use two-link inverse kinematics so the knee bends and the paw reaches its target."""
+    hip = np.asarray(leg["hip"], float)
+    knee = np.asarray(leg["knee"], float)
+    paw = np.asarray(leg["paw"], float)
+    target_point = np.asarray(target, float)
+    upper_length = float(np.linalg.norm(knee - hip))
+    lower_length = float(np.linalg.norm(paw - knee))
+
+    reach = target_point - hip
+    distance = float(np.linalg.norm(reach))
+    distance = float(np.clip(distance, abs(upper_length - lower_length) + 1e-4, upper_length + lower_length - 1e-4))
+    direction = reach / max(float(np.linalg.norm(reach)), 1e-8)
+    along = (upper_length * upper_length + distance * distance - lower_length * lower_length) / (2.0 * distance)
+    height = float(np.sqrt(max(upper_length * upper_length - along * along, 0.0)))
+    perpendicular = np.array([-direction[1], direction[0]])
+
+    rest_direction = (paw - hip) / max(float(np.linalg.norm(paw - hip)), 1e-8)
+    rest_perpendicular = np.array([-rest_direction[1], rest_direction[0]])
+    bend_side = 1.0 if float(np.dot(knee - hip, rest_perpendicular)) >= 0.0 else -1.0
+    new_knee = hip + direction * along + perpendicular * (bend_side * height)
+
+    old_upper_angle = float(np.arctan2(knee[1] - hip[1], knee[0] - hip[0]))
+    new_upper_angle = float(np.arctan2(new_knee[1] - hip[1], new_knee[0] - hip[0]))
+    old_lower_angle = float(np.arctan2(paw[1] - knee[1], paw[0] - knee[0]))
+    new_lower_angle = float(np.arctan2(target_point[1] - new_knee[1], target_point[0] - new_knee[0]))
+    upper_rotation = -np.degrees(_angle_delta(new_upper_angle, old_upper_angle))
+    lower_rotation = -np.degrees(_angle_delta(new_lower_angle, old_lower_angle))
+
+    upper = leg["upper"].rotate(
+        float(upper_rotation),
         resample=Image.Resampling.BICUBIC,
-        center=pivot,
+        center=tuple(hip),
     )
-    return _translate(moved, 0.0, -float(lift))
+    lower = leg["lower"].rotate(
+        float(lower_rotation),
+        resample=Image.Resampling.BICUBIC,
+        center=tuple(knee),
+    )
+    lower = _translate(lower, new_knee[0] - knee[0], new_knee[1] - knee[1])
+    result = Image.new("RGBA", upper.size, (0, 0, 0, 0))
+    result.alpha_composite(upper)
+    result.alpha_composite(lower)
+    rgba = np.asarray(result, float) / 255.0
+    clean_alpha = _components_near(
+        rgba[..., 3],
+        [tuple(hip), tuple(new_knee), tuple(target_point)],
+    )
+    return _rgba_layer(rgba[..., :3], clean_alpha)
 
 
 def _walking_shadow(width: int, height: int, compression: float) -> Image.Image:
@@ -192,8 +264,9 @@ def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
             if leg["depth"] != "far":
                 continue
             gait = leg["sign"] * stride_wave
-            lift = 8.0 * sy * max(0.0, leg["sign"] * step_wave)
-            animated = _rotate_leg(leg["image"], leg["pivot"], 14.0 * gait, lift)
+            lift = 32.0 * sy * max(0.0, leg["sign"] * step_wave)
+            target = (leg["paw"][0] + 30.0 * sx * gait, leg["paw"][1] - lift)
+            animated = _articulate_leg(leg, target)
             dog_layer.alpha_composite(_translate(animated, shift_x, body_bob))
 
         wag = 2.5 * np.sin(8.0 * np.pi * phase + 0.45)
@@ -204,8 +277,9 @@ def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
             if leg["depth"] != "near":
                 continue
             gait = leg["sign"] * stride_wave
-            lift = 9.0 * sy * max(0.0, leg["sign"] * step_wave)
-            animated = _rotate_leg(leg["image"], leg["pivot"], 15.5 * gait, lift)
+            lift = 40.0 * sy * max(0.0, leg["sign"] * step_wave)
+            target = (leg["paw"][0] + 38.0 * sx * gait, leg["paw"][1] - lift)
+            animated = _articulate_leg(leg, target)
             dog_layer.alpha_composite(_translate(animated, shift_x, body_bob))
 
         dog_layer.alpha_composite(_translate(torso_cover, shift_x, body_bob))
