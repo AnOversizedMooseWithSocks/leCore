@@ -11,7 +11,7 @@ Easiest: run `npx openzoo` (the paying proxy), then `hermes model`, choose
 
 - Base URL: `http://localhost:8402/v1` (stop at `/v1` — Hermes appends the route)
 - API key: `sk-openzoo` (any value for the local proxy; real key for hosted)
-- Model: any zoo id (`npx openzoo models` lists them)
+- Model: any zoo id (`curl localhost:8402/v1/models` lists them)
 
 Hermes saves the selection to `~/.hermes/config.yaml`. `config.openzoo.yaml` in
 this folder is the equivalent manual merge if you prefer editing config directly.

@@ -13,7 +13,7 @@ OpenAI-compatible endpoint via its built-in `provider: openai` — no plugin req
 ## Notes
 
 - Continue does not fetch a live model list; each zoo model you want is one entry.
-  `npx openzoo models` prints available model ids and pricing.
+  `curl localhost:8402/v1/models` prints available model ids and pricing.
 - `apiKey` is ignored by the local proxy (x402 pays); required-but-arbitrary. For a
   hosted endpoint, use your real key.
 - Coding sessions can push large repo context; the zoo's leCore corpus handling is
