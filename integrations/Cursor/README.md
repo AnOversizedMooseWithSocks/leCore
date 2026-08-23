@@ -11,12 +11,12 @@ so this folder is documentation only.
 3. Disable pre-enabled Cursor-hosted models to avoid routing conflicts.
 4. In the OpenAI section, enable **Override OpenAI Base URL** and enter:
    `http://localhost:8402/v1`
-   (hosted: `https://x402-tokens.fly.dev/v1`) — include the `/v1` suffix; Cursor
+   (hosted: `https://api.openzoo.fun/v1`) — include the `/v1` suffix; Cursor
    appends `/chat/completions` itself.
 5. **OpenAI API Key**: `sk-openzoo` (any value for local; real key for hosted).
    Despite the "OpenAI" label, this key is sent to the overridden endpoint.
 6. Click **+ Add Model** and type a zoo model id, e.g. `nvidia/nemotron-3.5-lightning`
-   (`curl localhost:8402/v1/models` lists ids). Verify/Save — Cursor sends a test request.
+   (`npx openzoo models` lists ids). Verify/Save — Cursor sends a test request.
 7. Pick the zoo model in the chat sidebar (`Cmd/Ctrl+L`).
 
 ## Known limitations (Cursor-side, not openzoo-side)
@@ -36,7 +36,7 @@ so this folder is documentation only.
 ## Full platform access: add the MCP server too
 
 The chat override above covers ordinary completions. openzoo's biggest capability —
-`zoo_ask`, which takes a corpus of up to ~9.8M tokens per call (a body models refuse directly)
+`zoo_ask`, which takes a corpus of up to ~1M tokens (a body models refuse directly)
 and answers via leCore memory spill — is an **MCP tool**, and Cursor supports MCP.
 Settings → MCP → *Add new global MCP server*, or drop into `~/.cursor/mcp.json`
 (per-project: `.cursor/mcp.json`):

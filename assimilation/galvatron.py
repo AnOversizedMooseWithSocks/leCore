@@ -558,6 +558,8 @@ def main():
                     help="build an IMBUED GALVATRON here: these weights plus the "
                          "resident roster, their calibration, the grounding "
                          "corpus and leCore itself, runnable anywhere")
+    ap.add_argument("--partition", default=None,
+                    help="a leCore partition the imbued Ouroboros spills durable notes to")
     ap.add_argument("--ban", metavar="TEXT",
                     help="text whose tokens the imbued model must never emit")
     ap.add_argument("--prove", nargs="?", const="", metavar="PROMPT",
@@ -948,7 +950,11 @@ def main():
             fp = _os.path.join(a.model_dir, f)
             if _os.path.isfile(fp) and not f.endswith(".safetensors"):
                 _sh.copy(fp, _os.path.join(a.install, f))
-        chk = audit(w2, payload=blob, cfg=cfg, probe_ids=ids)
+        ids_a = ids if ("ids" in dir() and ids) else []
+        if not ids_a:
+            ids_a = _tokens_from("the engine boots and reads its own record",
+                                 n_vocab, tok) or list(range(1, 9))
+        chk = audit(w2, payload=blob, cfg=cfg, probe_ids=ids_a)
         print("      wrote %s | AUDIT %d/%d" % (a.install, chk["passed"],
                                                 chk["total"]))
         for c in chk["checks"]:
@@ -1136,7 +1142,8 @@ def main():
         print("[imbue] corpus: %s (%d passages); banned tokens: %d"
               % (source, len(corpus), len(banned)))
         rep = _imbue(a.model_dir, a.imbue, _lc.UnifiedMind(dim=512, seed=0),
-                     corpus=corpus, banned=banned)
+                     corpus=corpus, banned=banned,
+                     partition=getattr(a, "partition", None))
         print("      wrote %s  (%.1f MB)" % (a.imbue, rep.get("bytes", 0) / 1e6))
         print("      residents: %d  %s" % (rep["residents"], rep["kinds"]))
         for sk in rep.get("skipped", []):

@@ -71,7 +71,12 @@ import numpy as np
 import lecore
 m = lecore.UnifiedMind(dim=128, seed=0)
 assert m.find_capability("rotate a mesh")
-assert len(m.levers()) == 6
+# ASSERT THE SHAPE, NOT THE COUNT. This read `== 6` and broke the moment a
+# seventh lever landed -- a test that fails when the thing it guards GROWS is
+# testing the wrong property. What this file cares about is that the faculty
+# still WORKS with every optional dep blocked, not how many entries it has.
+lv = m.levers()
+assert len(lv) >= 6 and all(x["evidence"] and x["costs"] for x in lv), lv
 o = m.ouroboros(dim=64)
 v = np.random.default_rng(0).standard_normal(64); v /= np.linalg.norm(v)
 o["write"](0, v)

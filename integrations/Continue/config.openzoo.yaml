@@ -4,7 +4,7 @@
 # Continue's native `provider: openai` speaks to any OpenAI-compatible
 # apiBase - no plugin needed. Each model you want available in Continue
 # gets its own entry (Continue has no live model-list fetch), so list the
-# zoo models you actually use. `curl localhost:8402/v1/models` prints the full list.
+# zoo models you actually use. `npx openzoo models` prints the full list.
 
 name: openzoo
 version: 0.0.1
@@ -17,7 +17,7 @@ models:
   - name: zoo nvidia/nemotron-3.5-lightning
     provider: openai
     model: nvidia/nemotron-3.5-lightning
-    apiBase: http://localhost:8402/v1     # hosted: https://x402-tokens.fly.dev/v1
+    apiBase: http://localhost:8402/v1     # hosted: https://api.openzoo.fun/v1
     apiKey: sk-openzoo                    # any value for local proxy; real key for hosted
     roles:
       - chat

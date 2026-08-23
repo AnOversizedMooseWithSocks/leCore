@@ -1061,6 +1061,25 @@
     },
     {
       "aliases": [
+        "boot up lecore",
+        "start lecore with its memory",
+        "the one call that gets me going",
+        "how do I start",
+        "load doctrine and memory and a model",
+        "autoboot"
+      ],
+      "consumes": [],
+      "does": "lecore.autoboot() is the standing start: it finds the memory partition (argument, $LECORE_PARTITION, or the shipped release_bundle/), loads doctrine and external memory, attaches a model rung when one is reachable, and opens a session. Returns a ready mind; the POST line is on m._autoboot_report. Pass partition= for your own memory directory and llm=None for the memory end only.",
+      "example": "import lecore; m = lecore.autoboot(); m._autoboot_report",
+      "method": null,
+      "name": "Boot leCore (autoboot: doctrine + external memory + model rung)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
         "supply my own embedding model",
         "bring your own vector encoder",
         "plug in an external embedder",
@@ -13990,6 +14009,37 @@
     },
     {
       "aliases": [
+        "tonemap an hdr image",
+        "filmic display transform",
+        "make hdr viewable"
+      ],
+      "consumes": [],
+      "does": "ACES filmic TONEMAP for an HDR buffer -- exposure + auto-key, the display transform a physically-lit render needs before pixels are viewable.",
+      "example": "from holographic.rendering.holographic_gbuffer import aces_tonemap",
+      "method": "aces_tonemap",
+      "name": "aces_tonemap",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Core algebra & datatypes"
+    },
+    {
+      "aliases": [
+        "which workspace is active",
+        "current staging area"
+      ],
+      "consumes": [],
+      "does": "The CURRENT workspace handle for the scene pipeline -- which staging area edits land in when none is named.",
+      "example": "ws.active_workspace()  # Workspace method",
+      "method": "active_workspace",
+      "name": "active_workspace",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Run it as a service / distributed"
+    },
+    {
+      "aliases": [
         "adaptive pipeline for data",
         "pick the right method for this data",
         "route data to the best method",
@@ -14008,6 +14058,37 @@
       "produces": [],
       "semantic": null,
       "theme": "Discover & drive it (for agents)"
+    },
+    {
+      "aliases": [
+        "caustics pass",
+        "focused light patterns",
+        "underwater light dapple"
+      ],
+      "consumes": [],
+      "does": "Add light CAUSTICS to a rendered image from the scene + camera (light direction and receiver plane configurable) -- the focused-light pass composited after the beauty.",
+      "example": "from holographic.rendering.holographic_gbuffer import add_caustics",
+      "method": "add_caustics",
+      "name": "add_caustics",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "stir the spectral fluid",
+        "inject velocity impulse"
+      ],
+      "consumes": [],
+      "does": "Inject a VELOCITY impulse into a spectral field simulation -- the stir operator for the FFT-domain fluid.",
+      "example": "field.add_velocity(source_velocity)  # SpectralField method: stir the FFT-domain fluid",
+      "method": "add_velocity",
+      "name": "add_velocity",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Data analysis & signals"
     },
     {
       "aliases": [
@@ -14085,6 +14166,53 @@
       "produces": [],
       "semantic": null,
       "theme": "Discover & drive it (for agents)"
+    },
+    {
+      "aliases": [
+        "anisotropic gaussian splatting",
+        "oriented splat render"
+      ],
+      "consumes": [],
+      "does": "ANISOTROPIC splat render: elongated gaussian splats oriented by local structure -- the quality tier above isotropic splatting for the same point set.",
+      "example": "from holographic.rendering.holographic_splat import aniso_render",
+      "method": "aniso_render",
+      "name": "aniso_render",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "build on lecore",
+        "app memory",
+        "per user memory",
+        "adapt to the user"
+      ],
+      "consumes": [],
+      "does": "Give an app built on leCore its own memory PER USER: remember/recall with provenance, observe/suggest/habits (procedures mined from what the user actually does), a capability preflight, and save/load. Each (app, user) is a separate partition, so no user can appear in another's memory.",
+      "example": "app = mind.app_substrate('lestudio', user='ana'); app.suggest('retouch a portrait')",
+      "method": "app_substrate",
+      "name": "app_substrate",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
+        "harmonic to hypervector",
+        "encode a harmonic as an atom"
+      ],
+      "consumes": [],
+      "does": "Encode a harmonic descriptor as a clean ATOM vector -- the bridge from the harmonic layer's structured values into bindable hypervector form.",
+      "example": "harmonic.as_atom()  # Harmonic method: descriptor -> bindable atom",
+      "method": "as_atom",
+      "name": "as_atom",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Core algebra & datatypes"
     },
     {
       "aliases": [
@@ -14260,6 +14388,39 @@
     },
     {
       "aliases": [
+        "quantum potential barrier",
+        "double slit potential"
+      ],
+      "consumes": [],
+      "does": "A potential BARRIER WALL for the quantum-dot simulation -- axis, position, thickness, height, optional gap (the double-slit shape is one call).",
+      "example": "from holographic.simulation_and_physics.holographic_quantum_dot import barrier_wall",
+      "method": "barrier_wall",
+      "name": "barrier_wall",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "boot the mind",
+        "bios",
+        "power on self test",
+        "operating prompt",
+        "os for the llm"
+      ],
+      "consumes": [],
+      "does": "BOOT the substrate like firmware: POST with measured checks (levers, ladder honesty, container round-trip, calibration, Unicron spectral read), partition mount, doctrine load, machine inventory -- then os_prompt() hands the attached LLM its generated operating screen (syscalls, rules, contract).",
+      "example": "rep = mind.boot(partition='/data/p1'); print(mind.os_prompt(rep))",
+      "method": "bios_boot",
+      "name": "bios_boot",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "keyword search over text",
         "bm25 lexical ranking",
         "rank documents by term overlap",
@@ -14340,6 +14501,22 @@
     },
     {
       "aliases": [
+        "warm start a ray",
+        "reuse a sphere trace",
+        "certified ray warm start"
+      ],
+      "consumes": [],
+      "does": "CERTIFIED warm-start transport for sphere tracing: replay a stored chain prefix on a neighbouring ray and hand back a t0 whose Lipschitz safety was checked ahead of time -- 0 mismatches over 576/576 certified pixels (lever-7 build, deep-dive Part 10).",
+      "example": "from holographic.rendering.holographic_raymarch import chain_transport",
+      "method": "chain_transport",
+      "name": "chain_transport",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "map the basins of an alphabet",
         "atlas of a vector space",
         "chart the holographic space",
@@ -14361,6 +14538,21 @@
     },
     {
       "aliases": [
+        "shut a message queue",
+        "release a mailbox"
+      ],
+      "consumes": [],
+      "does": "Close a bus mailbox explicitly, releasing its queue -- the orderly-shutdown half of open_mailbox.",
+      "example": "bus.close_mailbox('renders')  # Bus method",
+      "method": "close_mailbox",
+      "name": "close_mailbox",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "cost of binding an axis",
         "binding destroys similarity",
         "private subspace rotation",
@@ -14374,6 +14566,36 @@
       "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); vid=np.random.default_rng(0).standard_normal((20,64)); m.comparability_cost(vid, 0)",
       "method": "comparability_cost",
       "name": "comparability_cost",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "shrink recipe payloads",
+        "compact stored recipes"
+      ],
+      "consumes": [],
+      "does": "Compress the array payloads inside a recipe in place (the recipe stays replayable; the bytes shrink) -- storage hygiene for recipe libraries.",
+      "example": "from holographic.io_and_interop.holographic_recipe import compress_arrays",
+      "method": "compress_arrays",
+      "name": "compress_arrays",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "compress the whole cold store",
+        "bulk cool entries"
+      ],
+      "consumes": [],
+      "does": "Bulk-COOL every eligible entry in the cold store in one pass (compress now, inflate on get) -- the maintenance sweep the per-entry cool() implies.",
+      "example": "store.cool_all()  # ColdStore method: bulk-compress every eligible entry",
+      "method": "cool_all",
+      "name": "cool_all",
       "native": true,
       "produces": [],
       "semantic": null,
@@ -14596,6 +14818,56 @@
     },
     {
       "aliases": [
+        "keep all rows hot",
+        "turn off query tiering"
+      ],
+      "consumes": [],
+      "does": "Turn OFF the query layer's cold-storage tiering for a Database (keep everything hot) -- the benchmarking/debugging switch.",
+      "example": "db.disable_cold_storage()  # Database method",
+      "method": "disable_cold_storage",
+      "name": "disable_cold_storage",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Run it as a service / distributed"
+    },
+    {
+      "aliases": [
+        "seed doctrine",
+        "load the doctrine pack",
+        "boot with lessons",
+        "teach the operating doctrine"
+      ],
+      "consumes": [],
+      "does": "Boot a fresh mind with the DISTILLED OPERATING DOCTRINE: 14 measured, provenance-tagged lessons (ladder use, agent loops, storage law, honest benchmarks) taught through the normal reflex gate. Opt-in so cold state stays honest.",
+      "example": "mind.doctrine_load()",
+      "method": "doctrine_seedpack",
+      "name": "doctrine_seedpack",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "drift detection",
+        "echo detection",
+        "conflict candidate",
+        "stale memory",
+        "loop detection"
+      ],
+      "consumes": [],
+      "does": "leOS's displacement-drift detector on lever 7's floor: classify every task->response displacement against the neighborhood of similar past tasks. Verdicts: normal, void (honestly unexplored), echo (a non-answer restating the task), redshift (off established behaviour), blueshift (too little work), plus loop detection. teach_check() turns redshift into an IMPLICIT-CONFLICT candidate with the nearest established answers attached.",
+      "example": "mind.teach_check('where does the deployment run', 'it was decommissioned')",
+      "method": "drift_sentinel",
+      "name": "drift_sentinel",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
         "undo redo",
         "undo a geometry edit",
         "edit history",
@@ -14616,6 +14888,21 @@
       "produces": [],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "what color does this element burn",
+        "flame test color"
+      ],
+      "consumes": [],
+      "does": "The FLAME COLOR an element burns with (emission spectrum -> RGB) -- the flame-test palette the combustion renderer colors its fire from.",
+      "example": "from holographic.simulation_and_physics.holographic_elements import element_flame_color",
+      "method": "element_flame_color",
+      "name": "element_flame_color",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -14641,6 +14928,21 @@
     },
     {
       "aliases": [
+        "score candidates against a bundle",
+        "which answer does the pack support"
+      ],
+      "consumes": [],
+      "does": "Score CANDIDATE results against a superposed query pack in one pass -- which of these answers does the bundle actually support, with per-candidate cosines.",
+      "example": "from holographic.misc.holographic_superposed import evaluate_candidates",
+      "method": "evaluate_candidates",
+      "name": "evaluate_candidates",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "explore unlabeled data",
         "find the primary axis automatically",
         "auto decompose a data series",
@@ -14662,6 +14964,21 @@
       "produces": [],
       "semantic": null,
       "theme": "Discover & drive it (for agents)"
+    },
+    {
+      "aliases": [
+        "export every test artifact",
+        "bulk testkit export"
+      ],
+      "consumes": [],
+      "does": "Bulk-EXPORT a model directory's test artifacts (probes, singular values) in one call -- the testkit's sweep counterpart to its per-item exports.",
+      "example": "from holographic.io_and_interop.holographic_testkit import export_all",
+      "method": "export_all",
+      "name": "export_all",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -14928,6 +15245,21 @@
     },
     {
       "aliases": [
+        "stokes vector from components",
+        "polarization state constructor"
+      ],
+      "consumes": [],
+      "does": "Build a STOKES VECTOR from its polarization components -- the constructor the polarized-light renderer reads its inputs through.",
+      "example": "from holographic.rendering.holographic_stokes import from_components",
+      "method": "from_components",
+      "name": "from_components",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "combine ranked lists",
         "reciprocal rank fusion",
         "merge two rankings",
@@ -14963,6 +15295,21 @@
       "produces": [],
       "semantic": "simulate/step",
       "theme": "Run it as a service / distributed"
+    },
+    {
+      "aliases": [
+        "ideal gas state equation",
+        "pressure from density and temperature"
+      ],
+      "consumes": [],
+      "does": "Ideal-gas PRESSURE from density and temperature for a named gas -- the state equation the fluid and combustion layers share.",
+      "example": "from holographic.simulation_and_physics.holographic_gas import gas_pressure",
+      "method": "gas_pressure",
+      "name": "gas_pressure",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -15207,6 +15554,21 @@
     },
     {
       "aliases": [
+        "can this material burn",
+        "combustion check"
+      ],
+      "consumes": [],
+      "does": "Combustion PREDICATE: can this material burn -- the gate the fire propagation simulation consults per cell.",
+      "example": "from holographic.simulation_and_physics.holographic_combustion import is_flammable",
+      "method": "is_flammable",
+      "name": "is_flammable",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "bind",
         "unbind",
         "bundle",
@@ -15326,6 +15688,21 @@
       "produces": [],
       "semantic": "analyze/match",
       "theme": "Simulation & physics"
+    },
+    {
+      "aliases": [
+        "reconcile drifted replicas",
+        "merge model variants"
+      ],
+      "consumes": [],
+      "does": "MERGE two drifted model variants through the mind's reconciliation path -- the two-replica repair the distribution layer implies.",
+      "example": "from holographic.caching_and_storage.holographic_storeroute import merge_drift",
+      "method": "merge_drift",
+      "name": "merge_drift",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -15659,6 +16036,39 @@
     },
     {
       "aliases": [
+        "find duplicate rows",
+        "dedupe candidates",
+        "fuzzy duplicates",
+        "which rows are almost the same"
+      ],
+      "consumes": [],
+      "does": "Find NEAR-DUPLICATE rows in a table by fuzzy hypervector similarity above a stated threshold -- dedupe candidates with scores, not silent merging.",
+      "example": "from holographic.agents_and_reasoning.holographic_query import near_duplicates",
+      "method": "near_duplicates",
+      "name": "near_duplicates",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "filter missing values",
+        "rows with a value",
+        "is not null"
+      ],
+      "consumes": [],
+      "does": "Predicate builder: rows where a column IS PRESENT (the negative-space filter the query layer already prices like any other predicate).",
+      "example": "db.not_null('email', 'phone')  # Database method: rows where columns are present",
+      "method": "not_null",
+      "name": "not_null",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "orbit trap coloring",
         "fractal orbit trap render",
         "color a raymarch by closest approach",
@@ -15692,6 +16102,23 @@
       "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=np.random.default_rng(0); x=np.concatenate([r.standard_normal(60)*0.1, 3+r.standard_normal(80), r.standard_normal(50)*0.1]); m.packet_demux(x)['n_sources']",
       "method": "packet_demux",
       "name": "packet_demux",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "seat the panel",
+        "panel swarm",
+        "expert realm",
+        "council realm"
+      ],
+      "consumes": [],
+      "does": "Seat the expert panel in the swarm realm: each member a named resident with its own scope in one SHARED store; deliberation follows the swarm's contrast law -- consensus is silent, only disagreement is recorded, authored per-expert.",
+      "example": "mind.panel_seat(); mind.panel_deliberate(q, {'widrow': 'a', 'bau': 'b'})",
+      "method": "panel_realm",
+      "name": "panel_realm",
       "native": true,
       "produces": [],
       "semantic": null,
@@ -15931,6 +16358,21 @@
     },
     {
       "aliases": [
+        "fuzzy scene lookup",
+        "similar-value scene query"
+      ],
+      "consumes": [],
+      "does": "FUZZY role->value scene query: rows whose encoded role is NEAR the probe value -- the scene layer's similarity WHERE.",
+      "example": "scene_index.query_fuzzy('material', 'gold-ish')  # SceneQuery method",
+      "method": "query_fuzzy",
+      "name": "query_fuzzy",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Scenes you can describe & adjust"
+    },
+    {
+      "aliases": [
         "ray triangle intersection",
         "cast a ray at a mesh",
         "ray hits a mesh face",
@@ -16019,6 +16461,21 @@
     },
     {
       "aliases": [
+        "what can be redone",
+        "the undone edits"
+      ],
+      "consumes": [],
+      "does": "The edit history's REDO STACK (property): what undo has set aside, in order -- the other half of time travel.",
+      "example": "history.redo_stack  # EditHistory property",
+      "method": "redo_stack",
+      "name": "redo_stack",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "re-enable a niche method",
         "route by regime with a fallback",
         "gate a method behind a detector",
@@ -16075,6 +16532,22 @@
     },
     {
       "aliases": [
+        "resolve that one",
+        "what did 'it' refer to",
+        "anaphora over results"
+      ],
+      "consumes": [],
+      "does": "Resolve a natural REFERENCE ('that one', 'the red mesh') against recent query results -- deterministic anaphora over the session's own tables.",
+      "example": "db.resolve_reference(dest_row)  # Database method: anaphora over recent results",
+      "method": "resolve_reference",
+      "name": "resolve_reference",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "search my documents for the best match",
         "rank documents for a query",
         "adaptive search cascade",
@@ -16098,6 +16571,22 @@
       "produces": [],
       "semantic": "analyze/route",
       "theme": "Discover & drive it (for agents)"
+    },
+    {
+      "aliases": [
+        "what kind of question is this",
+        "classify intent",
+        "which tool answers this"
+      ],
+      "consumes": [],
+      "does": "Classify a QUESTION's intent deterministically (which faculty family should answer) -- the intent half of the zoo ladder's T2 rung.",
+      "example": "from holographic.agents_and_reasoning.holographic_intent import route_question",
+      "method": "route_question",
+      "name": "route_question",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -16155,6 +16644,21 @@
       "produces": [],
       "semantic": "simulate/step",
       "theme": "Learning & agents"
+    },
+    {
+      "aliases": [
+        "execute a saved view",
+        "run a stored query"
+      ],
+      "consumes": [],
+      "does": "Execute a saved VIEW by name against the current database state (the imperative companion to create_view; refreshes exactly like the incremental machinery).",
+      "example": "db.run_view('sales.by_region')  # Database method",
+      "method": "run_view",
+      "name": "run_view",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Run it as a service / distributed"
     },
     {
       "aliases": [
@@ -16379,6 +16883,22 @@
     },
     {
       "aliases": [
+        "fuzzy where clause",
+        "rows like this value",
+        "similarity filter"
+      ],
+      "consumes": [],
+      "does": "Predicate builder: rows whose encoded value is SIMILAR TO a probe above a cosine floor -- fuzzy WHERE, priced and calibrated like the rest of the query layer.",
+      "example": "from holographic.agents_and_reasoning.holographic_query import similar_to",
+      "method": "similar_to",
+      "name": "similar_to",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "bind mesh to skeleton",
         "compute skin weights from bones",
         "automatic skin weights",
@@ -16556,6 +17076,21 @@
       "produces": [],
       "semantic": null,
       "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "denoise a splat render",
+        "smooth gaussian shimmer"
+      ],
+      "consumes": [],
+      "does": "Edge-aware DENOISE for a splat render -- smooths the gaussian shimmer while preserving silhouettes; the cleanup pass between splatting and display.",
+      "example": "from holographic.rendering.holographic_splat import splat_denoise",
+      "method": "splat_denoise",
+      "name": "splat_denoise",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
     },
     {
       "aliases": [
@@ -16838,9 +17373,24 @@
       "produces": [],
       "semantic": null,
       "theme": "Scenes you can describe & adjust"
+    },
+    {
+      "aliases": [
+        "embed data in weights",
+        "multichannel steganographic write"
+      ],
+      "consumes": [],
+      "does": "Steganographic MULTI-CHANNEL write: embed data across weight channels at a stated overhead and bit budget -- the substrate's covert-capacity demonstration.",
+      "example": "from holographic.caching_and_storage.holographic_substrate import write_multichannel",
+      "method": "write_multichannel",
+      "name": "write_multichannel",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     }
   ],
-  "count": 726,
+  "count": 761,
   "schema_version": "1.1",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

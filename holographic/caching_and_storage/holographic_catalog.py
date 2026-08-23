@@ -938,6 +938,35 @@ _METHOD_ALIASES = {
                 "sample a growth at a point in time",
                 "the state of a grower at progress t",
                 "scrub a growth animation"),
+    # THE FRONT DOOR WAS DARK. `lecore.autoboot()` is the documented way to start
+    # -- it is in the README -- and find_capability("boot up lecore") returned
+    # holographic_boot (a MODEL boot record, unrelated) with autoboot nowhere.
+    # It is a MODULE function, not a mind method, so nothing auto-registered it:
+    # the catalog only sees the mind's surface, and the one call a newcomer makes
+    # first lives outside that surface.
+    "autoboot": ("boot up lecore",
+                 "start lecore with its memory",
+                 "the one call that gets me going",
+                 "load doctrine and memory and a model",
+                 "how do I start"),
+    # EXTERNAL MEMORY: the phrase a user says, pointed at the pair that does it.
+    # learning_load/learning_save ARE the external memory -- a .lecore container
+    # partition on disk that survives the process -- and neither surfaced for
+    # "external memory", "memory that persists between runs" or "load and save
+    # what I have learned". The mechanism was fine and the WORDS were missing.
+    "learning_load": ("external memory",
+                      "load what I have learned",
+                      "memory that persists between runs",
+                      "restore a saved mind",
+                      "read a lecore partition"),
+    "learning_save": ("save what I have learned",
+                      "write my memory to disk",
+                      "persist the mind between runs",
+                      "make a lecore partition"),
+    "teach": ("teach it a fact",
+              "tell lecore something to remember",
+              "add knowledge by hand",
+              "pin an established answer"),
     "unicron_bios": ("what kind of model is this",
                      "probe a checkpoint before touching it",
                      "will this fit in my model", "enumerate a model's layout",
@@ -1628,6 +1657,11 @@ def default_catalog():
     holographic_catalog_p04.register_p04(c)
     holographic_catalog_p05.register_p05(c)
     holographic_catalog_p06.register_p06(c)
+    # p07 originally used `from PKG import MODULE` -- the EXACT form the comment above
+    # declares invisible to wiring_report, added directly beneath the warning (cp27 CI
+    # simulation caught it: the gate reported p07 dark while it was loaded every boot).
+    import holographic.caching_and_storage.holographic_catalog_p07 as holographic_catalog_p07
+    holographic_catalog_p07.register_p07(c)
     return c
 
 

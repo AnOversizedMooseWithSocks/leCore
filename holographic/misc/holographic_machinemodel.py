@@ -84,6 +84,20 @@ import numpy as np
 # marginal cost grows with N (the number of items in one call). O(1) marginal in N is the strongest possible
 # statement and only two units make it.
 UNITS = {
+    # ---- EXPERIENCE UNIT (lever 7, backlog E0.6) ------------------------------------------------------
+    "experience_unit": {
+        "kind": "memory", "gpu_name": "similarity-keyed experience cache (lever 7)",
+        "module": "holographic.agents_and_reasoning.holographic_lever7", "symbol": "DisplacementTrace",
+        "setup": "build trace + N delta-rule writes", "marginal": "one unbind + cleanup + gates per read",
+        "scaling": "O(dim log dim) per op, flat in N until the capacity advisory (then tile)",
+        "use_when": "the workload is SELF-SIMILAR and the expensive path repeats up to similarity -- "
+                    "routing, solves, identifications, corpus answers",
+        "do_not_use_when": "no structure (measured ~1x on structureless streams), volatile regions, or a wall "
+                           "ALGEBRA already dissolved (FFT-exact solves, the optimizer-free SQL layer): there "
+                           "break_even_n is infinity by design",
+        "why": "the one lever that is NOT exact: a calibrated error rate buys coverage of inputs never seen "
+               "before. Baseline must be the EXPENSIVE PATH it replaces, never an array read."
+    },
     # ---- COMPUTE UNITS -------------------------------------------------------------------------------
     "simd_lanes": {
         "kind": "compute", "gpu_name": "ALU / SIMD lanes",
@@ -489,6 +503,23 @@ def spec_sheet(quick=True):
     out["t6_durable"] = {"setup_ns": _time(lambda: DeltaChain(base), reps),
                          "marginal_ns": _time(lambda: dc.get(3), max(2, reps // 2)),
                          "note": "append-only base+delta with a Merkle proof; get() reconstructs AND verifies"}
+
+    from holographic.agents_and_reasoning.holographic_ai import random_vector as _rv
+    from holographic.agents_and_reasoning.holographic_lever7 import DisplacementTrace as _DT
+    _r7 = np.random.default_rng(7)
+    def _build_trace():
+        t = _DT(512, seed=0)
+        for _ in range(8):
+            t.write(_rv(512, _r7), _rv(512, _r7))
+        return t
+    _tr = _build_trace()
+    _probe = _rv(512, _r7)
+    out["experience_unit"] = {
+        "setup_ns": _time(_build_trace, max(2, reps // 4)),
+        "marginal_ns": _time(lambda: _tr.read_gated(_probe), max(2, reps // 2)),
+        "note": "setup = trace + 8 delta-rule writes; marginal = one FULLY GATED read (unbind + cleanup + "
+                "calibrated null + volatility + outcome fields). Baseline for placement must be the expensive "
+                "path replaced -- against a 130 ns array read this unit correctly prices to never."}
 
     missing = set(UNITS) - set(out)
     if missing:                                              # the bar: every unit measures itself

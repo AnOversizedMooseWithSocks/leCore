@@ -254,6 +254,14 @@ import numpy as np; e=mind.wave_state_encoder(256, window=8); o=np.arange(8.0); 
 ```
 *Find it by:* wave state encoder carrier and envelope, encode candle high low as one vector, carrier plus envelope state, within interval extremes encoding, envelope excursion state vector, resonance recall state for candles, ohlc window to hypervector, state vector with intra bar swing
 
+### aces_tonemap
+ACES filmic TONEMAP for an HDR buffer -- exposure + auto-key, the display transform a physically-lit render needs before pixels are viewable..
+
+```python
+from holographic.rendering.holographic_gbuffer import aces_tonemap
+```
+*Find it by:* tonemap an hdr image, filmic display transform, make hdr viewable
+
 ### analytic_signal
 represent a signed series as ROTATION (holographic_analytic): the analytic signal z = value + i*Hilbert(value) = amplitude * exp(i*phase). Returns the instantaneous amplitude (envelope / circle radius), unwrapped phase (how far it has rotated), and instantaneous frequency (how fast the sign turns over). amplitude*cos(phase) reconstructs the signal EXACTLY. The 'sign as rotation' framework: a negative value is a rotation, magnitude is the radius. NumPy-only Hilbert transform, no scipy.
 
@@ -261,6 +269,14 @@ represent a signed series as ROTATION (holographic_analytic): the analytic signa
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); x=np.cos(np.linspace(0,20,512)); a=m.analytic_signal(x); a['amplitude'][:3]
 ```
 *Find it by:* analytic signal, hilbert transform, sign as rotation, value as rotation, instantaneous phase, instantaneous frequency, instantaneous amplitude, envelope of a signal
+
+### as_atom
+Encode a harmonic descriptor as a clean ATOM vector -- the bridge from the harmonic layer's structured values into bindable hypervector form..
+
+```python
+harmonic.as_atom()  # Harmonic method: descriptor -> bindable atom
+```
+*Find it by:* harmonic to hypervector, encode a harmonic as an atom
 
 ### assemble_pipeline
 find which candidate transform(s) connect an input signal to a target output, VALIDATED against a shuffle null (holographic_assemble). Each candidate is scored on a HELD-OUT segment and gated by MI-over-shuffle-null: does the REAL input drive the output more than a shuffled one? Survivors are returned sorted by significance; a candidate passes only if it clears the null (else it is chance alignment, not a discovery). The gate that stops 'any random projection works' -- the synesthesia case, made honest.
@@ -535,6 +551,14 @@ Bisect a MONOTONE probe(knob) to hit a target budget -- grow/shrink a knob until
 import lecore; m=lecore.UnifiedMind(); r=m.bisect_to_budget(lambda k:k, 20, 0, 4, midpoint='arith', max_iters=12, tol=0.10, bracket=True); r
 ```
 *Find it by:* bisect to a budget, binary search a monotone parameter, find the knob value for a target, grow a parameter until it hits a target, solve for the setting that meets a budget, bracket and bisect to a face count or cosine
+
+### Boot leCore (autoboot: doctrine + external memory + model rung)
+lecore.autoboot() is the standing start: it finds the memory partition (argument, $LECORE_PARTITION, or the shipped release_bundle/), loads doctrine and external memory, attaches a model rung when one is reachable, and opens a session. Returns a ready mind; the POST line is on m._autoboot_report. Pass partition= for your own memory directory and llm=None for the memory end only..
+
+```python
+import lecore; m = lecore.autoboot(); m._autoboot_report
+```
+*Find it by:* boot up lecore, start lecore with its memory, the one call that gets me going, how do I start, load doctrine and memory and a model, autoboot
 
 ### Cache (bake-and-query)
 bake a slow evaluator over what VARIES (position/view/time/constant) then look it up cheaply -- one shared grid-sample core over the scattered bakes (matbake, sdfbake, viewlut, anim).
@@ -1049,6 +1073,14 @@ mind.proof_store(['mortal',['socrates']], [{'head':['human',['socrates']],'name'
 ```
 *Find it by:* remember a proof, store verified knowledge, recall a proof, similar proofs, proof memory, verified knowledge base, knowledge with provenance, find proofs like this
 
+### app_substrate
+Give an app built on leCore its own memory PER USER: remember/recall with provenance, observe/suggest/habits (procedures mined from what the user actually does), a capability preflight, and save/load. Each (app, user) is a separate partition, so no user can appear in another's memory..
+
+```python
+app = mind.app_substrate('lestudio', user='ana'); app.suggest('retouch a portrait')
+```
+*Find it by:* build on lecore, app memory, per user memory, adapt to the user
+
 ### bank_or_formula
 decide whether to BANK computed values or keep the FORMULA and regenerate on demand (holographic_ladder, Quilez Q1 'store the formula not the samples'). The demoscene economy as a measured gate: banking pays iff hit_rate*eval - lookup > 0 (a miss must build the entry, so only reused evals amortize; break-even = lookup/eval). A bank of things a cheap formula gives for free is negative storage.
 
@@ -1064,6 +1096,14 @@ LEXICAL ranking by Okapi BM25 (holographic_bm25): rank a list of text docs by ex
 import lecore; m=lecore.UnifiedMind(); print(m.bm25_rank('smooth bumpy surface', ['smooth a bumpy surface mesh','fluid solver'])[:1])
 ```
 *Find it by:* keyword search over text, bm25 lexical ranking, rank documents by term overlap, exact word match retrieval, tf-idf style document ranking, which text matches these keywords
+
+### drift_sentinel
+leOS's displacement-drift detector on lever 7's floor: classify every task->response displacement against the neighborhood of similar past tasks. Verdicts: normal, void (honestly unexplored), echo (a non-answer restating the task), redshift (off established behaviour), blueshift (too little work), plus loop detection. teach_check() turns redshift into an IMPLICIT-CONFLICT candidate with the nearest established answers attached..
+
+```python
+mind.teach_check('where does the deployment run', 'it was decommissioned')
+```
+*Find it by:* drift detection, echo detection, conflict candidate, stale memory, loop detection
 
 ### find_capability_uris
 like find_capability but each result carries its disambiguating capability URI(s) (holographic_catalog + holographic_capuri) so a caller NEVER gets a bare ambiguous name. Returns [{name, does, example, uris}] -- one path for a unique name, several for a colliding one. The collision fix at the discovery layer.
@@ -2614,6 +2654,14 @@ import lecore; from holographic.io_and_interop.holographic_gltf import glb_to_me
 ```
 *Find it by:* glb imports only part of the model, multi mesh gltf import, imported model missing pieces, gltf node transforms ignored, glb shows a cube instead of my model, read all meshes from a glb scene, rigged glb loads wrong weights, skin weights dont match vertex count
 
+### aniso_render
+ANISOTROPIC splat render: elongated gaussian splats oriented by local structure -- the quality tier above isotropic splatting for the same point set..
+
+```python
+from holographic.rendering.holographic_splat import aniso_render
+```
+*Find it by:* anisotropic gaussian splatting, oriented splat render
+
 ### ascii_animate
 render an ASCII ANIMATION to a list of text frames (holographic_ascii) -- the demoscene 'tunnel in a terminal' as data. Pass frame(i,u) or frame(u) (u = normalised time) returning an image, an SDF node / DSL text (raymarched), or a 2-D field sampler each frame; get back n deterministic strings to diff, write as a reel, or drive your own loop. For live in-terminal playback with timing use holographic_ascii.ascii_play.
 
@@ -2741,6 +2789,14 @@ END-TO-END image -> MESH (the visible FRONT, NOT a watertight solid): shape-from
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=np.random.default_rng(0).uniform(0,1,(24,24)); v,q,f,g=m.image_to_mesh(img,res=32); print(len(v)>0)
 ```
 *Find it by:* mesh from a photo, image to 3d mesh, reconstruct a mesh from a picture, photo to mesh, surface reconstruction from an image, 3d model from a photo, picture to mesh, photogrammetry
+
+### is_flammable
+Combustion PREDICATE: can this material burn -- the gate the fire propagation simulation consults per cell..
+
+```python
+from holographic.simulation_and_physics.holographic_combustion import is_flammable
+```
+*Find it by:* can this material burn, combustion check
 
 ### mandelbulb
 The MANDELBULB distance-estimator SDF (holographic_sdf) -- the 3D Mandelbrot analogue (White-Nylander polar power z^n+c in spherical coords, analytic DE). power=8 is the classic bulb. The ESCAPE-TIME fractal family in 3D (vs fold_fractal's Mandelbox FOLD engine). Raymarches + orbit-traps with the existing renderer.
@@ -2902,6 +2958,14 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); from holographic.mesh_and_g
 ```
 *Find it by:* solidify a mesh, thicken a surface, give a surface thickness, add thickness to a mesh, shell a surface, make a hollow shell, shell modifier, turn a sheet into a solid slab
 
+### splat_denoise
+Edge-aware DENOISE for a splat render -- smooths the gaussian shimmer while preserving silhouettes; the cleanup pass between splatting and display..
+
+```python
+from holographic.rendering.holographic_splat import splat_denoise
+```
+*Find it by:* denoise a splat render, smooth gaussian shimmer
+
 ### to_shadertoy
 Emit a complete runnable SHADERTOY fragment shader for an SDF (holographic_sdf) -- map + raymarch + normals + lighting + mainImage, ready for shadertoy.com. Works for the fractal SDFs (fold_fractal/mandelbulb/menger) too, with a header note that a distance estimate needs conservative steps. The 'get the shadertoy code' primitive.
 
@@ -3057,6 +3121,14 @@ drive scene PARAMETERS from audio (W5') -- build a per-frame bus of band-energy 
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); t=np.linspace(0,1,22050,endpoint=False); sig=np.sin(2*np.pi*60*t); bus=m.audio_param_bus(sig, 22050); print(round(bus.subscribe(0,0.1,0.6,frame=5),2))
 ```
 *Find it by:* audio reactive parameters, drive parameters from audio, music reactive demo, band energy envelope, beat driven scene, onset to parameter, sync visuals to audio, audio param bus
+
+### query_fuzzy
+FUZZY role->value scene query: rows whose encoded role is NEAR the probe value -- the scene layer's similarity WHERE..
+
+```python
+scene_index.query_fuzzy('material', 'gold-ish')  # SceneQuery method
+```
+*Find it by:* fuzzy scene lookup, similar-value scene query
 
 ### workspace_manager
 a WORKSPACE MANAGER (holographic_workspace) -- durable user data coexisting with transient 3D/sim SCENES, each in its own namespace. SAVE/LOAD a scene: new_workspace, switch_workspace, export_workspace(name) -> a blob, import_workspace(blob) rebuilds it BYTE-IDENTICALLY, combine_workspaces, reset_to_default. Also named CHECKPOINTS: checkpoint(name,label) drops a save-point, restore_checkpoint rolls back to it byte-identically, list_checkpoints. The persistence + save-point layer for a scene.
@@ -3613,6 +3685,14 @@ import numpy as np; A=np.random.default_rng(0).standard_normal((128,512)); A/=np
 ```
 *Find it by:* how much of this bundle is signal, signal versus crosstalk fraction, is my trace damaged or just loaded, memory health report, energy budget of a superposition, saturation ledger
 
+### add_velocity
+Inject a VELOCITY impulse into a spectral field simulation -- the stir operator for the FFT-domain fluid..
+
+```python
+field.add_velocity(source_velocity)  # SpectralField method: stir the FFT-domain fluid
+```
+*Find it by:* stir the spectral fluid, inject velocity impulse
+
 ### auto_scale
 automatic scaling (holographic_scalinglaw): repeatedly diagnose from the current operating point and double the most responsive knob until the target error is met, a WALL is diagnosed (no knob helps -- stop and say so), or the round budget is spent. Every step carries the probe that justified it. The capacity-adaptive pattern (octree, load-gated record) generalised to any workload with declared knobs.
 
@@ -4149,6 +4229,22 @@ from holographic.scene_and_pipeline.holographic_workspace import WorkspaceManage
 ```
 *Find it by:* workspace, session, scratch tables, transient tables, isolate session, reset keep data, export workspace, combine workspaces
 
+### active_workspace
+The CURRENT workspace handle for the scene pipeline -- which staging area edits land in when none is named..
+
+```python
+ws.active_workspace()  # Workspace method
+```
+*Find it by:* which workspace is active, current staging area
+
+### disable_cold_storage
+Turn OFF the query layer's cold-storage tiering for a Database (keep everything hot) -- the benchmarking/debugging switch..
+
+```python
+db.disable_cold_storage()  # Database method
+```
+*Find it by:* keep all rows hot, turn off query tiering
+
 ### game_bus_host
 run a game world ON the existing distributed system (holographic_gameshard.BusShardHost): each farm node owns a set of world cells and exchanges entity handoffs over the message/distributed bus -- one topic per cell, so ownership can move without topology re-learning. The interaction layer's handshake with the data layer (bus/coordinator/presence); duplicates none of it, per the coordinator's own monoid rule (a game tick is non-monoid feedback: it runs whole on one worker). Rounds are barriered (publish R, join R+1); pinned equal to the single-process world to 1e-12..
 
@@ -4156,6 +4252,14 @@ run a game world ON the existing distributed system (holographic_gameshard.BusSh
 from holographic.scene_and_pipeline.holographic_distbus import MessageBus; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); bus=MessageBus(); w=m.game_world(cell=4.0,dt=0.1); h=m.game_bus_host(bus,w,[(0,0,0)]); w.spawn(1,(1,1,1)); print(h.tick()['n'])
 ```
 *Find it by:* run game shards on the farm, game world over the message bus, connect game to distributed system, multiplayer across machines, node owns world regions, handoff entities over the bus
+
+### run_view
+Execute a saved VIEW by name against the current database state (the imperative companion to create_view; refreshes exactly like the incremental machinery)..
+
+```python
+db.run_view('sales.by_region')  # Database method
+```
+*Find it by:* execute a saved view, run a stored query
 
 ## More capabilities
 
@@ -5331,11 +5435,32 @@ mind.write_wav(path, samples, rate) writes float samples in [-1,1] to 16-bit PCM
 mind.write_wav('/tmp/tone.wav', np.sin(np.linspace(0, 2*np.pi*440, 8000)), 8000)
 ```
 
+### add_caustics
+Add light CAUSTICS to a rendered image from the scene + camera (light direction and receiver plane configurable) -- the focused-light pass composited after the beauty..
+
+```python
+from holographic.rendering.holographic_gbuffer import add_caustics
+```
+
 ### amplitude_adjusted_surrogate
 AAFT surrogate -- the stricter null for NON-GAUSSIAN signals (holographic_surrogate). Basic phase-randomization preserves the spectrum but GAUSSIANIZES the marginal, destroying the fat tails of e.g. price returns; AAFT preserves BOTH the exact amplitude distribution and (approximately) the spectrum. Use it when the amplitude distribution matters (fat-tailed data); use phase_randomize when the signal is ~Gaussian and the spectrum must match exactly.
 
 ```python
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); x=np.random.default_rng(0).standard_normal(512)**3; print(bool(np.allclose(np.sort(m.amplitude_adjusted_surrogate(x)), np.sort(x))))
+```
+
+### barrier_wall
+A potential BARRIER WALL for the quantum-dot simulation -- axis, position, thickness, height, optional gap (the double-slit shape is one call)..
+
+```python
+from holographic.simulation_and_physics.holographic_quantum_dot import barrier_wall
+```
+
+### bios_boot
+BOOT the substrate like firmware: POST with measured checks (levers, ladder honesty, container round-trip, calibration, Unicron spectral read), partition mount, doctrine load, machine inventory -- then os_prompt() hands the attached LLM its generated operating screen (syscalls, rules, contract)..
+
+```python
+rep = mind.boot(partition='/data/p1'); print(mind.os_prompt(rep))
 ```
 
 ### body_params
@@ -5352,6 +5477,13 @@ weigh a CENTRAL BODY from a bound orbit (holographic_sysid): Kepler's third law 
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); T=3.156e7; tt=np.linspace(0,1.2*T,2000); R=1.496e11; pos=np.stack([R*np.cos(2*np.pi*tt/T),R*np.sin(2*np.pi*tt/T)],axis=1); m.central_mass_from_orbit(pos, tt[1]-tt[0])
 ```
 
+### chain_transport
+CERTIFIED warm-start transport for sphere tracing: replay a stored chain prefix on a neighbouring ray and hand back a t0 whose Lipschitz safety was checked ahead of time -- 0 mismatches over 576/576 certified pixels (lever-7 build, deep-dive Part 10)..
+
+```python
+from holographic.rendering.holographic_raymarch import chain_transport
+```
+
 ### chart_space
 chart a holographic ALPHABET as a measured atlas (holographic_ladder): march rays between atoms and record where they enter cleanup BASINS (nearest atom distinctively nearer than the runner-up). Reports basin coverage, dead zones, and the honest verdict structure_over_null (coverage minus a band-limited random null, Quilez Q8 -- high-D noise has basins too). For capacity forecasting and codebook placement.
 
@@ -5359,11 +5491,32 @@ chart a holographic ALPHABET as a measured atlas (holographic_ladder): march ray
 import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); A=np.random.default_rng(0).standard_normal((8,128)); print(m.chart_space(A)['structure_over_null'])
 ```
 
+### close_mailbox
+Close a bus mailbox explicitly, releasing its queue -- the orderly-shutdown half of open_mailbox..
+
+```python
+bus.close_mailbox('renders')  # Bus method
+```
+
 ### comparability_cost
 MEASURE the price of binding a boring axis into content (holographic_axisrole): adjacent-slice similarity when the axis is INDEXED (raw slices) vs BOUND (each slice rotated by a distinct per-slice key). On a boring carrier the indexed similarity is high and the bound similarity collapses toward 0 -- the similarity destroyed by the wrong role choice, in one number, against the raw indexed baseline.
 
 ```python
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); vid=np.random.default_rng(0).standard_normal((20,64)); m.comparability_cost(vid, 0)
+```
+
+### compress_arrays
+Compress the array payloads inside a recipe in place (the recipe stays replayable; the bytes shrink) -- storage hygiene for recipe libraries..
+
+```python
+from holographic.io_and_interop.holographic_recipe import compress_arrays
+```
+
+### cool_all
+Bulk-COOL every eligible entry in the cold store in one pass (compress now, inflate on get) -- the maintenance sweep the per-entry cool() implies..
+
+```python
+store.cool_all()  # ColdStore method: bulk-compress every eligible entry
 ```
 
 ### creature_pose
@@ -5385,6 +5538,34 @@ the shared DECISION step for any classify/match (holographic_relations): given r
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.decide_or_abstain([('a',0.9),('b',0.4)], margin=0.1))
+```
+
+### doctrine_seedpack
+Boot a fresh mind with the DISTILLED OPERATING DOCTRINE: 14 measured, provenance-tagged lessons (ladder use, agent loops, storage law, honest benchmarks) taught through the normal reflex gate. Opt-in so cold state stays honest..
+
+```python
+mind.doctrine_load()
+```
+
+### element_flame_color
+The FLAME COLOR an element burns with (emission spectrum -> RGB) -- the flame-test palette the combustion renderer colors its fire from..
+
+```python
+from holographic.simulation_and_physics.holographic_elements import element_flame_color
+```
+
+### evaluate_candidates
+Score CANDIDATE results against a superposed query pack in one pass -- which of these answers does the bundle actually support, with per-candidate cosines..
+
+```python
+from holographic.misc.holographic_superposed import evaluate_candidates
+```
+
+### export_all
+Bulk-EXPORT a model directory's test artifacts (probes, singular values) in one call -- the testkit's sweep counterpart to its per-item exports..
+
+```python
+from holographic.io_and_interop.holographic_testkit import export_all
 ```
 
 ### extend_generator
@@ -5413,6 +5594,20 @@ the FRAME-BUDGET CONTROLLER (holographic_framebudget) -- one knob from a target 
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); ctrl=m.frame_budget_controller(target_fps=60, start_level=4); ctrl.report(40.0); print(ctrl.current()['name'])
+```
+
+### from_components
+Build a STOKES VECTOR from its polarization components -- the constructor the polarized-light renderer reads its inputs through..
+
+```python
+from holographic.rendering.holographic_stokes import from_components
+```
+
+### gas_pressure
+Ideal-gas PRESSURE from density and temperature for a named gas -- the state equation the fluid and combustion layers share..
+
+```python
+from holographic.simulation_and_physics.holographic_gas import gas_pressure
 ```
 
 ### guide_structure
@@ -5499,6 +5694,13 @@ UNSTRUCTURED classification (holographic_relations, twin of match_record): when 
 import lecore; m=lecore.UnifiedMind(dim=1024,seed=0); P=m.build_prototypes({'greet':['hello there','hi how are you'],'bye':['goodbye','see you']}); print(m.match_prototype('hey hello',P)[:1])
 ```
 
+### merge_drift
+MERGE two drifted model variants through the mind's reconciliation path -- the two-replica repair the distribution layer implies..
+
+```python
+from holographic.caching_and_storage.holographic_storeroute import merge_drift
+```
+
 ### mesh_bevel_vertex
 BEVEL / CHAMFER a corner (holographic_meshverbs2) -- pull each edge incident to a vertex back by `ratio` and cap the hole. segments=1 caps with one FLAT facet; segments>=2 ROUNDS the corner into a smooth spherical dome (the 'bevel with N segments' fillet). Preserves closed + manifold. The VERTEX bevel (edge bevel deferred).
 
@@ -5534,11 +5736,32 @@ PARSE a Milkdrop `.milk` preset (holographic_milkdrop) into settings + per_frame
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); p=m.milk_parse('per_frame_1=q1 = q1 + 1\nzoom=1.0'); s=p.initial_state(); p.run_frame(s, {'bass':1.0}); print(s['q1'])
 ```
 
+### near_duplicates
+Find NEAR-DUPLICATE rows in a table by fuzzy hypervector similarity above a stated threshold -- dedupe candidates with scores, not silent merging..
+
+```python
+from holographic.agents_and_reasoning.holographic_query import near_duplicates
+```
+
+### not_null
+Predicate builder: rows where a column IS PRESENT (the negative-space filter the query layer already prices like any other predicate)..
+
+```python
+db.not_null('email', 'phone')  # Database method: rows where columns are present
+```
+
 ### packet_demux
 demultiplex a PACKETIZED stream (holographic_demux): variable-length bursts from different sources, no cyclic stride. Change-point segmentation (binary segmentation, BIC penalty -- a homogeneous stream honestly returns no boundaries), then NOISE-CALIBRATED assignment: split-half signatures estimate the noise floor, features weighted by 1/noise, segments merge within 3x the floor -- no magic threshold. Returns boundaries, assignment, and per-source reassembled streams ready for explore_series. The continuous costume of holographic_segment's discrete branching-entropy move.
 
 ```python
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=np.random.default_rng(0); x=np.concatenate([r.standard_normal(60)*0.1, 3+r.standard_normal(80), r.standard_normal(50)*0.1]); m.packet_demux(x)['n_sources']
+```
+
+### panel_realm
+Seat the expert panel in the swarm realm: each member a named resident with its own scope in one SHARED store; deliberation follows the swarm's contrast law -- consensus is silent, only disagreement is recorded, authored per-expert..
+
+```python
+mind.panel_seat(); mind.panel_deliberate(q, {'widrow': 'a', 'bau': 'b'})
 ```
 
 ### predictive_filter
@@ -5562,6 +5785,13 @@ expand a climbed ladder TOWER back to its ORIGINAL corpus of base symbols -- the
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus as mk; c=mk(); print(m.reconstruct_tower(m.climb_ladder(c))==c)
 ```
 
+### redo_stack
+The edit history's REDO STACK (property): what undo has set aside, in order -- the other half of time travel..
+
+```python
+history.redo_stack  # EditHistory property
+```
+
 ### residue_system
 exact integer arithmetic in vectors via a RESIDUE NUMBER SYSTEM (holographic_extras) -- encode integers in [0,M) as CRT residues carried in hypervectors, then add/subtract/scale with vector ops that are EXACT (no floating error), decoding back to the integer. The number-theoretic view of VSA bundling.
 
@@ -5574,6 +5804,20 @@ resolve a bare capability NAME or partial path to the FULL capability URI(s) (ho
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.resolve_capability_uri('rotation'))
+```
+
+### resolve_reference
+Resolve a natural REFERENCE ('that one', 'the red mesh') against recent query results -- deterministic anaphora over the session's own tables..
+
+```python
+db.resolve_reference(dest_row)  # Database method: anaphora over recent results
+```
+
+### route_question
+Classify a QUESTION's intent deterministically (which faculty family should answer) -- the intent half of the zoo ladder's T2 rung..
+
+```python
+from holographic.agents_and_reasoning.holographic_intent import route_question
 ```
 
 ### screen_ray
@@ -5609,6 +5853,13 @@ SYMMETRY SELECTION (holographic_meshselect) -- add a selection's mirror-image el
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); g={'vertices':[[-1,0,0],[1,0,0]],'faces':[]}; print(len(m.select_symmetric(g,m.mesh_selection(g,'vertex').add([0]),axis=0)))
+```
+
+### similar_to
+Predicate builder: rows whose encoded value is SIMILAR TO a probe above a cosine floor -- fuzzy WHERE, priced and calibrated like the rest of the query layer..
+
+```python
+from holographic.agents_and_reasoning.holographic_query import similar_to
 ```
 
 ### snap_to_grid
@@ -5681,6 +5932,20 @@ WHICH MODULES WORK TOGETHER (holographic_workflowgraph): the sparse workflow bon
 import lecore; m=lecore.UnifiedMind(); print([n for n,_ in m.workflow_neighbors('meshsmooth', top=3)])
 ```
 
+### write_multichannel
+Steganographic MULTI-CHANNEL write: embed data across weight channels at a stated overhead and bit budget -- the substrate's covert-capacity demonstration..
+
+```python
+from holographic.caching_and_storage.holographic_substrate import write_multichannel
+```
+
+## Deep dives
+
+* **`docs/LEVER7.md`** -- the displacement trace: the superposed algebra, the delta-rule write, the governance that makes it trustworthy (calibration, veto, sessions, receipts, provenance), its position against Titans / Larimar / MemoryLLM, and the kept negatives that shaped it.
+* **`docs/UNICRON_INSTALL.md`** -- installing leCore INTO a model: facts into `down_proj`, the algebra as circulants, a routed swarm that arrives off, the five-point health gate, budget-by-bisect, cartridges with exact revert, and the honest boundary.
+* **`docs/PRIMER_for_openzoo_ai.md`** -- provenance (`taught` vs `model-cached`), `taught_only`, `zoo_panel`, and giving a locally-run model the same treatment via `tools/local_rung.py`.
+* **`assimilation/README.md`** -- the Unicron/Galvatron scripts: `install.bat` (Unicron makes Galvatron), `galvatron.bat --imbue` (build a bundle) and `run_galvatron.bat` (run one).
+
 ---
 
-*726 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*761 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

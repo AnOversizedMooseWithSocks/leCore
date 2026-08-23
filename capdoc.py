@@ -160,6 +160,26 @@ def generate(root=None):
                 out.append("```")
             out.append("")
 
+    # DEEP DIVES belong in the GENERATOR, not appended by hand (cp51: a hand-added
+    # section here was silently erased by the next regen -- the same trap this repo
+    # documents for DOC_MAP, walked into one file over).
+    out.append("## Deep dives")
+    out.append("")
+    out.append("* **`docs/LEVER7.md`** -- the displacement trace: the superposed algebra, "
+               "the delta-rule write, the governance that makes it trustworthy "
+               "(calibration, veto, sessions, receipts, provenance), its position against "
+               "Titans / Larimar / MemoryLLM, and the kept negatives that shaped it.")
+    out.append("* **`docs/UNICRON_INSTALL.md`** -- installing leCore INTO a model: facts "
+               "into `down_proj`, the algebra as circulants, a routed swarm that arrives "
+               "off, the five-point health gate, budget-by-bisect, cartridges with exact "
+               "revert, and the honest boundary.")
+    out.append("* **`docs/PRIMER_for_openzoo_ai.md`** -- provenance (`taught` vs "
+               "`model-cached`), `taught_only`, `zoo_panel`, and giving a locally-run "
+               "model the same treatment via `tools/local_rung.py`.")
+    out.append("* **`assimilation/README.md`** -- the Unicron/Galvatron scripts: "
+               "`install.bat` (Unicron makes Galvatron), `galvatron.bat --imbue` (build a "
+               "bundle) and `run_galvatron.bat` (run one).")
+    out.append("")
     # a small footer so a reader knows the count and how to regenerate
     out.append("---")
     out.append("")

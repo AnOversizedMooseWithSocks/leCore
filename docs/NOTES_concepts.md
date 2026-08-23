@@ -78742,3 +78742,217 @@ the second would be the cheat. THE FIX IS REAL AND SHIPPED; THE CLAIM IT SUPPORT
 search in NumPy beats FAISS Flat's batched-equivalent workload", and proving that properly needs a
 harness row that batches BOTH sides. That row does not exist yet and I am not going to write it
 into the results table by hand.
+
+## MERGE 4: a big branch, and a real bloat finding
+
+FIRST, THE CONTAINER HAD BEEN RESET and the working copy was gone. Recovered
+from the last shipped zip -- 736 modules, integrations and the CI work intact.
+THAT IS WHAT SHIPPING EVERY TURN IS FOR; the delivery artifact is also the
+backup, and this is the first time that mattered.
+
+THE BLOAT MOOSE SUSPECTED IS REAL AND WAS MOSTLY ONE THING: a committed
+.venv-bench/ -- 37 MB across 1,025 files including three copies of the Python
+binary, 35% of the incoming archive. .gitignore ALREADY had `/.venv-bench/` and
+the rule was ANCHORED TOO TIGHTLY to catch it where it sat. Added the any-depth
+form. A RULE THAT IS RIGHT AND SCOPED WRONG READS EXACTLY LIKE A RULE THAT IS
+MISSING.
+
+AND THE REST OF THE SUSPECTED BLOAT MOSTLY IS NOT BLOAT, which is worth saying
+because deleting it would have been the confident move. Measured: 17.2 MB of
+images across 89 files, and MOST ARE REFERENCED BY DOCS -- figures/ 10 of 21,
+gallery/ 33 of 36, benchmarks/ 3 of 7. A README whose image 404s is worse than
+the bytes. data/uea (1.3 MB) has NO downloader in the tree, so bench_pack.py
+cannot run without it -- committed data that is load-bearing today, and the
+honest fix is a fetcher, not a deletion.
+ONE DIRECTORY QUALIFIED: research/path_d/figures/ -- 2.0 MB, twelve images, ZERO
+doc references and NO script in the tree that writes them. Orphaned output.
+IGNORED RATHER THAN DELETED, because they may be evidence behind a NOTES entry;
+ignoring stops them travelling without destroying them.
+
+THE MERGE ITSELF WAS A STRAIGHT TAKE-THEIRS, verified rather than assumed: their
+branch forked AFTER my last ship and contains all seventeen markers of this
+session's work (CI ordering, concurrency, the GPU xp conversion, the bf16 boot
+guard, L-1..L-4, levers, ouroboros, the ladder fixture fix). 772 modules after.
+THEY ADDED A SEVENTH LEVER -- "spend accumulated experience: amortize across
+SIMILARITY" -- with its own CHANGELOG.
+
+THREE FAILURES AFTER MERGING, all of the same family:
+  NINE NAME COLLISIONS from new modules joining existing families. phasor is a
+    new VSA BACKEND, so bind/unbind/bundle/cleanup collide BY DEFINITION -- a
+    backend that did not define bind would not be a backend. indexstore joins
+    the load/save/build family every store-shaped module has. And two real
+    homonyms worth naming: mueller.power is optical POWER while phasor.power is
+    FRACTIONAL POWER of an atom, and elements.symbols is CHEMICAL symbols while
+    indexstore.symbols is an index vocabulary. Recorded with reasons, not
+    budgeted away.
+  MY OWN TEST HARDCODED `len(m.levers()) == 6` and broke when a seventh landed.
+    A TEST THAT FAILS WHEN THE THING IT GUARDS GROWS IS TESTING THE WRONG
+    PROPERTY -- what that file cares about is that levers WORKS with every
+    optional dependency blocked, not how many entries it has. Now asserts the
+    shape (>= 6, every entry carrying evidence and costs).
+
+## RAN THE BUNDLED MEMORY SEED. It works, and it does not do what the name suggests.
+
+Moose asked how much the bundled seed has improved things. Measured it rather
+than reported the docstring, and the answer has three parts.
+
+WHAT THE SEED IS: lecore_data/routing/index_128d.npz -- 209 KB holding 620
+MODULES x 128d as int8 with per-row lo/hi (so ~4x smaller than float32), a mean
+and one principal component, plus a 1,458-edge "bones" graph. It is a
+DOCUMENT-SIDE index: it embeds the ENGINE'S MODULES, not queries.
+
+IT IS INTACT AND FAST. Self-retrieval -- feed a module's own dequantized vector
+and ask for itself -- is 60/60 top-1 at gamma 0. Loading and building the router
+costs 0.007 s, ONCE and lazily (boot is unaffected), and a query is 0.03 ms over
+620 modules. As a shipped artifact it is cheap and correct.
+
+THE BONES FUSION COSTS ACCURACY ON EVERY CASE I COULD MEASURE, which is the
+finding worth keeping:
+    gamma 0.0   top-1 60/60 (100%)      noisy(0.3) top-5 54/60
+    gamma 0.5   top-1 54/60  (90%)
+    gamma 1.0   top-1 53/60  (88%)      noisy(0.3) top-5 34/60
+    gamma 2.0   top-1 52/60  (87%)
+On a NOISY query -- a module vector plus noise, which is what a paraphrase looks
+like geometrically -- gamma 1.0 loses TWENTY of sixty at the noise level where
+retrieval still works at all. The docstring calls gamma>0 "measured dense+bones
+fusion (7/12)", so it was measured on twelve exam queries; on this probe it is
+a REGRESSION, and DEFAULT gamma IS 1.0.
+STATED AS A DISAGREEMENT, NOT A VERDICT: my probe is self-retrieval and
+self-retrieval-plus-noise, which is not the exam's task. Two honest measurements
+of different things can both be right, and the useful move is to say so rather
+than change a default on the strength of the probe I happened to run.
+
+AND THE HONEST LIMIT ON "IMPROVED THINGS": route_semantic("plain english")
+RETURNS None. There is no query embedder in the box -- set_embedder exists for a
+caller's own model, and the shipped index is the document side only. So the seed
+has NOT improved everyday capability lookup; find_capability (lexical) answered
+8/8 on stranger phrasings in the same run, and it is what every faculty and
+every agent path actually calls.
+THE SEED IS A LOADED GUN WITH NO TRIGGER SHIPPED: excellent artifact, real
+retrieval quality, and no default path from a user's sentence into it.
+
+## THE BUNDLED .lecore LEARNING STATE: it loads, and it is a SELFTEST FIXTURE
+
+Moose asked how much the bundled distilled memory has improved things. Opened it
+rather than reporting the headline, and the headline does not survive.
+
+THE ARTIFACT IS REAL AND WELL-BUILT. lecore_memory/learning/state.lecore is a
+zip container: manifest.json plus per-section .npy, eleven sections --
+affinity, chains, skeletons, predictor, ledger, taught, goals, recipes,
+calibration, experience. learning_load('lecore_memory') returns
+{loaded: True, format: container, sections: 11}. The FORMAT works.
+
+THE CONTENT IS NOT DISTILLED USE. The ledger reads:
+    queries 116 | est_tokens_saved 69,600 | T0 116, T1..T4 0, refused 0
+69,600 / 116 IS EXACTLY 600, and `ask(query, est_llm_tokens=600)` is the default
+in p20_zoo -- so "tokens saved" is QUERIES x A CONSTANT, not a measurement of
+anything. And the queries themselves:
+    116 log entries, TWO DISTINCT: "pin provenance q" x58, "pin cached q" x58
+    131 taught texts, TWO DISTINCT: the same two strings
+    pairs: ["0:0", "an established answer"], ["0:1", "a guess"]
+THOSE ARE SELFTEST STRINGS. A test that pins provenance and caching ran ~58
+times and its writes were committed as the shipped state.
+
+AND THE release_bundle COPY IS 958 KB OF ZEROS: queries 0, est_tokens_saved 0.0,
+every counter 0, affinity 0, chains 0, predictor 0 -- with two 508 KB .npy
+arrays for a section carrying no entries. It is TEN TIMES the size of the one
+with content in it.
+
+MEASURED EFFECT ON BEHAVIOUR: NONE that I can find. Two minds, one with the
+state loaded and one without, return an IDENTICAL top-5 for "render a mesh".
+With 116 T0 hits on two strings there is nothing for affinity or the predictor
+to generalise from -- counts=1 on the predictor, 0 on affinity, 0 chains.
+
+WHY THIS MATTERS MORE THAN THE NUMBER: est_tokens_saved 69,600 is exactly the
+shape of a metric that will be quoted. It is queries x 600 with no measurement
+behind it, from a corpus of two selftest strings. A LEDGER THAT MULTIPLIES A
+COUNT BY A CONSTANT IS A COUNTER WEARING A MEASUREMENT'S NAME.
+NOT A CRITICISM OF THE MECHANISM, which is the honest part: the container, the
+loader, the section layout and the tier accounting all work. What is missing is
+a REAL RUN behind them -- and a .lecore built from actual sessions is a genuinely
+valuable thing to ship. This one was built by a test.
+
+## BOOTED leCORE AS A STRANGER WOULD, AND FIXED WHAT TRIPPED ME
+
+Moose: boot it up, use external memory, and fix the docs wherever that was
+confusing. Did it without reading source first, which is the only way to find
+this class of problem.
+
+IT ALL WORKS. `lecore.autoboot()` returns a ready mind in 0.44 s with a real
+POST line, and external memory round-trips end to end: teach a fact,
+learning_save, NEW PROCESS, autoboot the same partition, ask -> tier T0,
+provenance "taught". The mechanism is sound. Everything below is about being
+able to FIND and TRUST it.
+
+FOUR THINGS TRIPPED ME, ALL FIXED:
+
+1. THE FRONT DOOR WAS DARK. find_capability("boot up lecore") returned
+   holographic_boot -- a MODEL boot record, unrelated -- and autoboot appeared
+   NOWHERE. It is a MODULE-LEVEL function, and the catalog only reflects the
+   MIND'S surface, so THE ONE CALL A NEWCOMER MAKES FIRST WAS THE ONE THING THE
+   DISCOVERY SYSTEM COULD NOT SEE. Registered as a pointer capability with a
+   runnable example. Same for "external memory" (-> learning_load/save) and
+   "teach it a fact": the mechanisms were fine, THE WORDS WERE MISSING. 7/7 now.
+
+2. THE DEFAULT PARTITION WAS ONE MACHINE'S ABSOLUTE PATH,
+   "/home/claude/claude_partition", which exists on nobody else's disk. Everyone
+   outside fell through to the shipped bundle without being told why. Order is
+   now argument -> $LECORE_PARTITION -> ./lecore_memory -> release_bundle/, with
+   the legacy path kept LAST so an existing setup still works. A DEFAULT NOBODY
+   CAN HIT IS A DEFAULT THAT TEACHES NOTHING.
+
+3. AND IT PICKED THE EMPTY PARTITION. release_bundle/ sorted ahead of
+   lecore_memory/ -- and release_bundle is the 958 KB of zeros from the previous
+   entry while lecore_memory has the content. Reordered.
+
+4. THE POST LINE LIED, and this is the one worth keeping. Booting a partition
+   with 116 logged queries reported "virgin mind" -- IDENTICAL to booting
+   nothing. The check reads the lever-7 text vocabulary, which was true, and the
+   PARENTHETICAL was a guess about why. Worse: bios.boot ALREADY RUNS POST TWICE
+   ON PURPOSE, before and after the mount, storing the second as
+   "post_after_mount" precisely because the spectral check needs state -- and
+   autoboot surfaced the PRE-MOUNT one. THE DESIGN WAS RIGHT AND THE WRAPPER
+   READ THE WRONG FIELD. Now reports vocabulary 11 vs 5 and names the partition
+   it loaded from, and _autoboot_report carries "mounted".
+
+DOCUMENTED IN THE README, because a fix nobody can find is the same bug again:
+what a partition IS, the four-step search order, how to keep your own, and that
+learning_load/learning_save ARE the whole external-memory API. THE EXAMPLE IS
+RUN VERBATIM AND PASSES -- teach, save, reboot, T0 recall with provenance.
+
+## BOTH ENDS, LIVE: external memory does kick in automatically -- after two fixes
+
+Moose asked whether the memory system now kicks in on its own with both ends
+connected. Booted it and watched.
+
+IT DOES, AND THE TIERING IS REAL. With a model rung attached and a partition
+mounted:
+    taught question   -> tier T0, answer 'shipyard-3', provenance "taught",
+                         ZERO llm calls -- memory answered, the model was never
+                         asked
+    unknown question  -> tier T4, model consulted
+ACROSS SEPARATE PROCESSES: teach + learning_save in one, autoboot + ask in
+another, T0 recall with the model attached and idle. That is the whole claim,
+measured.
+
+TWO REAL BUGS FOUND ON THE WAY, BOTH THE SAME SHAPE -- A FALLBACK THAT FIRED
+OVER AN EXPLICIT REQUEST:
+  autoboot(partition="/my/new/memory") SILENTLY MOUNTED release_bundle. cp79
+    added a shipped-bundle fallback so `autoboot()` works out of the box on a
+    fresh machine -- correct intent, unconditional trigger. So asking for a NEW
+    partition (the normal way to start your own memory) got the generic bundle,
+    _autoboot_report NAMED release_bundle while the caller believed otherwise,
+    and the first learning_save wrote somewhere the next boot would not read.
+    An explicit partition= or $LECORE_PARTITION is a REQUEST: create it and use
+    it. Only the conventional-path search may fall back.
+  memory=False STILL MOUNTED. The no-memory sentinel is not a real directory, so
+    the same fallback caught it and "boots clean" booted the shipped bundle.
+Verified all three arms after: explicit -> its own path, no argument ->
+lecore_memory, memory=False -> mounted None.
+
+AND ONE FAILURE THAT WAS MINE, worth recording because I nearly filed it as an
+engine bug: a taught fact "did not survive" a save. It survived fine -- I had
+called autoboot TWICE in one process, taught mind #1, and saved mind #2. THE
+ENGINE PERSISTED EXACTLY WHAT IT WAS ASKED TO. A second mind booting the same
+partition reads the first one's teaching at T0; checked that separately, and it
+does.

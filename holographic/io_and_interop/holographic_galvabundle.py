@@ -83,8 +83,40 @@ def main():
         print("load report:", report)
         return
     if a.mode == "generate":
-        ids = [int(t) for t in a.prompt.split(",") if t.strip() != ""]
+        # A BUNDLE MUST ACCEPT WHAT A PERSON TYPES (cp51): this path required
+        # COMMA-SEPARATED TOKEN IDS, so `generate --prompt "the lever"` died on
+        # int("the lever") -- the first thing anyone tries. If the bundle carries a
+        # tokenizer, text is encoded and the reply is DECODED back to text; the
+        # id-list form still works for anyone scripting against it.
+        raw = str(a.prompt or "")
+        looks_like_ids = raw.replace(",", " ").split() and all(
+            t.strip().lstrip("-").isdigit() for t in raw.split(",") if t.strip())
+        tok = None
+        try:
+            from holographic.io_and_interop.holographic_bpe import BPE
+            if os.path.exists(os.path.join(HERE, "tokenizer.json")):
+                tok = BPE.from_dir(HERE)
+        except Exception:
+            tok = None
+        if looks_like_ids:
+            ids = [int(t) for t in raw.split(",") if t.strip() != ""]
+        elif tok is not None:
+            ids = list(tok.encode(raw))
+            if not ids:
+                print("the bundle's tokenizer encoded 0 tokens for that prompt -- "
+                      "pass comma-separated ids instead")
+                return
+        else:
+            print("this bundle carries no tokenizer.json, so it cannot encode text -- "
+                  "pass comma-separated token ids (e.g. --prompt 12,44,7)")
+            return
         out, _ = gv.generate(ids, n_new=a.tokens)
+        if tok is not None and not looks_like_ids:
+            try:
+                print(tok.decode(list(out)))
+                return
+            except Exception:
+                pass
         print(",".join(str(t) for t in out))
         return
     # conversations live inside the bundle, so a bundle carries its own history

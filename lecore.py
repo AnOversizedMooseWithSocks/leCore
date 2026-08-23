@@ -151,3 +151,107 @@ def _read_version():
 
 
 __version__ = _read_version()
+
+
+def autoboot(partition=None, session=None, llm="auto", memory=True):
+    """ONE CALL, BOTH ENDS, MEMORY IN (cp62): the standing boot ritual made standard so
+    it never has to be asked for again. Finds the partition (arg, or $LECORE_PARTITION,
+    or the conventional path), boots doctrine + external memory, attaches the model rung
+    when one is reachable (llm="auto": ModelRung if importable and a model dir exists;
+    pass a callable to override; llm=None for memory-end only), sets the archive root,
+    and opens a session. Returns the mind, ready.
+
+        import lecore
+        m = lecore.autoboot()          # attached on both ends, memory loaded
+
+    The POST line is available as m._autoboot_report."""
+    import os
+    # THE DEFAULT WAS ONE MACHINE'S ABSOLUTE PATH -- "/home/claude/claude_partition"
+    # -- which exists on nobody else's disk, so every outside user fell through to
+    # the shipped bundle without being told why. It still works (the fallthrough is
+    # correct), but a default nobody can hit is a default that teaches nothing.
+    # Order now: explicit argument, $LECORE_PARTITION, ./lecore_memory (the
+    # conventional per-repo partition, and the one that actually has content),
+    # then the shipped release_bundle/. The legacy absolute path stays LAST so an
+    # existing setup that relies on it keeps working -- additive, not a flip.
+    root = partition or os.environ.get("LECORE_PARTITION")
+    if not root:
+        for _cand in ("lecore_memory", "release_bundle",
+                      "/home/claude/claude_partition"):
+            if os.path.isdir(_cand):
+                root = _cand
+                break
+        root = root or "lecore_memory"
+    if not memory:
+        root = "\0no-memory"          # nothing on disk matches; boots clean
+    rung = None
+    if llm == "auto":
+        # cp78 polish: the auto arm now uses the ENGINE'S OWN RuntimeRung (ships
+        # with the repo, automatic source attribution, opt-outs honored) instead
+        # of a session-local /tmp tool that never shipped -- anyone else's
+        # llm="auto" was silently getting no rung at all. Candidates:
+        # $LECORE_MODEL first, then the conventional local paths.
+        cands = [os.environ.get("LECORE_MODEL", "")] + \
+            ["/tmp/mini_installed_full", "/tmp/mini_baked"]
+        for cand in cands:
+            if cand and os.path.isdir(cand):
+                try:
+                    from holographic.io_and_interop.holographic_runtimerung \
+                        import RuntimeRung
+                    rung = RuntimeRung(cand)
+                    break
+                except Exception:
+                    rung = None
+    elif callable(llm):
+        rung = llm
+    # THE SHIPPED-BUNDLE FALLBACK IS FOR AN ABSENT DEFAULT, NOT AN EXPLICIT ASK.
+    # cp79 added it so `lecore.autoboot()` works out of the box on a fresh
+    # machine, which is right -- but it fired unconditionally, so
+    # `autoboot(partition="/my/new/memory")` SILENTLY MOUNTED release_bundle
+    # instead. _autoboot_report then named release_bundle while the caller
+    # believed they were on their own partition, and the first learning_save
+    # went somewhere the next boot would not read.
+    # An explicit partition= or $LECORE_PARTITION is a REQUEST: create it and
+    # use it. Only the conventional-path search may fall back.
+    _explicit = bool(partition or os.environ.get("LECORE_PARTITION"))
+    if _explicit and memory and not os.path.isdir(root):
+        os.makedirs(root, exist_ok=True)
+    if not _explicit and memory and not os.path.isdir(root):
+        _shipped = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "release_bundle")
+        if os.path.isdir(_shipped):
+            root = _shipped
+    m = UnifiedMind()
+    # CREATE AN EXPLICITLY-REQUESTED PARTITION INSTEAD OF SILENTLY DROPPING IT.
+    # `partition=root if isdir(root) else None` meant that asking for a NEW
+    # directory -- the normal way to start your own memory -- fell through to
+    # the shipped bundle, and _autoboot_report then said "release_bundle" while
+    # the caller believed they were on their own partition. The first save would
+    # go to the right place and every boot before it to the wrong one.
+    # Only for an EXPLICIT partition= or $LECORE_PARTITION: the search-order
+    # fallbacks must still fall back, because a missing ./lecore_memory is a
+    # conventional absence, not a request.
+    rep = m.boot(partition=root if os.path.isdir(root) else None,
+                 doctrine=True, llm=rung or (lambda p: ""))
+    m._archive_root = root
+    if rung is not None:
+        try:
+            m.zoo_attach(rung)
+            m._zoo_llm = rung
+            if hasattr(rung, "mind"):
+                rung.mind = m
+        except Exception:
+            pass
+    if session:
+        m.session_open(str(session))
+    # REPORT THE POST TAKEN *AFTER* THE MOUNT WHEN THERE IS ONE. bios.boot runs
+    # POST twice on purpose -- once before mounting a partition and once after,
+    # as "post_after_mount", precisely because the spectral check needs state to
+    # read. This surfaced the PRE-mount one, so booting a partition with 116
+    # logged queries reported "virgin mind", identical to booting an empty one.
+    # THE DESIGN WAS ALREADY RIGHT AND THE WRAPPER READ THE WRONG FIELD.
+    m._autoboot_report = {"partition": root, "rung": type(rung).__name__
+                          if rung is not None else None,
+                          "post": rep.get("post_after_mount") or rep.get("post"),
+                          "mounted": rep.get("mounted")}
+    return m

@@ -66,3 +66,6 @@ docs/PANEL_lean_logic_review.md
 /.lecore_jobs
 leOS.zip
 lestudio.zip
+/.venv-bench
+CHANGELOG_lever7.md
+docs/VOID_EXPLORER_PLAN.md

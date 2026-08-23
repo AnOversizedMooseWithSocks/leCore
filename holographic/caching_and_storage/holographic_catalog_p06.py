@@ -3457,6 +3457,29 @@ def register_p06(c):
                              "recall of the capability search",
                              "hold out an alias and see if it still routes"))
 
+    # THE FRONT DOOR, REGISTERED. `lecore.autoboot()` is what the README tells a
+    # newcomer to call, and find_capability("boot up lecore") returned
+    # holographic_boot -- a MODEL boot record, unrelated -- with autoboot
+    # nowhere in the top 15. It is a MODULE-LEVEL function, so nothing
+    # auto-registered it: the catalog reflects the MIND'S surface, and the one
+    # call someone makes FIRST lives outside that surface.
+    # A POINTER CAPABILITY, like the integrations entry: method=None because
+    # there is no mind method to invoke, and the example is the real call.
+    c.register_capability(
+        "Boot leCore (autoboot: doctrine + external memory + model rung)",
+        "lecore.autoboot() is the standing start: it finds the memory partition "
+        "(argument, $LECORE_PARTITION, or the shipped release_bundle/), loads "
+        "doctrine and external memory, attaches a model rung when one is "
+        "reachable, and opens a session. Returns a ready mind; the POST line is "
+        "on m._autoboot_report. Pass partition= for your own memory directory "
+        "and llm=None for the memory end only.",
+        example="import lecore; m = lecore.autoboot(); m._autoboot_report",
+        aliases=("boot up lecore", "start lecore with its memory",
+                 "the one call that gets me going", "how do I start",
+                 "load doctrine and memory and a model", "autoboot"),
+    )
+
+
 
 _PART = "holographic_catalog_p06"
 

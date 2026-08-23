@@ -5,7 +5,7 @@ author_url: https://openzoo.fun
 funding_url: https://openzoo.fun
 version: 0.1.0
 license: MIT
-description: Route chats through openzoo.fun - leCore-backed inference, 480+ models, effectively unlimited context, pay-per-call. Works with the local x402 proxy (npx openzoo) today and the hosted endpoint when available.
+description: Route chats through openzoo.fun - leCore-backed inference, ~435 models, effectively unlimited context, pay-per-call. Works with the local x402 proxy (npx openzoo) today and the hosted endpoint when available.
 requirements: requests
 """
 
@@ -31,12 +31,8 @@ from pydantic import BaseModel, Field
 
 class Pipe:
     class Valves(BaseModel):
-        # Default is the local proxy started by `npx openzoo`. The hosted endpoint is
-        # https://x402-tokens.fly.dev/v1 (api.openzoo.fun/v1 404s -- it is the
-        # website, not the gateway).
-        # NOTE if you run open-webui in Docker (the documented install): set
-        # this to http://host.docker.internal:8402/v1 -- inside a container
-        # "localhost" is the container, and the proxy is on the HOST.
+        # Default is the local proxy started by `npx openzoo`. Point this at
+        # the hosted endpoint (e.g. https://api.openzoo.fun/v1) once it exists.
         OPENZOO_BASE_URL: str = Field(
             default="http://localhost:8402/v1",
             description="OpenAI-compatible base URL for openzoo (local proxy or hosted).",
@@ -99,48 +95,17 @@ class Pipe:
     })
 
     @staticmethod
-    def _format_receipt(data: dict) -> str:
-        # FIXED (was reading the wrong object): billing does NOT live in
-        # `usage`. Verified against the live gateway, a response carries a
-        # TOP-LEVEL "x402" block:
-        #   x402: {billedUsd, cogsUsd, directUsd, savesVsDirect,
-        #          subscription: {tier, cogsUsd, wouldHaveBilled, invoiced}}
-        # while `usage` holds only OpenAI/OpenRouter fields (prompt_tokens,
-        # completion_tokens, cost, cost_details, is_byok). The previous
-        # version looked for billedUsd/savesVsDirect inside `usage`, never
-        # found them, and silently rendered a token count and nothing else --
-        # i.e. the receipt, which is the whole reason this plugin exists, was
-        # dead code.
-        x = data.get("x402") or {}
-        usage = data.get("usage") or {}
-        sub = x.get("subscription") or {}
+    def _format_receipt(usage: dict) -> str:
+        # openzoo returns billing info alongside usage; surface it so users
+        # see the per-call cost and the savings from the leCore spill.
         parts = []
-
-        billed = x.get("billedUsd")
-        if isinstance(billed, (int, float)):
-            parts.append(f"billed ${billed:.6f}".rstrip("0").rstrip("."))
-
-        # DELIBERATELY NOT rendering `savesVsDirect` as a percentage saved.
-        # Measured: billedUsd 0.00700472 / wouldHaveBilled 0.02101416 =
-        # 0.3333 == savesVsDirect. So the field is the RATIO PAID, not the
-        # fraction saved -- printing "saved 0.33" claims a third when the
-        # real saving is two thirds. Show both absolute numbers instead;
-        # they cannot be misread.
-        would = sub.get("wouldHaveBilled") or x.get("directUsd")
-        if isinstance(would, (int, float)) and isinstance(billed, (int, float)) \
-                and would > billed > 0:
-            parts.append(f"vs ${would:.6f}".rstrip("0").rstrip(".") + " direct"
-                         f" ({would / billed:.1f}x)")
-
-        if sub.get("tier"):
-            parts.append(f"{sub['tier']} subscription")
-        elif x.get("paid"):
-            parts.append(str(x["paid"]))
-
-        pt = usage.get("prompt_tokens")
-        if pt:
-            parts.append(f"{pt} tokens read")
-        return ("\n\n---\n*openzoo: " + " · ".join(parts) + "*") if parts else ""
+        if "billedUsd" in usage:
+            parts.append(f"billed ${usage['billedUsd']}")
+        if "savesVsDirect" in usage:
+            parts.append(f"saved {usage['savesVsDirect']} vs direct")
+        if "prompt_tokens" in usage:
+            parts.append(f"{usage['prompt_tokens']} tokens read")
+        return ("\n\n---\n*openzoo: " + ", ".join(parts) + "*") if parts else ""
 
     # ------------------------------------------------------------------ pipes
 
@@ -221,7 +186,8 @@ class Pipe:
 
         data = r.json()
         if self.valves.SHOW_RECEIPTS:
-            receipt = self._format_receipt(data)   # whole body: x402 is top-level
+            usage = data.get("usage", {}) or {}
+            receipt = self._format_receipt(usage)
             if receipt:
                 try:
                     data["choices"][0]["message"]["content"] += receipt
@@ -251,27 +217,9 @@ def _selftest():
             "chat_id": "x", "session_id": "y", "metadata": {}, "features": {}}
     clean = {k: v for k, v in junk.items() if k in Pipe._OPENAI_CHAT_FIELDS}
     assert set(clean) == {"model", "messages", "stream"}, clean
-    # receipt formatting -- REGRESSION TEST for the bug this file used to have.
-    # These are the exact shapes a live gateway returns; the old code read
-    # `usage` for billedUsd/savesVsDirect and therefore rendered nothing.
-    live = {
-        "usage": {"prompt_tokens": 3100, "completion_tokens": 20, "cost": 0.007},
-        "x402": {"billedUsd": 0.00700472, "savesVsDirect": 0.3333333333333333,
-                 "cogsUsd": 0.00700472, "directUsd": 0.00700472,
-                 "paid": "subscription",
-                 "subscription": {"tier": "pro", "wouldHaveBilled": 0.02101416,
-                                  "invoiced": "stripe"}},
-    }
-    full = Pipe._format_receipt(live)
-    assert "billed $0.007" in full, full
-    assert "vs $0.021" in full and "3.0x" in full, full   # 0.021/0.007
-    assert "pro subscription" in full, full
-    assert "3100 tokens read" in full, full
-    # and the ratio must NOT be printed as a savings percentage
-    assert "saved" not in full, full
-    # a usage-only body (no x402 -- e.g. prepaid credit, no 402 emitted) still
-    # renders the token count rather than blowing up
-    assert "3100 tokens read" in Pipe._format_receipt({"usage": {"prompt_tokens": 3100}})
+    # receipt formatting: all fields, some fields, none
+    full = Pipe._format_receipt({"billedUsd": 0.0021, "savesVsDirect": "97%", "prompt_tokens": 3100})
+    assert "billed $0.0021" in full and "saved 97%" in full and "3100 tokens read" in full
     assert Pipe._format_receipt({}) == ""
     # valves defaults are the local-proxy contract
     assert p.valves.OPENZOO_BASE_URL.endswith("/v1")

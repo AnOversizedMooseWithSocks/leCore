@@ -10,10 +10,10 @@ install, so this folder is documentation only.
 2. In Cline, click the ⚙️ settings icon.
 3. **API Provider**: select `OpenAI Compatible`.
 4. **Base URL**: `http://localhost:8402/v1`
-   (hosted: `https://x402-tokens.fly.dev/v1`) — do NOT paste `/chat/completions`.
+   (hosted: `https://api.openzoo.fun/v1`) — do NOT paste `/chat/completions`.
 5. **API Key**: `sk-openzoo` (any value for local; real key for hosted).
 6. **Model ID**: a zoo model id, e.g. `nvidia/nemotron-3.5-lightning`
-   — must exactly match an id returned by `/v1/models` (`curl localhost:8402/v1/models`).
+   — must exactly match an id returned by `/v1/models` (`npx openzoo models`).
 7. Fill the **Model Configuration** block (context window, output limits,
    whether the model supports images/computer-use). People skip this; for
    custom endpoints it matters — set the context window generously, since the

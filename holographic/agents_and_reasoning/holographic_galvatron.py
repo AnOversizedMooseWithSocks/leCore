@@ -269,6 +269,8 @@ class OuroborosResident:
         self.Pv = _projector(hidden_dim, dk, tag + "_v")
         self.S = np.zeros((dk, dk))
         self.n_writes = 0
+        self.n_stream = 0                               # cp46: writes from the hook
+        self.n_external = 0                             # cp46: writes from the mouth
         self._partition = partition                     # a KnowledgeStore, or None
 
     # -- the stream side (passive) --
@@ -279,6 +281,7 @@ class OuroborosResident:
             nk, nv = np.linalg.norm(k) or 1.0, np.linalg.norm(v) or 1.0
             self.S = self.decay * self.S + np.outer(k / nk, v / nv)
             self.n_writes += 1
+            self.n_stream += 1
         return np.zeros_like(h)
 
     # -- the mouth (measured verbs) --
@@ -287,6 +290,7 @@ class OuroborosResident:
         self.S = self.S + np.outer(k / (np.linalg.norm(k) or 1.0),
                                    v / (np.linalg.norm(v) or 1.0))
         self.n_writes += 1
+        self.n_external += 1
         if note and self._partition is not None:
             self._partition.add(str(note), kind="note", source="ouroboros")
         return True
@@ -303,12 +307,57 @@ class OuroborosResident:
 
     def capacity_report(self):
         """Predicted recall of a fresh memory from the crosstalk law -- effective load from
-        the decay-weighted write count, so the manager warns BEFORE the trace confabulates."""
-        n_eff = (1.0 - self.decay ** (2 * max(self.n_writes, 1))) / (1.0 - self.decay ** 2)
+        the decay-weighted write count.
+
+        KEPT NEGATIVE (cp46, the full-stack battery, and it QUALIFIES the cp45 claim that
+        "the manager knows saturation before it confabulates"): that is true only in a
+        HOMOGENEOUS trace. When the model's own forward passes accumulate a STREAM
+        BACKGROUND and facts are written on top, this prediction is an OPTIMISTIC UPPER
+        BOUND for those facts, and it does not notice: measured on a real baked model,
+        externally-written facts recalled at 0.923 / 0.753 / 0.424 against predictions of
+        0.938 / 0.886 / 0.852 for 0 / 3 / 40 background passes -- a gap of 0.43 while
+        `saturating` still read False. The resident CANNOT detect this from S alone,
+        because it stores the trace and not the keys. So it now reports the REGIME and
+        says plainly that mixed means upper-bound; verify_recall() is the ground-truth
+        path when it matters."""
+        # cp45 (the ouroboros battery found it): decay=1.0 is a LEGITIMATE config -- a
+        # trace with no forgetting -- and the geometric-series form divides by zero there.
+        # The limit is exact and obvious: with no decay every write counts once, so
+        # n_eff = n_writes. Guarding here keeps capacity_report honest at both extremes.
+        if abs(1.0 - self.decay ** 2) < 1e-12:
+            n_eff = float(max(self.n_writes, 1))
+        else:
+            n_eff = (1.0 - self.decay ** (2 * max(self.n_writes, 1))) / (1.0 - self.decay ** 2)
         pred = 1.0 / np.sqrt(1.0 + max(n_eff - 1.0, 0.0) / self.dk)
+        mixed = self.n_stream > 0 and self.n_external > 0
         return {"n_writes": self.n_writes, "n_effective": float(n_eff),
                 "predicted_recall": float(pred),
-                "saturating": bool(pred < 0.5)}
+                "saturating": bool(pred < 0.5),
+                "n_stream": self.n_stream, "n_external": self.n_external,
+                "regime": "mixed" if mixed else "homogeneous",
+                "prediction_is_upper_bound": bool(mixed),
+                "advice": ("stream background present -- predicted_recall is an UPPER "
+                           "BOUND for externally written facts; call verify_recall(pairs) "
+                           "for ground truth") if mixed else "prediction is calibrated"}
+
+    def verify_recall(self, pairs):
+        """GROUND TRUTH, because a prediction that cannot see its own regime must not be
+        the last word (cp46). Returns the MEASURED mean readback cosine over caller-owned
+        (key, value) pairs plus the gap against the prediction."""
+        if not pairs:
+            return {"measured_recall": None, "n": 0}
+        sims = []
+        for k, v in pairs:
+            r = self.external_read(k)
+            nv = np.asarray(v, np.float64)
+            sims.append(float(np.dot(r / (np.linalg.norm(r) or 1.0),
+                                     nv / (np.linalg.norm(nv) or 1.0))))
+        meas = float(np.mean(sims))
+        cap = self.capacity_report()
+        return {"measured_recall": meas, "n": len(pairs),
+                "predicted_recall": cap["predicted_recall"],
+                "gap": float(cap["predicted_recall"] - meas),
+                "regime": cap["regime"]}
 
     def consolidate(self, pairs, gain=0.6):
         """Transcript-sourced rehearsal ONLY: pairs = [(key, value), ...] from ground truth
@@ -460,7 +509,27 @@ def _selftest():
         from transformers import Qwen3NextConfig, Qwen3NextForCausalLM
     except ImportError:
         print("galvatron selftest SKIPPED-REFERENCE (torch/transformers absent)")
-        return
+        # cp45 OUROBOROS BATTERY (found and fixed a real red): decay=1.0 is a legitimate
+    # no-forgetting trace and capacity_report divided by zero on it. The limit is exact.
+    oB = OuroborosResident(hidden_dim=32, layer=0, dk=16, decay=1.0)
+    import numpy as _np
+    _rg = _np.random.default_rng(0)
+    kB, vB = _rg.standard_normal(16), _rg.standard_normal(16)
+    oB.external_write(kB, vB)
+    capB = oB.capacity_report()
+    assert capB["n_effective"] == 1.0, "decay=1.0: every write counts once (no division)"
+    assert capB["regime"] == "homogeneous" and not capB["prediction_is_upper_bound"]
+    oB.hook(_np.zeros((2, 32)))                      # a stream background arrives
+    capM = oB.capacity_report()
+    assert capM["regime"] == "mixed" and capM["prediction_is_upper_bound"], \
+        "cp46: a mixed trace must SAY its prediction is an upper bound"
+    vr = oB.verify_recall([(kB, vB)])
+    assert vr["measured_recall"] is not None and "gap" in vr, \
+        "verify_recall is the ground-truth path when the regime is mixed"
+    rB = oB.external_read(kB)
+    assert float(_np.dot(rB / _np.linalg.norm(rB), vB / _np.linalg.norm(vB))) > 0.9, \
+        "a single write must read back cleanly at either decay extreme"
+    return
     import lecore
     from holographic.io_and_interop.holographic_gdnruntime import GDNRuntime
 

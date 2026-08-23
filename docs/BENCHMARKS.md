@@ -141,3 +141,20 @@ genuinely nonlinear inner math. The corrected roadmap: installed coverage grows 
 the host vocabulary (turning refusals into gated/rmsnorm-style certifications) and
 through FAC's adapter lambdas — which the single-arg census systematically undercounts,
 since every installed customer so far was a closure the census would have skipped.
+
+## Long-horizon memory (LongMemEval-protocol, cp60-61)
+
+Six ability categories (single-session, multi-session, temporal, knowledge-update,
+preference, abstention), ~440 distractor turns over 30 dated sessions, RAW ingestion,
+deterministic: **1.000 overall across six seeds with no model attached**
+(`tools/bench_longmem.py`). Reader-mode (retrieve -> select -> read -> answer,
+`tools/bench_longmem_reader.py`): substrate 1.000; extractive reader with Ouroboros
+selection 1.000; ablating selection drops to 0.861 — selection is worth +14 points.
+Published SOTA on the official set is ~92-94 with frontier readers; the official-set
+run with a real reader model is on the user's-box list.
+
+## Speed tiers (cp71)
+
+Memory-first bypass **97×** (3.5 ms T0 serve vs 340 ms 8-token generation);
+truncated-schedule shortcuts **3.0× / 1.7× / 1.2×** at exit layers 7/14/21 of 28,
+gated per-cue by measured crystallization and agreement (`docs/OPENZOO_INTEGRATION.md` §8).

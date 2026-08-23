@@ -97,6 +97,25 @@ def _build_residents(mind, runtime, specs, hidden_dim):
                     mind, np.asarray(samples, np.float64),
                     int(sp["layer"]),
                     strength=float(sp.get("strength", 0.9))))
+            elif kind == "ouroboros":
+                # THE MEMORY MANAGER IN THE FORWARD PASS (cp51): a bundle without it
+                # could remember nothing DURING a run -- the oracle injects what it was
+                # given, the dreamer repairs, but nothing was watching the stream and
+                # nothing could be written mid-generation and read back. Passive by
+                # contract (measured bit-exact zero logit change), with the measured
+                # verbs and a capacity report that DECLARES ITS REGIME (cp46: with a
+                # stream background present the prediction is an UPPER BOUND; callers
+                # use verify_recall for ground truth). Durable notes spill to the
+                # partition when the pack names one -- the two speeds in one resident.
+                part = None
+                if sp.get("partition"):
+                    from holographic.caching_and_storage.holographic_knowledgestore \
+                        import KnowledgeStore
+                    part = KnowledgeStore(sp["partition"])
+                residents.append(G.OuroborosResident(
+                    hidden_dim, int(sp.get("layer", 0)),
+                    dk=int(sp.get("dk", 64)), decay=float(sp.get("decay", 0.98)),
+                    partition=part, tag=sp.get("tag", "ouro")))
             elif kind == "cache":
                 # STOP REDOING THE SAME WORK. Content-keyed memo over the
                 # measured hot paths: attention cluster routing (k-means was
@@ -340,6 +359,7 @@ def load_pack(path, mind=None, lazy=False, with_guards=True):
 
 
 def imbue(model_dir, out_dir, mind, corpus=(), probe_text=None, banned=(),
+          partition=None,
           bundle_engine=True, notes="", call_capabilities=None):
     """ONE CALL: ordinary checkpoint in, IMBUED GALVATRON out.
 
@@ -394,6 +414,7 @@ def imbue(model_dir, out_dir, mind, corpus=(), probe_text=None, banned=(),
     # screen routing (exact attention selection at ~38% of the keys) and leap
     # (speculative decoding, token-identical output) all travel in the manifest.
     specs = maximal_specs(rt, healthy, corpus=list(corpus), banned=list(banned),
+                          partition=partition,
                           carrier_pairs=ident,
                           capability="bundle_capacity", capability_args={},
                           verifier=True, leap=True,
@@ -917,7 +938,7 @@ def _probe_ids(model_dir, text=None, rt=None, minimum=16):
     return ids
 
 
-def maximal_specs(runtime, healthy_hiddens, corpus=(), banned=(),
+def maximal_specs(runtime, healthy_hiddens, corpus=(), banned=(), partition=None,
                   memories=(), carrier_pairs=None, capability=None,
                   capability_args=None, memory_snapshot=None, verifier=True,
                   leap=False, screen=None):
@@ -948,6 +969,14 @@ def maximal_specs(runtime, healthy_hiddens, corpus=(), banned=(),
     specs.append({"kind": "toolbelt", "layer": late, "gain": 1.0,
                   "max_calls": 32})
     specs.append({"kind": "cache", "verify": False})
+    # THE MAXIMAL GALVATRON WAS NOT MAXIMAL (cp51): every other resident either
+    # injects (oracle), repairs (dreamer), guards (ward) or routes (toolbelt) --
+    # nothing WATCHED the stream, so the bundle could not remember anything that
+    # happened DURING a run, and nothing could be written mid-generation and read
+    # back. Ouroboros is passive by contract (bit-exact zero logit change,
+    # measured) and mid-depth, where the stream is formed but not yet committed.
+    specs.append({"kind": "ouroboros", "layer": max(0, n // 2), "dk": 64,
+                  "decay": 0.98, "partition": partition})
     if verifier:
         # the anti-hallucination contract ships WITH the model, not beside it
         specs.append({"kind": "verifier", "passages": list(corpus)[:400]})

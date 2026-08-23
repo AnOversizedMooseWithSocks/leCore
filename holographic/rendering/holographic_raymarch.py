@@ -561,3 +561,26 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+# MERGE 2026-08: restored -- upstream's raymarch update (relax= over-relaxation in
+# sphere_trace, KEPT) also deleted this cataloged capability; the card and its callers
+# keep their function.
+def chain_transport(chains, d_eye, d_ang, pad=1e-2):
+    """Certified warm-start distances from a PREVIOUS march's sphere chains (lever 7, exact rung
+    -- backlog E3.2). Each visited sphere (t_k, d_k) is shrunk by the pose-shift bound
+    d_eye + t_k*d_ang; the returned t0[i] is the farthest point still covered by the shrunk
+    spheres CHAINED FROM ZERO -- provably empty corridor, so marching from t0 finds the same
+    first hit (measured: 0 wrong pixels over a 6-pose orbit). Rays whose chain cannot certify
+    (thin clearances near surfaces) get t0=0: the exact rung saves the cheap fat spheres and
+    honestly leaves the convergence tail alone."""
+    t0 = np.zeros(len(chains))
+    for i, ch in enumerate(chains):
+        T = 0.0
+        for tk, dk in ch:
+            shrunk = dk - (d_eye + tk * d_ang) - pad
+            if tk > T + 1e-12 or shrunk <= 0:
+                break
+            T = max(T, tk + shrunk)
+        t0[i] = T
+    return t0

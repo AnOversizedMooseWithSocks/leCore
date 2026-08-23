@@ -82,11 +82,37 @@ class KnowledgeStore:
         self.root = str(root)
         self.session = session
         os.makedirs(self.root, exist_ok=True)
-        self.path = os.path.join(self.root, "knowledge.json")
+        # THE JOURNAL LIVES IN THE CONTAINER (cp31 -- the migration cp20 flagged and two
+        # detonations demanded): knowledge.lecore is a typed, zip-compressed holographic
+        # container (sections lecore.memory.journal + lecore.memory.scopes). A legacy
+        # knowledge.json is READ ONCE, migrated by replay, and renamed *.migrated -- the
+        # doctrine holds: loose JSON is not a storage format here.
+        self.path = os.path.join(self.root, "knowledge.lecore")
+        self._legacy = os.path.join(self.root, "knowledge.json")
         self.entries = []
+        self._scopes = {}
         if os.path.exists(self.path):
-            with open(self.path) as f:
+            from holographic.io_and_interop.holographic_container import load_container
+            got = load_container(open(self.path, "rb").read())
+            for sec in got["sections"]:
+                if sec["kind"] == "lecore.memory.journal":
+                    self.entries = list(sec["meta"].get("entries") or [])
+                elif sec["kind"] == "lecore.memory.scopes":
+                    self._scopes = dict(sec["meta"].get("map") or {})
+        elif os.path.exists(self._legacy):
+            with open(self._legacy) as f:
                 self.entries = json.load(f)
+            sp = os.path.join(self.root, "scopes.json")
+            if os.path.exists(sp):
+                try:
+                    with open(sp) as f:
+                        self._scopes = json.load(f)
+                except (OSError, ValueError):
+                    pass
+            self.save()                                   # migrate by replay
+            os.rename(self._legacy, self._legacy + ".migrated")
+            if os.path.exists(sp):
+                os.rename(sp, sp + ".migrated")
 
     # ---- writing ----
 
@@ -136,32 +162,19 @@ class KnowledgeStore:
 
     SCOPES = ("all", "session", "none")
 
-    def scope_path(self):
-        return os.path.join(self.root, "scopes.json")
-
     def get_scope(self, session=None):
-        """How much history a session may reference. Persisted, so a private
-        conversation stays private across restarts -- a privacy setting that
+        """How much history a session may reference. Persisted IN THE CONTAINER, so a
+        private conversation stays private across restarts -- a privacy setting that
         forgets itself is worse than none, because the user believes it held."""
         session = session or self.session
-        try:
-            with open(self.scope_path()) as f:
-                return json.load(f).get(str(session), "all")
-        except (OSError, ValueError):
-            return "all"
+        return self._scopes.get(str(session), "all")
 
     def set_scope(self, scope, session=None):
         if scope not in self.SCOPES:
             raise ValueError("scope must be one of %r" % (self.SCOPES,))
         session = session or self.session
-        try:
-            with open(self.scope_path()) as f:
-                m = json.load(f)
-        except (OSError, ValueError):
-            m = {}
-        m[str(session)] = scope
-        with open(self.scope_path(), "w") as f:
-            json.dump(m, f, indent=1, sort_keys=True)
+        self._scopes[str(session)] = scope
+        self.save()                                       # scopes ride the same container
         return scope
 
     # ---- pruning: the other half of remembering ----
@@ -202,9 +215,15 @@ class KnowledgeStore:
         return n
 
     def save(self):
+        from holographic.io_and_interop.holographic_container import save_container
+        blob = save_container([
+            {"kind": "lecore.memory.journal", "id": "v1",
+             "meta": {"entries": self.entries}, "arrays": {}},
+            {"kind": "lecore.memory.scopes", "id": "v1",
+             "meta": {"map": self._scopes}, "arrays": {}}])
         tmp = self.path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(self.entries, f)
+        with open(tmp, "wb") as f:
+            f.write(blob)
         os.replace(tmp, self.path)     # atomic: a crash mid-write must not eat
                                        # the whole knowledge base
         return len(self.entries)

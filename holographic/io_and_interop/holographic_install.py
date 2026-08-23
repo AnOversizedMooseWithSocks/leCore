@@ -139,6 +139,17 @@ def audit(weights, seed="leCore", boot_rate=0.01, payload=None,
         rt = GDNRuntime(weights, cfg)
         out = rt.forward(list(probe_ids))
         return (bool(np.all(np.isfinite(out))), "logits %s" % (out.shape,))
+    # cp65 AUDIT HARDENING, from a live failure: the install audit crashed with
+    # "cannot reshape array of size 0" because the caller's probe encoded to ZERO
+    # tokens (the cp51 tokenizer lesson, recurring inside the auditor itself). An
+    # auditor that crashes on a degenerate probe audits nothing -- if the probe is
+    # empty, a runnable one is SYNTHESIZED from the vocab range and the report says
+    # so; the check still exercises the real forward pass.
+    if cfg is not None and probe_ids is not None and not list(probe_ids):
+        nv = int(cfg.get("n_vocab", cfg.get("vocab", 256)) or 256)
+        probe_ids = list(range(1, min(9, nv)))
+        report["notes"] = report.get("notes", []) + [
+            "probe was empty; synthesized ids 1..%d from the vocab" % probe_ids[-1]]
     if cfg is not None and probe_ids is not None:
         _check("model_still_runs", _finite,
                "an installed operator can produce NaNs and only show up later")

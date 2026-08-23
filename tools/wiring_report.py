@@ -40,12 +40,16 @@ EXEMPT = {
     # its body, not independent modules: holographic_catalog.default_catalog() calls each part's
     # register(c) in order, and nothing else may import them. Exempting them here rather than raising a
     # budget keeps the audit meaningful; the parts are still reachable, still documented, still linted.
-    "holographic_catalog_p01": "the discoverability registry itself, part 1 of 6",
-    "holographic_catalog_p02": "the discoverability registry itself, part 2 of 6",
-    "holographic_catalog_p03": "the discoverability registry itself, part 3 of 6",
-    "holographic_catalog_p04": "the discoverability registry itself, part 4 of 6",
-    "holographic_catalog_p05": "the discoverability registry itself, part 5 of 6",
-    "holographic_catalog_p06": "the discoverability registry itself, part 6 of 6",
+    "holographic_catalog_p01": "the discoverability registry itself, part 1 of 7",
+    "holographic_catalog_p02": "the discoverability registry itself, part 2 of 7",
+    "holographic_catalog_p03": "the discoverability registry itself, part 3 of 7",
+    "holographic_catalog_p04": "the discoverability registry itself, part 4 of 7",
+    "holographic_catalog_p05": "the discoverability registry itself, part 5 of 7",
+    "holographic_catalog_p06": "the discoverability registry itself, part 6 of 7",
+    # PART 7 EXISTS SINCE CHECKPOINT 10 (the orphan-family cards, minted by the
+    # audit-improve loop) but was never added here -- the cp27 CI simulation caught the
+    # gate failing on a module that loads every boot. Registry body, same status.
+    "holographic_catalog_p07": "the discoverability registry itself, part 7 of 7",
     "holographic_reference": "definitional reference implementations, used by the conformance harness (tests)",
     "benchmark_holographic": "a benchmark entry point",
     "stress_holographic": "an adversarial benchmark entry point",

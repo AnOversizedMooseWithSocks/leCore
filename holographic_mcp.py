@@ -136,6 +136,116 @@ _TOOLS = [
          "handle": {"type": "string"},
          "slots": {"type": "integer", "description": "terms per observation (default 3)"}},
          "required": ["handle"]}},
+    {"name": "zoo_ask",
+     "description": "THE HOSTED ANSWER LADDER: the server walks its FREE rungs first -- "
+                    "reflex trace, then the bound corpus (fresh), then deterministic dispatch "
+                    "-- and only if none can serve does it return escalate=true with the "
+                    "retrieved context. YOU are the model rung: answer from that context, "
+                    "then call zoo_teach so the same question never costs tokens again. "
+                    "Every answer carries {tier, via, why, PROVENANCE}: 'taught' means a "
+                    "human or a caller deliberately established it, 'model-cached' means a "
+                    "previous model rung's answer was cached and is PROVISIONAL. Pass "
+                    "taught_only=true to be escalated instead of receiving a cached guess. "
+                    "The cheap rungs refuse rather than guess.",
+     "inputSchema": {"type": "object", "properties": {
+         "query": {"type": "string"},
+         "handle": {"type": "string", "description": "optional corpus handle for the T1 rung"},
+         "taught_only": {"type": "boolean", "description": "refuse cached model answers; "
+                         "escalate instead so you can establish the fact yourself"},
+         "user": {"type": "string", "description": "route to THIS end user's own memory. "
+                  "Users of a public service have different goals; their learning should "
+                  "be theirs. Omit for the shared space."}},
+         "required": ["query"]}},
+    {"name": "zoo_panel",
+     "description": "DELIBERATION UNDER THE CONTRAST LAW: give a question and a map of "
+                    "{member: position}. When the seated members AGREE the realm is SILENT "
+                    "(unanimity carries no information); when they DISAGREE the dissent is "
+                    "surfaced and recorded per-dissenter. Use it to make a multi-position "
+                    "decision auditable instead of averaging it away.",
+     "inputSchema": {"type": "object", "properties": {
+         "question": {"type": "string"},
+         "positions": {"type": "object", "description": "{member: stance}"}},
+         "required": ["question", "positions"]}},
+    {"name": "zoo_tools",
+     "description": "CONTEXTUAL TOOL DISCOVERY AND USE: op='find' ranks the whole "
+                    "toolset (operator-registered learned APIs + the engine "
+                    "capability catalog + taught tool knowledge) against a task "
+                    "phrase; op='call' invokes an OPERATOR-REGISTERED api endpoint "
+                    "by service.endpoint with params. Hosted callers cannot register "
+                    "new urls (SSRF boundary: per-user api learning is a "
+                    "local-runtime feature); the operator registers services "
+                    "server-side.",
+     "inputSchema": {"type": "object", "properties": {
+         "op": {"type": "string", "enum": ["find", "call", "status"]},
+         "task": {"type": "string"},
+         "service": {"type": "string"}, "endpoint": {"type": "string"},
+         "params": {"type": "object"}}, "required": ["op"]}},
+    {"name": "zoo_void",
+     "description": "LEAP ON PURPOSE, WITH RECEIPTS: explore the gaps between known "
+                    "items. op='propose' maps items as metaballs, collides them at the "
+                    "radius, mixes the lenses and returns RANKED CONJECTURES with the "
+                    "evidence block (drift verdict, lens retrieval, pairing-null p). "
+                    "op='mix' blends one pair. op='walk' runs the slime-mold walker "
+                    "(pheromone-reinforced tendrils over the collision graph). Every "
+                    "result carries provenance='conjecture' -- nothing here is a fact "
+                    "until it is validated and evidenced.",
+     "inputSchema": {"type": "object", "properties": {
+         "op": {"type": "string", "enum": ["propose", "mix", "walk"]},
+         "items": {"type": "array", "items": {"type": "string"}},
+         "a": {"type": "string"}, "b": {"type": "string"},
+         "radius": {"type": "number"},
+         "user": {"type": "string", "description": "route to this end user's own space"}},
+         "required": ["op"]}},
+    {"name": "zoo_teach",
+     "description": "CLOSE THE LOOP: after you (the model rung) answer an escalated zoo_ask, "
+                    "teach the answer back. It lands in the per-tenant reflex trace under the "
+                    "full calibrated gate -- the next zoo_ask of that question serves at T0 "
+                    "with zero model tokens. Persisted across server restarts.",
+     "inputSchema": {"type": "object", "properties": {
+         "query": {"type": "string"}, "answer": {"type": "string"},
+         "user": {"type": "string",
+                  "description": "teach into THIS end user's own memory"}},
+         "required": ["query", "answer"]}},
+    {"name": "zoo_do",
+     "description": "THE HOSTED TASK PATH: pass a request; if the server has a LEARNED PLAN "
+                    "for a similar goal (plan_warm over the tenant's chain log) it executes "
+                    "the invokable steps itself and returns results at zero model cost. "
+                    "Otherwise it returns need_plan=true -- you plan (one model turn), pass "
+                    "plan=[steps...], the server executes what it can via its 3,400-tool "
+                    "catalog, logs the chain, and the SECOND encounter is free.",
+     "inputSchema": {"type": "object", "properties": {
+         "request": {"type": "string"},
+         "plan": {"type": "array", "items": {"type": "string"},
+                  "description": "step names (capability names or synthesized tools)"}},
+         "required": ["request"]}},
+    {"name": "zoo_synthesize",
+     "description": "SYNTHESIZE A TOOL ON THE HOSTED SERVICE: compose a typed chain of "
+                    "catalog capabilities into ONE new capability, registered live and "
+                    "immediately callable/chainable -- WITH a Lean 4 well-typedness "
+                    "certificate in the response. Ill-typed chains refuse with the mismatch "
+                    "named.",
+     "inputSchema": {"type": "object", "properties": {
+         "name": {"type": "string"}, "chain": {"type": "array", "items": {"type": "string"}}},
+         "required": ["name", "chain"]}},
+    {"name": "zoo_query",
+     "description": "HOSTED DATA SUPERPOWERS, both dialects: dialect='sql' runs the "
+                    "optimizer-free SQL-ish layer (db_query) over rows you pass or previously "
+                    "bound; dialect='graphql' runs nested-selection GraphQL over objects "
+                    "(nested selection == nested role unbind underneath). Exact answers from "
+                    "exact storage; fuzzy predicates say so.",
+     "inputSchema": {"type": "object", "properties": {
+         "dialect": {"type": "string", "enum": ["sql", "graphql"]},
+         "query": {"type": "string"},
+         "rows": {"type": "array", "items": {"type": "object"},
+                  "description": "flat rows for sql (bind once, then omit)"},
+         "objects": {"type": "array", "items": {"type": "object"},
+                     "description": "nested objects for graphql (bind once, then omit)"}},
+         "required": ["dialect", "query"]}},
+    {"name": "zoo_report",
+     "description": "THE FULL-ADVANTAGE DASHBOARD for this tenant: per-tier serves, "
+                    "estimated tokens saved, mined skeletons, learned transitions, queries "
+                    "seen -- the ledger that proves the tokens the ladder did not spend.",
+     "inputSchema": {"type": "object", "properties": {}, "required": []}},
     {"name": "receipt_verify",
      "description": "Re-run a prior call and check its receipt: pass the original tool name, "
                     "its exact arguments, and the expected output_sha256 from the receipt in "
@@ -163,6 +273,65 @@ _TOOLS = [
          "query": {"type": "string"},
          "top": {"type": "integer"}},
          "required": ["query"]}},
+    {"name": "zoo_model3d",
+     "description": "Model a 3D scene from a shape spec and render it through leCore's "
+                    "own SDF+raymarch faculties; the render is stored in the image memory "
+                    "(content-addressed, labeled) and survives restarts. spec: list of "
+                    "{shape: sphere|capsule|torus|box, at:[x,y,z], ...params}.",
+     "inputSchema": {"type": "object", "properties": {
+         "spec": {"type": "array"}, "name": {"type": "string"},
+         "size": {"type": "integer"}}, "required": ["spec"]}},
+    {"name": "zoo_research",
+     "description": "LOSSLESS research archive: give texts (+sources) to preserve them in "
+                    "full under a topic (notes + corpus index + vocabulary), or give a "
+                    "question to query the topic with provenance-labeled evidence.",
+     "inputSchema": {"type": "object", "properties": {
+         "topic": {"type": "string"}, "texts": {"type": "array"},
+         "sources": {"type": "array"}, "question": {"type": "string"}},
+         "required": ["topic"]}},
+    {"name": "zoo_backtest",
+     "description": "Walk-forward market backtest (no lookahead): routed-forecaster d-grid "
+                    "sweep, MAE vs naive last-value baseline with an honest verdict, "
+                    "conformal interval width, regime sign-run flags; the winning config "
+                    "is taught to memory so the next run starts warm.",
+     "inputSchema": {"type": "object", "properties": {
+         "series": {"type": "array"}, "d_grid": {"type": "array"},
+         "coverage": {"type": "number"}}, "required": ["series"]}},
+    {"name": "zoo_assimilate",
+     "description": "Assimilate API/framework documentation: archive the doc losslessly, "
+                    "extract call recipes, teach them as reflexes; then pass task= to get "
+                    "ranked calls to build with, zero model calls.",
+     "inputSchema": {"type": "object", "properties": {
+         "api": {"type": "string"}, "doc_text": {"type": "string"},
+         "task": {"type": "string"}}, "required": ["api"]}},
+    {"name": "zoo_feedback",
+     "description": "CLOSE THE LEARNING LOOP over the wire: report whether an answer "
+                    "was right (ok=true strengthens; ok=false vetoes the payload and "
+                    "feeds the calibration pair). This is what makes ANY attached model "
+                    "-- local ones included -- self-improving: taught answers plus "
+                    "graded outcomes plus calibrated serving. Args: query, ok, and "
+                    "optionally correction (taught immediately when given).",
+     "inputSchema": {"type": "object", "properties": {
+         "query": {"type": "string"}, "ok": {"type": "boolean"},
+         "correction": {"type": "string"}},
+         "required": ["query", "ok"]}},
+    {"name": "zoo_boot",
+     "description": "BOOT this hosted substrate and receive your operating screen: POST "
+                    "(measured checks incl. Unicron spectral health), machine inventory, "
+                    "the syscall table, distilled operating rules, and the escalation "
+                    "contract. Call this FIRST when attaching -- the prompt is generated "
+                    "from the live mind, so it never drifts from the engine.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "zoo_agent",
+     "description": "Run one round of a long-running agent loop: gather from the "
+                    "substrate first, resume-or-create the objective's goal, work steps "
+                    "under the tool cache, remember, checkpoint. Call again (any process) "
+                    "to continue; idle rounds stop it, not wall clocks. Args: objective, "
+                    "plan (first call), rounds, budget_steps.",
+     "inputSchema": {"type": "object", "properties": {
+         "objective": {"type": "string"}, "plan": {"type": "array"},
+         "rounds": {"type": "integer"}, "budget_steps": {"type": "integer"}},
+         "required": ["objective"]}},
     {"name": "lecore_invoke",
      "description": "Run any public leCore faculty. args is a JSON object of keyword "
                     "arguments; results return as JSON (arrays as nested lists, bytes as "
@@ -214,6 +383,47 @@ class MCPServer:
         self._memory_root = memory_root or os.environ.get("LECORE_MEMORY_ROOT",
                                                           "./lecore_memory")
         self._memory = None                               # built lazily; mind is lazy too
+        self._corpora_load()                               # E7.2: bindings survive restarts
+
+    def _corpora_path(self):
+        import os
+        root = getattr(self, "_memory_root", None) or "."
+        return os.path.join(str(root), "corpora.json")
+
+    def _corpora_save(self):
+        """Checkpoint 20: corpora persist as a CONTAINER section (lecore.zoo.corpora), not
+        JSON -- the blessed format for everything the zoo stores."""
+        try:
+            from holographic.io_and_interop.holographic_container import save_container
+            blob = save_container([{"kind": "lecore.zoo.corpora", "id": "v1",
+                                    "meta": {"corpora": self._corpora}, "arrays": {}}],
+                                  meta={"app": "lecore.zoo", "version": 2})
+            import os
+            with open(os.path.join(str(self._memory_root), "corpora.lecore"), "wb") as f:
+                f.write(blob)
+        except OSError:
+            pass                                            # persistence is best-effort, binding still works
+
+    def _corpora_load(self):
+        import json, os
+        try:
+            cpath = os.path.join(str(self._memory_root), "corpora.lecore")
+            if os.path.exists(cpath):
+                from holographic.io_and_interop.holographic_container import load_container
+                got = load_container(open(cpath, "rb").read())
+                for sec in got["sections"]:
+                    if sec["kind"] == "lecore.zoo.corpora":
+                        for k, v in (sec["meta"].get("corpora") or {}).items():
+                            self._corpora.setdefault(k, v)
+            elif os.path.exists(self._corpora_path()):       # legacy JSON: read + migrate
+                with open(self._corpora_path(), "r", encoding="utf-8") as f:
+                    stored = json.load(f)
+                for k, v in stored.items():
+                    self._corpora.setdefault(k, v)
+                self._corpora_save()
+                os.rename(self._corpora_path(), self._corpora_path() + ".migrated")
+        except (OSError, ValueError):
+            pass
 
     def _mem(self):
         if self._memory is None:
@@ -236,6 +446,7 @@ class MCPServer:
         import hashlib
         h = "corpus:" + hashlib.sha256("\x00".join(chunks).encode()).hexdigest()[:12]
         self._corpora[h] = chunks                          # content-addressed: re-binding
+        self._corpora_save()                               # E7.2: a zoo restart must not lose bindings
         return {"handle": h, "n_chunks": len(chunks)}      # the same corpus is idempotent
 
     def _corpus_ask(self, handle=None, query=None, k=4, question=None, corpus=None):
@@ -246,12 +457,283 @@ class MCPServer:
         if handle is None or query is None:
             return {"error": "need handle= (alias corpus=) and query= (alias question=)"}
         if handle not in self._corpora:
+            self._corpora_load()                           # E7.2: lazy reload after restart
+        if handle not in self._corpora:
             return {"error": "unknown handle %r -- corpus_bind first (handles live for this "
                              "server process; the zoo proxy owns persistence)" % handle}
         chunks = self._corpora[handle]
+        # E7.1 -- REFLEX BEFORE THE CORPUS: a per-handle displacement trace caches
+        # (question -> ranked answer) under the FULL lever-7 gate (cleanup + calibrated null +
+        # volatility). Handles are content-addressed (sha256 of the corpus), so a re-bound
+        # corpus is a NEW handle and the cache never serves stale chunks -- content addressing
+        # does the invalidation (lever 3 under lever 7, again). Provenance: via='reflex'.
+        import numpy as np
+        if not hasattr(self, "_reflex"):
+            self._reflex = {}
+        rx = self._reflex.get(handle)
+        if rx is None:
+            from holographic.agents_and_reasoning.holographic_lever7 import (
+                DisplacementTrace, key_atom)
+            rx = self._reflex[handle] = {"trace": DisplacementTrace(1024, seed=0),
+                                         "payloads": {}, "key_atom": key_atom}
+        toks = sorted(set(str(query).lower().split()))
+        qkey = np.sum([rx["key_atom"]("q:" + t, 1024) for t in toks], axis=0) if toks             else rx["key_atom"]("q:", 1024)
+        qkey = qkey / (np.linalg.norm(qkey) + 1e-12)
+        hit = rx["trace"].read_gated(qkey)
+        if hit["fired"]:
+            pid = int(hit.get("atom", -1))
+            if pid in rx["payloads"]:
+                out = [dict(row) for row in rx["payloads"][pid]]
+                for row in out:
+                    row["via"] = "reflex"
+                return out
         ranked = self.service.mind.bm25_rank(query, chunks, top=int(k))
-        return [{"index": int(i), "score": float(s), "chunk": chunks[int(i)]}
-                for i, s in ranked]
+        result = [{"index": int(i), "score": float(s), "chunk": chunks[int(i)]}
+                  for i, s in ranked]
+        pid = len(rx["payloads"])
+        rx["payloads"][pid] = [dict(row) for row in result]
+        rx["trace"].write(qkey, rx["key_atom"]("payload:%d:%s" % (pid, handle), 1024))
+        # the trace's atom index for this payload is the codebook slot just created:
+        rx["payloads"][len(rx["trace"]._atoms) - 1] = rx["payloads"].pop(pid)
+        return result
+
+    # -- THE HOSTED SUPERPOWERS (checkpoint 15): the ladder over the wire ------------------
+    def _zoo_state_path(self):
+        import os
+        return os.path.join(str(self._memory_root), "zoo_state.json")
+
+    def _user_service(self, user):
+        """PER-END-USER MEMORY (cp53). The hosted state was per-DEPLOYMENT: every caller
+        on one openzoo instance shared one ladder, so a preference one person taught was
+        served to everybody, and their self-improvement curves were averaged into a single
+        blur. Users of a public service have vastly different goals; the learning has to
+        be theirs. Passing `user` routes to that person's OWN partition under
+        <root>/users/<user> -- physical isolation, the same rule holographic_appkit gives
+        apps, because a salt is a convention and a directory is a fact. No `user` keeps
+        the shared space, so existing callers are unaffected."""
+        import os
+        cache = getattr(self, "_user_svcs", None)
+        if cache is None:
+            cache = self._user_svcs = {}
+        key = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in str(user))[:64]
+        if key not in cache:
+            import lecore
+            root = os.path.join(self._memory_root, "users", key)
+            os.makedirs(root, exist_ok=True)
+            m = lecore.UnifiedMind()
+            try:
+                m.learning_load(root)
+            except Exception:
+                pass
+            cache[key] = {"mind": m, "root": root}
+        return cache[key]
+
+    def _zoo_load(self):
+        """Per-tenant zoo state survives restarts: taught answers replay into the reflex trace
+        (write-path replay = bit-identical state, the lever-3 rule), chains reload into the
+        log. Best-effort: a missing or corrupt file is an empty state, never a crash."""
+        import json, os
+        if getattr(self, "_zoo_loaded", False):
+            return
+        self._zoo_loaded = True
+        try:
+            self.service.mind.learning_load(self._memory_root)
+        except Exception:
+            pass
+        try:                                             # legacy pass-5 tenants: read-only tolerance
+            if os.path.exists(self._zoo_state_path()):
+                st = json.load(open(self._zoo_state_path()))
+                for q, ans in st.get("taught", []):
+                    self._zoo_teach(q, ans, _persist=False)
+                for ch in st.get("chains", []):
+                    self.service.mind.chain_note(ch["goal_key"], [tuple(x) for x in ch["steps"]])
+                os.rename(self._zoo_state_path(), self._zoo_state_path() + ".migrated")
+        except Exception:
+            pass
+
+    def _zoo_save(self):
+        """Checkpoint 20: the CONTAINER is the only writer. zoo_state.json is gone -- the
+        learning container's experience + taught + chains sections carry everything the JSON
+        replay used to (proved by the remember-suite before the JSON was removed, not after)."""
+        try:
+            self.service.mind.learning_save(self._memory_root)
+        except Exception:
+            pass
+
+    def _zoo_faculty(self, fname, *fargs, persist=True, **fkw):
+        """cp25: the zoo calls leCore THROUGH leCore -- any of the new self-use faculties
+        run against the tenant mind, and mutating calls persist to the tenant partition
+        (the same restart-survival contract as zoo_teach)."""
+        self._zoo_load()
+        m = self.service.mind
+        try:
+            out = getattr(m, fname)(*fargs, **fkw)
+        except Exception as exc:
+            return {"error": "%s: %s" % (fname, str(exc)[:200])}
+        if persist:
+            try:
+                m.learning_save(self._memory_root)
+            except Exception:
+                pass
+        return out
+
+    def _zoo_ask(self, query, handle=None, taught_only=False, user=None):
+        """The hosted ladder: T0 reflex + T1 corpus (via the existing reflex-fronted
+        _corpus_ask when a handle is given) + T2 dispatch run SERVER-SIDE; a miss returns
+        escalate=true WITH the best retrieved context -- the caller is the model rung."""
+        self._zoo_load()
+        m = self.service.mind
+        if user:
+            m = self._user_service(user)["mind"]
+            if not getattr(m, "_zoo_ready", False):
+                m.zoo_attach(lambda p: "")
+                m._zoo_ready = True
+        out = m.zoo_answer(str(query), kb_search=None,
+                           dispatchers=m._zoo_dispatchers(), intern=None, main=None)
+        # cp49, and it matters MORE on a public server than anywhere else: a hosted ladder
+        # caches whatever the model rung answered and will serve it forever, confidently,
+        # to everyone -- indistinguishable from a fact somebody deliberately taught. So
+        # every hosted answer now DECLARES ITS PROVENANCE, and a caller who only wants
+        # established facts can say so instead of receiving a cached guess.
+        out.setdefault("provenance", "taught" if out.get("tier") in ("T1", "T2")
+                       else "model-cached")
+        if taught_only and out.get("tier") == "T0" and out["provenance"] != "taught":
+            out = {"tier": "escalate", "escalate": True,
+                   "why": "a cached model answer exists but taught_only was requested -- "
+                          "answer it yourself and zoo_teach it to establish it"}
+        elif out["tier"] in ("T0", "T1", "T2"):
+            return out
+        context = None
+        if handle:
+            rows = self._corpus_ask(handle=handle, query=query, k=3)
+            if isinstance(rows, list):
+                context = [r.get("chunk") for r in rows]
+        return {"tier": "escalate", "escalate": True, "context": context,
+                "why": "no free rung could serve; you are the model rung -- answer from the "
+                       "context, then zoo_teach the result so this never costs tokens again"}
+
+    def _zoo_teach(self, query, answer, _persist=True, user=None):
+        self._zoo_load()
+        if user:
+            svc = self._user_service(user)
+            m = svc["mind"]
+            if not getattr(m, "_zoo_ready", False):
+                m.zoo_attach(lambda p: "")
+                m._zoo_ready = True
+        else:
+            m = self.service.mind
+        lad = m.zoo["ladder"]
+        qk = lad._qkey(str(query))
+        lad._remember(qk, str(answer), str(query), provenance="taught")
+        # the conversation is a corpus, hosted edition: question + answer join the tenant's
+        # semantic space; a STEP-SHAPED answer (numbered / bulleted lines) is CHAIN-OF-THOUGHT
+        # and additionally mines into the chain log -- the caller's reasoning becomes a
+        # reusable skeleton candidate, exactly like a plan that ran here.
+        try:
+            m.semantic_ingest(str(query), source="teach_q")
+            m.semantic_ingest(str(answer), source="teach_a")
+            lines = [l.strip(" -*") for l in str(answer).splitlines() if l.strip()]
+            steps = [l.split(")", 1)[-1].split(".", 1)[-1].strip() for l in lines
+                     if l[:2].rstrip(".)").isdigit()]
+            if len(steps) >= 2:
+                sk = m.semantic_key(str(query))
+                m.chain_note(sk["vec"][:64], [(st[:60], True) for st in steps])
+        except Exception:
+            pass
+        stored = None
+        if _persist:
+            if not hasattr(self, "_zoo_taught"):
+                self._zoo_taught = []
+            self._zoo_taught.append([str(query), str(answer)])
+            self._zoo_save()
+            # THE STORAGE STACK, not a flat file (pass 4): taught answers ALSO land in the
+            # tenant's KnowledgeStore -- content-hashed, DEDUPED, external-storage grade --
+            # beside the JSON replay floor. Teaching the same answer twice stores one copy.
+            try:
+                note = self._mem().add_note("Q: %s\nA: %s" % (str(query), str(answer)),
+                                            tags=("zoo", "taught"))
+                stored = {"id": note.get("id") if isinstance(note, dict) else str(note),
+                          "dedup": bool(note.get("duplicate_of")) if isinstance(note, dict)
+                          else None}
+            except Exception:
+                stored = {"id": None, "dedup": None}
+        return {"taught": True, "next_ask_tier": "T0", "knowledge_store": stored}
+
+    def _zoo_do(self, request, plan=None):
+        """Warm plans execute server-side at zero model cost; cold requests ask the caller to
+        plan ONCE; either way the chain logs and the second encounter is free."""
+        self._zoo_load()
+        m = self.service.mind
+        from holographic.agents_and_reasoning.holographic_lever7 import key_atom
+        import numpy as np
+        toks = sorted(set(str(request).lower().split()))[:8]
+        gv = np.sum([key_atom("g:" + t, 64) for t in toks], axis=0)
+        gv = gv / (np.linalg.norm(gv) + 1e-12)
+        if plan is None:
+            warm = m.plan_warm(gv)
+            if warm is None:
+                return {"need_plan": True,
+                        "why": "no learned plan near this goal -- plan once (a list of "
+                               "capability/synthesized-tool names) and pass plan=[...]"}
+            plan = warm["steps"]
+            via = "plan_warm"
+        else:
+            via = "caller_plan"
+        report, done = [], []
+        for st in plan:
+            try:
+                if st in (m.zoo.get("synth") or {}):
+                    res = m.synth_call(st, None)
+                else:
+                    res = self.service.dispatch("POST", "/invoke", {"name": st, "args": {}})
+                ok = res is not None
+            except Exception as exc:
+                res, ok = {"error": str(exc)[:120]}, False
+            report.append({"step": st, "ok": ok})
+            done.append((st, ok))
+        m.chain_note(gv, done)
+        self._zoo_save()
+        return {"via": via, "model_calls_server_side": 0, "steps": list(plan),
+                "report": report}
+
+    def _zoo_query(self, dialect, query, rows=None, objects=None):
+        self._zoo_load()
+        m = self.service.mind
+        if dialect == "graphql":
+            return m.graphql(str(query), objects=objects)
+        if rows is not None:
+            self._zoo_rows = list(rows)
+            cols = sorted({k for r in self._zoo_rows for k in r})
+            db = m.db
+            try:
+                m.db_query("CREATE DATABASE zoo", db)
+            except Exception:
+                pass
+            try:
+                m.db_query("CREATE TABLE zoo.rows (%s)" % ", ".join(cols), db)
+            except Exception:
+                pass                                     # re-bind: table exists; inserts append
+            for r in self._zoo_rows:
+                vals = ", ".join(repr(r.get(c)) for c in cols)
+                m.db_query("INSERT INTO zoo.rows (%s) VALUES (%s)" % (", ".join(cols), vals), db)
+        if not getattr(self, "_zoo_rows", None):
+            return {"error": "no rows bound -- pass rows=[...] once, then query freely"}
+        return m.db_query(str(query), m.db)
+
+    def _zoo_synthesize(self, name, chain):
+        self._zoo_load()
+        m = self.service.mind
+        ex = {}
+        for step in chain:
+            hits = m.find_capability(str(step), k=1)
+            meth = getattr(hits[0], "method", None) if hits else None
+            fn = getattr(m, meth, None) if meth else None
+            ex[str(step)] = (lambda x=None, _f=fn: _f(x)) if callable(fn) else (lambda x=None: x)
+        r = m.synthesize_tool_certified(str(name), [str(c) for c in chain], ex)
+        if r.get("ok") and isinstance(r.get("lean_certificate"), dict):
+            r["lean_certificate"] = {"lean": r["lean_certificate"].get("lean", "")[:2000],
+                                     "ok": r["lean_certificate"].get("ok")}
+        return r
 
     # -- the three tools, each a thin delegation --
     def _find(self, query):
@@ -310,6 +792,132 @@ class MCPServer:
                                                         "arguments": a.get("arguments", {})}})
                         got = inner["result"]["_meta"]["lecore.receipt"]["output_sha256"]
                         out = {"match": got == exp, "actual_output_sha256": got}
+                elif tool == "zoo_feedback":
+                    out = self._zoo_faculty("answer_feedback", str(a.get("query")),
+                                            ok=bool(a.get("ok")))
+                    if a.get("correction"):
+                        self._zoo_faculty("teach", str(a.get("query")),
+                                          str(a.get("correction")))
+                        out = {"feedback": out, "correction_taught": True}
+                elif tool == "zoo_boot":
+                    rep_ = self._zoo_faculty("boot", partition=self._memory_root,
+                                             doctrine=True)
+                    out = {"report": {"ok": rep_.get("ok"),
+                                      "doctrine": rep_.get("doctrine"),
+                                      "inventory": rep_.get("inventory")},
+                           "os_prompt": self._zoo_faculty("os_prompt", rep_)}
+                elif tool == "zoo_agent":
+                    out = self._zoo_faculty("agent_loop", str(a.get("objective")),
+                                            executors={},
+                                            rounds=int(a.get("rounds") or 1),
+                                            budget_steps=int(a.get("budget_steps") or 2),
+                                            plan=a.get("plan"),
+                                            checkpoint_root=self._memory_root)
+                elif tool == "zoo_model3d":
+                    out = self._zoo_faculty("model3d", spec=a.get("spec") or [],
+                                            name=a.get("name"),
+                                            size=int(a.get("size") or 160))
+                elif tool == "zoo_research":
+                    if a.get("texts"):
+                        out = self._zoo_faculty("research_archive", str(a.get("topic")),
+                                                list(a["texts"]),
+                                                sources=a.get("sources"))
+                    elif a.get("question"):
+                        out = self._zoo_faculty("archive_query", str(a.get("topic")),
+                                                str(a["question"]), persist=False)
+                    else:
+                        out = {"error": "give texts to archive or a question to query"}
+                elif tool == "zoo_backtest":
+                    out = self._zoo_faculty("market_backtest",
+                                            [float(x) for x in (a.get("series") or [])],
+                                            d_grid=tuple(int(x) for x in
+                                                         (a.get("d_grid") or (3, 5, 8))),
+                                            coverage=float(a.get("coverage") or 0.9))
+                elif tool == "zoo_assimilate":
+                    if a.get("doc_text"):
+                        out = self._zoo_faculty("assimilate_docs", str(a.get("api")),
+                                                str(a["doc_text"]))
+                    elif a.get("task"):
+                        out = self._zoo_faculty("use_assimilated", str(a.get("api")),
+                                                str(a["task"]), persist=False)
+                    else:
+                        out = {"error": "give doc_text to assimilate or task to build"}
+                elif tool == "zoo_ask" and hasattr(self.service.mind,
+                                                   "ask_grounded") and \
+                        not a.get("taught_only") and not a.get("user") and \
+                        not a.get("session"):
+                    # plain asks go through the grounded floor (cp68); taught_only
+                    # keeps its STRICTER contract below -- refuse anything that is
+                    # not deliberately taught, including grounded model output
+                    _g = self.service.mind.ask_grounded(
+                        str(a.get("query") or a.get("question") or ""))
+                    out = {"answer": _g["answer"], "provenance": _g["provenance"],
+                           "escalate": _g["escalate"],
+                           "tier": ("escalate" if _g["escalate"]
+                                    else _g.get("tier") or "T0")}
+                elif tool == "zoo_ask":
+                    out = self._zoo_ask(a.get("query"), a.get("handle"),
+                                        bool(a.get("taught_only", False)),
+                                        a.get("user"))
+                elif tool == "zoo_panel":
+                    mp = self.service.mind
+                    if not getattr(mp, "_panel_realm", None):
+                        mp.panel_seat(members=list((a.get("positions") or {}).keys()))
+                    out = mp.panel_deliberate(a.get("question"), a.get("positions") or {})
+                elif tool == "zoo_tools":
+                    mt = self.service.mind
+                    if a.get("op") == "status":
+                        lad_t = mt.zoo["ladder"]
+                        margs = getattr(lad_t, "_recent_margins", [])[-32:]
+                        sat = mt.saturation_estimate(margs) if margs else \
+                            {"state": "no-data", "note": "margins accrue as "
+                             "questions are asked"}
+                        out = {"saturation": sat,
+                               "taught_rows": len(getattr(lad_t, "taught_log",
+                                                          [])),
+                               "services": sorted(
+                                   mt.api_toolbox().services)}
+                    elif a.get("op") == "find":
+                        out = {"tools": mt.tool_find(str(a.get("task", "")))}
+                    else:
+                        box = mt.api_toolbox()
+                        svc = str(a.get("service", ""))
+                        if svc not in box.services:
+                            out = {"ok": False,
+                                   "error": "service %r is not registered by the "
+                                            "operator; hosted callers cannot add "
+                                            "urls (ssrf boundary)" % svc}
+                        else:
+                            out = box.call(svc, str(a.get("endpoint", "")),
+                                           params=a.get("params") or {})
+                elif tool == "zoo_void":
+                    mv = self.service.mind
+                    if a.get("user"):
+                        mv = self._user_service(a["user"])["mind"]
+                        if not getattr(mv, "_zoo_ready", False):
+                            mv.zoo_attach(lambda p: ""); mv._zoo_ready = True
+                    op = a.get("op")
+                    items = list(a.get("items") or [])
+                    if op == "propose":
+                        out = mv.void_propose(items, radius=float(a.get("radius", 0.45)))
+                    elif op == "walk":
+                        out = mv.void_walk(items)
+                    else:
+                        out = mv.void_mix(str(a.get("a")), str(a.get("b")),
+                                          corpus=items or None)
+                        out.pop("blend", None)          # vectors do not belong on the wire
+                elif tool == "zoo_teach":
+                    out = self._zoo_teach(a.get("query"), a.get("answer"),
+                                          user=a.get("user"))
+                elif tool == "zoo_do":
+                    out = self._zoo_do(a.get("request"), a.get("plan"))
+                elif tool == "zoo_synthesize":
+                    out = self._zoo_synthesize(a.get("name"), a.get("chain") or [])
+                elif tool == "zoo_query":
+                    out = self._zoo_query(a.get("dialect"), a.get("query"),
+                                          a.get("rows"), a.get("objects"))
+                elif tool == "zoo_report":
+                    out = self.service.mind.zoo_report()
                 elif tool == "void_explore":
                     if a["handle"] not in self._corpora:
                         out = {"error": "unknown handle -- corpus_bind first"}
@@ -358,6 +966,8 @@ class MCPServer:
                 elif tool == "lecore_describe":
                     out = self._describe(a["name"])
                 elif tool == "lecore_invoke":
+                    self._zoo_load()  # cp25: the raw faculty runner joins tenancy --
+                    # idempotent since cp21, so this is free on the warm path
                     # ALIAS TOLERANCE (UX sweep): method= is what a stranger sends after
                     # lecore_find told them the method name; a miss advises instead of KeyError.
                     fac = a.get("name") or a.get("method") or a.get("faculty")
@@ -427,9 +1037,65 @@ def _selftest():
     assert srv.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
     tl = srv.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = [t["name"] for t in tl["result"]["tools"]]
+    # THE PIN IS THE POINT: every tool added must arrive HERE in the same commit. This
+    # list sat at 10 tools while the server grew to 20 -- red from checkpoint 15 to 27,
+    # invisible because the local regression constructed the server without running
+    # _selftest(). The cp27 CI simulation (running the REAL test) caught it.
     assert names == ["lecore_map", "lecore_find", "lecore_describe", "corpus_bind",
-                     "corpus_ask", "void_explore", "receipt_verify", "memory_write",
-                     "memory_search", "lecore_invoke"]
+                     "corpus_ask", "void_explore", "zoo_ask", "zoo_panel", "zoo_tools",
+                     "zoo_void",
+                     "zoo_teach", "zoo_do",
+                     "zoo_synthesize", "zoo_query", "zoo_report", "receipt_verify",
+                     "memory_write", "memory_search", "zoo_model3d", "zoo_research",
+                     "zoo_backtest", "zoo_assimilate", "zoo_feedback", "zoo_boot",
+                     "zoo_agent", "lecore_invoke"]
+    # PROVENANCE + TAUGHT_ONLY PINS (cp49): on a PUBLIC server a cached model answer that
+    # looks like an established fact is the worst failure mode there is -- one caller's
+    # guess becomes everyone's permanent truth. These three asserts are the guard.
+    srv.handle({"jsonrpc": "2.0", "id": 71, "method": "tools/call", "params": {
+        "name": "zoo_teach", "arguments": {"query": "pin provenance q",
+                                           "answer": "an established answer"}}})
+    _pa = json.loads(srv.handle({"jsonrpc": "2.0", "id": 72, "method": "tools/call",
+        "params": {"name": "zoo_ask", "arguments": {"query": "pin provenance q"}}}
+        )["result"]["content"][0]["text"])
+    assert _pa.get("provenance") == "taught", "a deliberately taught fact says taught"
+    _lad = srv.service.mind.zoo["ladder"]
+    _lad._remember(_lad._qkey("pin cached q"), "a guess", "pin cached q")
+    _pc = json.loads(srv.handle({"jsonrpc": "2.0", "id": 73, "method": "tools/call",
+        "params": {"name": "zoo_ask", "arguments": {"query": "pin cached q",
+                                                    "taught_only": True}}}
+        )["result"]["content"][0]["text"])
+    assert _pc.get("tier") == "escalate", \
+        "taught_only must refuse a cached model answer rather than serve a guess as fact"
+    _pp = json.loads(srv.handle({"jsonrpc": "2.0", "id": 74, "method": "tools/call",
+        "params": {"name": "zoo_panel", "arguments": {"question": "pin?",
+                   "positions": {"a": "yes", "b": "yes"}}}}
+        )["result"]["content"][0]["text"])
+    assert _pp.get("silent"), "zoo_panel: consensus is silent (the contrast law)"
+    # ZOO_VOID PIN (cp57): the hosted leap carries its receipts.
+    _zv = json.loads(srv.handle({"jsonrpc": "2.0", "id": 91, "method": "tools/call",
+        "params": {"name": "zoo_void", "arguments": {"op": "mix",
+            "a": "alpha beta code", "b": "gamma delta trace",
+            "items": ["alpha beta code", "gamma delta trace", "beta gamma bridge",
+                      "delta epsilon store"]}}})["result"]["content"][0]["text"])
+    assert _zv.get("provenance") == "conjecture" and "structure" in _zv, \
+        "a hosted mix is a conjecture with an evidence block, never a bare answer"
+    # PER-USER PINS (cp53): two people on one openzoo instance must not share a memory.
+    srv.handle({"jsonrpc": "2.0", "id": 81, "method": "tools/call", "params": {
+        "name": "zoo_teach", "arguments": {"query": "pin per user q",
+                                           "answer": "ana's answer", "user": "pin_ana"}}})
+    _ub = json.loads(srv.handle({"jsonrpc": "2.0", "id": 82, "method": "tools/call",
+        "params": {"name": "zoo_ask", "arguments": {"query": "pin per user q",
+                                                    "user": "pin_bo"}}}
+        )["result"]["content"][0]["text"])
+    assert "ana" not in str(_ub.get("answer") or ""), \
+        "one end user's memory must never surface for another"
+    _ua = json.loads(srv.handle({"jsonrpc": "2.0", "id": 83, "method": "tools/call",
+        "params": {"name": "zoo_ask", "arguments": {"query": "pin per user q",
+                                                    "user": "pin_ana"}}}
+        )["result"]["content"][0]["text"])
+    assert _ua.get("tier") == "T0" and _ua.get("provenance") == "taught", \
+        "the user who taught it must be served it, marked taught"
     # RECEIPT PINS: every call carries one; re-running matches it; a tampered hash does not
     rc = srv.handle({"jsonrpc": "2.0", "id": 40, "method": "tools/call",
                      "params": {"name": "lecore_describe", "arguments": {"name": "bind"}}})
