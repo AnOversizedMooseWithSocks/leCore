@@ -65,11 +65,11 @@ def split_walking_layers(body: Image.Image):
     height, width = rgba.shape[:2]
     sx, sy = width / 768.0, height / 768.0
     specs = [
-        # name, polygon, hip, knee, paw, depth, phase sign
-        ("front_far", [(180, 390), (270, 390), (290, 500), (285, 570), (220, 590), (175, 560)], (229, 406), (235, 480), (230, 553), "far", -1.0),
-        ("front_near", [(250, 390), (365, 395), (370, 540), (350, 620), (250, 620), (245, 500)], (310, 410), (315, 492), (305, 583), "near", 1.0),
-        ("rear_far", [(365, 365), (490, 365), (500, 450), (480, 500), (500, 550), (450, 580), (355, 545), (380, 440)], (431, 391), (444, 460), (421, 524), "far", 1.0),
-        ("rear_near", [(440, 360), (565, 370), (575, 490), (555, 565), (485, 600), (420, 560), (460, 490)], (505, 391), (520, 467), (500, 548), "near", -1.0),
+        # name, polygon, hip, knee, paw, depth, walk-cycle offset
+        ("front_far", [(180, 390), (270, 390), (290, 500), (285, 570), (220, 590), (175, 560)], (229, 406), (235, 480), (230, 553), "far", 0.50),
+        ("front_near", [(250, 390), (365, 395), (370, 540), (350, 620), (250, 620), (245, 500)], (310, 410), (315, 492), (305, 583), "near", 0.00),
+        ("rear_far", [(365, 365), (490, 365), (500, 450), (480, 500), (500, 550), (450, 580), (355, 545), (380, 440)], (431, 391), (444, 460), (421, 524), "far", 0.25),
+        ("rear_near", [(440, 360), (565, 370), (575, 490), (555, 565), (485, 600), (420, 560), (460, 490)], (505, 391), (520, 467), (500, 548), "near", 0.75),
     ]
     masks: list[np.ndarray] = []
     regions: list[np.ndarray] = []
@@ -99,7 +99,7 @@ def split_walking_layers(body: Image.Image):
 
     legs = []
     yy = np.arange(height, dtype=float)[:, None]
-    for (name, _, raw_hip, raw_knee, raw_paw, depth, sign), mask in zip(specs, masks):
+    for (name, _, raw_hip, raw_knee, raw_paw, depth, cycle_offset), mask in zip(specs, masks):
         hip = (raw_hip[0] * sx, raw_hip[1] * sy)
         knee = (raw_knee[0] * sx, raw_knee[1] * sy)
         paw = (raw_paw[0] * sx, raw_paw[1] * sy)
@@ -115,7 +115,7 @@ def split_walking_layers(body: Image.Image):
                 "knee": knee,
                 "paw": paw,
                 "depth": depth,
-                "sign": sign,
+                "cycle_offset": cycle_offset,
             }
         )
 
@@ -200,21 +200,43 @@ def _walking_shadow(width: int, height: int, compression: float) -> Image.Image:
     return layer.filter(ImageFilter.GaussianBlur(radius=16.0 * sx))
 
 
-def _footstep_dust(width: int, height: int, phase: float) -> Image.Image:
+def _paw_target(leg: dict, phase: float, sx: float, sy: float) -> tuple[float, float]:
+    """Four-beat walk path: slow planted sweep, then a quick lifted return."""
+    cycle = (phase * 4.0 + float(leg["cycle_offset"])) % 1.0
+    stance_fraction = 0.68
+    stride = (28.0 if leg["depth"] == "far" else 36.0) * sx
+    lift = (30.0 if leg["depth"] == "far" else 39.0) * sy
+    if cycle < stance_fraction:
+        amount = cycle / stance_fraction
+        x_offset = -0.5 * stride + stride * amount
+        y_offset = 0.0
+    else:
+        amount = (cycle - stance_fraction) / (1.0 - stance_fraction)
+        smooth = amount * amount * (3.0 - 2.0 * amount)
+        x_offset = 0.5 * stride - stride * smooth
+        y_offset = -lift * np.sin(np.pi * amount)
+    return leg["paw"][0] + x_offset, leg["paw"][1] + y_offset
+
+
+def _footstep_dust(
+    width: int,
+    height: int,
+    phase: float,
+    legs: list[dict],
+    base_x: float,
+) -> Image.Image:
     """Small soft puffs mark alternating paw contacts without hiding the feet."""
     sx, sy = width / 768.0, height / 768.0
     layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer, "RGBA")
-    step = (phase * 4.0) % 1.0
-    events = [
-        (0.00, (294.0 * sx, 590.0 * sy)),
-        (0.50, (505.0 * sx, 558.0 * sy)),
-    ]
-    for event, (px, py) in events:
-        age = (step - event) % 1.0
-        if age >= 0.28:
+    for leg in legs:
+        cycle = (phase * 4.0 + float(leg["cycle_offset"])) % 1.0
+        if cycle >= 0.14:
             continue
-        life = age / 0.28
+        life = cycle / 0.14
+        stride = (28.0 if leg["depth"] == "far" else 36.0) * sx
+        px = leg["paw"][0] - 0.5 * stride + base_x
+        py = leg["paw"][1]
         alpha = int(62 * (1.0 - life) ** 1.7)
         drift = 22.0 * sx * life
         rise = 8.0 * sy * life
@@ -247,7 +269,6 @@ def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
         phase = index / float(frames)
         # Four full strides carry one repeating meadow tile past the dog.
         stride_wave = np.sin(8.0 * np.pi * phase)
-        step_wave = np.cos(8.0 * np.pi * phase)
         bob_amount = 0.5 * (1.0 - np.cos(16.0 * np.pi * phase))
         body_bob = -6.0 * sy * bob_amount
         body_sway = 1.5 * sx * np.sin(8.0 * np.pi * phase + 0.35)
@@ -257,16 +278,14 @@ def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
 
         frame = _meadow_base(width, height, horizon, phase, travel=travel)
         frame.alpha_composite(_walking_shadow(width, height, bob_amount))
-        frame.alpha_composite(_footstep_dust(width, height, phase))
+        frame.alpha_composite(_footstep_dust(width, height, phase, legs, base_x))
         dog_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
 
         # The far pair is behind the coat. Diagonal pairs share a phase, producing a friendly trot.
         for leg in legs:
             if leg["depth"] != "far":
                 continue
-            gait = leg["sign"] * stride_wave
-            lift = 32.0 * sy * max(0.0, leg["sign"] * step_wave)
-            target = (leg["paw"][0] - 30.0 * sx * gait, leg["paw"][1] - lift)
+            target = _paw_target(leg, phase, sx, sy)
             animated = _articulate_leg(leg, target)
             dog_layer.alpha_composite(_translate(animated, shift_x, body_bob))
 
@@ -277,9 +296,7 @@ def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
         for leg in legs:
             if leg["depth"] != "near":
                 continue
-            gait = leg["sign"] * stride_wave
-            lift = 40.0 * sy * max(0.0, leg["sign"] * step_wave)
-            target = (leg["paw"][0] - 38.0 * sx * gait, leg["paw"][1] - lift)
+            target = _paw_target(leg, phase, sx, sy)
             animated = _articulate_leg(leg, target)
             dog_layer.alpha_composite(_translate(animated, shift_x, body_bob))
 
