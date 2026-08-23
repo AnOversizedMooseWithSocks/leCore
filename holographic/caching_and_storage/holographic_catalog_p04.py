@@ -96,7 +96,7 @@ def register_p04(c):
                           "the same AST that code_structure decomposes and a dialect table supplies the type names, "
                           "the intrinsic names and the declaration syntax -- so the hand-written compute shader "
                           "becomes a PROJECTION of the authoritative Python kernel: one source of truth, two "
-                          "runtimes, no drift. Dialects: wgsl, c_f64, c_f32, js, zig_f64, zig_f32. BOUNDED LOOPS "
+                          "runtimes, no drift. Dialects: wgsl, glsl (ES 3.0/WebGL2), c_f64, c_f32, js, zig_f64, zig_f32. BOUNDED LOOPS "
                           "EMIT: `for i in range(<int literal>)` -- the shader fBm/octave shape -- with explicit "
                           "counter promotion ((double)i / f32(i) / @floatFromInt) and mutable accumulators; a "
                           "variable trip count still refuses. THE BAR IS EXECUTED, "

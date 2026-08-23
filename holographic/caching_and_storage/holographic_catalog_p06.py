@@ -3154,6 +3154,309 @@ def register_p06(c):
                                "harness integration", "connect a chat app to the zoo",
                                "LibreChat endpoint", "Cursor base url override", "zoo_ask MCP"))
 
+    c.register_capability(
+        "Capacity gate (consult every law, then ROUTE to the measured escape)",
+        "mind.capacity_gate(**advise_scale kwargs) -> proceed / reroute / abstain. advise_scale "
+        "applies every measured capacity law, but NOTHING CALLED IT BEFORE ALLOCATING -- so a "
+        "request past the pair-capacity law succeeded and then recalled at 0.007. This gate ROUTES, "
+        "because every failing law has a measured escape and it is never 'more dim': pair-capacity "
+        "-> celled_memory (0.007 -> 1.000); nesting depth -> encode_tree_carrier (leaf share 0.00044 "
+        "at d7 -> recovery 0.94-1.00); bundle readout -> bundle_recover. ABSTAINS rather than "
+        "guessing when no escape is on record. Never resizes the request.",
+        example="m.capacity_gate(n_pairs=2000, vocab=6767, dim=512, bundle_k=64, factors=4, depth=6)",
+        aliases=("check capacity before allocating", "will this fit in a bundle",
+                 "am I past the capacity law", "what should I use instead of more dimension",
+                 "route around a capacity wall", "capacity check before allocating",
+                 "is my dimension big enough", "why did recall collapse",
+                 "consult the scale laws", "gate an allocation"))
+
+    c.register_capability(
+        "Exact factorization by linear codes (solve, do not search)",
+        "mind.lincode_codebooks(dim, F, M) -> (codebooks, basis); mind.factor_exact(composite, "
+        "basis, F, M) -> (indices, residual). Raviv 2024: codewords from a linear code make a bound "
+        "product's phase a LINEAR image of the index bits, so factorization is a SOLVE -- exact, and "
+        "independent of F and M. MEASURED vs phasor_factor, D=1024, 12 trials: 2/12 -> 12/12 at "
+        "F=3 M=24; 0/12 -> 12/12 at F=4 M=24 and F=6 M=8; 5.4ms -> 0.3ms. KEPT NEGATIVE: NOT a "
+        "better resonator -- needs codebooks it built, and REFUSES underdetermined systems.",
+        example="cbs, b = m.lincode_codebooks(n_factors=3, n_entries=24); m.factor_exact(cbs[0][0]*cbs[1][1]*cbs[2][2], b, 3, 24)",
+        aliases=("factor a bound product exactly", "exact factorization", "solve for the factors",
+                 "past the resonator wall", "linear codes for factoring",
+                 "recover indices from a product", "factorize without searching",
+                 "resonator fails at my factor count", "exact algebraic recovery",
+                 "too many factors to search"))
+
+    c.register_capability(
+        "What does this actually return? (the return-shape probe)",
+        "mind.shape_of(fn, *args) calls it ONCE and reports signature + a recursive runtime shape; "
+        "mind.signature_of(fn) gives arity alone and executes NOTHING. Dict KEYS, tuple ELEMENTS named "
+        "individually, array shape+dtype, and a plain object's PUBLIC ATTRIBUTES. WHY: six instrument "
+        "errors in one session, all one class -- a docstring's Returns line names the return CONTENTS and "
+        "gets read as the CALL SHAPE (route_or_abstain yields (Capability,score) TUPLES; expand_query's "
+        "expanded is a BOOL; fit_camera returns a DICT not a camera). Errors are REPORTED, not raised.",
+        example="import lecore; m=lecore.UnifiedMind(); print(m.shape_of(m.quadruped_spec)['returns'][:80])",
+        native=True, aliases=("what shape does this return", "what does this function give back",
+                             "how do i call this faculty", "what arguments does this take",
+                             "inspect a return value", "why is this returning the wrong thing",
+                             "attribute error on a returned object", "is this a dict or an object"))
+
+    c.register_capability(
+        "Render a plate (fixed white point, reproducible tone)",
+        "mind.render_plate(...) is render_specimen's pipeline -- same trace, denoise and firefly clamp -- with a FIXED white point instead of a SEARCHED exposure. render_specimen's grade re-normalises its input, so lowering the lights cannot fix a blowout, and on a mostly-BRIGHT subject (fat 0.90, bone 0.87) it has no dark reference and clips the pale tissues. A plate also needs REPRODUCIBLE tone: two renders of one subject must be comparable. Headroom is load-bearing -- Reinhard maps L==W to exactly 1.0, so white AT the percentile clips 100%. Report gives measured highlight_fraction.",
+        example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.rendering.holographic_plate import tonemap_fixed, highlight_fraction; print(round(highlight_fraction(tonemap_fixed(np.full((8,8,3),2.4), white=4.0)),3))",
+        native=True, aliases=("fixed exposure instead of auto",
+                             "reproducible tone across renders", "stop the auto exposure clipping",
+                             "tonemap with a white point", "why is my render washed out",
+                             "technical plate render"))
+
+    c.register_capability(
+        "Stock a part library (why your creature parts do not render)",
+        "mind.stocked_part_library(sockets): builds geometry for every part the sockets ask for and "
+        "DEFINES it into the library. part_library() returns an EMPTY codebook by design -- define(name, "
+        "geometry=) is how geometry gets in, and nothing was calling it. So place_parts resolved 7 "
+        "placements against a library holding NOTHING, returned geometry with 0 VERTICES, and reported "
+        "missed: []. Placement succeeded; there was nothing to place. MEASURED after stocking: 17,368 "
+        "verts, 67% outside the body. Postchecks each part, so an empty one is reported.",
+        example="import lecore; m=lecore.UnifiedMind(); o=m.build_creature(m.quadruped_spec(), parts=True); print(m.stocked_part_library(o['sockets'])['stocked'])",
+        native=True, aliases=("my creature parts do not show up", "eyes and feet are missing",
+                             "place_parts returns nothing", "empty part library",
+                             "parts placed but not visible", "how do i add geometry to a part library"))
+
+    c.register_capability(
+        "Viscera that are separate organs (disjoint, with identity)",
+        "mind.place_viscera(body_sdf, ...) places NAMED organs in a plain SDF body and GUARANTEES they do "
+        "not interpenetrate. .which(P) gives a per-point organ INDEX (-1 outside) -- the question a union "
+        "cannot answer, and why smooth_union viscera render as one featureless mass with every organ the "
+        "same colour. Real organs PRESS AGAINST each other. Enforces what organ_field documents (inside the "
+        "envelope, bone subtracted) for composed SDFs, since organ_field needs a RIG. KEPT NEG: shrinking "
+        "alone drove organs to zero (2 of 6 reachable) -- the fit pushes overlapping pairs APART too.",
+        example="import lecore; m=lecore.UnifiedMind(); import numpy as np; v=m.place_viscera(lambda P: np.linalg.norm(P-[0,.5,0],axis=1)-.35, -.3,.3,.5,.13); print(v.names)",
+        native=True, aliases=("place organs inside a body", "organs that do not overlap",
+                             "which organ is this point in", "heart liver lungs stomach placement",
+                             "why do my organs look like one blob", "label each organ separately",
+                             "anatomically separate viscera"))
+
+    c.register_capability(
+        "Studio lighting rig (three-point as an environment, for the path tracer)",
+        "mind.studio_sky(preset) builds a sky(D)->radiance for path_trace: warm dominant KEY, cool WEAK "
+        "fill (a fill matching the key is flat light), RIM behind for separation, plus ambient and bounce. "
+        "Presets classic ~4:1, soft ~1.8:1, dramatic ~10:1; mind.rig_ratios() states the ratio as data. "
+        "WHY AN ENVIRONMENT, not scene_light() x3: path_trace has no NEE and is very noisy for SMALL "
+        "emitters, but a softbox is physically a LARGE source -- describing it as broad sky lobes lands it "
+        "in the regime the sampler converges in. KEPT NEG: lights the SUBJECT; makes no floor or backdrop.",
+        example="import lecore; m=lecore.UnifiedMind(); sky=m.studio_sky('classic'); print(m.rig_ratios()['key_fill_ratio'])",
+        native=True, aliases=("studio lighting setup", "three point lighting rig",
+                             "light my render like a studio", "key fill and rim light",
+                             "soft lighting for a product shot", "environment lighting for a path tracer",
+                             "how do i light this nicely", "portrait lighting ratio"))
+
+    c.register_capability(
+        "Outcome feedback to the attached model (close the one-way seam)",
+        "mind.llm_tell(prompt, reply, verdict) records what happened to a model's output; "
+        "mind.llm_feedback(k) returns recent verdicts as text to prepend to the next prompt; "
+        "attach_llm(on_outcome=fn) fires a callback live. THE GAP: leCore knows the outcome of every "
+        "model call -- routed / abstained / smuggled, the faithfulness verdict, the router z -- and every "
+        "one returns to the CALLER; the model that produced it is never told, and a model that cannot see its "
+        "own error rate cannot correct it. Verdict labels belong to the caller. KEPT NEG: a CHANNEL, not a "
+        "learning rule -- the payoff is UNMEASURED.",
+        example="import lecore; m=lecore.UnifiedMind(); m.attach_llm(lambda p:'ok'); m.llm_tell('q','ok','routed'); print(m.llm_report()['outcomes'])",
+        native=True, aliases=("tell the model whether its answer worked",
+                             "close the feedback loop with the llm", "let the model see its mistakes",
+                             "record what happened to a tool call", "does the model learn from results",
+                             "one way seam", "report the verdict back to the model"))
+
+    c.register_capability(
+        "Split work across contending paths (do not pick one winner)",
+        "mind.split_plan(paths): proportional dispatch by MEASURED throughput, where compute_plan picks "
+        "ONE tier. After FreeToken (2608.16157): an expert miss can go over PCIe or run on the CPU, and "
+        "both READ THE SAME MEMORY -- they compete for one pool rather than adding, so a fixed choice misses "
+        "most of what the router asks for. contended=True caps bus-sharing paths at the FASTEST instead of "
+        "summing. ADDITIVE: argmax(weights) is the picker's winner, and split_gain is 0.0 when one path "
+        "dominates.",
+        example="import lecore; m=lecore.UnifiedMind(); print(m.split_plan([{'name':'a','throughput':50.0},{'name':'b','throughput':50.0}])['split_gain'])",
+        native=True, aliases=("use both backends at once", "split work between cpu and gpu",
+                             "proportional dispatch", "why pick one when both are free",
+                             "two paths share the same memory", "weights instead of a winner"))
+
+    c.register_capability(
+        "Route a session to a prefix-caching upstream (the openzoo decision)",
+        "mind.llm_prefix_route(upstreams): picks an upstream from MEASURED prefix reuse, not from price "
+        "alone. On a 12-turn agent transcript with a mid-session edit, hit_rate is 0.000 while "
+        "prefix_reuse is 0.832 -- a router reading hit_rate concludes 'caching does not help' and routes "
+        "anywhere; reading BOTH sends the session where 83% of the prompt is already paid for. Falls back "
+        "to price when reuse is low or no upstream advertises caching. DISTINCT from unicron_prefix_cache "
+        "(a token radix tree for a LOCAL runtime). KEPT NEG: saving_estimate is an UPPER BOUND -- real "
+        "providers discount, not exempt.",
+        example="import lecore; m=lecore.UnifiedMind(); m.attach_llm(lambda p:'ok'); m._llm('aa'); m._llm('aab'); print(m.llm_prefix_route([{'name':'x','prefix_cache':True,'cost_per_1k':1.0}]))",
+        native=True, aliases=("which provider should this session go to",
+                             "route by prompt caching support", "pick an upstream for an agent session",
+                             "is prompt caching worth it for this workload",
+                             "openzoo routing decision", "cheapest upstream for a long conversation"))
+
+    c.register_capability(
+        "Prefix reuse: is an exact cache blind to your agent workload?",
+        "Compares the exact cache hit_rate against measured PREFIX REUSE -- the fraction of prompt text "
+        "unchanged from something already sent. A coding agent rewrites its history, so an exact "
+        "whole-prompt cache scores ZERO (append a token, the sha256 moves) while nearly all the text is "
+        "unchanged. MEASURED on a 12-turn agent transcript with a mid-session edit: "
+        "hit_rate 0.000, prefix_reuse 0.832 -- together they say 'use a prefix-caching backend'; hit_rate "
+        "alone reads as 'caching does not help'. After FreeToken (2608.16157). KEPT NEG: measures reuse, "
+        "cannot itself reuse remote compute.",
+        example="import lecore; m=lecore.UnifiedMind(); m.attach_llm(lambda p:'ok', cache=True); m._llm('aa'); m._llm('aab'); print(m.llm_prefix_advice()['recommend_prefix_backend'])",
+        native=True, aliases=("why is my cache not hitting", "agent history keeps changing",
+                             "prefix caching worth it", "my prompts grow every turn",
+                             "cache hit rate is zero but prompts are similar",
+                             "should i use prompt caching", "coding agent prefill cost"))
+
+    c.register_capability(
+        "Batch the attached model (one round trip instead of K)",
+        "mind.llm_batch(prompts): the UP direction of the LLM seam. A text->text signature forces a fan-out "
+        "sequential however parallel the backend is. THREE FILTERS COMPOSE cheapest first: REPLAY (cached "
+        "prompts never leave the process), DEDUP (identical prompts in one call take one slot), BATCH (the "
+        "rest go in one round trip via batch_fn). "
+        "MEASURED on a 3-branch swarm, 360 asks: 40 round trips -> 1. Falls back to sequential with no batch "
+        "backend. KEPT NEG: dedup is tied to cache=True -- collapsing identical prompts is sound only for a "
+        "PURE function; a sampler must disagree with itself.",
+        example="import lecore; m=lecore.UnifiedMind(); m.attach_llm(lambda p:'hi', cache=True, batch_fn=lambda ts:['hi']*len(ts)); print(m.llm_batch(['a','b','a']))",
+        native=True, aliases=("send many prompts in one request", "batch several questions together",
+                             "one round trip instead of many", "ask the model many things at once",
+                             "speed up my agent fan out", "parallel prompts to a backend",
+                             "reduce round trips to the model", "why does my swarm take so long"))
+
+    c.register_capability(
+        "Metered LLM seam (what the attached model costs, and replay for the deterministic ones)",
+        "attach_llm now wraps your callable in MeteredLLM (holographic_llmseam): counters always on, exact "
+        "sha256 hash-replay opt-in, hard call budget that FAILS CLOSED. The seam was self._llm=llm and nothing "
+        "else -- the priciest unit in the engine, outside every measured tier. mind.llm_report() gives asked/"
+        "calls/hits/hit_rate/chars/seconds. MEASURED on a 3-branch swarm workload: 360 asked -> 40 real calls, "
+        "hit_rate 0.889. "
+        "KEPT NEG: cache=False by default -- caching a SAMPLING model collapses N branches to one and "
+        "manufactures a false consensus (pinned in the selftest).",
+        example="import lecore; m=lecore.UnifiedMind(); m.attach_llm(lambda p: 'hi', cache=True); m._llm('q'); m._llm('q'); print(m.llm_report()['hit_rate'])",
+        native=True, aliases=("how much is my llm costing me", "cache model responses",
+                             "stop calling the model for the same thing twice",
+                             "limit how many times the model is called",
+                             "count llm calls and tokens", "make my llm router cheaper",
+                             "why is my agent so slow", "budget for model calls",
+                             "measure what the attached model spends"))
+
+    c.register_capability(
+        "Roofline predictor (price a byte-moving change before you build it)",
+        "predict_streaming_ms: predicted wall-clock ms for a streaming pass over N bytes, from THIS box's "
+        "MEASURED floor bandwidth (memory_mountain). The tiers reproduced the fast-arbiter table to ~15%, so "
+        "the floor is a planner. LLM decode is memory-bandwidth bound, so bytes-per-token IS "
+        "latency: 8B f16 at 16 GB/token predicts 600 ms here vs 4.78 ms on an H100 -- a flat 126x at EVERY "
+        "model size, no compute term anywhere. That flatness is the diagnosis. KEPT NEG: predicts the ROOFLINE, "
+        "not the run -- it cannot see NUMA, page faults or a noisy neighbour; a large miss is a scheduling bug.",
+        example="import lecore; m=lecore.UnifiedMind(); c,t = m.memory_mountain(); print(m.predict_streaming_ms(16e9, t))",
+        native=True, aliases=("how long will it take to stream this much data",
+                             "predict memory bandwidth time", "roofline estimate",
+                             "is my change worth it before i build it",
+                             "how fast can this machine read a model",
+                             "price a cache change", "tokens per second from bandwidth",
+                             "why is decode slow"))
+
+    c.register_capability(
+        "What does each check COST? (pick the fast instrument, not the familiar one)",
+        "Measures every verification instrument on THIS box, cheapest first, each row carrying the QUESTION "
+        "it answers. WHY: four sessions were spent guessing because the cheap tool existed and nobody knew "
+        "its cost -- material_preview is 0.044s, the render it replaced "
+        "50-140s. LATENCY, not absence, was the bug; a two-minute check is one you skip under pressure. "
+        "MEASURED: signature_of/shape_of/find_capability ~0s, feature_coverage 0.014s, render_gbuffer "
+        "0.031s, material_preview 0.044s. KEPT NEG: wall-clock at a stated size, and a cheap instrument "
+        "answering a DIFFERENT question is no substitute.",
+        example="import lecore; m=lecore.UnifiedMind(); print(m.instrument_costs()['rows'][0])",
+        native=True, aliases=("which check is fastest", "how long does this verification take",
+                             "cheapest way to check my change", "what does this instrument cost",
+                             "i do not have time for a full render", "quick verification options"))
+
+    c.register_capability(
+        "Stage contracts for the render pipeline (end-to-end missed four)",
+        "mind.verify_render_stages(): asserts the EFFECT of each stage, not its implementation. FOUR "
+        "defects shipped in this arc and every one was a stage never measured alone -- a tonemap with no "
+        "exposure, a renderer with no budget (16+ min, no output), a planner costing the OUTPUT while "
+        "upsample traces at 1/N (4x resolution lost), and a FLAT denoiser guide that erased every texture. "
+        "All four passed end-to-end tests, which only ask whether an image came out. KEPT NEG: verifies "
+        "MECHANISM, not beauty.",
+        example="import lecore; m=lecore.UnifiedMind(); # see holographic_stagecheck._selftest",
+        native=True, aliases=("check my render pipeline is wired right",
+                             "which stage of the render is broken", "test each step separately",
+                             "the image came out but something is wrong",
+                             "pipeline stage contracts", "verify the renderer end to end"))
+
+    c.register_capability(
+        "Did that call produce anything USABLE? (the quiet failure)",
+        "mind.result_usable(v, expect=) / mind.guarded_call(fn). A tool that RAISES is caught by ordinary "
+        "flow; one that returns nothing usable is treated as SUCCESS -- BENCH-3 measures that at "
+        "silent_fail 0.50, and AgentAbstain calls it the most dangerous failure mode. THE CALLER DECLARES "
+        "THE POSTCONDITION: an empty result is often CORRECT (route_or_abstain returns hits: [] on a deliberate "
+        "abstention). expect=any/nonempty/numeric/truthy. MEASURED: silent_fail 0.50 -> 0.00, AbsRec@1 "
+        "0.50 -> 1.00, completion unchanged. KEPT NEG: catches an ABSENT answer, never a WRONG one.",
+        example="import lecore; m=lecore.UnifiedMind(); print(m.guarded_call(lambda: None)['ok'])",
+        native=True, aliases=("did the tool actually return anything", "check a result is usable",
+                             "empty result but no error", "postcondition after a call",
+                             "silent failure", "the call succeeded but did nothing",
+                             "validate what a function gave back"))
+
+    c.register_capability(
+        "Runtime-discovery abstention (does it abandon AFTER starting?)",
+        "BENCH-3. BENCH-1/2 test one of AgentAbstain's eight scenarios -- capability absent, knowable "
+        "BEFORE anything runs -- so our AbsRec@1 of 1.000 is TRUE BY CONSTRUCTION and cannot be failed. "
+        "This is the arm that CAN fail: the request looks feasible, routing succeeds, and only INVOCATION "
+        "reveals it cannot work. Paired, so abstaining at step 0 scores ZERO. MEASURED: abandon 0.50, "
+        "SILENT-FAIL 0.50 -- loud failures are discovered, quiet ones (a tool returning nothing) are not. "
+        "KEPT NEG: a low score is a MEASUREMENT of a known gap, not a bug.",
+        example="import lecore; m=lecore.UnifiedMind(); print(m.runtime_benchmark(n=6)['silent_fail_rate'])",
+        native=True, aliases=("does it give up when a tool breaks", "abandon a task partway",
+                             "a tool failed after we started", "runtime discovery abstention",
+                             "did it notice the plan stopped working", "silent failure detection",
+                             "does it keep going after an error"))
+
+    c.register_capability(
+        "Paired accuracy + AbsRec@1 (the abstention field's own metrics)",
+        "mind.paired_benchmark(): scores leCore the way AgentAbstain (2607.10059) does -- a should-act "
+        "task twinned with a should-abstain one, and a PAIR counts only if BOTH are right. We reported "
+        "two separate rates, so comparisons needed hand translation. MEASURED: author phrasing 1.000, "
+        "stranger 0.200, stranger+closest 0.667 vs SOTA best-of-17-frontier-LLMs <0.60; AbsRec@1 1.000 "
+        "vs strongest baseline 0.267. KEPT NEG: AbsRec@1 is 1.0 BY CONSTRUCTION (the gate runs before "
+        "any tool call) and the fixture covers ONE of eight scenarios -- not coverage.",
+        example="import lecore; m=lecore.UnifiedMind(); print(m.paired_benchmark(n=8)['paired_accuracy'])",
+        native=True, aliases=("how do we compare to other agents", "paired abstention accuracy",
+                             "score us the way the papers do", "agentabstain metric",
+                             "do we abstain in time", "benchmark against state of the art",
+                             "is our router better than a frontier model"))
+
+    c.register_capability(
+        "Alias gaps (which capabilities a stranger cannot find, and the repair for each)",
+        "BENCH-2 as a WORK LIST, not a score. Holds out one alias per capability and reports every entry the "
+        "router then loses, with the repair named per row. RANKED_BUT_GATED = the router FOUND it and the "
+        "noise floor discarded it (MEASURED: 17 of 26 gaps -- so 'add aliases' is the wrong advice for the "
+        "majority; take top-k, or add a DISTINCTIVE alias). ABSTAINED = thin coverage. MISROUTE = crowded "
+        "neighbourhood. Three attacks on the floor are refuted at matched false-action: BM25 scorer, "
+        "self-null gate, margin rescue. KEPT NEG: a row cannot tell a thin alias set from a hard one.",
+        example="import lecore; m=lecore.UnifiedMind(); r=m.alias_gaps(n=20); print(r['n_gaps'], r['gaps'][0]['fix'])",
+        native=True, aliases=("which capabilities are hard to find",
+                             "why cant users find my feature", "what aliases should i add",
+                             "find weak spots in the catalog", "capability discoverability report",
+                             "which entries need better wording", "audit my capability descriptions"))
+
+    c.register_capability(
+        "Paraphrase arm (false-ABSTAIN rate: does it refuse work it could do?)",
+        "BENCH-2, the other half of the agent socket: a router that abstained on EVERYTHING would also score "
+        "0.0% false action. Each task is a capability's own alias asked against an index rebuilt with THAT "
+        "ALIAS REMOVED -- tool present, siblings intact, only the wording unfamiliar. Counted apart: recovered "
+        "/ abstained / misrouted. MEASURED n=40, seeds 0-4: false-abstain 0.820 +/- 0.075, model calls 0. "
+        "KEPT NEGATIVE: dictionary enrichment makes it WORSE (0.980 +/- 0.019, every seed) -- "
+        "route_or_abstain's null is length-matched, so added tokens lift the floor faster than the score",
+        example="r = mind.agent_paraphrase_benchmark(n=40); print(r['arms']['lexical']['false_abstain_rate'])",
+        native=True, aliases=("how often does it refuse work it could do",
+                             "does it find my tool if i word it differently",
+                             "measure the false abstain rate",
+                             "test the router with unfamiliar wording",
+                             "why cant it find a capability i know exists",
+                             "paraphrase benchmark", "false abstain rate",
+                             "recall of the capability search",
+                             "hold out an alias and see if it still routes"))
+
 
 _PART = "holographic_catalog_p06"
 

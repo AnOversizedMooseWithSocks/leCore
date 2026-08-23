@@ -1632,6 +1632,84 @@ class _UnifiedPart12:
                 best_s, best = s, n
         return best, best_s
 
+    def llm_report(self):
+        """What the attached model has cost so far (holographic_llmseam.MeteredLLM.report): asked / calls /
+        hits / hit_rate / chars_in / chars_out / errors / seconds / seconds_per_call. `calls` counts only what
+        REACHED the model, so calls+hits is the total asked and hit_rate is the fraction that cost nothing --
+        the number a hosted router bills on. Returns None when no metered LLM is attached (attach_llm with
+        meter=False, or none attached), never a fabricated zero row."""
+        llm = getattr(self, "_llm", None)
+        return llm.report() if hasattr(llm, "report") else None
+
+    def llm_prefix_advice(self):
+        """Should this workload point at a PREFIX-CACHING backend? A measured yes/no, not a guess.
+        Compares the exact cache's hit_rate against measured PREFIX REUSE -- the fraction of prompt text
+        that was unchanged from something already sent (holographic_llmseam).
+        WHY THIS EXISTS (FreeToken, arXiv 2608.16157, MIT/UC Berkeley, Aug 2026): agent workloads
+        "continuously change their execution pattern", and a coding agent rewrites its own history, so an
+        exact whole-prompt cache scores ZERO -- append one token and the sha256 moves -- while nearly all
+        the text is unchanged. FreeToken checkpoints at the boundaries agent frameworks cut on and
+        reprocesses only the new part, taking worst-case first token from 232s (llama.cpp) / 946s
+        (KTransformers) to under 44s.
+        MEASURED on a 12-turn coding-agent transcript with one mid-session edit: exact hit_rate 0.000
+        while prefix_reuse was 0.832. Those two numbers TOGETHER say "point at a prefix-caching backend";
+        either alone is misleading -- hit_rate 0.000 reads as "caching does not help here", which is the
+        opposite of the truth.
+        KEPT NEG: leCore's seam is text->text and CANNOT reuse a remote model's partial compute. This
+        MEASURES the available reuse so the decision to wire a prefix-caching backend (FreeToken, or a
+        provider prompt cache) is made on a number instead of a hunch. Returns None if no metered LLM."""
+        r = self.llm_report()
+        if r is None:
+            return None
+        exact, pre = float(r["hit_rate"]), float(r["prefix_reuse"])
+        if exact >= 0.5:
+            verdict = "exact cache is already carrying this workload -- repeated identical asks"
+        elif pre >= 0.5:
+            verdict = ("EXACT CACHE IS BLIND HERE: %.0f%% of prompt text is unchanged but hit_rate is "
+                       "%.3f. A prefix-caching backend is the lever; exact replay is not." % (100 * pre, exact))
+        else:
+            verdict = "little reuse of either kind -- prompts are genuinely distinct; caching will not help"
+        return {"hit_rate": exact, "prefix_reuse": pre, "verdict": verdict,
+                "recommend_prefix_backend": bool(exact < 0.5 and pre >= 0.5)}
+
+    def llm_tell(self, prompt, reply, verdict, detail=None):
+        """Tell the attached model what happened to its output (holographic_llmseam.MeteredLLM.tell).
+        `verdict` is a short label the CALLER owns -- "routed" / "abstained" / "smuggled" / "refused" --
+        because leCore has several loops with different outcome vocabularies and one enum would be wrong for
+        most of them. Records always; fires on_outcome only if one was supplied. Returns the record, or None
+        when no metered LLM is attached."""
+        llm = getattr(self, "_llm", None)
+        return llm.tell(prompt, reply, verdict, detail) if hasattr(llm, "tell") else None
+
+    def llm_feedback(self, k=5):
+        """The last k verdicts as text, ready to prepend to a prompt -- the cheapest way to let a model see
+        its own error rate without a training loop (holographic_llmseam.feedback_digest). Oldest first, so
+        the newest verdict reads last where a model weights hardest. Empty string when nothing has been
+        recorded, never a fabricated history."""
+        llm = getattr(self, "_llm", None)
+        return llm.feedback_digest(k) if hasattr(llm, "feedback_digest") else ""
+
+    def llm_batch(self, prompts):
+        """Answer many prompts in as few round trips as the attached backend allows
+        (holographic_llmseam.MeteredLLM.batch) -- the UP direction of the seam, and the same move
+        `Clean up many cues at once` made for cleanup: one wide request instead of K narrow ones.
+        THREE FILTERS COMPOSE, cheapest first: REPLAY (already-cached prompts never leave the process),
+        DEDUP (identical prompts in one call take one backend slot), BATCH (whatever survives goes in one
+        round trip via batch_fn). A fan-out's branch prompts repeat across BOTH axes, which is why a swarm
+        is the workload this pays on. Answers come back positionally aligned with `prompts`, and a backend
+        returning the wrong COUNT is rejected loudly rather than silently mis-attributed.
+        Falls back to sequential when no batch backend was advertised -- same answers, more round trips --
+        so callers never need to ask what was attached. Raises if no LLM is attached at all.
+        KEPT NEG: dedup is tied to cache=True, because collapsing identical prompts is sound only for a PURE
+        function; with cache off a sampler is allowed to disagree with itself, which is the point of a
+        fan-out. See llm_report() for asked / calls / hits / deduped / saved / round_trips."""
+        llm = getattr(self, "_llm", None)
+        if llm is None:
+            raise RuntimeError("no LLM attached -- call attach_llm(fn) first")
+        if not hasattr(llm, "batch"):
+            return [llm(p) for p in prompts]        # attached with meter=False: honest sequential fallback
+        return llm.batch(list(prompts))
+
 
 def _selftest():
     """Delegates to holographic.unified.check_part -- one home for the shared contract."""

@@ -948,6 +948,108 @@ def register_p05(c):
                           example="from holographic.agents_and_reasoning.holographic_ai import bind, bundle; from holographic.agents_and_reasoning.holographic_ai import Vocabulary  # Vocabulary(...).cleanup(x)", native=True,
                           aliases=("bind", "unbind", "bundle", "cleanup", "permute", "superpose", "blend"))
 
+    c.register_capability(
+        "Shader-native atom families (a vocabulary that is a FUNCTION, not a table)",
+        "Two zero-storage atom vocabularies from hash32_pcg -- an atom is RECOMPUTED on a GPU or in a browser, "
+        "never shipped. hash_atom/encode_hash: Rademacher, integer-only, VERIFIED IN CHROME (101/101 vs f64). "
+        "phasor_atom/record/query/factor/power: FHRR unit phasors; bind is phase ADDITION, unbind the "
+        "conjugate, EXACT with no FFT; power is fractional-power encoding in one multiply; factor keeps the "
+        "phase (0.967 vs 0.250 real-cast). canonical_terms/term_id are THE shared normalisation boundary -- "
+        "apply ONCE. KEPT NEGATIVES, pinned: Rademacher does NOT bind; a record is not a key.",
+        example=(
+            "rec = mind.phasor_record([('colour','red'), ('size','large')])\n"
+            "name, scores = mind.phasor_query(rec, 'colour', ['red','blue','large','small'])\n"
+            "q = mind.encode_hash(['holographic','memory'], normalise=False)"
+        ),
+        aliases=[
+            "atom from a hash with no storage",
+            "vocabulary that works in a shader",
+            "generate a codebook instead of storing it",
+            "bind exactly without an FFT",
+            "phasor FHRR atom vocabulary",
+            "role filler record from names",
+            "zero byte vocabulary",
+            "recompute the same atom on the GPU",
+            "browser friendly hypervector atoms",
+            "one place to normalise a term",
+            "same term id in both search arms",
+            "factor a complex product back into its parts",
+            "encode a continuous coordinate as a phase",
+        ],
+    )
+
+    c.register_capability(
+        "Answer, return the set, or abstain (retrieval shape policy)",
+        "Decides the SHAPE of an answer instead of always forcing a ranking. If m passages contain EVERY query "
+        "term they are indistinguishable to a term scorer, so above m=1 the honest output is the SET plus its "
+        "size; below a null-calibrated threshold it ABSTAINS. The ambiguity count is EXACT (postings "
+        "intersection), not a predicted confidence. Measured: well-posed 0.875 vs a 0.858 Bayes ceiling; "
+        "ambiguous set-recall 1.000 at median 2 where top-1 gives 0.458; no-match refusal 99.2%. KEPT NEGATIVE, "
+        "selftest-pinned: a near-duplicate scores HIGH, so a confidence gate does NOT detect ambiguity.",
+        example=(
+            "docs = [['alpha','beta','solo'], ['alpha','beta','twin'], ['zeta','kappa','unique']]\n"
+            "v = mind.retrieval_verdict(['zeta','kappa'], docs)\n"
+            "print(v['mode'], v['ambiguity'], v['ceiling'])"
+        ),
+        aliases=[
+            "should I answer or refuse this query",
+            "return a set instead of one result",
+            "how ambiguous is this search",
+            "when is a ranking meaningless",
+            "abstain instead of guessing a document",
+            "query performance prediction",
+            "detect near duplicate documents in results",
+            "bayes ceiling for a search query",
+        ],
+    )
+
+    c.register_capability(
+        "Verified GLSL kernels (shader source with the number that verified it)",
+        "Nine GLSL kernels this engine compiled and EXECUTED against exact references: BM25 with exact containment "
+        "coverage, an inverted index scattered by additive blending (63x less work, 106x wall clock on real "
+        "queries), diffusion, PBD constraints, linear image formation, HDRIFT attraction and repulsion. "
+        "SOURCE ONLY -- core is NumPy/Flask/stdlib, so no GL binding lives here. EVERY entry carries its KEPT "
+        "NEGATIVE and the selftest REFUSES one shipped without it: scatter gives up bit-reproducibility, "
+        "diffusion conserves heat only to f32, PBD is Jacobi, raster exactness depends on the scene.",
+        example=(
+            "print(mind.glsl_kernels())\n"
+            "k = mind.glsl_kernel('scatter_bm25_vs')\n"
+            "print(k['does']); print(k['verified']); print(k['source'][:200])"
+        ),
+        aliases=[
+            "ready made glsl shader source",
+            "verified shader kernels library",
+            "get the glsl for bm25 scoring",
+            "gpu inverted index shader",
+            "diffusion step shader",
+            "position based dynamics shader",
+            "which shaders have been tested",
+        ],
+    )
+
+    c.register_capability(
+        "Save and load a retrieval index (one format, disk and browser)",
+        "mind.index_save(tokens, path) writes a portable `lecore-index/1` bundle; mind.index_load(path) reads it "
+        "back and REFUSES a payload whose sha256 does not match -- a truncated write parses cleanly and "
+        "answers wrongly. Fills a real gap: mind.save persists the MIND, not an index. Stores the GENERATOR "
+        "(packed token stream + vocabulary + global stats); postings are DERIVED on load, so duplicate state "
+        "cannot drift. The SAME bytes load in a browser from IndexedDB via pages/idb_store.js.",
+        example=(
+            "toks = [mind.canonical_terms('the quick brown fox'), mind.canonical_terms('lazy dogs sleep')]\n"
+            "man = mind.index_save(toks, '/tmp/idx.json')\n"
+            "back = mind.index_load('/tmp/idx.json')\n"
+            "print(back['ndocs'], back['ntok'], back['sha256'][:12])"
+        ),
+        aliases=[
+            "save an index to disk and load it back",
+            "persist memory across sessions",
+            "store the corpus in the browser",
+            "indexeddb local storage for leCore",
+            "serialize a retrieval index",
+            "keep my documents between runs",
+        ],
+    )
+
     # --- the catalog itself ---
 
 

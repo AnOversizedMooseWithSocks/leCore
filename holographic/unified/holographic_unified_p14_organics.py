@@ -1099,9 +1099,44 @@ class _UnifiedPart14:
         from holographic.agents_and_reasoning.holographic_modeltrain import replay_recipe
         return replay_recipe(recipe, examples, labels=labels)
 
+    def lincode_codebooks(self, dim=None, n_factors=3, n_entries=24, seed=0):
+        """Build codebooks whose phases are a LINEAR image of their index bits (Raviv 2024 form).
+
+        Returns (codebooks, basis). The basis IS the structure that makes factorization a SOLVE
+        instead of a search -- keep it, or factor_exact has nothing to work with.
+        See holographic_lincode.build_codebooks.
+        """
+        import holographic.agents_and_reasoning.holographic_lincode as _LC
+        return _LC.build_codebooks(dim or self.dim, n_factors, n_entries, seed=seed)
+
+    def factor_exact(self, composite, basis, n_factors, n_entries):
+        """Recover F indices from a bound product by SOLVING for index bits -- exact, not searched.
+
+        MEASURED head-to-head against phasor_factor at D=1024, 12 trials each: resonator
+        2/12 -> this 12/12 at F=3 M=24; 0/12 -> 12/12 at F=4 M=24; 0/12 -> 12/12 at F=6 M=8;
+        and 5.4ms -> 0.3ms. KEPT NEGATIVE: this is NOT a better resonator. It requires codebooks
+        built by lincode_codebooks (they carry the structure being solved) and REFUSES an
+        underdetermined system rather than guessing. The resonator factors codebooks it did not
+        create; this one is exact on codebooks it did. See holographic_lincode.factor_exact.
+        """
+        import holographic.agents_and_reasoning.holographic_lincode as _LC
+        return _LC.factor_exact(composite, basis, n_factors, n_entries)
+
+    def capacity_gate(self, **kw):
+        """Consult every measured capacity law and ROUTE to the escape (proceed/reroute/abstain).
+
+        Takes the same keywords as advise_scale. A law that is measured and never consulted is
+        worth nothing, and every failing law here has a MEASURED escape that is not "more dim":
+        pair-capacity -> celled_memory (recall 0.007 -> 1.000), nesting depth ->
+        encode_tree_carrier (leaf share 0.00044 at d7 -> recovery 0.94-1.00 at d7-32).
+        See holographic_capacitygate.capacity_gate.
+        """
+        import holographic.caching_and_storage.holographic_capacitygate as _cg
+        return _cg.capacity_gate(self.advise_scale(**kw))
+
     def advise_scale(self, n_pairs=None, vocab=None, dim=None, bundle_k=None,
                      depth=None, factors=None, alpha=0.90, decoder="one-shot",
-                     fix=False):
+                     fix=False, codebook=None):
         """Every measured capacity/depth law in one checkpoint, consulted BEFORE the
         wall: margins per law, the BINDING constraint, and a concrete prescription
         (exact dim, decoder switch at the PIC transition, or the named lever --
@@ -1111,7 +1146,7 @@ class _UnifiedPart14:
         from holographic.caching_and_storage.holographic_supermemory import advise_scale
         return advise_scale(n_pairs=n_pairs, vocab=vocab, dim=dim or self.dim,
                             bundle_k=bundle_k, depth=depth, factors=factors,
-                            alpha=alpha, decoder=decoder, fix=fix)
+                            alpha=alpha, decoder=decoder, fix=fix, codebook=codebook)
 
     def depth_probe(self, depth, dim=None, n=8, seed=0):
         """Measure the nesting-depth wall for typed trees: worst-case cosine between
@@ -1769,6 +1804,103 @@ class _UnifiedPart14:
         blended field. Per-segment since B-1. See holographic_creaturereport.part_colour_ids."""
         import holographic.mesh_and_geometry.holographic_creaturereport as _cr
         return _cr.part_colour_ids(creature, spec=spec, points=points, spacing=spacing)
+
+    def split_plan(self, paths, contended=True):
+        """Dispatch work PROPORTIONALLY across contending paths instead of picking one winner
+        (holographic_splitplan). `paths` is [{"name", "throughput": items/sec, "shares_bus": bool}] with
+        throughput MEASURED, never a spec-sheet number.
+        WHY (FreeToken, arXiv 2608.16157): an MoE expert miss can be served over PCIe on the GPU or on the
+        CPU where it already lives, and BOTH READ THE SAME SYSTEM MEMORY -- they compete for one pool
+        rather than adding. Engines that pick one strategy at load time miss most of what the router asks
+        for; FreeToken measures both bandwidths on the actual machine and splits in proportion. Two
+        machines with the same GPU can want opposite strategies, and none of it is on a spec sheet.
+        THIS IS leCore'S OWN FINDING FROM THE OTHER SIDE: machine_spec_sheet's founding negative is that a
+        latency-ordered hierarchy is the wrong frame because "every one is a BATCH unit whose per-access
+        cost collapses with N". Units contending for one resource do not form a ladder.
+        `contended=True` caps bus-sharing paths at the fastest of them rather than summing -- deliberately
+        CONSERVATIVE, because over-claiming a split's benefit is how a win becomes a production regression.
+        ADDITIVE: argmax(weights) is exactly the tier a picker would choose, so `compute_plan` callers are
+        unaffected. `split_gain` is 0.0 when one path dominates -- the honest answer, and the case where
+        picking was right."""
+        from holographic.agents_and_reasoning.holographic_splitplan import split_plan
+        return split_plan(paths, contended=contended)
+
+    def render_plate(self, sdf, eye, target, material, sky, width=340, height=255, fov_deg=36.0,
+                     tol=0.012, min_spp=16, max_spp=128, max_bounce=2, seed=0, denoise=True,
+                     white=None, white_pct=99.0, gamma=2.2, exposure=1.0, far=12.0, albedo_fn=None,
+                     budget_s=None, upsample=1):
+        """render_specimen's pipeline with a FIXED white point instead of a searched one
+        (holographic_plate). Identical trace -> denoise -> clamp; only the last step differs.
+        WHY: render_specimen ends in grade(), which SEARCHES an exposure and RE-NORMALISES its input --
+        so scaling the lights cannot change the result (three sessions were spent lowering `gain` against
+        a blowout that was structurally immune to it), and on a mostly-BRIGHT subject like an anatomical
+        section (fat 0.90, bone 0.87) it has no dark reference and drives the pale tissues to clipping.
+        A plate also needs REPRODUCIBLE tone: a searched exposure means two renders of the same subject
+        under the same light are not comparable, which defeats the point of a plate.
+        `white=None` measures one at `white_pct` WITH HEADROOM and reports it -- pin that number for a
+        series. Headroom is load-bearing: extended Reinhard maps L == W to exactly 1.0, so a white point
+        set AT the percentile clips the top by construction (measured: 100% of a flat bright fixture).
+        Report carries white / highlight_fraction / grain_raw / grain_denoised / sample_saving, so "is it
+        blown out" is a MEASUREMENT rather than an opinion.
+        KEPT NEG: a fixed white below the scene's real range WILL clip -- reproducible and your
+        responsibility, versus adaptive and unpredictable.
+        `budget_s` MEASURES rather than times out: render_plan probes the cost on a tiny tile and shrinks
+        resolution/spp to fit, and the plan is reported so you see what was traded instead of silently
+        receiving a smaller image. Omitting it is how a 16-minute render with no output happens.
+        `upsample=N` traces COLOUR at 1/N size and upscales guided by a FULL-RES G-buffer. The asymmetry is
+        the point: a G-buffer is one sphere-trace per pixel while a path trace is min_spp..max_spp bounced
+        paths, so full-res geometry is nearly free and full-res colour is the whole cost. PREFER THIS OVER
+        bake, whose 9.6x brings QUANTISED NORMALS and a ~0.2 radiance error that does NOT converge with
+        grid resolution -- an approximation in the SHADING, where this one approximates only colour BETWEEN
+        known edges. KEPT NEG: it invents plausible detail, not true detail; it is not a high-res trace."""
+        from holographic.rendering.holographic_plate import render_plate
+        return render_plate(self, sdf, eye, target, material, sky, width=width, height=height,
+                            fov_deg=fov_deg, tol=tol, min_spp=min_spp, max_spp=max_spp,
+                            max_bounce=max_bounce, seed=seed, denoise=denoise, white=white,
+                            white_pct=white_pct, gamma=gamma, exposure=exposure, far=far, albedo_fn=albedo_fn,
+                            budget_s=budget_s, upsample=upsample)
+
+    def material_preview(self, sdf, eye, target, material, width=160, height=120, fov_deg=36.0, far=12.0):
+        """See what a material callback ACTUALLY paints, in ~1s, WITHOUT path tracing
+        (holographic_matpreview). One sphere trace gives surface positions -- the entire input to a
+        material -- so albedo is nearly free while a lit render is 50-140s on a composed SDF.
+        WHY: a material was only ever called BY the path tracer, so "did my change reach the pixels" cost
+        a full render, which is long enough that guessing beats measuring. It did: eyes authored at radius
+        0.017 that are two pixels wide, a fur term that is ~1 everywhere and flattens, a coat paler than
+        its albedo -- each diagnosed only after a render.
+        Report gives hit_fraction, n_unique_colours and luma_span, so a FLAT callback and a BROKEN one --
+        indistinguishable in a render, two minutes each -- are told apart instantly.
+        KEPT NEG: this is ALBEDO, not radiance. It cannot say the render is too bright, dark or noisy;
+        those are transport and exposure questions and belong to render_plate's report."""
+        from holographic.rendering.holographic_matpreview import preview_material
+        return preview_material(self, sdf, eye, target, material, width, height, fov_deg, far)
+
+    def feature_coverage(self, sdf, eye, target, features, width=160, height=120, fov_deg=36.0, far=12.0):
+        """For each named (centre, radius) feature, the fraction of VISIBLE pixels it occupies
+        (holographic_matpreview). `features` is [(name, centre_xyz, radius), ...].
+        THE NUMBER THAT WAS MISSING FOR FOUR SESSIONS. An eye at radius 0.017 on a body 1.6 units long is
+        not "small" in any way a person can judge from the spec -- it is a pixel count, and 0.0000 says so
+        in one second. Each entry also reports `nearest`, the distance from the feature centre to the
+        closest visible surface point, so a MISPLACED feature (large nearest) and a TOO-SMALL one (nearest
+        ~0, pixels 0) are distinguished -- they need opposite fixes and both read as 'it is not there'."""
+        from holographic.rendering.holographic_matpreview import feature_coverage
+        return feature_coverage(self, sdf, eye, target, features, width, height, fov_deg, far)
+
+    def verify_render_stages(self, sdf, eye, target, material, sky, width=96, height=72, budget_s=60):
+        """Assert each render STAGE's contract in one pass (holographic_stagecheck) -- because four defects
+        shipped in this arc and every one was a stage never measured in isolation:
+        (1) tonemap_fixed had a white point and NO exposure (doubling white moved the mean 0.444 -> 0.424);
+        (2) render_plate had no budget_s (16+ minutes, no output); (3) render_plan was costing the OUTPUT
+        size while upsample traces at 1/N, losing 4x resolution; (4) gbuffer(albedo_fn=None) gave SVGF a
+        FLAT guide, so it smoothed across every texture -- four sessions of "fur does not work".
+        All four passed end-to-end testing, because end-to-end only asks whether an image came out.
+        Each check asserts the EFFECT of a stage, never its implementation -- reading the code back is how
+        all four survived. Small by default; a verifier that costs a full render is one nobody runs.
+        KEPT NEG: verifies MECHANISM, not beauty. Every check can pass on a render that looks wrong --
+        that question belongs to an eye and to material_preview at 0.044s, not to an assertion."""
+        from holographic.rendering.holographic_stagecheck import verify_render_stages
+        return verify_render_stages(self, sdf, eye, target, material, sky,
+                                    width=width, height=height, budget_s=budget_s)
 
 def _selftest():
     """Delegates to holographic.unified.check_part -- one home for the shared contract."""

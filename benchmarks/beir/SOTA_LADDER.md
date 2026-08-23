@@ -2,9 +2,18 @@
 
 Every number below is a PUBLISHED result on the standard BEIR test split (sources in brackets), placed
 beside our measured train-tuned/test-once hybrid. PROTOCOL ASTERISK, stated honestly: the neural rows
-are zero-shot MS-MARCO-trained models with 10^7-10^10 learned parameters; our row tunes ~6 fusion
-weights + (k1,b) on the in-domain TRAIN qrels and holds ZERO learned parameters. Different regimes;
-the ladder is a target list, not a claimed equivalence.
+are zero-shot MS-MARCO-trained models with 10^7-10^10 learned parameters, and they never see these
+datasets' train qrels. Our rows do. THE ASTERISK IS NOT UNIFORM ACROSS ROWS AND MUST BE READ PER ROW:
+  * NFCorpus 0.3442 (phase-8) tunes ~6 fusion weights + (k1,b) on the in-domain TRAIN qrels: ZERO
+    learned parameters, and the closest thing here to a fair fight with a zero-shot row.
+  * SciFact 0.7092 (phase-9) fits |V| PER-TERM weights by seeded gradient descent on SciFact TRAIN
+    qrels. That is deterministic and zero-neural, but it is NOT zero-parameter and it is NOT zero-shot
+    -- it is in-domain supervised, the same regime as the Contriever FEW-SHOT row noted below at 0.84.
+    Placing it against zero-shot SPLADE-v3 (0.710) compares across regimes; the honest in-regime
+    comparator is 0.84, and by that comparator this row is well short.
+Different regimes; the ladder is a target list, not a claimed equivalence. The status verbs (BEATEN /
+CLEARED / MATCHED) escalated at phase-9 while this asterisk did not -- corrected here, and the SciFact
+verbs should be re-read as 'reached the number, in a different regime', not as a like-for-like win.
 
 ## NFCorpus (3,633 docs, 323 test queries, graded qrels)
 

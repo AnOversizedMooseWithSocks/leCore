@@ -386,6 +386,9 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 - **[`SERVICE.md`](SERVICE.md)** — the **standalone HTTP service**: every endpoint (data store, jobs, and the
   agent-facing skills API) with `curl` examples, for driving leCore as an app rather than a library.
 - **[`GALLERY.md`](GALLERY.md)** — a **visual showcase**: renders, procedural patterns, memory/reconstruction demos, and performance charts, straight from the engine's tests (the visual companion to the code reference).
+- **[`docs/GLSL_GUIDE.md`](docs/GLSL_GUIDE.md)** — **building with leCoreGLSL**: an interactive field demo, the ten verified
+  shader kernels, the three shader shapes, what the GPU is measurably good and bad at here, and
+  what you can build (games and simulation: yes; retrieval: no; VR: untested and labelled so).
 - **[`writing_vsa_programs.md`](writing_vsa_programs.md)** — the **VSA program writing guide**: how to express
   your own logic as a holographic program on `HoloMachine`, the small stored-program machine, without baking it
   into the core. Read this when you want to run custom logic over the vector algebra.

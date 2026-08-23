@@ -1318,7 +1318,11 @@ class _UnifiedPart04:
 
     # -- K8: dialect emitters -- one source of truth, two runtimes, no drift -------------------------------
     def emit_kernel(self, fn, dialect="wgsl"):
-        """Emit a scalar, straight-line, float kernel into `wgsl` | `c_f64` | `c_f32` | `js` | `zig_f64` | `zig_f32`. The hand-written
+        """Emit a scalar, straight-line, float kernel into `wgsl` | `glsl` | `slang` | `c_f64` | `c_f32` | `js` |
+        `zig_f64` | `zig_f32`. SLANG is an HLSL superset, so one emitted artifact reaches SPIR-V, HLSL,
+        MSL and CUDA through slangc -- OPT-IN, never a required dependency. Emitting INTO Slang rather
+        than authoring in it keeps the Python kernel authoritative, which is what the installed-weights
+        path needs (you install the kernel, not a shader). The hand-written
         compute shader becomes a PROJECTION of the authoritative Python kernel. K10's rule: the emitter REFUSES
         rather than guesses -- an unannotated parameter, an unknown call, a `while`, a range whose bound is not a
         literal, or a missing return each raise with

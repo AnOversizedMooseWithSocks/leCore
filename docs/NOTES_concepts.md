@@ -5029,7 +5029,7 @@ lossless at the true rank and lossy below it, at a fraction of the full storage 
 A parallel investigation ("Path D": computing and storing INSIDE the holographic space) was merged in from a
 separate session. It arrived as a self-contained bundle -- two new modules, plus experiments, figures, and the
 frontier-program / dataset-benchmark / distribution-candidate docs -- and it touched none of the existing
-engine code, so the integration was additive: the bundle lives under `path_d/`, the two reusable modules were
+engine code, so the integration was additive: the bundle lives under `research/path_d/`, the two reusable modules were
 hoisted to the top level and (the real work) WIRED INTO `UnifiedMind` as faculties, the same discipline every
 other module shipped under. They imported cleanly against the frozen kernel with zero API drift, and both their
 selftests and the headline experiments reproduced on this tree before anything was written down.
@@ -5059,7 +5059,7 @@ same linearity.
 The bundle's own headline (reproduced here) is the distributed forward pass: a single weight-vector is faithful
 to 16 classes (~0.02 x D), and federating to 8 shards holds 96 (~6x) -- the same federation move that fixes
 storage, applied to the matmul. The bundle also carries the frontier-program and dataset-benchmark docs (now
-under `path_d/docs/`) and a second lever, RNS-phasor arithmetic, that lives in the Path D experiments but is not
+under `research/path_d/docs/`) and a second lever, RNS-phasor arithmetic, that lives in the Path D experiments but is not
 yet an engine module -- a clear, honestly-labelled next step rather than a claim.
 
 Tests: +3 (one mind-level integration test wiring both faculties -- federation grows shards and parity restores
@@ -70768,341 +70768,7977 @@ SAME LESSON AS THE AGENT BENCHMARK, THIRD COSTUME: TESTING ABSTENTION REQUIRES A
 QUESTION WITH NO GOOD ANSWER, and any rule that can accidentally emit a
 meaningful query will eventually emit one.
 
-## Adaptive retrieval dispatch -- BM25 demoted from full retriever to last-pass denoise (+8 tests)
+## GLSL DIALECT: A PINNED NEGATIVE FLIPPED ON PURPOSE, PLUS THE EVIDENCE THAT EARNED IT
 
-The user's diagnosis, correct on audit: BM25 shipped as a full parallel retriever (score the WHOLE corpus
-lexically every hybrid query, fuse two complete rankings) -- rendering the scene twice to fix a few noisy
-pixels. The engine already had the right shape (dispatch_render's strategy pick; adaptive path tracing's
-stop-when-proven; route_or_abstain's null floor) but retrieval never got the dispatcher. Now it does:
-holographic_retrievaldispatch.dispatch_retrieval, faculty retrieval_dispatch.
+`emit(fn, "glsl")` used to RAISE, and the module selftest PINNED that refusal. It was correct:
+GLSL ES has no f64, and this emitter's whole discipline is refuse-rather-than-guess on types.
+What was missing was not a table row, it was a reason to accept f32 semantics.
 
-THE CASCADE (cheapest proof first): (1) EXACT -- unique verbatim phrase hit = the answer, cost one scan,
-no scoring (the catalog exact-alias lesson as a stage); (2) DENSE -- semantic scores gated on the
-top-1/top-2 relative margin: wide margin = proven pixel, return, BM25 never runs; (3) REFINE -- narrow
-margin only: BM25 FIT OVER THE DENSE SHORTLIST (default 32 docs, O(shortlist) independent of corpus size),
-RRF-fused dense-dominant (1.0, 0.3, the SR-BETA optimum); (4) ABSTAIN when both arms are flat.
+THE REASON NOW EXISTS AND IS MACHINE-CHECKED. Six theorems in Lean 4.14.0 (core only -- mathlib
+is unreachable, so they are stated over Int/Nat, which is what a conservative f32 error budget
+IS; the reals restatement is NOT claimed):
+  T1 margin_preserves_argmax        -- |t-s| <= eps and margin > 2*eps => the argmax cannot move
+  T2a lipschitz_one_linear_growth   -- a norm-preserving step gives e(n) <= n*delta
+  T2b amplifying_step_is_exponential-- a gain>=2 step gives 2^n <= f(n)
+  T3 contraction_halves_geometrically -- 2^n * e(n) <= e(0)
+  T4 tiled_max_eq_global            -- a tiled reduction equals the single pass
+  T5 gate_sound                     -- whenever the gate ANSWERS, the answer is the f64 answer
+Axiom footprint printed for all six: [propext, Quot.sound] only. NO sorryAx, no Classical.choice.
 
-MEASURED: exact short-circuits; wide margin skips lexical; refine rescues a dense-buried gold INSIDE the
-window; token-fit contrast full-corpus(2000) vs shortlist(32) > 50x; deterministic under planted dense ties.
+MEASURED, on 122 REAL module docstrings (bag-of-atoms, derived_atom per token):
+acc_f32 == acc_f64 at every corpus size; the T1 gate answered 100% of queries at precision 1.000;
+worst-case margin/(2*eps) = 33.8. On synthetic unitary atoms the same ratio reads ~1e7 -- that
+number is a property of a near-orthogonal corpus, NOT of f32, and it is kept as such.
 
-KEPT NEGATIVES (loud): (a) refine CANNOT rescue gold outside the shortlist (RRF case C re-confirmed --
-widen the retriever k, never the lexical weight); (b) two verbatim hits = ambiguity, falls through, not
-proof; (c) a confidently-WRONG dense top-1 passes the gate un-refined -- the adaptive-sampling trade,
-mitigated by tau (tau=1.0 = old always-hybrid behavior, available, not default). Additive: bm25_rank /
-fuse_rankings / route_semantic unchanged; the dispatcher only composes them. Discoverability 5/5 stranger
-phrasings. Tests +8 (tests/test_retrieval_dispatch.py). Audits 0/0/0.
+WHAT SHIPPED: a `glsl` row in DIALECTS (GLSL ES 3.0 / WebGL2), the intrinsic column MIRRORED from
+wgsl (GLSL spells sqrt/exp/log/sin/cos/abs/min/max/pow identically -- one column, not a second
+table to keep in sync), and the selftest REPINNED THE OTHER WAY as a DIFFERENTIAL guard: glsl must
+equal the c_f32 arm under a mechanical token map, so if either grows a hand-written special case
+the test fails. The "unknown dialect must raise" guard is kept, now aimed at `hlsl`.
+Catalog title and body updated; discoverability 5/5 on stranger phrasings.
 
-## BEIR benchmark: holographic arms vs BM25 on REAL test collections -- the tuned hybrid WINS (NFCorpus), ties-with-recall-win (SciFact)
+KEPT NEGATIVES (unchanged and added):
+  * NO GLSL COMPILER WAS RUN. There is no GPU, no browser and no glslangValidator here. The
+    arithmetic is validated through c_f32, which shares the IR and COMPILES AND RUNS (max abs err
+    9.47e-07 vs Python over 200 random inputs on a loop-carrying fBm kernel). What is NOT
+    validated: that a GLSL compiler accepts the text, GLSL's own precision guarantees, fast-math
+    latitude. Same gap WGSL already declares. Stated, not papered over.
+  * `bind` is still NOT emittable and that is still not a missing feature.
+  * f32 is a SERVING tier with a certificate, not a bit-exact tier.
 
-The user's bar: SOTA-style benchmark, large real published data, no custom sets favoring either side,
-beat BM25. Data: NFCorpus (3,633 docs, 323 test queries, GRADED qrels) and SciFact (5,183 docs, 300 test
-claims) -- both standard BEIR tasks, both BM25-FRIENDLY domains (the honest hard mode), fetched from
-GitHub mirrors (benchmarks/beir/fetch_data.sh). INSTRUMENT VALIDATED FIRST: our BM25 reproduces the
-published BEIR references (nDCG@10 0.3184 vs ~0.325 NFCorpus; 0.6689 vs ~0.665 SciFact).
+CAPACITY MEASUREMENT CORRECTED (this is the one that moved a number people will quote).
+The earlier superposition cliff scored each query against a codebook that WAS the k stored
+values, so crosstalk and distractor count grew together -- two effects, one number. Plate (1994,
+p.160ff) and the VSA-comparison literature both fix an item memory and vary only k. Re-run with
+item memory FIXED at 512:
+    d=256  50% at k=27.2      d=512  50% at k=59.2      d=1024  50% at k=116.1
+    ratios 1.00 / 2.18 / 4.27 against the published LINEAR-in-d law's 1 / 2 / 4 -- within 9%
+    across a 4x range, consistently ABOVE linear (possibly the unitary mint, which the published
+    curves do not assume).
+The old cliff (~16-32 at d=512) was PESSIMISTIC BY ~2x. Anything that cited it as "the capacity"
+should be re-read.
 
-ARMS (pure NumPy/stdlib/hashlib, deterministic, zero learned weights): holo-bow (idf-weighted bundle of
-sha256-seeded token hypervectors -- a random projection of tf-idf); holo-ctx (RANDOM INDEXING,
-Kanerva/Sahlgren: token context vectors bundled from co-occurring docs -- corpus-derived semantics);
-holo-cg (char-3/4-gram hypervector bundles -- the morphology channel). Fusion weights swept on the TRAIN
-qrels only, TEST touched once (the legitimate SOTA protocol). Champion both datasets: CombSUM min-max,
-ctx as the strongest holographic arm, bow weight 0.
+TILE SIZE: THE CAPACITY LAW IS REFUTED, THE BALANCE LAW PREDICTED A NUMBER.
+Lever 6 says a measured limit is a tile size. I had claimed lever 6 "named its own tile size"
+because g=16 matched the (wrong) cliff. Retested on held-out seeds with the two laws made to
+disagree -- a capacity law says g* is FIXED in K, a balance law says g* ~ sqrt(K) because a
+2-tier tree loads leaves with g and the coordinator with K/g:
+    K=128  best g = 8    (g=8: 1.0000, g=16: 0.9974, g=32: 0.8958, g=64: 0.5677)
+    K=512  best g = 16   (g=8: 0.6771 <-- CATASTROPHIC, g=16: 0.9707, g=23: 0.9421, g=32: 0.8307)
+g* MOVED, and non-monotonically: g=8 is optimal at K=128 and the worst arm tested at K=512,
+because 512/8 = 64 chunks saturates the COORDINATOR. Capacity law refuted. Measured g* sits
+BELOW sqrt(K) (16 vs 22.6), which is expected: a leaf recall faces K distractors, a coordinator
+recall only K/g.
+Then the balance law was made to PREDICT rather than fit: three tiers balance at g* ~ K^(1/3),
+which for K=512 is exactly 8 -- the value that was catastrophic at two tiers.
+    K=512, 3 tiers: g=8 -> 1.0000 +- 0.0000 ; g=12 -> 0.9993 ; g=16 -> 0.9915
+    (2-tier best was 0.9707) -- the derived number won.
+Lever 6's recursion clause ("when the coordinator hits its own limit, split again") is therefore
+not advice: it is what the load balance requires, and the tier count sets the exponent.
 
-RESULTS (test, bootstrap 95% CI over queries):
-  NFCorpus: hybrid nDCG@10 0.3371 vs bm25 0.3184  (+0.0187 [+0.0106,+0.0281]) SIGNIFICANT WIN --
-            also beats the PUBLISHED BEIR BM25 0.325. R@100 0.3174 vs 0.2426 (+0.0747) SIGNIFICANT WIN.
-            holo-ctx ALONE beats bm25 R@100 (+0.0539 significant) -- vocabulary mismatch is where
-            corpus-derived semantics genuinely add signal BM25 structurally cannot have.
-  SciFact:  R@100 0.9270 vs 0.8970 (+0.0300 [+0.0127,+0.0500]) SIGNIFICANT WIN.
-            nDCG@10 0.6743 vs 0.6689 (+0.0054 [-0.0100,+0.0213]) NOT significant -- an honest TIE.
+MULTIPLE-TESTING CONTROL applied to my own sweep (the group-size winner was chosen from 5 arms).
+Re-run on 10 HELD-OUT seeds, paired sign-flip permutation (10k), Benjamini-Hochberg at q=0.05:
+g=4 (p=0.0033), g=32 (p=0.0021), g=64 (p=0.0022) all significantly WORSE than g=16; g=8 is
+NOT distinguishable (p=1.0000) while costing 1.9x the floats. So g=16 over g=8 is a COST
+argument, not an accuracy one, and saying otherwise would have been look-elsewhere.
 
-KEPT NEGATIVES (loud): (a) holo-ctx alone LOSES SciFact nDCG (-0.084 significant) -- shared-terminology
-claims are BM25's home regime and corpus semantics add noise there; ONLY the tuned fusion converts that
-into never-lose-plus-recall. The regime split (ctx wins vocab-mismatch, bm25 wins shared-terminology) is
-the retrieval_dispatch thesis measured on public data. (b) CombSUM beat RRF on train BOTH datasets --
-the RRF docstring's brittleness warning did not bind at this scale with min-max per query; recorded, not
-generalized. (c) fixed equal-ish weights LOSE (phase-1 hybrid -0.019 SciFact) -- tuning on train is
-load-bearing. (d) corpus sizes are BEIR-standard but moderate (3.6k/5.2k docs); the MSMARCO-scale claim
-is NOT made. (e) phase-3 first run OOMed on a second dense (N,V) allocation -- fixed by sparse per-doc
-accumulation (the doc-major lesson, third costume).
+INSTRUMENT ERRORS THIS ARC, kept loud:
+  16. bind applied twice and called a bind/unbind round-trip (unbind needs the INVOLUTION) --
+      reported "decisions flipping" that were not.
+  17. `ring` and `positivity` are mathlib tactics, absent from Lean core.
+  18. TWO THEOREMS COMPILED WHILE DEPENDING ON sorryAx. `lean file.lean` EXITS 0 on this.
+      Only `#print axioms` catches it. PROPOSED GUARD: no Lean proof ships without an axiom
+      print showing sorryAx absent -- compilation success is not proof success, which is the
+      same lesson as "static analysis has repeatedly passed broken code", in a new costume.
+  19. my GLSL test kernel called float(i) explicitly; the emitter REFUSED CORRECTLY, since int
+      promotion is the dialect's job (int_promote), not an intrinsic.
+RETRACTED: I flagged "two DIALECTS tables and a GLSL output in neither" as a never-two-
+implementations violation. It does not reproduce. holographic_emit is the KERNEL emitter (Python
+AST) and owns the shared GLSL primitives (glsl_float/glsl_vec3/assemble_glsl); sdfemit is a
+DIFFERENT IR (an SDF node tree); holographic_sdf._emit_shader and postfx both DELEGATE to
+holographic_emit. Three emitters, three IRs, one set of primitives -- layered, not duplicated.
 
-Scorecard vs the bar: 3 of 4 headline metrics SIGNIFICANT WINS over a reference-grade BM25 on its own
-turf, the 4th a statistical tie, with zero learned weights and the core's own constraints intact.
-Scripts: benchmarks/beir/{bench_beir,bench_beir_tuned,bench_beir_push}.py.
+## THE GLSL KEPT NEGATIVE IS RETIRED: THE VSA READ PATH NOW RUNS AS COMPILED, EXECUTED GLSL
 
-## SciFact nDCG closed: the domain-operators fix -- BM25 now beaten on ALL FOUR headline metrics
+Standing kept negative, carried since the WGSL work and repeated when the glsl dialect landed:
+"the emitted shader is NOT executed by any test here -- there is no GPU and no browser."
+That is now FALSE FOR GLSL and the negative is retired with evidence rather than deleted.
 
-The one non-win (SciFact nDCG@10, a statistical tie) fell to the demoscene seat's own move, found via Rule 0
-in the catalog ('Domain operators & cosine palette (demoscene)' / domain_repeat): don't build a bigger
-evaluator, EVALUATE WHERE THE DETAIL LIVES. A SciFact claim is evidenced by ONE sentence; doc-level BM25
-length-normalizes the match over ~9 sentences and dilutes exactly what nDCG@10 needs. Channels added, each
-a lever wearing a text costume: SENT-MAXP (tile the domain -- BM25 over the corpus's 45,952 sentences,
-doc score = max over its tiles; MaxP, Dai-Callan 2019), TITLE-F (LOD field -- separate title BM25, BM25F
-spirit, Robertson 2004), BIGRAM (more dimensions -- ordered-pair terms, SDM, Metzler-Croft 2005), plus the
-fused system tuning its OWN internal k1/b on train (baseline untouched at the published 1.5/0.75).
+Mesa llvmpipe supplies a headless software GL 4.5 core context over surfaceless EGL, so the
+shaders are COMPILED BY A REAL GLSL COMPILER AND RUN. glsl_run.py implements the whole read
+path as three passes, FRAGMENT SHADERS AND texelFetch ONLY -- no compute shaders, no SSBOs --
+because the target is WebGL2/GLSL ES 3.00, which has neither:
+  1. BIND   circular convolution as a circulant GATHER, k[(j-i) mod D]. The matrix is NEVER
+            materialised; the "weight" is the D-vector and the shader wraps the index. The mod
+            on the index domain is domain repetition.
+  2. SCORE  the codebook matvec, one fragment per atom, the dot product as the fragment's loop.
+  3. ARGMAX a TILED max reduction -- the pass T4 (tiled_max_eq_global) proves cannot move the
+            answer, now also observed not to.
 
-TRAIN champion: k1=0.9 b=0.40, weights (doc 1.0, maxp 0.3, title 0.3, bigram 0.0, ctx 1.0, cg 0.5).
-TEST (touched once): nDCG@10 0.6854 vs bm25 0.6689 -- +0.0165 [+0.0003, +0.0335] SIGNIFICANT WIN (the CI
-lower bound is barely positive: a real but MARGINAL win, said plainly); R@100 0.9237 vs 0.8970 (+0.0267)
-SIGNIFICANT WIN. Both also beat the published BEIR BM25 reference (0.665).
+MEASURED, GPU vs leCore's f64 rFFT path:
+    D=256 K=64   bind 6.44e-07   unbind 5.76e-07   scores 1.88e-07 (abs)
+    D=512 K=64   bind 7.55e-07   unbind 7.79e-07   scores 2.38e-07 (abs)
+    tiled max == single-pass max: True at both dims
+    ARGMAX matches f64 at both dims; T1 gate ANSWERS, safety margin/(2*eps) 1.9e6 and 2.3e6
+The f32 error lands where the earlier CPU-side f32 study said it would (~2e-7 on scores),
+which is the point: the prediction was made before the shader existed and the shader met it.
 
-FINAL SCORECARD (all bootstrap-CI over queries, train-tuned/test-once):
-  NFCorpus nDCG@10  0.3371 vs 0.3184  WIN     NFCorpus R@100  0.3174 vs 0.2426  WIN
-  SciFact  nDCG@10  0.6854 vs 0.6689  WIN     SciFact  R@100  0.9237 vs 0.8970  WIN
-4/4 significant, zero learned weights, NumPy/stdlib/hashlib only.
+WHAT IS STILL NOT CLAIMED, and this matters:
+  * llvmpipe is DESKTOP GLSL 330 core, not GLSL ES 3.00 on a browser. The shaders were written
+    to the WebGL2 subset on purpose, but "written to the subset" is not "run in a browser".
+    A real WebGL2 host is still untested.
+  * A software rasteriser is not a GPU. Nothing here measures throughput, and the earlier GPU
+    crossover question is untouched.
+  * K=64, D<=512, one seed per configuration. This is an EXISTENCE result -- the path runs and
+    the numbers match -- not a characterisation.
+  * Only the READ path. Ingest, tokenisation, index building and the host loop remain host work,
+    which is the same boundary unicron_vm_unit_install already drew: arithmetic installs,
+    control and storage do not.
 
-KEPT NEGATIVES (loud): (a) BIGRAM refused by the sweep (weight 0) -- solo 0.639, correlated with unigram
-BM25, adds nothing under fusion; the SDM lift did not transfer here. (b) MaxP SOLO is WORSE than doc BM25
-(0.559 vs 0.669) -- sentence idf is noisier; the tile channel only pays FUSED, exactly like occlusion's
-low-load tie. (c) MRR@10 not significant on SciFact (+0.011, CI spans 0). (d) phase-4 alone UNDERSHOT
-phase-3 on train (0.694 < 0.700) -- arms fight without the joint sweep; partial sweeps mislead. (e) two
-OOM kills during phase 5, both fixed with the engine's own levers: slim/cold-store mode on the five k1/b
-variants + sentence/bigram indexes, and float32 channel caches -- the bench harness dogfooding the
-module's PR #32 machinery. Scripts: benchmarks/beir/bench_beir_scifact_{fix,final}.py.
+## GLSL ES 3.00 COMPILES, AND THE READ PATH SHIPS AS A SELF-VERIFYING WebGL2 PAGE
 
-## Perfect recall without BM25 -- hierarchical computing-in-superposition + exact verify (+5 tests)
+Prior caveat: "written to the WebGL2 subset is not run as WebGL2." WebGL2's shading language is
+GLSL ES 3.00, a DIFFERENT language from desktop GLSL 330 -- mandatory precision qualifiers,
+explicit `out`, no implicit conversions. So the ES compiler itself was asked.
 
-The user's bar: n-dimensional PERFECT recall, corpus size limited only by time, no BM25, rendering
-metaphors as the design language. Literature confirmed the exact mechanism (web-verified): a Bloom filter
-IS the simplest computing-in-superposition -- a VSA compound hypervector representing a set, all members
-tested in one shot, and it structurally CANNOT produce a false negative (Bloom 1970; Kleyko-Rahimi-
-Gayler-Osipov 2020; Kleyko et al. Proc. IEEE 2022). False positives are hash collisions = OVERDRAW, and
-overdraw dies to a depth test: exact sha256 term-hash verification of every candidate.
+Mesa hands out a surfaceless GLES 3.x context over EGL (glsl_es_compile.py, ctypes, no new
+dependency). Result on OpenGL ES 3.2 / GLSL ES 3.20:
+    vertex OK | bind (circulant) OK + link OK | score (matvec) OK + link OK | tiled max OK + link OK
+The three passes are legal GLSL ES 3.00 and LINK. Only two lines differ from the 330-core
+versions -- `precision highp float/int/sampler2D` and the vec4 out -- which are exactly the ES
+rules, not a rewrite.
 
-holographic_perfectrecall.PerfectRecallIndex, faculty perfect_recall_index. The rendering shape is
-load-bearing: GEOMETRY INSTANCING (a term's bit code is a pure sha256 function -- one definition, any
-number of references); IRRADIANCE PROBES (tile filter = OR-bake of its docs' filters, queried in one
-AND); HIERARCHICAL CULLING (unlit tiles skipped wholesale; lit tiles descend to doc filters, then exact
-verify); MULTI-CHANNEL (independent token/trigram/field channels, composited); ADAPTIVE SAMPLING (work
-only where the probe says signal). GUARANTEE AS ASSERTION: selftest checks exact set EQUALITY (==, not
-F1) against brute force -- 60/60 at N=30k synthetic AND 25/25 on the REAL SciFact corpus (5,183
-abstracts) in tests/test_perfect_recall.py.
+SHIPPED: lecore_webgl2.html, 57.6 KB, ONE FILE, no build step, no network, no dependency.
+It is a DIFFERENTIAL TEST, not a demo: the atoms and the expected f64 results are computed by
+the authoritative engine and embedded as base64 Float32 blobs, so opening it in a browser
+compares WebGL2 against leCore and prints a PASS/FAIL table --
+    bind vs f64 rFFT | unbind vs f64 | scores vs f64 | tiled max == single pass (T4)
+    | ARGMAX vs f64 | T1 gate (margin > 2*eps) with the safety factor
+D=256, K=32, planted target 7, f64 argmax 7, margin 0.865444.
+It CHECKS FOR EXT_color_buffer_float first and says ABSENT rather than silently dropping to half
+precision and reporting a bogus error figure -- a rendering path that quietly changes precision
+would make every number below it a lie.
 
-TWO INSTRUMENT LESSONS FROM ONE BUILD (both kept):
-  * PROBE SATURATION -- first run OR'd 512 docs into a 2048-bit tile probe: every bit set, cull blind, a
-    too-coarse shadow map. Probes now have their OWN resolution dial (tile_bits, default 64k). Probe
-    resolution must scale with tile OCCUPANCY, not per-doc content.
-  * THE 0.3N ASSERT WAS THE BUG -- the 'failing' rare-term query had in fact descended EXACTLY the tiles
-    truly containing the term (optimal cull) and verified EXACTLY the 21 true hits; the arbitrary
-    absolute threshold was wrong, the index was right. Replaced with the optimality floor + a
-    tile-resolution CONTRAST (fine tiles same exact answer, <0.5x docs tested). Assert contrasts, never
-    absolutes -- the standing rule, re-earned.
+VERIFIED BEFORE SHIPPING (the page cannot be run here, so what CAN be checked was):
+    embedded k / V round-trip to the f64 atoms exactly; embedded refScores match V @ unbind(...);
+    embedded argmax == f64 argmax; every page shader starts `#version 300 es` and carries the
+    precision qualifier -- i.e. the text in the page is the text the ES compiler accepted.
 
-KEPT NEGATIVES (loud): (a) CONTAINMENT is not RELEVANCE -- this returns the exact matching set; ranking
-stays the benchmark suite's problem and is NOT claimed. (b) a ubiquitous query term lights every probe
-and degenerates toward the O(N) verify scan -- 'no limit but time' means the worst case IS time, pinned
-in the selftest. (c) memory O(N*(bits/8 + 8*terms)); the verify sets are the zero-false-positive price,
-cold-store-parkable. (d) exactness is relative to the 8-byte term hash (2^-64 pair collision), declared
-in add(). Discoverability 5/5. Audits 0/0/0. Tests +5.
+STILL NOT CLAIMED: no browser has run it. Mesa's ES front end is not ANGLE/D3D, not Apple's
+Metal path, and not a real GPU. Throughput is unmeasured. K=32, D=256, one seed. This is an
+EXISTENCE artifact -- open it and it self-reports.
 
-## Phase 6: perfect-recall structure vs the BEIR benchmark -- scorecard holds 4/4; the exact structure's win is DIAGNOSTIC
+## THE WHOLE READ PATH IS IN SHADERS NOW -- INCLUDING THE DECISIONS -- AND THE GREEDY WALK WAS A BUG
 
-Question asked: how do we stack up against BM25 now? Measured answer: the RANKING scorecard is unchanged
--- 4/4 significant wins (NFCorpus nDCG 0.3371/R@100 0.3174 vs 0.3184/0.2426; SciFact 0.6854/0.9237 vs
-0.6689/0.8970) -- and the exact-containment channel was REFUSED by the train sweep on BOTH datasets
-(coord weight 0.0). KEPT NEGATIVE, stated plainly: bare coordination level adds nothing over BM25 for
-ranking, because BM25 already IS coordination + idf + saturation; the perfect-recall structure cannot
-improve a ranking metric through a channel that is a strict information subset of the lexical arm.
+Closed: the tiered store and every between-level decision. The tier walk runs ENTIRELY on the
+GPU -- each level's winner is written to a texture and read by the next pass via texelFetch, so
+no result crosses back to the host mid-query. Host work is now exactly what the install boundary
+always said: ingest, tokenisation, pass sequencing. Fragment shaders and texelFetch only.
 
-WHAT THE STRUCTURE DID BUY -- two measurements only an exact index can make:
-  * THE RECALL CEILING, per dataset: NFCorpus -- only 28.8% (3551/12334) of relevant docs share even ONE
-    query term. 71% of NFCorpus relevance is LEXICALLY UNREACHABLE by any term method, BM25 included;
-    that is why the ctx (semantics) arm is where the NFCorpus wins came from, now proven rather than
-    inferred. SciFact -- 99.1% reachable, which is why BM25 is near-ceiling there and the wins are thin.
-  * THE GUARANTEE AUDIT of our own shipped system: the hybrid's top-200 candidates MISS 1090/3551
-    lexically-reachable relevant docs on NFCorpus (ranked truncation provably loses reachable answers)
-    vs only 15/336 on SciFact. For recall-critical workloads (discovery, dedup, compliance) the
-    perfect-recall union layer recovers those 1090 for free; for nDCG@10 it does not move the needle
-    and no such claim is made.
+Corpus: 100 real module docstrings, dim 256, bag-of-atoms. Tier size from the BALANCE LAW
+(g ~ K^(1/3) = 4.64 -> g=5), not from a sweep: 100 docs -> 20 chunks -> 4 supers.
 
-Also: the phase-6 first run TIMED OUT on per-term pr.query() tile walks -- fixed with the bake-once
-lever (exact postings precomputed from the same verify sets); the SciFact leg then OOMed -- fixed with
-slim mode on the untouched baseline + freeing unused arm matrices. Script benchmarks/beir/bench_beir_perfect.py.
+FIRST ATTEMPT FAILED AND THE FAILURE IS THE USEFUL PART.
+    NumPy f64 flat scan        acc 0.9700   100 dots/query
+    NumPy f64 3-tier walk      acc 0.6400    14 dots/query
+    GLSL  f32 3-tier walk      acc 0.6400   -- and GPU == NumPy on 100/100 queries
+The shader was NOT the suspect: it reproduced the reference exactly. The structure was wrong.
 
-## RECALL GUARD shipped -- the 1,090-miss wound closed as a faculty with a completeness CERTIFICATE (+5 tests)
+TWO HYPOTHESES, BOTH TESTED, ONE REFUTED.
+  (a) chunk-norm bias -- a chunk is a SUM of g correlated doc vectors, so its norm varies and
+      argmax over un-normalised sums should favour fat chunks. REFUTED: 0.6400 with and without
+      per-chunk normalisation, identical to four decimals. Kept as a negative.
+  (b) the greedy walk -- ONE hard argmax per level has no recovery. CONFIRMED, and a beam fixes
+      it, measured rather than assumed:
+        beam  1: 0.6400 @ 14 dots    beam 3: 0.9600 @ 34 dots
+        beam  2: 0.8800 @ 24 dots    beam 4: 0.9700 @ 44 dots  <- exact parity with flat scan
+So the hierarchy buys 2.3x fewer dot products AT EXACT PARITY -- not the 7x the greedy walk
+appeared to offer while quietly costing 33 accuracy points. THE HONEST NUMBER IS 2.3x.
+IMPORTANT SCOPE CORRECTION: the earlier "3 tiers at g=K^(1/3) gives 1.0000" result was measured
+on near-orthogonal unitary KEY->VALUE pairs selected by a GROUP KEY. Real correlated documents
+bundled by SUM are a different structure and do NOT inherit that number. Do not cite it for
+document retrieval.
 
-The phase-6 guarantee audit's finding, converted into capability. holographic_recallguard.guard_candidates
-(faculty guard_candidates): union any ranked list with exact-containment TIERS from perfect_recall_index
-(all m query terms, then m-1, ...) until a budget fills. The output carries a CERTIFICATE -- the
-coordination level c down to which completeness is a THEOREM: every doc sharing >= c query terms IS
-present. The selftest verifies the claim EXHAUSTIVELY against brute force; the ranked head is preserved
-untouched (beauty pass; the guard is the coverage pass under it).
+BEAM IN A FRAGMENT SHADER, no sorting and no scratch buffer: output slot t takes the entry whose
+RANK is t, and rank is computed by counting how many entries beat it (strict >, ties broken by
+lower index, which makes it a total order). O(N^2) per pass, but N is 4, 20 and 20 here, and it
+is branch-free. Indices emitted are ABSOLUTE, so the next level needs no host arithmetic.
 
-MEASURED on the real wound (NFCorpus, BM25 top-200, budget 1000): reachable relevant misses 1165 -> 732;
-Recall@1000 0.2776 -> 0.3106, with BM25's own curve FLAT past 200 (a ranker that stopped cannot recover;
-the exact structure can). This is the game BM25 cannot enter: a completeness guarantee is not a ranking
-property, it is a structural one.
+FINAL, on the real corpus:
+    NumPy f64 flat scan   acc 0.9700   100 dots/query
+    NumPy f64 beam walk   acc 0.9700    44 dots/query
+    GLSL  f32 beam walk   acc 0.9700
+    GLSL vs NumPy beam: SAME ANSWER on 100/100 queries
+f32 cost zero decisions across the whole corpus, which is what T1 predicts and T5 certifies.
 
-KEPT NEGATIVES (loud): (a) residual 732 misses = tiers that exceeded the budget (tier-1 on common terms
-is most of the corpus) -- the certificate then ADMITS less completeness rather than lying, pinned by
-test; raise the budget, buy more theorem. (b) lexically-reachable only -- zero-shared-term relevance
-(71% of NFCorpus) stays the semantics arm's job. (c) combinatorial tiers of long queries are capped at
-256 subset-queries; the certificate stops there honestly. (d) nDCG unchanged by design (phase-6 coord
-negative respected: the guard adds coverage, never reorders). Discoverability 5/5. Audits 0/0/0.
+INSTRUMENT ERROR 20: I set a uniform (uNI) that FS_TOPB never reads. The GLSL compiler
+eliminated it, moderngl then had no such name, and the harness crashed. The compiler was right;
+the harness now skips uniforms the program does not declare.
 
-## SOTA ladder established -- who we beat, who is next (web-verified published targets)
+## SHIPPED: lecore_webgl2_full.html -- the read path, the real corpus, the tier walk, in one file
 
-Searched the current literature for beat-targets stronger than BM25 on our two BEIR tasks. The ladder
-(benchmarks/beir/SOTA_LADDER.md) with published nDCG@10: NFCorpus -- our 0.3371 is ABOVE BM25 (0.325)
-and Contriever (0.336) and INSIDE ColBERTv2's reported range (0.338-0.344); NEXT TARGET SPLADE-v3
-(0.357). SciFact -- our 0.6854 is above BM25 (0.665); NEXT TARGET ColBERTv2 (0.693, +0.008 away), then
-SPLADE-v3 (0.710). Protocol asterisk stated in the doc: neural rows are zero-shot MS-MARCO-trained
-(1e7-1e10 params); ours tunes ~6 fusion weights in-domain with ZERO learned parameters -- a target
-list, not a claimed equivalence. Standing context kept: BEIR itself found BM25 beating most neural
-zero-shot systems, so the beaten baseline was never soft; hybrid fusion remains the production
-standard. TWO CANDIDATE RUNGS identified for the next session, both no-weights analogues of the
-published edges: (1) SPLADE's learned doc expansion -> ctx-neighbor DOCUMENT expansion at index time
-(pure counting); (2) ColBERTv2's late interaction -> per-TERM maxsim over token hypervectors (the maxp
-lever at term granularity). Neither claims anything until measured.
+311 KB, ONE FILE, no build step, no network, no dependency. It runs leCore's ACTUAL read path in
+WebGL2 over 100 real module docstrings: 3-tier store (100 -> 20 -> 4, g=5 from the balance law
+K^(1/3)), beam-4 coarse-to-fine walk, every decision made ON THE GPU -- each level's winners are
+written to an index texture the next pass reads via texelFetch. Two shaders carry the whole
+thing: FS_GATHER (matvec over rows NAMED BY AN INDEX TEXTURE) and FS_TOPB (top-b by rank
+counting -- slot t takes the entry beaten by exactly t others, ties by lower index, which makes
+it a total order; no sort, no scratch buffer).
 
-## Phase 7: both ladder rungs measured -- SciFact reaches ColBERTv2, NFCorpus clears its reported low
+It is a DIFFERENTIAL TEST, not a demo: the f64 engine's answer for all 100 queries is embedded,
+and the page reports agreement, retrieval accuracy, dot-products-per-query, and per-query time.
+It also has a per-query inspector showing which supers and chunks the beam kept.
+Embedded reference: flat 0.9700 / beam 0.9700, 44 dots per query against 100 for a flat scan.
 
-RUNG 2 (term-level late interaction, 'lint' -- the ColBERTv2 analogue: sum_q idf * max_d ctx-cosine,
-computed via one reduceat per vocab term with a bake-once per-term cache after the naive version timed
-out at 2e12 flops) and RUNG 1 (ctx-neighbor DOC EXPANSION, 'bmx' -- the SPLADE analogue: append each
-doc term's top-3 random-indexing neighbors at index time). Train-swept with the champion channels,
-test once.
+VERIFIED BEFORE SHIPPING (the page cannot be opened here, and an unrun example is a rotting
+example): the exact shader text lifted OUT OF THE PAGE compiles AND LINKS under a real GLSL ES
+compiler (Mesa, GLSL ES 3.20 via surfaceless EGL); embedded V / CH / SU reproduce the engine's
+arrays; embedded refBeam reproduces from the embedded queries; names and labels are length-K.
+It also checks EXT_color_buffer_float FIRST and reports ABSENT rather than silently dropping to
+half precision, which would make every number under it a lie.
 
-  SciFact:  HYBRID7 nDCG@10 0.6924 (prior 0.6854) -- ColBERTv2's published 0.693 MATCHED to the third
-            decimal (delta 0.0006, far inside our own CI width). BOTH rungs earned weight (bmx 0.6,
-            lint 1.0; lint solo 0.6671 with the best single-arm R@100 0.9095). vs BM25: +0.0235
-            [+0.0077,+0.0404] -- the previously MARGINAL SciFact nDCG win is now SOLID.
-  NFCorpus: HYBRID7 nDCG@10 0.3390 (prior 0.3371) -- inside ColBERTv2's reported range (0.338-0.344),
-            above its low report. vs BM25 +0.0206 [+0.0116,+0.0306]. R@100 0.3254 (+0.0828, the best
-            recall yet; lint solo is the best single-arm R@100 at 0.3003 despite weak solo nDCG 0.2611
-            -- late interaction is a RECALL arm here, fusion converts it).
+WHY QUERIES ARE PRE-ENCODED AND NOT TYPED: encoding free text in-browser needs derived_atom
+(blake2b -> PCG64 -> numpy's ziggurat -> FFT normalise), which is the DECLARED DEAD END in GLSL
+ES -- no u64, and reproducing it would be a second implementation of the atom generator.
+Tokenisation and encoding are host work under exactly the boundary unicron_vm_unit_install drew.
+The way to make queries typeable is the shader-native atom family (FHRR phase-from-integer-hash,
+defined once and evaluated twice), which is NOT built.
 
-KEPT NEGATIVES (loud): (a) bmx REFUSED on NFCorpus (weight 0.0) -- ctx-neighbor expansion adds noise
-where the ctx arm already carries the semantics directly; the SPLADE analogue transferred on SciFact
-only. Learned expansion is evidently doing something corpus co-occurrence does not capture -- SPLADE-v3
-NFC (0.357) stays OPEN, and honestly may need what we do not have (learned term weighting). (b) lint
-solo nDCG on NFCorpus is WEAK (0.2611) -- maxsim without exact-match evidence over-generalizes; it pays
-only fused. (c) 0.6924 vs 0.693 is a MATCH claim, not a beat claim -- stated at published-number
-precision with the protocol asterisk standing. (d) the naive lint recomputed a 126M-flop matvec per
-query term -- the bake-once lever fixed it (third costume this campaign). Ladder updated in spirit:
-next open rungs are SPLADE-v3 NFC 0.357 and BM25+UPR SciFact 0.703.
+STILL NOT CLAIMED: no browser has opened it. Mesa's ES front end is not ANGLE, not Apple's Metal
+path, not a real GPU. The per-query time it prints includes a readback per pass and is NOT a
+throughput number. 100 docs, dim 256, one seed, one corpus.
 
-## Phase 8: multi-bounce retrieval -- NFCorpus reaches ColBERTv2's HIGH report; the regime split closes its third loop
+## TYPED QUERIES IN THE BROWSER: A SHADER-NATIVE ATOM FAMILY, ONE DEFINITION EVALUATED THREE TIMES
 
-The user's directive: stack the levers as parallel render layers. BOUNCE 2 = pseudo-relevance feedback
-(Rocchio/RM3, pure counting) with the FUSED first pass as the light source -- top-F fused docs emit
-their top-T terms (tf*idf, query terms excluded), a second lexical pass scores the expanded query, the
-final image interpolates the bounces. Plus a PARALLEL fusion-ensemble layer (RRF of two weight
-variants), gated on train. Swept on train, test once.
+The last blocker was named and now removed. `derived_atom` (blake2b -> PCG64 -> numpy ziggurat ->
+FFT normalise) cannot be reproduced in GLSL ES (no u64), and reproducing it would be a SECOND
+IMPLEMENTATION of the atom generator -- so every page shipped PRE-ENCODED queries.
 
-  NFCorpus: BOUNCE2 nDCG@10 0.3442 (prior 0.3390) -- ColBERTv2's HIGH report (0.344) reached at
-            published precision (delta 0.0002; matched-to-cleared, stated at face value inside our CI).
-            R@100 0.3335 (+0.0908 over BM25, the campaign's largest recall margin). Champion F=5 T=20
-            alpha=0.2 -- a LIGHT second bounce; heavy feedback lost on train.
-  SciFact:  PRF REFUSED on train (best alpha=0.0) and the ensemble refused too -- stays 0.6924
-            (= ColBERTv2 matched). KEPT NEGATIVE, and the regime split's THIRD confirmation: feedback
-            expansion pays where vocabulary mismatches (NFC) and adds noise where terminology is shared
-            (SciFact) -- same fault line as ctx (phase 2), bmx (phase 7), now PRF (phase 8). One
-            diagnosis, three independent instruments agreeing.
+NEW: holographic_hashatom -- Rademacher (+/-1) atoms from an integer hash. FNV-1a over the token
+bytes, `lowbias32` finaliser per component, sign from the top bit, scaled 1/sqrt(D).
+  * ALL u32 INTEGER ARITHMETIC. Exact in NumPy, in GLSL ES 3.00, and in JS via Math.imul.
+  * NO TRANSCENDENTAL, deliberately: a phasor/trig atom would diverge in the last bits between
+    evaluations. Rademacher generation is BIT-IDENTICAL, not merely close. MEASURED: GPU vs
+    NumPy query encode max|diff| = 0.000e+00, arrays exactly equal.
+  * This is Kanerva's binary spatter-code family in a real-valued costume -- a known-good VSA
+    vocabulary, not a novelty.
+ONE DEFINITION, THREE EVALUATIONS (NumPy / GLSL / JS), each pinned against the others. That is
+the rule that keeps this from being three implementations. The JS path was checked against NumPy
+on all 1230 distinct query tokens the page actually hashes: identical.
 
-KEPT NEGATIVES (loud): (a) the parallel ensemble was refused on BOTH datasets -- two fusions of the
-same channels are CORRELATED samples; averaging them reduces no noise (the multi-ray lesson in ranking
-costume: rays must have independent errors). (b) 0.3442 vs 0.344 is a third-decimal edge -- claimed at
-published precision only, protocol asterisk standing. (c) SPLADE-v3 rungs (0.357 NFC / 0.710 SF) and
-UPR (0.703 SF) remain OPEN -- the remaining gap plausibly IS learned term weighting.
-FINAL LADDER STATE: NFC 0.3442 (BM25, Contriever, ColBERTv2 full range: all reached or beaten);
-SF 0.6924 (BM25 beaten, ColBERTv2 matched). Zero learned weights throughout.
+KEPT NEGATIVE, PINNED IN THE SELFTEST: this family is NOT unitary in the HRR sense. Its FFT
+magnitude spectrum is not flat, so bind/unbind through it is NOT exact. It is a BUNDLING
+vocabulary for bag-of-atoms retrieval, NOT a binding vocabulary -- the selftest asserts the
+spectrum is non-flat so a future session cannot quietly assume otherwise. Cross-talk is asserted
+against a DERIVED bar, not a picked one: E|cos| ~ sqrt(2/(pi*d)) for random +/-1 vectors, so 6
+sigma at d=512 is 0.2652; measured 0.1953.
 
-## Phase 9: SPLAT-FIT term weights -- SciFact 0.7092: the LLM-reranker rung CLEARED, SPLADE-v3 MATCHED
+RETRIEVAL, real 100-docstring corpus, dim 256, NO VOCABULARY SHIPPED:
+    NumPy encode + flat scan   acc 0.9800     (derived_atom family was 0.9700)
+    GLSL  encode + flat scan   acc 0.9800     same answer on 100/100 queries
+The hash family matches and slightly beats the FFT-normalised family for BAG-OF-ATOMS retrieval,
+at zero storage. Lever 3 in its purest form: an atom is a function of its name.
 
-The user's insight, executed: 'learned term weighting' is not a wall -- it is 3DGS fitting in a text
-costume. Each vocab term gets a splat weight w_t on its BM25 contribution (w=1 == BM25 bit-for-bit),
-fit by SEEDED, DETERMINISTIC gradient descent on the train qrels (listwise softmax-CE over BM25-top-C
-union relevants), L2-pulled toward 1, gated by a held-out 15% train slice. Zero neural nets; the
-optimizer is ours.
+SHIPPED: lecore_webgl2_typed.html, 200 KB, one file. Type words; the browser tokenises, hashes
+FNV-1a, uploads the hashes as an INTEGER texture (R32UI/usampler2D -- a float texture cannot
+carry a u32 exactly past 2^24, so routing hashes through floats would silently corrupt every
+atom), and a fragment shader expands them into the query vector. Then the 3-tier beam walk runs
+with every decision on the GPU. The query is NOT normalised: a positive scalar cannot move an
+argmax, so a whole reduction pass is skipped. It stays a differential test -- 100 held-out
+queries ship as TOKEN STRINGS with the f64 answers, so the page verifies its own ENCODER as well
+as its recall, and the live box reports the T1 margin gate per query.
+Embedded f64 reference on this family: flat 0.9800, beam 0.9600.
 
-TWO INSTRUMENT LESSONS BEFORE THE RESULT (both kept): (1) the first fit was a NO-OP (|w-1|=0.001) --
-a single global lr over 2k queries starved rare terms; (2) the 3DGS answer is PER-SPLAT step sizes
-(Adagrad) -- parameters with wildly different gradient frequencies need per-coordinate scaling, the
-same reason 3DGS tunes per-parameter lrs.
+VERIFIED BEFORE SHIPPING: all four shaders lifted OUT OF THE PAGE compile AND link under a real
+GLSL ES compiler (GLSL ES 3.20, surfaceless EGL); embedded V reproduces the engine; embedded
+refBeam reproduces from the embedded token strings; the JS hash path matches NumPy on all 1230
+tokens.
 
-THE RESULT, split exactly along the standing regime law (FOURTH independent instrument):
-  SciFact (1-2 binary relevants/query -- the loss ALIGNS with nDCG@10): val nDCG rises monotonically as
-    lambda drops (0.658 -> 0.704). TEST: 0.7092 (prior 0.6924) --
-      * BM25+UPR (T0-3B LLM reranker, 0.703): CLEARED.
-      * SPLADE-v3 (0.710): MATCHED (delta 0.0008, inside CI).
-      * vs BM25: +0.0402 [+0.0207, +0.0606], the campaign's strongest margin.
-  NFCorpus (~38 graded relevants/query -- the loss FIGHTS the top-heavy metric): val nDCG FALLS
-    monotonically as the fit strengthens (0.252 -> 0.214); shipped NFC result stays phase-8's 0.3442.
-    KEPT NEGATIVE: listwise CE over all graded relevants optimizes total relevant mass, not top-10
-    gain; the honest next door is a rank-gain-weighted (LambdaRank-style) objective -- NAMED, not
-    attempted, so no future session reinvents the misaligned loss.
+STILL NOT CLAIMED: no browser has opened it. Mesa's ES front end is not ANGLE and not Apple's
+Metal path. The printed per-query time includes a readback per pass and is NOT throughput.
+100 docs, dim 256, one seed. Beam 0.9600 < flat 0.9800 on THIS family -- the hierarchy costs 2
+documents out of 100 here, which is a real cost and is printed, not hidden.
 
-PROTOCOL ASTERISK, GROWN AND STATED: this phase fits |train-query vocab| parameters in-domain (vs ~6
-before); still deterministic, still zero learned neural weights, still train-only/test-once -- but the
-SPLADE/UPR rows are zero-shot transfer. The ladder is a target list, not an equivalence claim. Also:
-train nDCG 0.7685 vs test 0.7092 -- the in-domain generalization gap, printed not hidden. PRF refused
-on SciFact AGAIN (alpha=0.0), the regime law's fifth appearance.
+## THE FULL ALGEBRA NOW RUNS IN GLSL: FHRR PHASOR ATOMS FROM AN INTEGER HASH, ZERO VOCABULARY
 
-## Phase 9: HRNN ridge readout + HDRIFT drift + reflex CI-gate, measured -- FOUR kept negatives, champions unchanged
+holographic_hashatom bought typed queries at zero storage but its selftest PINS a refusal: its
+FFT magnitude spectrum is not flat, so it BUNDLES and does not BIND. Bag-of-words retrieval was
+fine with that; the ALGEBRA is not -- role-filler records, VM programs and the VSA read path all
+need bind/unbind exact. So the browser had recall but not the engine.
 
-The three named techs pointed at the benchmark, results reported straight. CHAMPIONS STAND: NFC 0.3442,
-SF 0.6924 (phase 8). What was measured and why each refused:
+NEW: holographic_phasor. Stop trying to make a real vector whose spectrum HAPPENS to be flat and
+define the atom AS the spectrum (Plate's frequency-domain HRR; the FHRR/phasor line). A phasor
+atom is unit magnitude by construction, so
+    bind   = phase ADDITION       (componentwise complex multiply)
+    unbind = phase SUBTRACTION    (multiply by the conjugate -- the TRUE inverse, since |a|=1)
+are exact with NO FFT anywhere and NO normalisation step to get wrong. MEASURED in NumPy:
+bind/unbind round trip exact to 2.48e-16.
+That is also why it suits a shader: unitary_vector reaches flat spectra by
+draw-Gaussian -> FFT -> divide by magnitude -> inverse FFT, none of which a fragment shader
+wants. Phase addition is one add.
 
-  * HDRIFT QUERY DRIFT refused (t*=0.0 both datasets). Mechanism named: ctx query vectors are BUILT
-    from corpus term vectors, so they are already ON the corpus manifold -- the mean-shift field has
-    nothing to correct. HDRIFT corrects off-manifold queries; ours are on-manifold by construction.
-    A clean, explainable negative, not a failure of the field.
-  * POINTWISE RIDGE (the HRNN standing learning rule over 2k channel+rank features) refused on SF
-    (holdout collapsed with interactions, 0.6641) and underperformed the phase-8 champion on NFC test
-    (0.3418 < 0.3442) despite passing its gate. Mechanism: squared error on GRADES is not a ranking
-    objective, and a linear reweighting of 4-6 HIGHLY CORRELATED channels has strictly less room than
-    the tuned-lattice + PRF-bounce pipeline it competes against.
-  * PAIRWISE RIDGE (RankNet's objective in closed form -- ridge on feature DIFFERENCES) also refused
-    on SF (holdout 0.6796 < grid 0.6812) and lost to pointwise on NFC. Mechanism: the pairwise design
-    is STARVED at this scale (5,608 difference rows on SF) -- the objective is right, the data is thin.
-  * REFLEX CI-GATE: the phase-9a lesson pinned -- a 0.0024 holdout edge was NOISE and switching on it
-    lost test points; the gate now demands a bootstrap-CI-backed holdout win (abstain-over-argmax
-    applied to model selection) and it correctly SAVED the SF champion twice. INSTRUMENT FLAW kept on
-    record: the NFC gate compared ridge against grid-WITHOUT-the-PRF-bounce (a weaker comparator than
-    the shipped champion), so its pass was against the wrong baseline -- gates must compare against
-    the ACTUAL incumbent, not a convenient proxy.
+PHASES ARE STORED IN TURNS (0..1), NOT RADIANS, on purpose: bind is (a+b) mod 1, exact in float
+for values already in [0,1), and the only constant shared across NumPy/GLSL/JS is 2^32 rather
+than pi. Putting a transcendental constant in the middle of the one thing that must match bit
+for bit is how the two evaluations drift.
 
-THE GENUINE NEXT RUNG, named for the next session: ridge over TERM-level features (per-term learned
-weights, the closed-form SPLADE shape) rather than channel-level -- the expressive room is at the term
-granularity, and the standing learning rule reaches it legally. A bigger bounded build, not a sweep.
-Script benchmarks/beir/bench_beir_hrnn.py.
+STORAGE MODEL, stated once: an ATOM is a function of its name (same u32 hash as the Rademacher
+family, so the vocabulary is still ZERO BYTES -- lever 3). A RECORD, being a bundle of bound
+pairs, is NOT unit magnitude and IS stored, as complex (re, im). Atoms are generated; records are
+stored. The selftest PINS the negative that a bundle is not a unit atom, because treating one as
+a key returns a wrong answer rather than an error.
 
-## Phase 10: TERM-level ridge (RSJ relevance weighting via CG) -- refused by its own gate; the SPLADE gap is now DIAGNOSED, not just open
+IN GLSL (llvmpipe, fragment shaders, RG32F complex textures, atoms regenerated in-shader from a
+u32 name hash carried in an INTEGER texture):
+    atom generated in-shader vs NumPy   max|diff| 5.28e-07
+    GPU bind vs NumPy bind              max|diff| 5.50e-07
+    GPU bind -> unbind round trip       max|diff| 1.74e-07
+    3-role record, every role recovered against 9 candidates, GPU == NumPy on all three,
+    margins 253.9 / 234.4 / 237.0 -- six orders above the f32 error, so T1's gate answers easily
+    bind, unbind, bundle, cleanup: ALL CORRECT. Vocabulary stored: 0 bytes.
 
-The named next rung, built hardened-first: per-term delta corrections to idf, solved by conjugate
-gradient on the ridge normal equations over a sparse (rows x V) design (NFC: 414k rows / 329k nnz /
-V=22,704; SF: 129k rows / 307k nnz / V=30,911), regressing the RESIDUAL over the TRUE incumbent (the
-phase-9 comparator flaw fixed: the gate fought the exact shipped phase-8 pipeline, PRF bounce included).
-Lineage: Robertson-Sparck Jones 1976 relevance weighting -- SPLADE's destination by the closed-form road.
+The f32 error is ~5e-7 rather than the ~2e-7 seen on the Rademacher path, and the reason is
+named rather than glossed: cos/sin are transcendental, so unlike the Rademacher family the
+GENERATION is NOT bit-identical between NumPy and GLSL -- only close. Rademacher was chosen for
+the query encoder precisely because it avoids trig; phasors accept trig because they buy exact
+BIND, which Rademacher cannot. TWO FAMILIES, TWO JOBS, and each one's refusal is pinned in its
+own selftest.
 
-RESULT: REFUSED by the CI gate on BOTH datasets (NFC holdout +0.0001, CI lo -0.0024; SF -0.0085, CI lo
--0.0203). Champions stand: NFC 0.3442, SF 0.6924. Nothing shipped backward -- the hardened gate did its
-job twice more.
+STILL NOT CLAIMED: no browser has run the phasor shaders (the typed page ships the Rademacher
+retrieval path only). llvmpipe is not ANGLE and not Apple's Metal path. D=256, one record,
+9 candidates -- an EXISTENCE result for the algebra, not a capacity characterisation.
 
-THE DIAGNOSIS, and it is the finding of the phase: 329k nonzeros over 22.7k terms is ~14 observations
-per term. THREE closed-form learners (channel ridge, pairwise ridge, term ridge) have now refused with
-the SAME starvation signature. SPLADE-v3's per-term weights are trained on ~500k MS MARCO queries; our
-in-domain qrels carry 0.8-2.6k. The remaining gap to the 0.357/0.710 tier is NOT a missing algorithm --
-it is missing supervision volume. Triple-confirmed boundary, each confirmation CI-gated.
+## ONE PAGE, BOTH HALVES: RETRIEVAL AND THE VSA ALGEBRA, RUNNING IN WebGL2, ZERO VOCABULARY
 
-ALSO SHIPPED IN THIS PHASE: the UNFRIENDLY-DATA PROBE (one random content term dropped per query, 3
-seeds) -- baseline lexical fragility documented (bm25 nDCG@10 drops 0.0195 NFC / 0.0343 SF under
-dropout), the yardstick future rankers must beat to claim robustness, not just accuracy.
+lecore_webgl2_vsa.html -- 204 KB, one file, six shader programs, no build step, no network.
+Two interactive boxes: ask the memory (typed query -> 3-tier beam recall over 100 real
+docstrings) and build a record (typed role:filler pairs -> bind, bundle, unbind, cleanup).
 
-THE LEGAL ROUTE PAST THE BOUNDARY, named for the backlog: manufacture the missing supervision from the
-corpus itself -- SYNTHETIC QUERY GENERATION (doc -> queries via the engine's own n-gram/HRNN generation;
-docT5query's no-neural analogue) feeding the already-built term-ridge machinery. The solver is ready;
-it is waiting for photons.
+THE RECORD IS BUILT IN A SHADER from the role and filler name hashes, so for the algebra half
+NOTHING is stored -- not the vocabulary and not the record. It is a pure function of the names
+typed into the box. MEASURED before shipping: a 5-pair record built in-shader matches NumPy to
+1.43e-06, and all five roles recover correctly against 13 candidates with margins 188-266, which
+is six orders above the f32 error, so T1's gate answers without strain.
 
-## BM25 demoted to INTERNAL ARM -- deletion refused, front door re-pointed (the honest version of "remove it")
+TWO FAMILIES, TWO JOBS, in the same page and generated from the SAME u32 name hash:
+  Rademacher (+/-1)  -> query encoding and bag-of-atoms retrieval. No trig, so generation is
+                        BIT-IDENTICAL across NumPy/GLSL/JS. Cannot bind: spectrum not flat.
+  FHRR phasor        -> bind/unbind exact by construction (phase add/subtract, |a|=1 so the
+                        conjugate is the TRUE inverse). Uses cos/sin, so generation is close
+                        (~5e-7) rather than bit-identical.
+Each family's refusal is pinned in its own selftest. Neither is a replacement for the other.
 
-Request was to delete BM25. REFUSED with reasons on record: (1) the shipped champions (NFC 0.3442 /
-SF 0.6924) are fusions whose strongest channel IS bm25 -- deleting it reverts past BM25, not away from
-it; (2) additive-only constitution: a wired, cataloged, test-pinned faculty is never deleted; (3) the
-anti-reversion protection is the TEST SUITE pinning the hybrid as champion, not absence of the
-ingredient. What WAS done (additive): bm25_rank catalog entry re-labeled 'INTERNAL ARM; front door is
-retrieval_dispatch', and the generic ranking phrasings ('search my documents for the best match',
-'rank documents for a query') moved onto retrieval_dispatch's aliases so discovery routes to the
-cascade first and bm25 is only reached as its summoned arm. Replacement stack re-verified end to end
-in one pass (dispatch exact/refine stages, perfect_recall_index containment, guard_candidates
-certificate); 18/18 retrieval-family tests; audits 0/0/0 after the does-length trim.
+VERIFIED BEFORE SHIPPING: all SIX fragment programs lifted OUT OF THE PAGE compile AND link
+under a real GLSL ES compiler (GLSL ES 3.20, surfaceless EGL) -- FS_ENCODE, FS_GATHER, FS_TOPB,
+FS_RECORD, FS_BINDC, FS_CLEAN. Embedded V reproduces the engine; embedded refRoles reproduce and
+equal the stored fillers; the JS hash path matches NumPy on all 1241 tokens the page can hash.
+The page checks EXT_color_buffer_float FIRST (needed for R32F *and* RG32F targets) and reports
+ABSENT rather than silently dropping precision.
+
+STILL NOT CLAIMED, unchanged: no browser has opened it; Mesa's ES front end is not ANGLE and not
+Apple's Metal path; the printed per-query time includes a readback per pass and is NOT
+throughput; 100 docs, dim 256, one seed, one 5-pair record. Retrieval beam accuracy on this
+family is 0.9600 against a flat scan's 0.9800 -- the hierarchy costs two documents in a hundred,
+and the page prints both numbers rather than only the flattering one.
+
+## THE TWO ATOM FAMILIES ARE NOW REAL: RULE 0 CAUGHT ME BUILDING A DUPLICATE PRIMITIVE
+
+By the governing rule, holographic_hashatom and holographic_phasor DID NOT EXIST -- they sat at
+repo root, unwired, uncatalogued, reachable only by import. Landing them found a worse problem.
+
+RULE 0 CATCH: `hash32_pcg` ALREADY EXISTED in holographic_determinism -- the PCG output hash
+(Jarzynski & Olano, "Hash Functions for GPU Rendering", JCGT 2020), built precisely so "the SAME
+value must be recomputed on the GPU", with `hash32_pcg_glsl` ALREADY EMITTING its GLSL, and a
+module note already explaining that hash_u64 is 64-bit and therefore cannot be reproduced in
+GLSL ES / WGSL. My `lowbias32` was A SECOND IMPLEMENTATION OF EXACTLY THAT PRIMITIVE. Both
+families now DELEGATE to hash32_pcg. FNV-1a stays, and the reason is written down: hash32_pcg is
+a uint->uint PERMUTATION, not a string digest, so something must fold name bytes into one uint
+first -- that part is host-side only and a shader never sees a string.
+The atoms therefore CHANGED. Re-measured rather than assumed: hashatom cross-talk 0.1797 <
+derived bound 0.2652 (6 sigma of sqrt(2/(pi*d))), separation 1.069; phasor bind/unbind still
+exact to 2.48e-16, cross-talk 0.1290 < derived bar 0.1875, 3-role record fully recovered.
+
+WIRED: five delegating faculties on UnifiedMind -- hash_atom, encode_hash, phasor_atom,
+phasor_record, phasor_query. Registered as "Shader-native atom families (a vocabulary that is a
+FUNCTION, not a table)" with a runnable example and nine aliases; discoverability battery 5/5 on
+stranger phrasings. Audits 0/0/0 after the fixes below.
+
+WALKED INTO THE STANDING TRAP, recorded so the note earns its keep: appending methods to
+holographic_unified_p15 put them INSIDE A MODULE-LEVEL FUNCTION, because the class had already
+closed above it -- the file parsed clean, file_python_check passed, and the mind simply did not
+have the methods. Fix: anchor on a KNOWN CLASS METHOD and insert BEFORE it, which guarantees
+class scope no matter where the class ends. INSTRUMENT ERROR 21.
+
+BUDGET INVARIANT, honoured the hard way. Adding "GLSL" to the Dialect-emitters TITLE orphaned
+its `_DOES_BUDGET` line, and skill_lint then reported the 3069-char entry as a NEW regression.
+Re-adding a budget under the new name would GROW the budget set, which that file states must
+never happen. So the original title was RESTORED VERBATIM, the GLSL prose I had added there was
+trimmed into one clause, and the budget line was restored unchanged. GLSL discoverability rides
+on the new capability's aliases instead -- which the 5/5 battery confirms. The new entry itself
+was TIGHTENED from 824 -> 532 chars rather than budgeted.
+
+AUDITS: skill_lint 0 gaps / 0 does-length regressions; catalog_gaps 0; reachability_audit 0
+duplicate definitions, and neither new module appears in the IMPORT-ONLY list (the 8 there --
+bpe, brdf, lexicon, lightcache, materialdata, mcp, reasoning, testkit -- are pre-existing and
+untouched). capdoc.py and docgen.py regenerated: CAPABILITIES.md, capabilities.json,
+REFERENCE.md (738 modules).
+
+## BENCHMARKING THE GLSL PATH: MEASURE THE SLOPE, NOT THE MILLISECONDS
+
+FIRST, WHAT THIS CANNOT MEASURE, so no number is misread: there is no GPU here. Mesa llvmpipe is
+a SOFTWARE RASTERISER on the same CPU as NumPy, so every wall time below is CPU-vs-CPU and says
+NOTHING about throughput on real hardware. The GPU crossover question is UNTOUCHED and still
+needs the A4500. What IS measurable is work counts, scaling exponents, readback share and the
+batching gap -- and a slope transfers across backends in a way an absolute time never does.
+
+WORK PER QUERY (exact arithmetic, hardware-free), D=256, beam=4:
+    K=100   g=5    flat 100 dots    beam 44
+    K=400   g=7    flat 400         beam 65
+    K=1600  g=12   flat 1600        beam 108
+
+MEASURED SCALING EXPONENT (d log t / d log K) -- the transferable result:
+    flat, work    +1.00      beam, work   +0.32
+    flat, GL      +0.97      beam, GL     +0.16
+    flat, batched +0.99      flat, NumPy  +0.70
+THE STRUCTURAL CLAIM HOLDS AND IS NOW MEASURED, NOT ASSERTED: the flat scan is linear in corpus
+size on the GPU path (+0.97 against a predicted +1.00), while the tier walk is very nearly FLAT
+(+0.16). Beam time went 0.422 -> 0.631 ms while K went 100 -> 1600, a 16x corpus for a 1.5x cost.
+Crossover on THIS backend is between K=100 and K=200: at K=100 beam is slower than flat
+(0.422 vs 0.371 ms) because four extra passes cost more than 56 saved dot products; by K=400 it
+is 2.4x faster and by K=1600, 8.6x. A hierarchy is a LOSS on a small corpus, which is worth
+stating plainly rather than only quoting the large-K number.
+
+BEAM'S EXPONENT (+0.16) IS BELOW ITS OWN WORK EXPONENT (+0.32) and that is not a win, it is the
+fixed per-pass cost dominating -- six draws whose cost barely moves. Named so nobody reads it as
+superlinear efficiency.
+
+NUMPY'S +0.70 IS NOT A CLEAN O(K) EITHER: a K x 256 matvec is BLAS-threaded and cache-resident at
+these sizes, so its slope is depressed by parallelism, not by doing less work. NumPy is 4-40x
+faster than llvmpipe here in absolute terms, which is exactly what a software rasteriser against
+tuned BLAS should look like and is NOT evidence about a real GPU.
+
+C. READBACK SHARE of a single-query flat scan: 12.2% at K=100 rising to ~20% at K>=800. That is
+the measurement that justifies keeping every between-level decision ON the GPU -- a design that
+read back an index at each of three levels would have paid that toll three times per query.
+
+D. BATCHING (one draw for the whole query set vs one draw each): a flat 2-3x at every K. So
+roughly a third of the per-query time in every page shipped this session is per-draw overhead,
+not shading. The pages loop one query per draw because they are DIFFERENTIAL TESTS and need a
+readback to compare against the embedded f64 answer; a deployment would batch. Stated so the
+"per-query time" the pages print is read as what it is.
+
+## WALKING THE LEVERS AT THE MEASURED LIMITS: ONE WIN, ONE REFUTED, TWO THEOREMS
+
+The benchmark found real limits, so the levers were applied TO THOSE, not to a guess.
+
+TWO NEW LEAN THEOREMS (4.14.0 core, axioms [propext, Quot.sound], no sorryAx):
+  T6 tier_work_le_flat -- a 3-tier walk with beam b and group g touches g + 2*b*g rows against a
+     flat scan's g^3, so the tier walk wins ON WORK as soon as 1 + 2*b <= g*g. At b=4 that is
+     g >= 3, i.e. K >= 27. The hypothesis `2 <= g` was in the first draft and the linter caught
+     it as unused -- the bound needs NOTHING but the branching condition, so it was DROPPED
+     rather than silenced. A theorem carrying an assumption it does not use overstates its cost.
+  T7 tiered_storage_shrinks -- if each tier groups at least 2 children, the coordinator levels
+     together cost at most 3/4 of the leaf level, for EVERY K. So keeping only coordinators and
+     regenerating leaves is a strict win in bytes at any grouping >= 2, not a heuristic that
+     happens to pay at some size.
+T6 PLUS THE MEASUREMENT SIZES THE OVERHEAD: the work crossover is K=27, the measured TIME
+crossover was ~K=150, and the whole gap is fixed per-pass cost. That is the number to attack.
+
+LEVER 5 (fewer, fatter passes) -- REFUTED AS I INSTANTIATED IT, and the cause is mine.
+Fusing the top level's score+select into one pass made things SLOWER at every size:
+    K=100  6-pass 0.400 ms  fused 0.664     K=400  0.486 -> 1.708
+    K=200  0.412 -> 0.983                   K=800  0.529 -> 2.107
+Answers were identical (25/25) so it is a pure loss, not a trade. WHY: a fragment cannot share
+work with its neighbours, so my fused shader recomputes every score for EVERY rank comparison --
+O(N^2 * D) where the two-pass form is O(N*D). The lever is not wrong; my instantiation converted
+a pass saving into a quadratic recompute. UNTESTED FIX, recorded so it is not re-derived: emit
+the four beam indices PACKED INTO ONE RGBA FRAGMENT so the scores are computed once. Not built,
+not measured, not claimed.
+
+LEVER 3 + LEVER 6 (determinism instead of storage; a limit is a tile size) -- WORKS, WITH A COST.
+A doc vector is a SUM OF HASH ATOMS, hence a FUNCTION of its token ids. So store only the
+coordinator tiers and REGENERATE the beam's leaves in-shader from token ids:
+    K     bytes_full   bytes_regen   shrink   answers identical   time vs 6-pass
+    100     126,976       30,580     4.15x        25/25            1.090 vs 0.400
+    200     245,760       52,964     4.64x        25/25            1.144 vs 0.412
+    400     478,208       92,612     5.16x        25/25            1.365 vs 0.486
+    800     920,576      149,380     6.16x        25/25            1.648 vs 0.529
+THE SHRINK GROWS WITH K (4.2x -> 6.2x) because the leaf level is the term that scales, exactly as
+T7 predicts. THE COST IS REAL AND IS NOT HIDDEN: ~3x slower than storing the leaves. But it still
+BEATS THE FLAT SCAN at K=800 (1.648 vs 2.281), so the compressed index is not merely smaller, it
+is smaller AND faster than the naive baseline. Space-for-time, quantified, not a free lunch.
+
+A CAVEAT I RAISED AND THEN REFUTED BY MEASUREMENT, kept because the refutation is the result.
+Regeneration recomputes an UNNORMALISED sum while the stored index holds normalised vectors, so
+with variable document lengths it should be a length-biased and therefore DIFFERENT ranking.
+Tested at K=200 with lengths 6..40:
+    full-document queries          agree 200/200
+    partial queries, 60% of tokens agree 200/200,  acc 1.000 vs 1.000
+    partial queries, 40%           agree 198/200,  acc 1.000 vs 0.990
+    partial queries, 25%           agree 197/200,  acc 1.000 vs 0.985
+So the bias is real but tiny, and it COSTS 1-1.5 POINTS OF ACCURACY at short queries -- not zero.
+The correct fix is one number per doc: carry the token count and divide by sqrt(count), which
+restores the exact ranking for a few bytes against the D floats it saves. Not built.
+
+STILL SOFTWARE: llvmpipe, so every millisecond above is CPU-vs-CPU. The ratios and the byte
+counts are the transferable part; the absolute times are not.
+
+## MAKING THE SHADERS FAST: 2.37x, ALL ANSWERS IDENTICAL, AND ONE CERTIFICATE THAT NEARLY LAPSED
+
+Four structural changes, chosen because each attacks FETCH COUNT or PASS COUNT -- the two things
+a fragment pipeline charges for on any backend, so these are not llvmpipe artefacts.
+
+  V1 VEC4 PACKING. The scalar shaders spent uD texelFetches per operand -- 512 fetches for one
+     D=256 dot product. A texel is RGBA, so packing four components per texel cuts that to 128
+     and turns the inner loop into dot(vec4,vec4).
+  V2 f16 STORAGE. Bandwidth is the bill; half precision halves it and halves the index on disk.
+  V3 SINGLE-PASS TOP-B. The rank-counting select is O(N^2) in fetches AND ran once per output
+     slot, so four fragments each re-read the whole score row. One fragment now does ONE linear
+     scan and packs four winners into RGBA. This is exactly the fix recorded as UNTESTED when
+     the naive pass-fusion was refuted last session -- now built, and this time it works.
+  V4 CACHED RENDER TARGETS. The earlier harness allocated a texture and framebuffer per draw.
+     Allocation is not shading.
+
+MEASURED (llvmpipe, so read the RATIOS; every arm answer-checked against the scalar baseline):
+    K=200    scalar 0.423 ms | vec4 0.276 (1.53x) | +top4 0.264 (1.60x) | +f16 0.266 (1.59x)
+    K=800    scalar 0.550    | vec4 0.341 (1.61x) | +top4 0.298 (1.85x) | +f16 0.301 (1.83x)
+    K=3200   scalar 0.774    | vec4 0.493 (1.57x) | +top4 0.332 (2.33x) | +f16 0.327 (2.37x)
+    answers 30/30 identical in EVERY arm at EVERY K.
+
+READ THE SHAPE, NOT JUST THE HEADLINE. vec4 gives a flat ~1.55x, NOT the 4x its fetch reduction
+suggests -- the dot products were never the whole bill. The top-b fix contributes nothing at
+K=200 and most of the gain at K=3200, because the O(N^2) select grows with g (g=6 -> 15). So the
+speedup is 1.6x on a small corpus and 2.37x on a large one, and saying "2.4x" alone would be
+quoting the best cell.
+
+f16 WAS VERIFIED PROPERLY, AND THE VERIFICATION IS THE INTERESTING PART.
+30/30 on synthetic atoms is a hypothesis about the fixture: those margins are enormous. Re-run on
+the REAL 100-docstring corpus with PARTIAL queries, judged by T1's criterion rather than by
+whether it happened to agree:
+    qfrac  agree    acc f32  acc f16   median margin/2eps   MIN margin/2eps   T1 gate answers
+    1.00   100/100  1.000    1.000        4856                72.55            100/100
+    0.60   100/100  0.980    0.980        4188                 1.60            100/100
+    0.40   100/100  0.970    0.970        3374                 4.10            100/100
+    0.25   100/100  0.940    0.940        2733                 0.04             99/100
+    0.15   100/100  0.950    0.950        1723                 7.54            100/100
+f16 changed NO answer and NO accuracy figure anywhere. But at 25% queries ONE query fell to
+margin/2eps = 0.04 -- BELOW the certificate -- and T1's gate correctly declined to certify it,
+while the answer happened to still be right. That is T5 doing exactly what it promises: the gate
+may ABSTAIN, it may not be WRONG. The median ratio is ~10^3, so f16 is comfortable in the middle
+and marginal in the tail.
+DESIGN CONCLUSION, actionable: ship f16 WITH THE GATE ON and re-score gated-out queries in f32.
+That buys half the bandwidth and half the index on disk while keeping every answer certified,
+and it costs a f32 rescore on roughly 1% of short queries. Shipping f16 with the gate OFF would
+be trading a proof for a number that held on 100 queries.
+
+NOT YET DONE, stated rather than implied: the shipped HTML pages still run the SCALAR shaders.
+Porting vec4 + top4 into lecore_webgl2_vsa.html is the next bounded item; it needs the same
+compile+link check under the ES compiler and the same embedded-reference reproduction, and a
+half-done port would break a verified artifact.
+
+## REDESIGNED FOR LARGE HISTORY -- AND THE REDESIGN REFUTED MY OWN "DEPTH IS CHEAP" CLAIM
+
+No one depends on the GLSL yet, so this is a redesign, not a patch. Three structural limits fixed
+and one belief destroyed.
+
+FIXED 1 -- ROWS. A K x D texture caps K at MAX_TEXTURE_SIZE (~16384 in WebGL2). Rows are now
+packed into a FLAT 2D texture addressed by `ivec2(n % W, n / W)`, uW a uniform. At D=256 one
+16384^2 texture addresses 4,194,304 rows instead of 16,384 -- a 256x capacity change from an
+addressing decision, no new memory.
+
+FIXED 2 -- HARDCODED DEPTH. Tiers are built until the top fits one group, whatever depth that
+takes; the walk descends however many levels the index happens to have. Depth is data.
+
+FIXED 3 -- APPEND MEANT REBUILD. T8 (append_eq_rebuild, machine-checked) says a cell is a SUM, so
+adding an item to a live cell equals rebuilding it. Append now touches one cell per level:
+    K=512    append 0.166 ms   rebuild   1.4 ms    8x
+    K=4096   append 0.162 ms   rebuild  12.3 ms   76x
+    K=32768  append 0.184 ms   rebuild 123.2 ms  670x
+Append is FLAT in K, as the theorem says, and the advantage grows without bound.
+
+THE BELIEF THAT DIED. T9/T10 prove one more tier multiplies addressable ROWS by g, and I wrote
+"depth is the cheap axis". Built at scale, self-retrieval COLLAPSED: 19/20 at K=512, 10/20 at
+K=4096, 2/20 at K=32768. GPU matched NumPy 20/20, so the shader was never the suspect -- the
+STRUCTURE was wrong. A cell at level L is a sum of g^L leaves, so the top cells superpose
+K/(top count) documents, and superposition capacity is ~D/9. DEPTH DOES NOT BUY CAPACITY FOR A
+SUM-BUNDLED TREE. The theorems are true about rows and say nothing about bundles; I applied them
+to the wrong quantity.
+
+WHAT ACTUALLY GOVERNS IT, measured: LEAVES PER TOP CELL, and depth is irrelevant given that.
+    K=4096, 64 leaves/cell, beam 4: depth 3 (g=8) 131/200 -- depth 2 (g=64) 131/200. IDENTICAL.
+    K=4096, 24 leaves/cell (under the ~28 capacity), beam 4: 175/200; beam 16: 195/200.
+    K=32768, 180 leaves/cell: 39/200. Same K at 24 leaves/cell: 135/200. Load, not depth.
+
+THE DESIGN RULE THAT FALLS OUT, with a number, tested rather than asserted. A 2-level tree costs
+K/g + beam*g dots, minimised at g ~ sqrt(K); but a cell holds only ~D/9 items, so g <= D/9.
+Sublinear O(sqrt(K)) THEREFORE REQUIRES D >= 9*sqrt(K). At K=4096 that demands D >= 576:
+    D=256  (rule violated)  beam4 131/200   beam16 186/200
+    D=512  (just under)     beam4 184/200   beam16 200/200
+    D=576  (rule satisfied) beam4 187/200   beam16 200/200
+    D=1024 (comfortable)    beam4 198/200   beam16 200/200
+The rule predicts the knee. This is lever 4 (more dimensions) EARNING its place for once -- not
+as "try a bigger vector" but as a REQUIREMENT derived from capacity and paid for in the one
+resource that buys it.
+
+SO THE SHIPPING CONFIGURATION IS: 2 levels, g = min(sqrt(K), D/9), beam 16, D >= 9*sqrt(K),
+vec4-packed, flat 2D addressing, f16 leaves WITH the T1 gate on, O(1) append. Not "as many tiers
+as fit".
+
+REPORTING BUG IN MY OWN HARNESS, recorded: glsl_index.py prints depth AFTER the append test, so
+the depth it shows is one greater than the level counts printed beside it. The measurements are
+unaffected -- the walk reads the live structure -- but the printout is inconsistent and would
+mislead a reader. INSTRUMENT ERROR 22.
+
+## THE FIXTURE WAS FLATTERING THE CODE. RE-RUN ON A HARD CORPUS, AND SEVERAL CLAIMS SHRANK.
+
+Every retrieval number before this used `hash_atom("doc%d")` -- one fresh near-orthogonal atom
+per document. That is the friendliest input this code can receive: no shared vocabulary, no
+length variation, no duplicates, and the target is the only vector anywhere near the query. The
+rule D >= 9*sqrt(K) was DERIVED under exactly those conditions, so it was a claim about the
+fixture.
+
+THE HARD CORPUS (hard_corpus.py): every module split into overlapping source passages. Its
+difficulty is stated BEFORE any retrieval score, because a score without the corpus's stats is
+unreadable:
+    3000-6000 passages | 16,606-term vocabulary | 93 distinct terms per passage (range 18..130)
+    top-20 terms are 7.3% of ALL term occurrences (Zipf, heavy head)
+    random-pair Jaccard median 0.033 -- but NEAREST-NEIGHBOUR Jaccard median 0.156, 90th pct 0.558
+    13.3% OF PASSAGES HAVE A PEER ABOVE 0.5 JACCARD -- real near-duplicates, which a clean
+    fixture never has and which are exactly what breaks a coarse index.
+Queries are HELD-OUT 8-term subsets, not whole documents. A whole-document query is a lookup:
+the target is the only vector containing every term, so any method wins.
+
+FINDING 1 -- THE RETRIEVER IS WEAK HERE, AND THAT IS THE HONEST HEADLINE.
+Flat exhaustive scan, D=1024, 8-term queries: top-1 hits the source passage 0.333 of the time
+(0.193 at D=256, 0.347 at D=2048). The 0.97-0.98 figures quoted earlier came from 100 clean
+docstrings with 40% of their tokens as the query. BAG-OF-ATOMS IS A WEAK RETRIEVER ON OVERLAPPING
+REAL TEXT and no index change fixes that -- it is the ceiling everything else is measured against.
+(Caveat both ways: with overlapping windows a neighbour is often a near-copy of the gold passage,
+so exact-passage top-1 UNDERSTATES usefulness. Stated, not used to excuse the number.)
+
+FINDING 2 -- A "PERFECT" ARM WAS A FAKE WIN, AND THE HARNESS CAUGHT IT.
+D=2048, g=227 scored tree==flat 1.000 -- while spending 3646 dot products against the flat scan's
+3000. It was not a tree, it was a flat scan in disguise. Every arm now prints dots and anything
+at or above K is marked NOT A WIN. Perfect fidelity at negative speedup is the shape a fixture
+takes when it is allowed to choose its own cost.
+
+FINDING 3 -- MY COST RULE WAS MISSING THE BEAM. Cost is K/g + beam*g, minimised at
+g* = sqrt(K/beam), NOT sqrt(K). With beam 16 at K=3000 that is g*=14, not 55 -- a 4x error in the
+recommended tile size. Corrected, and the capacity constraint becomes D >= 9*sqrt(K/beam), which
+is far cheaper than the D >= 9*sqrt(K) I quoted (123 rather than 492 at these sizes).
+
+FINDING 4 -- THE FRONTIER, which is the actual deliverable (K=3000, D=1024, hard corpus):
+    g=8   beam=4    407 dots   7.4x   fidelity 0.747
+    g=14  beam=16   439 dots   6.8x   fidelity 0.873      <- g*, best cost at useful fidelity
+    g=8   beam=16   503 dots   6.0x   fidelity 0.920
+    g=8   beam=64   887 dots   3.4x   fidelity 0.980
+    g=28  beam=64  1900 dots   1.6x   fidelity 1.000
+    g=55  beam=64  3575 dots   0.8x   fidelity 1.000      NOT A WIN
+BEAM BUYS FIDELITY MUCH MORE CHEAPLY THAN g DOES. At fixed ~500 dots, (g=8, beam=16) reaches
+0.920 while (g=28, beam=4) reaches only 0.647. THE EARLIER RECOMMENDATION -- large g, beam 16 --
+WAS WRONG ON HARD DATA: small tiles with a wide beam dominate. Revised shipping default:
+g ~ sqrt(K/beam) with beam 16-64, and NEVER a configuration whose dot count approaches K.
+
+FINDING 5 -- fidelity is NOT monotone in g (beam 16: 0.920 at g=8, 0.840 at g=55, 0.940 at
+g=113). The g=113 arm is high only because beam*g=1808 covers 60% of the corpus. Non-monotone
+curves are where single-point comparisons lie; the frontier is the only honest form.
+
+STILL OPEN, named rather than buried: the hard-corpus runs are NumPy-side. The GLSL path was
+verified answer-identical to NumPy at every earlier size, so the fidelity numbers carry over, but
+the frontier has not been re-measured through the shaders. And bag-of-atoms' 0.333 ceiling says
+the next real work is the RETRIEVER, not the index -- BM25 fusion or a learned/dense arm, both of
+which already exist in the engine and neither of which this GLSL path uses yet.
+
+## BACKLOG -- GET AS MUCH OF leCore INTO GLSL AS THE ARITHMETIC BOUNDARY ALLOWS
+
+Ordering rule: a debt that would make later measurements lie comes first; then PRIMITIVES that
+unlock several faculties each; then faculties; then platform. Every item states its ACCEPTANCE
+CRITERION, because "done" without one is how examples rot. Sizes are honest, not flattering.
+The boundary is unchanged and not negotiable: ARITHMETIC goes in shaders, CONTROL AND STORAGE
+stay on the host. `unicron_vm_unit_install` drew that line for models and it is the same line.
+
+--- P0 -- DEBTS THAT MAKE EVERYTHING ELSE MEASURABLE -------------------------------------------
+
+P0.1  THE RETRIEVER, NOT THE INDEX. Flat exhaustive scan tops out at 0.333 on the hard corpus.
+      Every index number is measured against that ceiling, so raising it dominates every other
+      item here. `holographic_bm25` and `fuse_rankings` already exist and the GLSL path uses
+      NEITHER. Tokenise on the host, score BM25 as a sparse matvec in a shader, fuse by RRF.
+      ACCEPT: flat-scan top-1 on the hard corpus rises materially above 0.333 with the fused arm,
+      reported with a bootstrap CI over >=5 query seeds, and BM25-alone and dense-alone baselines
+      BOTH reported so fusion cannot hide behind its parts.
+
+P0.2  PORT vec4 + top4 INTO THE SHIPPED PAGES. lecore_webgl2_vsa.html still runs the SCALAR
+      shaders while the fast path sits in glsl_fast.py. The artifact people open is the slow one.
+      ACCEPT: page shaders lifted out and compiled+linked under the ES compiler, embedded
+      references reproduce, and the page's own PASS table still reads all-pass.
+
+P0.3  f16 LEAVES WITH THE T1 GATE ON. Measured free on answers, but one query in a hundred fell
+      to margin/2*eps = 0.04 -- below the certificate. Ship f16 with the gate and an f32 rescore
+      for gated-out queries. ACCEPT: index halves in bytes, gate fires on the sub-certificate
+      queries, and rescored answers are identical to the all-f32 run.
+
+P0.4  RE-MEASURE THE FRONTIER THROUGH THE SHADERS. The (dots, fidelity) frontier is NumPy-side.
+      ACCEPT: the same frontier reproduced through GLSL, answer-identical at every point.
+
+--- P1 -- PRIMITIVES (each unlocks several faculties) ------------------------------------------
+
+P1.1  WALSH-HADAMARD TRANSFORM. `Hadamard codebook (cleanup as one transform)` and
+      `Walsh-Hadamard transform (exact, matrix-free)` already exist: correlating against ALL
+      atoms becomes ONE transform instead of a codebook scan. In a shader it is log2(D)
+      ping-pong passes of pure add/subtract -- no multiplies, no texture-wide reads. This is the
+      single biggest structural change available to cleanup, and it removes the codebook matvec
+      that dominates every walk. ACCEPT: WHT cleanup answer-identical to the matvec cleanup, with
+      a dot-count and pass-count comparison at D=256..4096.
+
+P1.2  FRACTIONAL POWER ENCODING IN THE PHASOR FAMILY. FPE is phase SCALING, so on phasor atoms it
+      is one multiply -- continuous coordinates, time, and recency for free, with no new
+      machinery. Feeds spatial memory, temporal recall and any continuous role.
+      ACCEPT: similarity decays smoothly with coordinate distance (Spearman against the NumPy
+      reference), and bind/unbind exactness is unaffected.
+
+P1.3  NTT EXACT INTEGER BINDING. `holographic_ntt` gives bit-EXACT binding in modular integer
+      arithmetic. GLSL ES has u32, so this is the one path where a shader can be BIT-IDENTICAL to
+      NumPy rather than f32-close -- which would retire the whole margin-gate apparatus for
+      workloads that need exactness. ACCEPT: GLSL NTT bind/unbind bit-identical to the NumPy NTT
+      over random inputs; modulus fits u32 without 64-bit intermediates, or the item is REFUSED
+      loudly and the refusal recorded.
+
+P1.4  RESONATOR / ITERATIVE PROJECTION. `Recursive factoring (past the resonator's cliff)` --
+      the loop is unbind, cleanup, re-bind, repeat, which is exactly the ping-pong shape T3 gives
+      a step bound for. Unlocks factored recall (query by decomposition, not string match).
+      ACCEPT: factors a 3-codebook product on the GPU with the same iteration count NumPy needs,
+      and T3's bound predicts that count within one step.
+
+P1.5  NULL-REFERENCED ABSTENTION. `Route or abstain` judged against a null drawn from the
+      corpus's own vocabulary. The scores already exist in a texture; the null needs one extra
+      pass. ACCEPT: gate precision 1.000 on the hard corpus and a measured abstention rate, both
+      reported -- an abstention gate with no reported abstention rate is decoration.
+
+--- P2 -- FACULTIES ----------------------------------------------------------------------------
+
+P2.1  HDRIFT IN SHADERS. Particle drift is attraction minus batch self-repulsion -- an N-body
+      step, the canonical GPU workload. Gives a generative model of a browsing/reading history
+      that can be composed and ablated. ACCEPT: drift_generate samples match the NumPy model's
+      distribution (two-sample test, not eyeball), and the refusal on a collapsing dataset is
+      preserved.
+
+P2.2  PBD / sim_program_run. Already installs at drift identically 0.0 over 100 steps; in a
+      shader it is a ping-pong FBO, which is what demos have always done. ACCEPT: 100 steps
+      GPU vs NumPy within the f32 budget, with the drift figure reported.
+
+P2.3  mesh_program_obj AS AN ACTUAL VERTEX SHADER. Rigid transforms certify BLOCKDIAG and the
+      byte-exact CPU path already exists. ACCEPT: same mesh out of the vertex path as the
+      installed path, within f32.
+
+P2.4  raster_program_pgm. Image formation certifies RECTANGULAR -- a fragment shader going home.
+      ACCEPT: image matches the installed path within f32.
+
+P2.5  HRNN route_profile. Verdicts at geometric horizons; scale disagreement is the signal.
+      ACCEPT: the same verdicts as NumPy on a planted regime switch.
+
+--- P3 -- PLATFORM -----------------------------------------------------------------------------
+
+P3.1  RUN IT IN A REAL BROWSER. The oldest standing gap. Mesa's ES front end is not ANGLE and not
+      Apple's Metal path. ACCEPT: the page's own PASS table read from Chrome and from Safari.
+
+P3.2  GPU BENCHMARK ON THE A4500. Everything timed so far is llvmpipe -- software, same CPU as
+      NumPy. No throughput claim exists. ACCEPT: dots/second and the flat-vs-tree crossover on
+      real hardware, with the software numbers shown beside them for contrast.
+
+P3.3  WGSL/WebGPU PARITY. Compute shaders remove the fragment-shader contortions (real reductions,
+      scatter, workgroup memory). `verify_wgsl_kernel` already exists for the differential test.
+      ACCEPT: same answers as the GLSL path, plus a pass-count comparison.
+
+P3.4  BATCHED QUERY PATH. Measured 2-3x, still unbuilt in the shipped pages, which loop one query
+      per draw BECAUSE they are differential tests. ACCEPT: batched path answer-identical, with
+      the per-query cost reported both ways.
+
+P3.5  WIRE THE GLSL INDEX TO UnifiedMind + CATALOG. FlatIndex is a script, not a faculty -- so by
+      the governing rule it does not exist. ACCEPT: a delegating faculty, a catalog entry with a
+      runnable example, 5/5 stranger-phrasing discoverability, audits 0/0/0.
+
+--- WHAT IS DELIBERATELY NOT ON THIS LIST ------------------------------------------------------
+
+Tokenisation, HTML parsing, index construction, eviction, lifetime and durability. They are
+CONTROL AND STORAGE, and `unicron_vm_unit_install` measured that boundary as structural, not
+unfinished: 10 of 17 VM units install, and the 7 that do not are exactly these. A shader has no
+state over time either. Anyone tempted to move them should re-read that census first.
+
+## PANEL REVIEW OF THE GLSL BACKLOG -- FOUR ADDITIONS, ONE PROMOTION, TWO CORRECTIONS, ONE CUT
+
+Seats + real published methods only; every leCore citation checked against the live catalog
+before being written down.
+
+CORRECTION 1 (Plate seat) -- THE CAPACITY CONSTANT IN P1/P4 IS A LINEAR-READOUT ARTIFACT.
+The backlog's D >= 9*sqrt(K/beam) rule hardcodes ~D/9 capacity. The catalog already refutes the
+constant: `Bundle capacity as a measured load ratio` -- "the folklore 20-32 instructions was a
+LINEAR-readout artifact: naive cosine holds safe M/D = 0.02 while [a better readout holds more]".
+Every walk in the GLSL path uses naive cosine readout, i.e. the WORST readout the engine knows
+about. ACTION: P1.1 (WHT cleanup) is not just a speed item -- re-measure capacity per readout and
+re-derive the D rule with the readout as a stated variable, not a constant. The design rule as
+written is true only of the readout it was measured with.
+
+CORRECTION 2 (Cranmer seat) -- P0.1's ACCEPTANCE CRITERION INVITES A FIXTURE BIAS. "Top-1 rises
+materially above 0.333" will be satisfied by ANY fusion on queries drawn from document terms,
+because BM25 is strong exactly there. Fix the criterion: report BM25-alone, dense-alone and fused
+on the SAME query set with paired permutation + BH-FDR (the harness already exists and was
+already used once this arc), and the claim is "fusion beats BOTH parts", not "beats 0.333".
+Also adopt the friendliness gate from the retrieval dispute harness (tools/benchmarks_faiss.py
+REFUSES near-orthogonal separable data) -- the hard corpus passes it today; CI should keep it so.
+
+ADDITION 1 (Pharr seat, P1.6) -- HOLOFOREST IN SHADERS. The backlog scales the tree by widening
+and beam, but sublinear NN with an HONEST miss signal already exists: HoloForest, random-
+projection tree ensemble, whose CROSS-TREE AGREEMENT is an abstention signal. A projection tree
+traversal is a chain of dot-against-hyperplane decisions -- the same gather/select shape already
+built. This also answers the near-duplicate problem the hard corpus exposed (13.3% of passages
+have a >0.5-Jaccard peer): an ensemble reports the ambiguity instead of picking arbitrarily.
+ACCEPT: recall@5 vs the flat scan at matched dot budget AGAINST the beam-tree arm (the two
+compete for the same slot; measure, do not keep both), and agreement-vs-error curve reported.
+
+ADDITION 2 (Duda seat, P0.5) -- BYTES ARE A P0 MEASUREMENT, NOT A P2 FEATURE. The backlog
+measures dots but not bytes-touched, and on every real GPU retrieval at these sizes is BANDWIDTH
+bound, not FLOP bound. f16 (P0.3) is one point on a rate-distortion curve that already has an
+instrument in the tree (`Rate-distortion report (bits per vector at a stated error)`). ACCEPT
+for the frontier re-measure (P0.4): every point reports (dots, BYTES TOUCHED, fidelity), and the
+f16/f32 decision cites the R-D report rather than a single agreement number.
+
+ADDITION 3 (Quilez seat, P2.6) -- THE PROCEDURAL TEXTURE MENU IS THE CHEAPEST WHOLE FACULTY.
+`Procedural texture menu (2D + 3D standard set)` is pure per-pixel arithmetic -- the definition
+of a fragment shader -- and `to_shadertoy` already emits complete GLSL programs. This is the
+highest faculty-count-per-effort item on the board and exercises the emitter on real workloads.
+ACCEPT: N menu textures rendered via GLSL, differential vs NumPy within f32, using emit_kernel
+where the kernel qualifies (loop-bounded scalar) and recording WHICH textures refuse and why --
+the refusal list is the interesting output.
+
+ADDITION 4 (Stam/Milanfar seats, P2.7) -- ONE DIFFUSION/BLUR STEP, WITH ITS KEPT NEGATIVE
+CARRIED IN. Stable-fluids diffusion and separable blur are ping-pong passes and unlock the
+denoise/PDE family. CARRIED NEGATIVE, verbatim from the record: a denoiser fed a recall output
+dropped cosine 0.13 -> -0.06 -- a shared kernel is not a shared manifold. The GLSL diffusion
+must NOT be chained after retrieval without the cross-faculty integration test that pins that
+number. ACCEPT: N diffusion steps GPU==NumPy within f32, plus the integration test present and
+failing if anyone wires blur after recall.
+
+PROMOTION (Kanerva seat) -- P1.3 (NTT EXACT INTEGER BINDING) FROM "one item among five" TO THE
+P1 ITEM AFTER WHT. Reason stated plainly: u32 NTT is the only path where a shader is BIT-
+IDENTICAL to NumPy. That retires the entire margin-gate apparatus for exact workloads AND
+retires the phasor family's cos/sin generation drift (~5e-7) in one move. One primitive
+deleting two standing caveats outranks primitives that add capability.
+
+CUT (Togelius seat, concurring: all) -- P2.5 (HRNN route_profile) DEFERRED out of the GLSL lane.
+The horizon ladder is verdicts over a STREAM -- state over time -- and the walk's arithmetic is
+trivial once scores exist. It sits on the control side of the boundary this backlog itself
+declares non-negotiable. Deferred with reason recorded, not silently dropped.
+
+RE-ORDERED BACKLOG DELTA (only changes listed; the P0 debts stand as written, plus P0.5):
+  P0.5  bytes-touched + R-D report joins the frontier re-measure
+  P1 order: WHT (now also the capacity re-measure per readout) -> NTT (promoted) -> FPE ->
+            resonator -> abstention -> HoloForest (new, competes with the beam tree for a slot)
+  P2 adds: procedural texture menu (P2.6), diffusion step with carried negative (P2.7)
+  P2 removes: HRNN route_profile (deferred to the host lane)
+  P0.1 criterion tightened: beats BOTH parts under paired permutation + BH-FDR, friendliness
+       gate in CI
+
+## BACKLOG P1.1 AND P1.3 KNOCKED OUT -- ONE CLEAN WIN, ONE HONEST HALF-REFUSAL
+
+P1.1 WALSH-HADAMARD CLEANUP IN GLSL -- DONE.
+log2(D) ping-pong passes, butterfly partner found by a single XOR on the index, so there is NO
+bit-reversal pass and NO twiddle table: the whole transform is adds and subtracts.
+    D=256   GPU vs mind.wht  max rel err 9.66e-08   8 passes
+    D=1024                   1.02e-07              10 passes
+    D=4096                   1.25e-07              12 passes
+The point is not the transform, it is that the CODEBOOK STOPS BEING DATA: with atoms as
+sign-permuted Hadamard rows, correlating against ALL of them is one WHT instead of a K x D
+matvec. At K=64, D=256 that is 16,384 multiply-adds against 2,048 add/subtracts -- 8x on
+operations and ZERO codebook reads, which matters more than the 8x on a bandwidth-bound GPU.
+KEPT NEGATIVE, recorded up front so nobody quotes the 8x as universal: the WHT costs D*log2(D)
+REGARDLESS OF K, so below K = log2(D) rows it is a LOSS. It pays only on a large codebook.
+
+P1.3 NTT EXACT INTEGER BINDING -- PARTIAL, AND THE REFUSAL IS THE RESULT.
+The acceptance criterion said prove the modulus fits u32 or REFUSE LOUDLY. Both happened.
+  REFUSED: the engine default q=167772161 gives products up to 2.81e16, far past 2^32. It needs
+    64-bit intermediates and GLSL ES has none. The default NTT CANNOT run in GLSL ES. Full stop.
+  REFUSED AGAIN, by the engine itself: with a u32-safe modulus (q=12289 < 2^16) and FULL-RANGE
+    entries, ntt_convolve's own bound check fired -- exact cyclic convolution needs
+    q > 2*n*max|a|*max|b|, and 2*n*q*q swamps a 16-bit modulus. That check was RIGHT and was not
+    routed around.
+  WORKS, in the regime that matters here: with +/-1 entries max|a|*max|b| = 1, so the bound needs
+    only q > 2n, which q=12289 clears up to n=6144. Measured:
+      n=256   q=12289 root=8340    GPU vs NumPy ntt_bind: BIT-IDENTICAL
+      n=1024  q=12289 root=10302   GPU vs NumPy ntt_bind: BIT-IDENTICAL
+    BIT-IDENTICAL, not f32-close -- the first place in this whole arc where a shader reproduces
+    NumPy exactly. And +/-1 entries are precisely the Rademacher family the GLSL path already
+    uses, so this is not a toy regime.
+  THE PRICE, stated: values live mod 12289, so a bundle of m terms stays unambiguous only while
+    max|sum| < 6144. That is a real capacity ceiling and it is NOT the same ceiling as the float
+    path's superposition limit. So the promotion's promise -- "retires the margin gate" -- is
+    HALF TRUE: it retires it for binary/ternary workloads at bounded bundle depth, and not at all
+    for float ones. The backlog claim is corrected accordingly rather than left standing.
+
+INSTRUMENT ERROR 23, and it looked exactly like a real bug: the WHT reported max rel err 1.000
+at every D. Not a convention mismatch -- the output was ALL ZEROS, because gl.run() read the
+framebuffer without ever issuing vao.render(). A relative error of exactly 1.000 IS the signature
+of an all-zero output, and printing four numbers found in seconds what theorising about sequency
+ordering would not have. Look at the numbers before naming the cause.
+
+## BACKLOG P0.1 -- THE RETRIEVER CEILING IS RAISED, AND THE FUSION HYPOTHESIS IS REFUTED
+
+The panel tightened this item's criterion from "beats 0.333" to "beats BOTH its parts under
+paired permutation + BH-FDR". That correction is the reason this session has a result instead of
+a false positive: unweighted RRF fusion scored 0.632 in the easiest regime -- comfortably past
+0.333, and 0.227 WORSE than simply using BM25 alone.
+
+THREE ADVERSARIAL QUERY REGIMES, because one regime is one fixture:
+  R1 EXACT      -- 8 terms sampled from the gold passage. BM25's best case.
+  R2 SHARED     -- 8 terms from the OVERLAP between the gold passage and its nearest neighbour.
+                   13.3% of this corpus has a >0.5-Jaccard peer, so this asks the question that
+                   matters: can the retriever DISCRIMINATE, or does it only find the neighbourhood?
+  R3 PARAPHRASE -- every query term replaced by words from its DICTIONARY DEFINITION (the vendored
+                   144,478-entry dictionary; 44.3% of corpus terms have one). Zero surface overlap.
+
+RESULTS with the ENGINE'S OWN faculty (mind.bm25_rank), K=800, 40 queries x 3 seeds:
+    regime   bm25    dense   fused    fused vs bm25
+    R1       0.875   0.425   0.758    -0.1167  p=0.0005   FUSION LOSES
+    R2       0.458   0.367   0.425    -0.0333  p=0.4177   ns
+    R3       0.000   0.000   0.000    +0.0000  p=1.0000   ns
+Larger harness run (K=3000, 120 queries x 5 seeds) agrees in direction and is sharper:
+    R1 bm25 0.858 / dense 0.357 / fused 0.632 -- fused vs bm25 -0.2267, p=0.0000, SIGNIFICANT
+    R2 bm25 0.327 / dense 0.205 / fused 0.285 -- fused vs bm25 -0.0417, p=0.0067, SIGNIFICANT
+
+FOUR FINDINGS, IN ORDER OF HOW MUCH THEY CHANGE THE PLAN.
+1. THE CEILING MOVES 0.333 -> 0.875, and it moves because of BM25, not because of anything new.
+   The dense arm this GLSL path was built around is the WEAK arm on real text.
+2. UNWEIGHTED RRF FUSION IS REFUTED. It is significantly worse than its stronger part wherever
+   the comparison is powered. RRF gives both lists equal say, so a strong arm gets dragged toward
+   a weak one. Weighting toward BM25 would help, but a weight chosen on this data is BM25 with
+   extra steps -- it needs held-out selection, and that is NOT done here and NOT claimed.
+3. NEAR-DUPLICATE DISCRIMINATION IS THE REAL UNSOLVED PROBLEM. BM25 falls 0.875 -> 0.458 the
+   moment query terms come from the shared region. No arm handles it. This is the item the
+   corpus was built to expose and no configuration in this session addresses it.
+4. R3 IS A CLEAN ZERO FOR EVERY ARM, AND IT IS REAL, NOT A BROKEN HARNESS -- checked: gold BM25
+   score is exactly 0.000 with zero query terms present in the gold passage, and gold ranks
+   435 / 1173 / 2004 / 2617 of 3000, i.e. random. Lexical is blind to vocabulary mismatch by
+   construction, and the hash-atom dense arm is EQUALLY blind because a synonym hashes to an
+   unrelated vector. THE GLSL PATH HAS NO SEMANTICS AT ALL. That is the honest name for the gap,
+   and it is what the dense-routing seam's honest `None` has been saying all along.
+
+HARNESS PIN FAILED, AND THE FAILURE CHANGED THE REPORT. My vectorised BM25 agreed with
+mind.bm25_rank on only 16/20 probes (later 36/40). Investigated rather than waved through:
+score-vector correlation 0.846 with no ties at the top, so it is a genuine formula/tokenisation
+difference, not a tie-break. CONSEQUENCE: the headline table was RE-RUN with the faculty itself
+at smaller scale, and the harness is now labelled an Okapi VARIANT used only for scale trends.
+A harness that disagrees with the engine measures itself.
+
+BACKLOG UPDATE:
+  P0.1 CLOSED as "ceiling raised" -- ship BM25 as the PRIMARY arm, dense as a supplement, and
+       DELETE unweighted RRF from the plan.
+  NEW P0.6 -- WEIGHTED FUSION WITH HELD-OUT WEIGHT SELECTION. Only claim it beats BM25 if the
+       weight is chosen on a disjoint query set. Otherwise do not ship fusion at all.
+  NEW P1.7 -- NEAR-DUPLICATE DISCRIMINATION. Everything drops ~50% on R2. HoloForest's cross-tree
+       agreement (already P1.6) is the natural instrument: report ambiguity instead of guessing.
+  NEW P1.8 -- SEMANTICS, OR AN HONEST REFUSAL. R3 = 0.000 everywhere. Either install a real
+       embedder behind the dense-routing seam, or make the system REFUSE paraphrase queries
+       rather than return a confident wrong passage. The second is cheaper and is not a defeat.
+
+## TWO-STAGE RETRIEVAL + ABSTENTION, MEASURED AGAINST THE PUBLISHED RECORD (SEARCHED, NOT RECALLED)
+
+WHAT THE LITERATURE THROUGH 2026 ACTUALLY SAYS, and why our results are the expected ones:
+  * BM25 is still a strong zero-shot baseline, and on corpora with PRECISE DOMAIN TERMINOLOGY it
+    beats strong 2026 commercial dense embeddings outright (T2-RAGBench: BM25 > text-embedding-
+    3-large on every metric except Recall@20). SOURCE CODE IS EXACTLY THAT KIND OF CORPUS, so
+    BM25 winning on our hard corpus is the predicted result, not an anomaly, and our dense arm
+    losing is not evidence that the VSA path is broken.
+  * BM25+RM3 pseudo-relevance feedback UNDER-PERFORMS the lexical baseline in a 2026 matched
+    evaluation -- naive expansion is not the move, which independently matches our refutation of
+    naive fusion.
+  * Hybrid RRF "increases coverage but offers limited gains in ranking accuracy" (Recall@100
+    ~0.997, nDCG barely moving).
+  * The winning pipelines are TWO-STAGE: broad recall then rerank, with a cross-encoder reranker
+    at >50x runtime. A learned cross-encoder is out of bounds here, so the slot needs an
+    unsupervised occupant.
+
+I CORRECTED MY OWN CONCLUSION. Last round I measured fusion on TOP-1 ONLY and wrote "delete RRF".
+The literature says fusion's gain lives in COVERAGE, which top-1 cannot see. Instrument fixed --
+recall@10 and recall@100 added.
+
+PROXIMITY RERANKING AS THE CONSTITUTIONAL CROSS-ENCODER. BM25 is a bag of words and cannot tell
+two passages apart when they share vocabulary but ARRANGE it differently -- precisely the R2
+near-duplicate failure. Minimum-window span + ordered-bigram scoring is unsupervised, has no
+learned weights, and is ordered LEXICOGRAPHICALLY (coverage, then tightness, then adjacency) on
+purpose: a hand-tuned mixture would need held-out selection to justify and would not be honest
+without it. Results, K=800, 40 queries x 3 seeds, engine bm25_rank:
+    regime  arm         top-1   recall@10   recall@100
+    R1      bm25        0.875   1.000       1.000
+    R1      rrf         0.758   1.000       1.000
+    R1      rrf+prox    0.892   1.000       1.000
+    R2      bm25        0.458   1.000       1.000
+    R2      rrf         0.425   1.000       1.000
+    R2      rrf+prox    0.475   1.000       1.000
+    R3      all arms    0.000   <=0.017     <=0.083
+  BH-FDR: rrf+prox vs rrf +0.1333 p=0.0008 SIG -- the reranker FULLY REPAIRS the damage fusion
+  did. rrf+prox vs bm25 +0.0167 p=0.7786 ns -- it MATCHES the single strong arm and does not beat
+  it. Two-stage is not yet a win here, and saying otherwise would be reading a +0.017 as a result.
+
+THE COVERAGE CLAIM IS UNTESTABLE AT THIS SCALE, and that is a finding about the instrument, not
+about fusion: recall@100 is 1.000 for EVERY arm including dense alone, because 100 of 800 docs is
+12.5% of the corpus. Worse for the hypothesis, BM25's recall@10 is ALREADY 1.000, so there is no
+coverage gap left for fusion to fill on this corpus. "Delete RRF" is therefore SOFTENED, not
+confirmed: RRF is unnecessary here and harmful to top-1, and whether it earns its place at
+corpus scales where lexical recall is imperfect is UNTESTED.
+
+P1.5 ABSTENTION -- DONE, AND IT CONVERTS R3 FROM A LIE INTO A REFUSAL.
+Threshold calibrated on a NULL of 300 scrambled 8-term queries drawn from the corpus vocabulary
+at matched length -- never on the test regimes, because a threshold tuned on the thing it is
+judged by is not a gate. Null median 12.013, 95th percentile 18.427, so the threshold admits a
+5% false-answer rate BY CONSTRUCTION.
+    regime   answered   precision-when-answering   forced top-1   abstained
+    R1       119/120    0.874                      0.875          0.8%
+    R2       119/120    0.462                      0.458          0.8%
+    R3         1/120    0.000                      0.000          99.2%
+R3 goes from returning a confident wrong passage 100% OF THE TIME to REFUSING 99.2% of the time,
+while R1 and R2 are essentially untouched (0.8% abstention, precision equal to forced accuracy to
+three decimals). That is the shape a sound gate should have -- T5's promise in production form:
+it may abstain, it may not be wrong.
+KEPT NEGATIVE: the gate does NOT fix R2. It answers 119/120 R2 queries at 0.462 precision,
+because a near-duplicate scores HIGH -- the failure there is discrimination, not confidence, and
+a confidence gate is the wrong instrument for it. P1.7 stands.
+
+BACKLOG UPDATE:
+  P1.5 CLOSED. Ship the null-calibrated gate; report the abstention rate alongside every accuracy
+       figure, or the accuracy figure is not interpretable.
+  P0.6 (weighted fusion) DOWNGRADED: on this corpus lexical recall is already saturated, so there
+       is nothing for a weight to buy. Revisit only at a scale where recall@10 < 1.0.
+  NEW P0.7 -- SCALE THE CORPUS UNTIL recall@10 < 1.0. Every coverage question in this backlog is
+       currently unanswerable because the corpus is too small for the metric. 800-3000 passages
+       is not enough to test a coverage hypothesis.
+  P1.7 (near-duplicate discrimination) UNCHANGED AND NOW THE LARGEST OPEN GAP: proximity
+       reranking moved R2 by +0.017 (ns). Bag-of-words, dense hashing, fusion, and proximity have
+       all now failed on it.
+
+## P1.7 REFRAMED BY MEASUREMENT: R2 IS NOT A RETRIEVAL FAILURE, IT IS AN ILL-POSED QUESTION
+
+P1.7 was called "the largest open gap" because BM25 falls 0.875 -> 0.458 on near-duplicate
+queries and every method tried -- bag-of-words, dense hashing, RRF, proximity reranking -- failed
+to move it. BEFORE trying a fifth method, the panel's baseline discipline says ask what the
+CEILING is. A method being bad and a question being unanswerable look identical in an accuracy
+column.
+
+THE CEILING NEEDS NO SCORER AT ALL. If a query's terms occur in m passages, every one of those m
+contains exactly what the query asks for; a scorer seeing only those terms cannot separate them,
+and a deterministic selector is right in at most 1 of the m symmetric cases.
+
+MEASURED AT MATCHED CORPUS SIZE (K=800 -- the same size the 0.875/0.458 numbers came from,
+because a ceiling from a different corpus is a different question):
+    regime  containment ceiling   engine bm25 top-1   headroom   queries uniquely determined
+    R1      0.858                 0.875               -0.017     0.717
+    R2      0.444                 0.458               -0.014     0.000
+BM25 IS AT THE CEILING IN BOTH REGIMES -- very slightly above it, which is expected because BM25
+also uses term FREQUENCY, a signal the pure containment ceiling ignores. THERE IS NO HEADROOM TO
+WIN. The four failed methods were not failing; they were being asked to break a tie that the data
+does not contain.
+
+AND ZERO PERCENT OF R2 QUERIES ARE UNIQUELY DETERMINED. Not "few" -- none. By construction R2
+draws terms from the region two passages SHARE, so ambiguity is guaranteed rather than incidental.
+
+P0.7 DONE AS THE SAME EXPERIMENT: the corpus scaled to 20,000 passages, vocabulary 31,638. At
+that size R1 stays nearly well-posed (median 1 passage contains all query terms, 77.8% uniquely
+determined, ceiling 0.882) while R2 degrades further -- median 3 passages, MAX 163, ceiling
+0.345, 0.0% uniquely determined. Ambiguity grows with corpus size, which is the direction that
+matters for a browsing history that only ever gets bigger.
+
+T11 tied_selector_correct_at_most_once -- machine-checked, axioms [propext, Quot.sound]. States
+the counting fact self-containedly: two golds that a CONSTANT selector both gets right must be
+the same gold, so at most one of the m symmetric cases is correct. The first Lean theorem in this
+arc that bounds a RESULT rather than an implementation.
+
+BACKLOG UPDATE -- P1.7 IS CLOSED, AND REPLACED BY A DIFFERENT ITEM.
+  CLOSED: "beat 0.458 on R2" is unachievable and should never have been an item. Deleted rather
+    than left to lure a future session into a fifth failed method.
+  NEW P1.9 -- RETURN THE AMBIGUOUS SET, NOT A GUESS. When the containment set has m > 1, the
+    system should say so and return all m with the ambiguity size, instead of ranking them by a
+    tie-break that carries no information. ACCEPT: on R2, report set-recall (is the gold IN the
+    returned set) and the median set size; set-recall should be near 1.0 where top-1 is 0.458,
+    and the two numbers must be reported TOGETHER -- a set-recall without a set size is
+    meaningless, since returning the whole corpus scores 1.0.
+  NOTE FOR P1.6 (HoloForest): its cross-tree agreement is now the natural DETECTOR for this
+    condition, not a way to win the tie. Its acceptance criterion changes accordingly: agreement
+    must CORRELATE with containment-set size, which is a measurable ground truth we now have.
+  AND THE R1 RESULT MATTERS TOO: at 0.875 against a 0.858 ceiling, R1 IS SOLVED. Any future work
+    proposing to improve exact-term retrieval on this corpus should be refused with this number.
+
+## P1.6 + P1.9 -- KNOWING WHEN RANKING IS MEANINGLESS, JUDGED AGAINST THE QPP LITERATURE
+
+T11 established that R2 is ill-posed and BM25 already sits at its ceiling, so the remaining job
+is not better ranking but KNOWING WHEN RANKING CARRIES NO INFORMATION. That task has a name and a
+literature -- Query Performance Prediction -- so the bar is the published unsupervised baselines,
+not a self-invented score. Implemented per their definitions: NQC (std of top-k scores normalised
+by the corpus score, Shtok et al. 2012), WIG (mean top-k minus corpus score, Zhou & Croft 2007),
+sigma_max (max running std over prefixes), and the naive top1-top2 margin.
+DEVIATION DECLARED: the textbook normaliser is the score of the ENTIRE CORPUS as one document,
+which is degenerate under single-document idf; the mean score over the full ranking is used
+instead. It is a per-query constant so it cannot flip a within-query comparison, but it is not
+the textbook form and is not claimed to be.
+
+THE CANDIDATE IS NOT A PREDICTOR AT ALL: exact CONTAINMENT SIZE m, obtained by intersecting the
+postings of the query terms. For a lexical retriever the ambiguity is not something to estimate;
+it is readable straight off the index, and intersecting eight postings is cheap.
+
+RESULTS, 360 queries across all three regimes, engine bm25_rank:
+    Kendall tau against the 1/m ambiguity ground truth
+      nqc +0.181 | wig +0.302 | sigma_max +0.336 | margin +0.404 | containment +1.000 (exact)
+    RISK-COVERAGE, top-1 accuracy on the most-confident X% (base rate 0.444)
+      predictor    20%     40%     60%     80%    100%
+      nqc         0.472   0.528   0.519   0.514  0.444
+      wig         0.639   0.618   0.648   0.556  0.444
+      sigma_max   0.625   0.660   0.662   0.556  0.444
+      margin      0.875   0.708   0.616   0.535  0.444
+      containment 0.903   0.757   0.685   0.552  0.444
+NQC -- the most widely used unsupervised QPP baseline -- IS NEARLY USELESS HERE: 0.472 at 20%
+coverage against a 0.444 base rate. WIG and sigma_max do better; the naive margin beats all three
+published estimators; and the exact containment count beats everything. The finding is not "our
+predictor is better", it is that THIS TASK DID NOT NEED AN ESTIMATOR -- an inverted index already
+knows the answer, and the QPP literature's estimators exist for settings where it does not.
+
+HARDENING CHECK, because containment and the R2 construction share a notion of shared terms and
+that could hand it the win. Re-run WITHIN R1 ONLY, where query construction never references
+containment (200 queries, base accuracy 0.835):
+      nqc 0.800 | wig 0.775 | margin 0.975 | containment 0.950   (at 20% coverage)
+Containment still beats both published estimators, and MARGIN NOW BEATS CONTAINMENT (0.975 vs
+0.950). So the containment advantage IS partly regime-construction, exactly as suspected, and the
+honest recommendation is BOTH: margin for confidence, containment for the ambiguity SET SIZE --
+they answer different questions and the earlier single ranking of them was too simple.
+
+P1.9 -- RETURN THE SET. Set-recall and set size reported TOGETHER, since either alone is
+meaningless (returning the whole corpus scores 1.000):
+    regime  set-recall  median |set|  mean |set|  top-1   Bayes ceiling
+    R1      1.000       1             1.3         0.875   0.858
+    R2      1.000       2             2.4         0.458   0.444
+    R3      0.000       4             7.4         0.000   0.259
+R2 IS THE RESULT: returning the containment set gives 100% recall at a median of TWO passages,
+against 45.8% accuracy at one passage. The information was never missing -- the interface was
+forcing a choice the data does not support.
+R3's set-recall is 0.000 and that is correct behaviour, not a failure of this component: no
+passage contains the paraphrased terms, so the fallback subset cannot contain the gold. R3 is the
+ABSTENTION gate's job, and it abstains on 99.2% of them.
+
+THE SYSTEM'S HONEST BEHAVIOUR IS NOW THREE-WAY, and each branch has a measured number:
+    well-posed query  -> one answer            (R1: 0.875, ceiling 0.858)
+    ambiguous query   -> the set + its size    (R2: recall 1.000 at median 2)
+    no lexical match  -> abstain               (R3: 99.2% refusal)
+
+BACKLOG UPDATE:
+  P1.6 CLOSED, but NOT as originally written -- the acceptance criterion said HoloForest
+       cross-tree agreement should correlate with containment size. It was never built, because
+       containment size is EXACT and free; an ensemble that estimates a quantity you can compute
+       is machinery for its own sake. HoloForest stays relevant for DENSE-only retrieval, where
+       no inverted index exists, and that is where its item is moved.
+  P1.9 CLOSED. Ship: margin for the confidence gate, containment set for the answer shape.
+  NEW P1.10 -- the three-way behaviour needs ONE policy object with all three thresholds
+       calibrated on the scrambled-query null, not three ad-hoc checks scattered across callers.
+
+## P1.10 SHIPPED AS A REAL FACULTY -- holographic_retrievalpolicy
+
+Everything this arc measured about retrieval existed only in scripts, which by the governing rule
+means it did not exist. It does now: one policy object holding all three behaviours, wired,
+catalogued and discoverable.
+
+  holographic/agents_and_reasoning/holographic_retrievalpolicy.py -- RetrievalPolicy
+  mind.retrieval_policy(docs, ...)   cached by CONTENT HASH (hashlib, never hash())
+  mind.retrieval_verdict(query, docs) -> mode / answer / set / ambiguity / top_score / margin /
+                                         threshold / ceiling / reason
+
+THE DECISION RULE, and every threshold comes from a null rather than from the evaluation:
+  top score below the scrambled-query threshold        -> ABSTAIN
+  exactly one passage contains every query term        -> ANSWER
+  m > 1 passages contain every term                    -> SET, with m and the 1/m ceiling
+The ambiguity is COUNTED, not estimated -- postings intersection. That is the whole point: the
+published unsupervised QPP estimators try to guess a quantity an inverted index already holds,
+and NQC in particular barely beat the base rate when measured against it.
+
+VALIDATED ON THE HARD CORPUS, not only on the planted selftest (K=800, 120 queries per regime):
+    regime  answer%  set%   abstain%  acc|answer  set-recall|set  median |set|
+    R1      0.717    0.283  0.000     0.965       1.000           2
+    R2      0.000    1.000  0.000     n/a         1.000           2
+    R3      0.008    0.000  0.992     0.000       n/a             n/a
+READ THE FIRST ROW CAREFULLY, because it is the result. When the policy chooses to ANSWER on R1
+it is right 96.5% of the time -- against 87.5% when the same retriever is forced to answer every
+R1 query. The gain is not a better ranker; it is declining to rank the 28.3% that were ambiguous
+and returning those as sets instead, at set-recall 1.000. R2 is recognised as ambiguous 100% of
+the time and never guessed at. R3 is refused 99.2% of the time.
+
+CLOSE-OUT, done rather than claimed: module _selftest with planted truths for all three branches
+AND a pinned kept negative (the ambiguous query scores 15.35 against a 10.23 threshold -- a
+CONFIDENCE gate does NOT detect ambiguity, so nobody tries to solve one with the other);
+faculty inserted BEFORE a known class method, because instrument error 21 was appending to the
+file end and landing inside a module-level function; catalog entry with a runnable example and
+eight aliases; discoverability battery 5/5 on stranger phrasings; audits skill_lint 0 gaps and
+0 does-length regressions (the entry was TIGHTENED 700+ -> 588 chars rather than budgeted),
+catalog_gaps 0, reachability_audit 0 duplicates; capdoc.py and docgen.py regenerated (739
+modules).
+
+BACKLOG UPDATE:
+  P1.10 CLOSED.
+  P1.8 (semantics, or an honest refusal) CLOSED AS "HONEST REFUSAL". R3 was 0.000 accuracy with
+       100% confident wrong answers; it is now 99.2% refusal. The cheaper half of that item is
+       DONE. Installing a real embedder remains open and is now a clearly-scoped separate item,
+       not a vague aspiration -- and the abstention floor means the system is SAFE without it.
+  STILL OPEN, unchanged: P0.2 (port vec4+top4 into the shipped pages), P0.3 (f16 + gate), P0.4
+       (frontier through the shaders), P1.2 (FPE), P1.4 (resonator), P2.x, P3.x.
+
+DEGENERACY GUARD ADDED AFTER THE CLEAN-EXTRACT SMOKE TEST CAUGHT A REAL BUG.
+The 3-document smoke corpus made the policy ABSTAIN ON EVERYTHING while reporting a perfectly
+healthy threshold. Cause: a null only means something when a scrambled query looks DIFFERENT from
+a real one, and on a tiny corpus the vocabulary is barely larger than the query, so the two
+distributions coincide and the threshold swallows every real query. Silently refusing everything
+is the worst failure mode a gate can have -- worse than not gating. The policy now DETECTS the
+condition (N < 30, or vocabulary < 8x query length), DISABLES the gate, and reports
+`degenerate_reason` saying so. Pinned in the selftest with the exact 3-passage corpus that
+exposed it. The smoke test earned its place: a happy-path corpus would never have found this.
+
+## THE GPU PATH NOW CARRIES THE ARM THAT ACTUALLY WINS: BM25 + CONTAINMENT IN GLSL
+
+The shaders had been carrying the WEAK arm. Measured on realistic overlapping source text, BM25
+reaches 0.875 top-1 against a 0.858 Bayes ceiling while the hash-dense arm the GLSL path was
+built around manages 0.425. Worse, the policy that turns 0.875 into 0.965-when-answering needs
+the CONTAINMENT COUNT, which the GPU path could not compute at all.
+
+BOTH ARE ONE PASS AND THE SAME SHAPE. Per document fragment, walk that document's terms once;
+occurrence counts give BM25's tf, and how many DISTINCT query terms were seen gives containment.
+No scatter -- which matters, because a fragment shader cannot scatter and the textbook
+posting-list formulation needs exactly that. It also reuses the concatenated token-id + offset
+textures already built for regenerate-on-demand: the compressed index and the lexical scorer want
+the same bytes.
+
+VERIFIED on the hard corpus (800 real overlapping passages, 40 queries):
+    top-1 ranking identical to the NumPy reference   40/40
+    containment coverage EXACT (integers, so bit-exact) 40/40
+    max relative score error   1.331e-07   (f32 against f64)
+DIFFERENTIAL TARGET STATED PRECISELY: pinned against the SAME Okapi formula in NumPy, not against
+mind.bm25_rank. That harness gap (score correlation 0.846) is already on record as a
+formula/tokenisation difference and is neither introduced nor fixed by this shader.
+
+THEN THE INNER LOOP WAS THE BILL, AND STRUCTURE FIXED IT. The first shader was O(doclen * nq):
+every fragment compared all ~93 of its tokens against all 8 query terms, 744 comparisons. Storing
+each document's terms SORTED AND UNIQUE with their tf turns the inner loop into a BINARY SEARCH,
+O(nq * log doclen) = 8 * 7 = 56:
+    linear scan     8.42 ms/query
+    binary search   4.33 ms/query   -> 1.9x, top-1 identical 40/40
+KEPT NEGATIVE, because the arithmetic promised more than it delivered: 13x fewer comparisons
+bought only 1.9x. The remaining cost is the per-fragment document-length sum and texture fetch
+latency, not the comparisons -- so the next win is precomputing dl per document, not a cleverer
+search. Quoting "13x fewer operations" as a speedup would have been wrong by 7x.
+AND IT COSTS BYTES: sorted-unique + tf is 0.79x the size of the raw token stream, i.e. LARGER,
+because tf is stored explicitly where repetition used to be implicit. A 1.9x speed win paid for
+with 1.27x the index. Stated as the trade it is.
+
+BACKLOG UPDATE:
+  NEW P0.8 -- precompute document length per doc instead of summing tf per fragment. The
+       measurement above says that, not intuition, is where the remaining time is.
+  P0.2/P0.3/P0.4 unchanged and now MORE valuable: the shipped page still runs scalar cosine, and
+       it should be running this instead.
+
+## P0.8 CLOSED, AND THE SHIPPED PAGE NOW RUNS THE ARM THAT WINS
+
+P0.8 -- the measurement said the remaining cost was the per-fragment document-length sum, not the
+comparisons, so document length was precomputed into a texture and the length-norm hoisted out of
+the query loop. Hard corpus, 800 passages, 40 queries:
+    original linear scan          12.86 ms/query
+    binary search + precomp dl     3.53 ms/query   -> 3.6x total, top-1 identical 40/40
+The measurement chose the optimisation; intuition had said "fewer comparisons" and would have
+stopped at 1.9x.
+
+SHIPPED: lecore_search_webgl2.html, 490 KB, one file. It replaces the scalar-cosine pages with
+the measured-strong path -- BM25 scoring AND the exact containment count in ONE GLSL ES pass, then
+the answer/set/abstain policy.
+
+THREE DESIGN DECISIONS WORTH KEEPING:
+  * NO VOCABULARY TABLE IS SHIPPED. A term's id IS its FNV-1a hash, so the browser hashes a typed
+    word and the shader compares u32s -- the same lever-3 move as the atom families. Measured on
+    the shipped corpus: 3,733 terms, ZERO collisions. The page REPORTS the collision count rather
+    than assuming it, because a silent collision is a wrong answer with no symptom.
+  * df, avgdl AND document length are DERIVED IN-PAGE at load from the shipped arrays. Shipping
+    them would be duplicate state that can drift from the data it describes.
+  * THE PAGE CALIBRATES ITS OWN NULL -- 200 scrambled vocabulary-matched queries through the
+    shader that will actually answer, 95th percentile. An embedded Python threshold would drift
+    silently the moment the two scorers diverged; this one is a property of what runs. It prints
+    both its own value and Python's beside it, so a divergence is visible rather than hidden.
+
+VERIFIED BEFORE SHIPPING: the page's own shader text, lifted out of the file, compiles AND LINKS
+under a real GLSL ES compiler (GLSL ES 3.20, surfaceless EGL); all 60 embedded reference verdicts
+reproduce from the engine (mode AND exact ambiguity count); the embedded threshold reproduces to
+1e-9. The page's self-test checks verdict MODE and the ambiguity COUNT AS EXACT INTEGERS -- an
+approximate match there would be a bug, not a tolerance.
+
+STILL NOT CLAIMED, unchanged: no browser has opened it; Mesa's ES front end is not ANGLE and not
+Apple's Metal path; the per-query time includes a readback and is not throughput.
+
+BACKLOG UPDATE:
+  P0.2 CLOSED -- superseded rather than completed. The old pages ran scalar cosine over hash atoms
+       and porting vec4+top4 into them would have optimised the WEAK arm. The new page runs BM25.
+       The cosine pages remain as the VSA-algebra demonstration, which is what they are good for.
+  P0.8 CLOSED.
+  P0.3 (f16 leaves + gate) and P0.4 (frontier through the shaders) now apply to the DENSE lane
+       only, which the retrieval measurements demoted to a supplement. Their priority drops
+       accordingly -- optimising the weak arm is not where the next win is.
+
+## RULE 0 CAUGHT ME AGAIN, ON MY OWN NEW FACULTY: RetrievalPolicy HAD A SECOND BM25
+
+holographic_bm25.BM25 already existed -- persistent, with `scores`, `rank`, corpus stats, and a
+tokenizer doing PORTER-STYLE suffix normalisation ('smoothing' matches 'smooth'). My
+RetrievalPolicy shipped its own `scores()` with a plain regex tokenizer and no stemming. That is
+a second implementation of the one thing this project is loudest about not duplicating, AND it
+was the WORSE one -- it is exactly the 0.846 score correlation the harness pin flagged earlier
+and that I had attributed vaguely to "formula/tokenisation differences" without chasing it home.
+
+FIXED BY DELEGATION, not by patching: the policy now constructs holographic_bm25.BM25, scores
+through it, and -- the part that is easy to get wrong -- builds its containment index from
+BM25's OWN `docs_tokens` using BM25's OWN `tokenize`. If the policy split terms differently from
+the scorer, the containment count would be describing a different query than the one being
+scored, and the two halves of the verdict would silently disagree.
+
+THE PIN THAT FAILED NOW PASSES: policy top-1 == mind.bm25_rank top-1 on 20/20 probes, against
+16/20 before. The disagreement was never a mystery; it was my duplicate.
+
+RE-MEASURED ON THE HARD CORPUS, because delegation changes the numbers and assuming otherwise
+would be the whole point of the exercise missed (K=800, 120 queries per regime):
+    regime  answer%  set%   abstain%  acc|answer  set-recall|set  median |set|
+    R1      0.683    0.317  0.000     0.963       1.000           2
+    R2      0.000    1.000  0.000     n/a         1.000           2
+    R3      0.008    0.000  0.992     0.000       n/a             n/a
+Against the pre-delegation run (0.717 / 0.965): the policy now ANSWERS slightly less often
+(68.3% vs 71.7%) at essentially the same precision (0.963 vs 0.965). Stemming collapses
+inflections, so MORE passages contain "every query term" and more queries are correctly
+recognised as ambiguous. That is the stemmer working, not a regression -- and the set arm
+absorbs them at set-recall 1.000.
+
+CONSEQUENCE FOR THE SHIPPED PAGE, stated rather than hidden: lecore_search_webgl2.html
+implements BM25 in GLSL with a NON-STEMMING tokenizer, so it is now the engine's older behaviour,
+not its current one. The page's embedded references still reproduce because they were generated
+against the same non-stemming path, so it is SELF-CONSISTENT and its PASS table is honest -- but
+it is no longer identical to `mind.retrieval_verdict`. Porting Porter normalisation into JS (it
+is pure string rewriting, no tables) is the next item rather than a silent divergence.
+
+BACKLOG UPDATE:
+  NEW P0.9 -- port the engine's Porter-style tokenizer to the page's JS so the browser and the
+       faculty agree. ACCEPT: page verdicts match mind.retrieval_verdict on the embedded query
+       set, not merely their own reference.
+  P3.5 (wire the GLSL index to a faculty) REFRAMED: the persistent index already exists as
+       holographic_bm25.BM25; what bm25_rank lacks is a CACHED handle, which mind.retrieval_policy
+       now provides by content hash. No new sibling is needed, which is the outcome Rule 0 exists
+       to produce.
+
+## P0.9 CLOSED -- THE PAGE AND THE FACULTY NOW AGREE, AND GETTING THERE FOUND A REAL BUG
+
+The engine's BM25 tokenizer does light suffix normalisation ('smoothing' -> 'smooth'); the page's
+JS did not, so the browser and the faculty were splitting terms differently -- which matters more
+than it sounds, because the containment count would then be describing a DIFFERENT QUERY than the
+one being scored.
+
+PORTED AND DIFFERENTIALLY TESTED ON UNFRIENDLY INPUT. The port is literal (four suffixes, the
+>=3-char stem guard, the engine's own 56-word stopword list shipped with the page rather than
+retyped). Tested against Python on 12,015 words -- the corpus vocabulary PLUS every word appearing
+in the dictionary definitions of those terms, which is a far messier set than the corpus the port
+was written while looking at -- and on 300 real source passages through the full tokenize path:
+    NORMALIZE  12,015 words   0 mismatches
+    TOKENIZE   300 passages   0 mismatching documents
+
+THEN THE STRICTER BAR CAUGHT A BUG THE OLD BAR COULD NOT. The page had been judged against its own
+embedded reference, which it passed. Judged against mind.retrieval_verdict it scored 52/60.
+ROOT CAUSE: tokenize() IS NOT IDEMPOTENT --
+    settings  -> setting -> sett      classes -> class -> clas
+    processes -> process -> proces    meshing -> mesh  -> mesh   (some words are, most are not)
+I pre-tokenised the corpus in the page generator and then handed it to RetrievalPolicy, which
+tokenises again, so the shipped index was built on OVER-STEMMED terms. Self-consistent, and wrong.
+FIX: tokenise EXACTLY ONCE, inside the policy, and build the GPU index from the policy's OWN token
+view. Same rule that fixed the duplicate scorer -- one implementation, and everything READS it
+instead of repeating it. Now 60/60 against the faculty, shaders still compile and link under a
+real GLSL ES compiler.
+
+THE LESSON WORTH KEEPING, because it will recur: "tokenise, then hand the result to something that
+tokenises" is silent over-stemming. Any pipeline stage that normalises must be told whether its
+input is raw or already normalised, and the safe default is to normalise once at the boundary.
+A test that compares a system to ITS OWN OUTPUT will never find this class of bug -- only
+comparison against the authority will.
+
+BACKLOG UPDATE:
+  P0.9 CLOSED. The shipped page now matches mind.retrieval_verdict 60/60 on mode AND exact
+       ambiguity count, not merely its own reference.
+  NEW P1.11 -- make tokenize() IDEMPOTENT or make double application detectable. Right now the
+       only defence is discipline, and discipline is what just failed. ACCEPT: either
+       tokenize(tokenize(x)) == tokenize(x) for the full 12,015-word set, or a marker that makes a
+       second pass a loud error rather than a quiet degradation.
+
+## P1.11 -- DOUBLE TOKENIZATION IS NOW DETECTABLE, AND THE "OBVIOUS" FIX WAS MEASURED AND REJECTED
+
+The bug that shipped an over-stemmed index came from tokenize() not being idempotent. Two ways
+out, and the choice was made by measurement rather than by which sounded tidier.
+
+OPTION A, MEASURED AND REJECTED: iterate the strip to a FIXPOINT, which makes the tokenizer
+idempotent by construction. Termination is not in doubt -- T12 (strictly_decreasing_chain_bounded,
+machine-checked) is the well-founded fact behind it: every non-fixed step strictly shortens the
+token and length is a natural, so no infinite chain exists.
+    idempotence violations today: 138 of 4,857 corpus terms (2.8%)
+    R1 top-1: 0.875 current, 0.875 fixpoint -- IDENTICAL
+    R2 top-1: 0.458 current, 0.467 fixpoint -- +0.0083, PAIRED PERMUTATION p=1.0000
+The R2 difference is about ONE QUERY in 120 and is not significant; quoting it as a gain would
+have been exactly the kind of reading this project keeps catching. And the fixpoint over-stems
+visibly -- `across -> acro`, `addressed -> addr` -- which is the false-bridge risk the
+derivational stemmer's m-gate exists to prevent. Costs a real risk, buys no measured accuracy,
+and flipping a default silently is the one thing this engine does not do. REJECTED, on the record,
+so it is not re-proposed.
+
+OPTION B, SHIPPED: make double application DETECTABLE and give callers an explicit opt-out.
+RetrievalPolicy now exposes `double_tokenization_risk` -- the measured fraction of its stored
+terms that a second pass would change (0.017 on the hard corpus) -- and takes `pretokenized=True`
+to skip the pass entirely. It does NOT guess: raw and already-normalised token lists are not
+distinguishable in general, so the honest move is to publish the number rather than infer intent.
+PINNED IN THE SELFTEST: that tokenize("settings") == ["setting"] and tokenize("setting") ==
+["sett"], so if the non-idempotence this detector exists for ever changes, the test says so
+instead of the detector quietly becoming pointless; and that pretokenized=True preserves the
+token view exactly.
+
+WHY 2.8% MATTERS: small enough to hide in any spot check, large enough to change answers. The
+shipped page passed its own self-test at 60/60 while disagreeing with the faculty on 8 of 60.
+
+Audits after: skill_lint 0 gaps / 0 does-length regressions, catalog_gaps 0, reachability_audit 0
+duplicates. capdoc/docgen regenerated.
+
+BACKLOG UPDATE:
+  P1.11 CLOSED as detection + opt-out, with the idempotent variant measured and rejected.
+  NEW P1.12 -- the same double-normalisation trap exists anywhere a stage normalises: the atom
+       families hash RAW tokens while BM25 hashes NORMALISED ones, so a term's atom and its
+       posting can disagree about which word they represent. Not yet a bug because the two arms
+       are never joined on term identity -- but they WILL be if weighted fusion is revisited.
+       ACCEPT: one normalisation boundary named for the whole pipeline, and a test that both arms
+       resolve the same string to the same term id.
+
+## P1.12 -- ONE NAMED NORMALISATION BOUNDARY, BECAUSE THE TWO ARMS DISAGREED ABOUT 48% OF WORDS
+
+MEASURED FIRST, on the 12,015-word unfriendly set (corpus vocabulary plus every word appearing in
+the dictionary definitions of those terms):
+    raw-token hash != normalised-token hash : 5,784 of 12,015 words (48.1%)
+    dropped by the boundary entirely (stopword/short) : 118 (1.0%)
+    examples: settings/setting, classes/class, a_bad/bad, 1950s/1950
+The atom families hash whatever string they are handed; BM25 hashes its OWN normalised tokens. So
+a term's ATOM and its POSTING disagree about which word they represent for nearly half the
+vocabulary. Harmless only while the two arms are never joined on term identity -- and it stops
+being harmless the moment weighted fusion is revisited, which is a live backlog item.
+
+SHIPPED: canonical_terms / term_id in holographic_hashatom, wired as mind.canonical_terms and
+mind.term_id. NOT NEW MACHINERY -- holographic_bm25.tokenize already WAS the boundary; what was
+missing was a name, a faculty and a test. term_id returns None for text the boundary drops,
+because a dropped term has no identity and inventing one papers over the drop.
+
+THE PIN FAILED FIRST, AND IT WAS RIGHT TO. I asserted the boundary is "stable on its own output".
+It is not: term_id('settings') hashes 'setting', term_id('setting') hashes 'sett'. Asserting the
+WISH instead of the measured behaviour is how a test becomes decoration. The selftest now pins
+the ACTUAL contract -- apply exactly once -- and pins the non-stability itself in both directions:
+'settings' must NOT be stable (with a message saying that becoming idempotent is a BEHAVIOUR
+CHANGE to be re-measured, not a bug fix), and 'meshing' must remain stable, so a drift in either
+direction is loud.
+
+Catalog entry EXTENDED rather than a new capability registered -- the boundary belongs with the
+families it exists to reconcile. Tightened 693 -> under the 600-char cap rather than budgeted.
+Discoverability confirmed on the two new phrasings. Audits 0/0/0; capdoc/docgen regenerated.
+
+BACKLOG UPDATE:
+  P1.12 CLOSED.
+  P0.6 (weighted fusion) UNBLOCKED-WITH-A-PRECONDITION: it may only be attempted through
+       term_id, and its acceptance criterion now includes "both arms resolve the same string to
+       the same id" as a gate, not an afterthought. Before this item that experiment would have
+       silently fused two different vocabularies and the result would have looked like a finding.
+
+## P0.6 AND P0.7 CLOSED BY MEASUREMENT: FUSION IS DEAD HERE, AND RERANKING IS THE WHOLE REMAINDER
+
+P0.7 asked for the corpus to be scaled until lexical recall@10 fell below 1.0, so the coverage
+question fusion is supposed to answer would become testable. Scaled 25x, to 20,000 passages:
+    recall@1    bm25 0.785   dense 0.085
+    recall@10   bm25 1.000   dense 0.345
+    recall@100  bm25 1.000   dense 0.685
+RECALL@10 IS STILL EXACTLY 1.000. The premise failed rather than the experiment: on this corpus
+BM25's coverage does not degrade with scale at all, so there is no gap for a fusion weight to
+fill. P0.6 (weighted fusion) is CLOSED AS DEAD HERE -- not deferred, not "needs more tuning".
+Anyone reviving it must first show a corpus where recall@10 < 1.0.
+
+AND THE DENSE ARM DOES NOT SCALE. Hash-atom top-1 went 0.425 at K=800 to 0.085 at K=20,000 --
+a 5x collapse for a 25x corpus. BM25 barely moved (0.875 -> 0.785) because idf tells it which
+terms matter; the dense arm's 8-term query vector is a weak summary and more documents fall close
+to it by chance as K grows. THE GLSL DENSE LANE IS THEREFORE A DEMONSTRATION OF THE VSA ALGEBRA,
+NOT A RETRIEVAL PATH, and the shipped search page being BM25-based is the correct architecture,
+not an interim step.
+
+WHAT THE SATURATION ACTUALLY MEANS, and it is the most useful thing measured today: recall@10 =
+1.000 with recall@1 = 0.785 says THE ANSWER IS ALWAYS IN THE TOP TEN. Every remaining point is a
+RERANKING point. That is exactly the two-stage shape the 2026 literature reports as the winning
+pipeline -- broad recall, then rerank -- except that the reranker there is a cross-encoder at >50x
+runtime, which is out of bounds here.
+
+PROXIMITY RERANKING, RETESTED WHERE THERE IS HEADROOM. It measured +0.017 (ns) at K=800, where
+only 0.017 was available; at K=20,000 there is 0.217:
+    gold present in top-10      1.000   (the ceiling a reranker can reach)
+    BM25 top-1                  0.783
+    + proximity rerank top-1    0.857
+    paired permutation          +0.0733   p=0.0002   SIGNIFICANT
+    headroom captured           33.8% of what was available
+The earlier "ns" verdict was CORRECT AND MISLEADING AT THE SAME TIME: the effect was real, the
+corpus was too small to show it. A null result at a size where the ceiling is 0.017 above the
+baseline says nothing about the method, and reporting it without that context nearly retired a
+technique that is worth 7 points. STATE THE AVAILABLE HEADROOM ALONGSIDE ANY RERANKING RESULT.
+
+BACKLOG UPDATE:
+  P0.6 CLOSED (dead), P0.7 CLOSED (premise refuted, coverage answered).
+  NEW P0.10 -- proximity reranking into the shipped page and the policy. It is unsupervised, needs
+       no weights, and is worth +0.073 at scale. ACCEPT: page top-1 rises on the embedded set with
+       available-headroom reported, and the rerank runs on the GPU over the top-10 (a 10-row pass,
+       trivial next to the 20k-row scoring pass).
+  NEW P0.11 -- rerun EVERY earlier "ns" verdict in this arc at 20k. At least one of them was a
+       size artefact; there is no reason to think it was the only one.
+
+## P0.11 -- RERUNNING THE "ns" VERDICTS CAUGHT A REPLICATION FAILURE, AND IT WAS MINE
+
+The rule this project states plainly is that single-seed numbers are lottery tickets. I broke it:
+proximity reranking measured +0.0733 with p=0.0002 at K=20,000 on ONE query draw and I wrote
+SIGNIFICANT. A fresh draw at the same corpus size gave +0.0400, p=0.1363 -- ns. Same corpus, same
+method, different sample.
+
+SETTLED PROPERLY, six independent draws of 200 queries each:
+    draw 0 +0.0850 | draw 1 +0.0500 | draw 2 +0.0500
+    draw 3 +0.0600 | draw 4 +0.0450 | draw 5 +0.0300
+    per-draw effect: mean +0.0533, sd 0.0167, range +0.030 .. +0.085
+    pooled paired permutation (1,200 queries, 20k iterations): +0.0533, p=0.00000  SIGNIFICANT
+THE EFFECT IS REAL. THE NUMBER I PUBLISHED WAS NOT -- +0.0733 sits 1.2 sd above the mean effect,
+and the second draw's "ns" sits below it. Both single-draw verdicts were noise around a genuine
++0.053. CORRECTED FIGURE: proximity reranking is worth +0.053 +- 0.017, not +0.073.
+
+THE OTHER "ns" VERDICTS, RETESTED AT 20k WITH HEADROOM STATED:
+    R1 exact  n=250  ceiling@10 0.996  bm25 0.796  +prox 0.836  +0.0400 p=0.1363  headroom 0.200
+    R2 shared n=120  ceiling@10 0.917  bm25 0.300  +prox 0.333  +0.0333 p=0.6220  headroom 0.617
+    fixpoint vs current, R1: -0.0080 p=0.4863 ns ; R2: +0.0083 p=1.0000 ns
+R2 remains unmoved by reranking even with 0.617 of headroom available -- consistent with the
+containment ceiling: near-duplicates are ambiguous, not mis-ranked, and no reranker can break a
+tie the data does not contain. THE P1.11 REJECTION OF THE FIXPOINT TOKENIZER SURVIVES SCALING:
+still not significant in either regime at 25x the corpus, and now with the R1 sign NEGATIVE. That
+rejection was not a size artefact.
+
+TWO PROCESS RULES ADDED, because this arc produced counterexamples to both:
+  1. STATE THE AVAILABLE HEADROOM beside any reranking result. An "ns" where the ceiling is 0.017
+     above baseline says nothing about the method.
+  2. NEVER REPORT A SINGLE-DRAW p-VALUE. Report per-draw effects, their spread, and the pooled
+     test. A p of 0.0002 and a p of 0.1363 came from the same true effect of +0.053.
+
+BACKLOG UPDATE:
+  P0.11 CLOSED.
+  P0.10 (proximity rerank into the page and policy) CONFIRMED WORTH DOING, at the corrected
+       +0.053 +- 0.017 -- and its acceptance criterion now requires the multi-draw form, not a
+       single p-value.
+  EVERY EARLIER SIGNIFICANCE CLAIM IN THIS ARC INHERITS RULE 2. The FDR-controlled group-size
+       result used 10 held-out seeds and is safe; the fused-vs-bm25 refutations were single-draw
+       and should be re-run in the multi-draw form before being cited as final.
+
+## THE FUSION REFUTATIONS SURVIVE MULTI-DRAW, AND PROXIMITY RERANKING IS NOW A FACULTY
+
+INTEGRITY DEBT PAID FIRST. Last turn I flagged the fused-vs-BM25 refutations as single-draw and
+therefore not final. Re-run at the SAME corpus size as the original claim (K=800), six independent
+draws of 60 queries:
+    R1  per-draw mean -0.2194 sd 0.0279 (range -0.250 .. -0.167)
+        pooled n=360  -0.2194  p=0.00000  SIGNIFICANT   [bm25 0.864, fused 0.644]
+    R2  per-draw mean -0.0639 sd 0.0485 (range -0.150 .. +0.000)
+        pooled n=360  -0.0639  p=0.00100  SIGNIFICANT   [bm25 0.358, fused 0.294]
+BOTH SURVIVE, and R1's effect is an order of magnitude larger than its spread. Unweighted RRF
+fusion really is worse than its stronger part here. Note R2's range TOUCHES ZERO -- one draw in
+six showed no effect at all, which is exactly why the single-draw form is banned.
+
+P0.10 SHIPPED: proximity reranking landed in RetrievalPolicy as `proximity_key`, exposed as
+`verdict(..., rerank=True)` and `mind.retrieval_verdict(..., rerank=True)`. DEFAULT OFF, because
+it changes an existing decision and this engine does not flip defaults silently.
+
+VALIDATED THROUGH THE FACULTY at K=20,000, answer-mode queries only, four independent draws:
+    per-draw effect mean +0.0812, sd 0.0171
+    rerank OFF 0.892  ->  ON 0.973    pooled n=480, +0.0813, p=0.00000
+The effect is LARGER through the faculty (+0.081) than in the raw harness (+0.053) because the
+policy has already routed ambiguous queries to the SET arm, so the reranker only sees queries
+where a single right answer exists. That is the two components composing as intended rather than
+a better number appearing from nowhere -- and it is stated so nobody quotes +0.081 as the
+standalone reranker effect.
+
+PINNED IN THE SELFTEST, both directions: rerank=False must leave the verdict SHAPE untouched, and
+rerank=True must only REORDER documents BM25 already returned -- never introduce one from outside
+the top-k. Recall is the scorer's job; reordering is the reranker's, and a reranker that can
+introduce documents is silently a second retriever.
+
+Audits 0/0/0; capdoc/docgen regenerated.
+
+BACKLOG UPDATE:
+  P0.10 CLOSED for the faculty. The PAGE half remains: the GPU rerank is a 10-row pass, trivial
+       beside the 20k-row scoring pass, and is the next page change.
+  The multi-draw rule is now applied retroactively across the arc; the two refutations above were
+       the outstanding ones and both held.
+
+## P0.10 CLOSED -- THE PAGE RERANKS, AND THE GPU PASS THE ITEM ASKED FOR WAS REFUSED WITH A REASON
+
+The backlog item said "the rerank runs on the GPU over the top-10 (a 10-row pass, trivial next to
+the 20k-row scoring pass)". Built it in JS instead, and the reason is the argument the item made
+against itself: TEN documents beside a 20,000-row scoring pass is not worth a shader, a texture
+upload and a readback. This is the same objection that retired HoloForest when containment was
+already exact -- machinery for its own sake. The item is CLOSED WITH THE REASON, not by doing it
+anyway to satisfy the wording.
+
+SHIP ONE REPRESENTATION, DERIVE THE OTHER. Proximity needs token POSITIONS, which the
+sorted-unique+tf layout throws away, so the obvious move was to ship both layouts. Instead the
+page now ships ONLY the raw token-hash stream and builds sorted-unique+tf in JS at load:
+    page 468 KB -> 409 KB, with MORE capability than before
+    raw stream 71,270 tokens (371 KB base64); the scorer's index is derived, never shipped
+Duplicate state that can drift from the data it describes is worse than the cycles to rebuild it.
+
+VERIFIED AGAINST THE FACULTY, not against itself:
+    mode        60/60
+    ambiguity   60/60   (exact integers)
+    reranked answer 45/45   -- every answer-mode query, matching mind.retrieval_verdict(rerank=True)
+    shaders compile AND link under a real GLSL ES compiler (GLSL ES 3.20)
+The answer check is the new one and it is the strict one: it compares the RERANKED pick, so a
+divergence in the ported proximity key would show up as a wrong document rather than a tolerance.
+
+THE PORTED RERANKER IS PINNED THE SAME WAY THE FACULTY'S IS: it REORDERS the scorer's top-10 and
+can never introduce a document from outside it. Recall is the scorer's job; a reranker that can
+introduce documents is silently a second retriever.
+
+BACKLOG STATE AFTER THIS TURN -- what is genuinely left:
+  P0.3 / P0.4 / P0.5  dense-lane optimisation. DEMOTED: the dense arm measured 0.085 top-1 at
+       K=20,000 against BM25's 0.785, so this lane is the VSA-algebra demonstration, not a
+       retrieval path. Optimising it further would be optimising the arm that loses.
+  P1.2 FPE in the phasor family, P1.4 resonator -- real, unbuilt, algebra-side.
+  P2.x  HDRIFT / PBD / mesh / raster / procedural textures / diffusion in GLSL -- all unbuilt.
+  P3.1 run it in a real browser -- STILL THE OLDEST OPEN GAP and unreachable from here.
+  P3.2 GPU benchmark on the A4500 -- no throughput claim exists anywhere in this arc.
+  P3.3 WGSL/WebGPU parity, P3.4 batched query path.
+
+## THE FRACTAL COMPRESSION MOVE, MEASURED -- AND IT LOSES TO PLAIN BIT PACKING
+
+The demoscene discipline says ship the generator, not the data, and the page was shipping 371 KB
+of token stream. Source code is intensely self-similar, so leCore's own iterated pair promotion
+(`learn_chunks` -- fractal by construction, since a promoted pair becomes a symbol that can itself
+be promoted) is the obvious instrument. Measured on the shipped corpus, 71,270 tokens over 2,731
+distinct symbols:
+
+    A. raw u32 stream                      285,080 B   1.00x
+    B. dense-rank + 12-bit pack + vocab    117,829 B   2.42x   round-trip EXACT
+    C. B + pair promotion (4,000 merges)   139,738 B   2.04x   round-trip EXACT
+
+PROMOTION ON TOP OF PACKING IS A LOSS: 0.84x. It shrinks the stream 71,270 -> 43,574 symbols, but
+it widens every symbol from 12 to 13 bits AND adds a 13,000-byte codebook, and those two costs
+exceed the saving. Alone against the u32 baseline it managed 1.38x; against a properly packed
+baseline it is negative. THE FRACTAL WIN IS REAL BUT SMALLER THAN THE ENTROPY WIN, and stacking
+them the obvious way makes things worse.
+
+WHY, and it is worth keeping: the tokenizer ALREADY REMOVED the redundancy promotion feeds on.
+Stopwords are gone, inflections are collapsed to one form, and within a document the only
+remaining structure is position. What looked like a fractal self-similarity opportunity was mostly
+an artefact of shipping 12 bits of entropy in a 32-bit box.
+
+KEPT NEGATIVE, and it is the shape of the lesson: A COMPRESSION RESULT QUOTED AGAINST AN
+UNPACKED BASELINE IS A STRAWMAN. 1.38x against u32 and 0.84x against packed-u12 are the same
+measurement of the same method. Always state which baseline.
+
+INSTRUMENT ERROR 24: my first call passed WORDS to learn_chunks, which takes integer symbols. The
+faculty refused correctly with a clear error. The page already has integer ids -- a term's id IS
+its FNV-1a hash -- so the fix was to feed the id stream, not to change the faculty.
+
+WHAT THE PAGE SHOULD SHIP, decided by the measurement: dense-rank + 12-bit packing, 2.42x exact,
+no codebook and no round-trip risk. The pair-promotion path is REJECTED for this artifact and the
+number is recorded so it is not re-proposed. Note the exactness bar was non-negotiable throughout:
+every arm was verified to round-trip token-for-token, because a compressor that changes one token
+changes an answer.
+
+BACKLOG UPDATE:
+  NEW P0.12 -- ship the packed stream in the page (2.42x, 409 KB -> ~250 KB expected after
+       base64). Unpacking is a dozen lines of JS and must be pinned against the Python packer on
+       the whole stream, not a sample.
+  PAIR PROMOTION for this corpus: REJECTED with numbers. It remains the right tool where the
+       symbol stream is NOT pre-normalised -- raw text, byte streams, instruction traces -- which
+       is where the existing capability was measured in the first place.
+
+## P0.12 CLOSED -- THE PAGE IS 192 KB, DOWN FROM 490 KB, WITH MORE CAPABILITY THAN WHEN IT STARTED
+
+The stream now ships dense-ranked and BIT-PACKED at 12 bits (2,731 distinct terms), and the
+scorer's sorted-unique+tf index is still derived in-page rather than shipped:
+    packed 106,905 B at 12 bits + vocabulary 10,924 B = 117,829 B, against 285,080 B as u32
+    -> 2.42x on the stream, and the FILE went 409 KB -> 192 KB
+Across the arc: 490 KB (cosine over hash atoms, weak arm) -> 192 KB (BM25 + containment + policy +
+reranking). Smaller and strictly more capable, which is what shipping the generator instead of the
+data is supposed to look like.
+
+T13 (pack_roundtrip, machine-checked, NO axioms at all) says packing is lossless exactly while
+every symbol is below 2^bits, and its companion says a symbol AT the boundary comes back as zero.
+So the generator ASSERTS the width instead of trusting it -- a vocabulary that outgrew 4,096 terms
+would silently ALIAS terms rather than fail, and aliased terms are wrong answers with no symptom.
+
+THE UNPACKER IS PINNED ON THE WHOLE STREAM, not a sample: the JS `unpack` lifted OUT OF THE PAGE
+and run under Node reproduces all 71,270 Python symbols exactly. A sampled check would pass while
+an off-by-one corrupted only the tail, which is precisely the failure mode bit packing has.
+
+VERIFIED AFTER PACKING, against the faculty rather than against itself: mode 60/60, ambiguity
+60/60 (exact integers), reranked answer 45/45, shaders compile AND link under GLSL ES 3.20.
+
+INSTRUMENT ERROR 25: my extractor's regex was greedy and pulled two lines PAST the unpack function
+into the Node harness, which then failed with "Cannot access 'P' before initialization". The page
+was fine; the tool that read it was not. Cut at the function's own closing brace instead. Third
+time this arc that the harness, not the artifact, was the broken thing.
+
+BACKLOG UPDATE:
+  P0.12 CLOSED.
+  Remaining, honestly: P1.2 (FPE) and P1.4 (resonator) on the algebra side; the P2.x GLSL
+  faculties (HDRIFT, PBD, mesh, raster, procedural textures, diffusion); and the three P3 items
+  that need hardware or a browser this container does not have -- P3.1 run it in a real browser,
+  P3.2 GPU throughput on the A4500, P3.3 WGSL parity.
+
+## P1.2 AND P1.4 WERE ALREADY BUILT -- AND THE INTEGRATION TEST FOUND A SILENT DEFECT
+
+RULE 0 CLOSED BOTH ITEMS BEFORE THEY STARTED. Fractional-power encoding exists (Encoders /
+number-to-vector, with kaiser aperture-taper sidelobe shaping measured -13 -> -37.5 dB, weak-item
+margin 1.5x -> 18.2x; Spatial memory uses it at spearman 0.967) and so does the resonator
+(fpe_lattice_resonator per Frady/Kent 2020, recursive_factor past the cliff, factor_composite).
+Both backlog items were mine, written without auditing. They are struck.
+
+WHAT WAS ACTUALLY MISSING is the cross-faculty integration test the constitution demands for a new
+faculty -- holographic_phasor is a NEW atom family, and "a shared kernel is not a shared manifold"
+is on the record with a number. Ran it, and it found a real defect:
+
+factor_composite HANDED A COMPLEX PHASOR COMPOSITE CASTS IT TO FLOAT AND DISCARDS THE IMAGINARY
+PART, then returns a dict whose `factors` field is populated and whose `solved` field is False. On
+the first trial it returned the CORRECT factors, which is exactly how this kind of bug survives.
+Measured over 60 random 3-factor products, 8 entries per codebook, search space 512:
+    factor_composite (casts to real, discards phase)  15/60 = 0.250
+    complex resonator (keeps phase)                   58/60 = 0.967
+    chance                                                    0.002
+Half the representation is half the answer. The first correct result was luck.
+
+SHIPPED, in the phasor module where the family it factors lives -- NOT as a sibling of
+factor_composite, which is correct for the real/bipolar family it was built and validated for:
+  phasor.factor  -- iterate-a-projection, same shape as IK/PBD/the real resonator: unbind by the
+      conjugate of the current estimates, project by the COMPLEX inner product, re-estimate, stop
+      at a fixpoint. T3 bounds the step count for a contraction; convergence here is OBSERVED,
+      not proved, and the iteration cap is real.
+  phasor.power   -- fractional power as PHASE SCALING, one multiply, no FFT: spearman 0.956
+      against -|x-1|, sim(a^1,a^1.1)=0.975 and sim(a^1,a^2.0)=0.025, and bind/unbind exactness
+      survives it at 2.48e-16. The real-valued encoder with kaiser shaping remains the one to use
+      OUTSIDE this atom family.
+Wired as mind.phasor_factor / mind.phasor_power, catalog entry EXTENDED (not a new capability --
+the boundary and both families belong together), two new aliases confirmed discoverable, `does`
+tightened 648 -> under the cap rather than budgeted. Audits 0/0/0; capdoc/docgen regenerated.
+
+THE DEFECT ITSELF IS NOT FIXED IN factor_composite, and that is deliberate: changing it to REFUSE
+complex input would flip an existing behaviour. It is recorded here and named in phasor.factor's
+docstring, where anyone reaching for the wrong tool will read it. NEW P1.13 -- make
+factor_composite REFUSE a complex composite loudly instead of casting. Additive as a warning,
+behaviour-changing as a refusal; the measurement above is the justification when it is taken.
+
+## P1.13 CLOSED -- factor_composite NOW REFUSES A COMPLEX COMPOSITE INSTEAD OF HALVING IT
+
+The measurement that justified this was already on the record: handed a phasor product, the dense
+resonator cast to float, discarded the imaginary part, and returned a populated `factors` field
+with `solved: False` -- 0.250 recovery against 0.967 for a resonator that keeps the phase, chance
+0.002. A correct-looking answer built from half the representation.
+
+THE NUANCE THAT MAKES THE GUARD SAFE, and it is the whole reason this was not a one-line change:
+an FFT round trip leaves ~1e-16 imaginary residue on a genuinely real vector, and refusing THAT
+would break every legitimate caller whose data passed through a transform. So the guard fires on
+imaginary content SIGNIFICANT RELATIVE TO THE REAL PART (COMPLEX_TOL = 1e-9, which sits ~7 orders
+above float64 FFT residue and ~9 below any real phasor content), and the old path stays reachable
+behind an explicit `allow_complex_cast=True` rather than being deleted.
+
+MEASURED BOUNDARY, so the tolerance is not a guess:
+    FFT round-trip residue  imag/real 7.15e-16  -> ACCEPTED, books stored as float64
+    imag/real 1e-12, 1e-10                      -> ACCEPTED
+    imag/real 1e-08, 1e-06                      -> REFUSED
+    genuine phasor codebook, imag/real 1.0      -> REFUSED with the measurement in the message
+
+PINNED IN THE MODULE SELFTEST IN ALL THREE DIRECTIONS: genuine complex must be refused; FFT
+residue must be accepted; the deliberate opt-out must still construct. A guard pinned in only the
+refusing direction is how a too-strict guard ships.
+
+THE REAL/BIPOLAR PATH IS UNAFFECTED -- verified, because a guard that quietly breaks the validated
+family would be a worse bug than the one it fixes: dense factoring still recovers (2,5) with
+solved=True, and ResonatorNetwork stores float64 books.
+
+INSTRUMENT ERROR 26: my first residue test passed a 2D ARRAY where a LIST OF CODEBOOKS was
+expected, so iteration yielded rows and the constructor died on shape[1]. The guard had already
+accepted the residue without raising. INSTRUMENT ERROR 27: a follow-up test then fed DENSE
+bipolar codebooks to the SBC path (L=16) and got an IndexError, which I checked against the
+pre-existing behaviour before blaming the guard -- it fails the same way it always did. Two
+harness errors in one item, both found by reading the failure rather than assuming the change
+caused it.
+
+Audits 0/0/0; capdoc/docgen regenerated.
+
+## THE INCEPTION TEST FOUND A BIAS IN MY OWN FIXTURE -- EVERY MEASUREMENT IN THIS ARC WAS SAMPLED WRONG
+
+Asked the index for itself, in the literal sense HOLOGRAPHIC_INCEPTION.md means -- the corpus IS
+this engine's source, so the search should retrieve its own implementation. It is also maximally
+unfriendly data, because the modules that implement retrieval are written in the vocabulary of
+retrieval and are therefore near-duplicates of each other.
+
+    holographic_retrievalpolicy   mode=set  amb=7  top1=holographic_retrievalpolicy#  hit@1 1
+    holographic_phasor            mode=set  amb=3  top1=holographic_phasor#0          hit@1 1
+    holographic_resonator         mode=set  amb=8  top1=holographic_resonator#92      hit@1 1
+    holographic_emit              mode=set  amb=2  top1=holographic_emit#1748         hit@1 1
+    holographic_hashatom          mode=answer amb=0 top1=holographic_catalog_p05#8096 hit@1 0
+    holographic_determinism       mode=set  amb=3  top1=holographic_catalog_p05#2898  hit@1 0
+    self-retrieval: hit@1 4/6, hit@10 6/6
+
+BOTH MISSES WENT TO THE CATALOG, and that is a finding rather than a failure: a catalog entry
+DESCRIBES a module in that module's own vocabulary, so the description and the thing described are
+indistinguishable to a term scorer. Which one is "correct" depends on intent the query does not
+carry. This is the containment story appearing inside the engine's own documentation.
+
+THEN THE TEST REPORTED "holographic_bm25 NOT IN CORPUS", WHICH WAS THE REAL CATCH.
+load_passages walked a SORTED file list and stopped at the target count -- an ALPHABETICAL PREFIX
+of the tree. Measured: at target=20000 it covered 546 of 737 modules (74%) and 9 of 12 families,
+with sampling_and_signal, simulation_and_physics and unified ENTIRELY ABSENT. Every retrieval
+measurement in this arc ran on that sample.
+FIXED: the builder now collects per file and INTERLEAVES, so a truncated corpus is a STRATIFIED
+sample of the tree rather than its first chunk. At every target from 800 to 20,000 it now covers
+728 of 737 modules (99%) and 12 of 12 families.
+
+RE-MEASURED, because a changed fixture invalidates the numbers quoted against it. Stratified,
+K=20,000, four independent draws of 200:
+    recall@10 (ceiling)   0.999   [prefix corpus: 1.000]
+    BM25 top-1            0.801   [prefix corpus: 0.785]
+    + proximity rerank    0.851
+    rerank effect         per-draw +0.0500 sd 0.0203, pooled +0.0500 p=0.00000 SIGNIFICANT
+    containment: median 1, mean 1.4, uniquely determined 0.680
+EVERY CONCLUSION SURVIVES. Recall@10 is still saturated (0.999, so fusion still has nothing to
+buy), BM25 is slightly BETTER on the harder corpus, and the reranker's effect is +0.050 against
+the +0.053 measured on the biased sample -- inside one standard deviation. The bias was real and
+worth fixing; it did not move any verdict, and saying so is more useful than pretending it did.
+
+THE PROCESS LESSON, which is the point: A FIXTURE THAT TRUNCATES A SORTED LIST IS A BIASED SAMPLE,
+and it looks exactly like a complete one from inside. It took asking the system for ITSELF to
+notice -- the missing module was one I happened to know should be there. Corpus builders get a
+coverage assertion from now on, not a target count.
+
+## AN EXTERNAL BENCHMARK, AND THE FIRST VERSION OF IT WAS A HAPPY-PATH FIXTURE I BUILT MYSELF
+
+Every retrieval number in this arc came from a corpus built from this engine's own source, with
+queries sampled from a document's own terms -- i.e. measured against a fixture I wrote. So: the
+REVERSE-DICTIONARY task (Hill et al. 2016; SemEval-2022 CODWOE Track 2), on the vendored
+144,478-word dictionary. Published labels I did not invent, out of domain relative to source code,
+and a standard protocol -- median rank over the whole vocabulary plus top-1/10/100.
+
+FIRST VERSION SCORED 0.990 TOP-1, AND THAT IS THE TELL, NOT THE RESULT. Published neural systems
+reach roughly 50-70% top-10 on this task; anything near 1.0 means the task collapsed. It had: I
+queried with `docs[i]`, so the QUERY WAS THE DOCUMENT. String lookup wearing a benchmark's name.
+A result that beats the literature by thirty points is measuring itself.
+
+REBUILT so query and document are DIFFERENT descriptions of the same word, with the headword
+stripped from both:
+    document = synonyms + hypernym chain + usage example   (what the word IS)
+    query    = the dictionary definition                    (how the word is EXPLAINED)
+    vocabulary  3,683   median rank  94   top-1 0.125  top-10 0.362  top-100 0.502  +prox 0.135
+    vocabulary 14,704   median rank 108   top-1 0.090  top-10 0.285  top-100 0.495  +prox 0.095
+    chance at 14,704:   top-1 0.00007, top-10 0.00068
+So BM25 is ~1,300x chance at top-1 and ~420x at top-10, and it is nowhere near solving the task --
+top-100 stalls at 0.495, meaning HALF the words are not in the first hundred at all. That is the
+honest external number, and it is a very different picture from the 0.80 top-1 this engine posts on
+its own source corpus.
+
+WHY THE GAP, and it is the same finding the R3 paraphrase probe produced with a 0.000: source-code
+retrieval is a LEXICAL task (identifiers recur verbatim) while reverse dictionary is a SEMANTIC one
+(a definition shares almost no surface form with the word it defines). BM25 is at its ceiling in the
+first and structurally blind in the second. The published record says the same thing -- BM25 beats
+2026 commercial embeddings on precise-terminology corpora and loses badly where vocabulary must be
+bridged. Our numbers reproduce BOTH halves of that, which is the strongest external validation
+available here.
+PROXIMITY RERANKING ADDS +0.010 / +0.005 -- essentially nothing, and expected: reranking reorders
+what recall found, and recall@10 is 0.285. There is nothing to reorder.
+
+CONSEQUENCE FOR THE ROADMAP, stated plainly: an embedder is not an optional enhancement, it is the
+only thing that addresses this half of retrieval. The abstention gate makes the system SAFE without
+one (it refuses rather than guessing); it does not make it CAPABLE.
+
+ALSO FIXED THIS TURN -- the coverage assertion promised last turn is now mechanical, and it
+immediately caught a residual bug in my own fix: round-robin interleaving still took an
+alphabetical PREFIX whenever the target was below the file count (728), because it drew chunks[0]
+from each file IN ORDER. Now the file list is walked with an even STRIDE, and the builder REFUSES
+to return a corpus missing any family. Coverage at every target from 100 to 20,000: 12/12 families.
+A promise written in NOTES is not a guard; the assertion is.
+
+## THE CAPABILITY WAS ALREADY THERE -- AND FINDING IT EXPOSED A SYMMETRIC LEAK IN MY BENCHMARK
+
+RULE 0, AND IT IS THE ANSWER TO "MAKE IT CAPABLE": `build_semantic_index` is described in the
+catalog as "the fuzzy REVERSE of a dictionary: describe an idea and get the words whose
+definitions mean it" -- random indexing over glosses, opt-in, ~150 MB at full vocabulary. That IS
+the reverse-dictionary task, already in the engine. I built a benchmark for it without checking
+first, and then wrote that "an embedder is not optional" as if none existed. It does.
+
+MEASURED, vocabulary 14,704, 300 held-out definitions:
+    BM25 (lexical)   top-1 0.090   top-10 0.267   median rank 129
+    semantic index   top-1 0.803   top-10 0.953   median rank 1
+Nine times BM25 at top-1, and comfortably past published neural reverse-dictionary systems.
+
+WHICH IS EXACTLY THE SHAPE I HAD JUST LEARNED TO DISTRUST. Checked instead of celebrated: the
+semantic index is built BY RANDOM INDEXING OVER THE GLOSSES, and my query WAS the gloss. So it had
+seen the query text and BM25 had not. Swapping the query to what BM25 indexes flips the whole
+result:
+    query = DEFINITION (what the semantic index was built from)
+        semantic top-1 0.803 top-10 0.953  |  bm25 top-1 0.090 top-10 0.267
+    query = SYNONYMS+HYPERNYM+EXAMPLE (what BM25 indexes)
+        semantic top-1 0.233 top-10 0.397  |  bm25 top-1 0.840 top-10 0.977
+A SYMMETRIC LEAK: each arm scores ~0.8 when queried with the text it indexes and ~0.1-0.2 on the
+other. NEITHER number is a retrieval result. Both are lookup. My "BM25 is structurally blind"
+conclusion from last turn was built on the half of this table that flattered the point I was
+making, and it is withdrawn.
+
+THE FAIR TEST needs a THIRD description neither arm was built from. The dictionary supplies one --
+the word's own EXAMPLE SENTENCE, separable from both glosses and synonyms:
+    query = EXAMPLE SENTENCE (neither arm indexes it), 993 usable words, chance top-1 0.00101
+        BM25 (synonyms+hypernym)  top-1 0.263  top-10 0.543
+        semantic index (glosses)  top-1 0.173  top-10 0.447
+        either arm                top-10 0.583
+THAT is the honest number: BM25 0.263/0.543 against the semantic arm's 0.173/0.447, both ~260x
+chance, and the UNION at 0.583 is meaningfully above either -- the two arms fail on different
+words, which is the first evidence in this whole arc that a hybrid has something real to combine.
+Note this reverses the earlier fusion verdict's CONTEXT rather than the verdict: fusion was refuted
+on a corpus where lexical recall@10 was saturated at 1.000, and here it is 0.543.
+
+THE PROCESS LESSON, third time this arc and the sharpest: I CAUGHT A LEAK, FIXED IT, AND BUILT A
+NEW ONE IN THE SAME SESSION. The tell was identical both times -- a number that beats the
+published literature by a wide margin. The rule that generalises: WHEN AN ARM IS QUERIED WITH THE
+TEXT IT WAS BUILT FROM, THE RESULT IS LOOKUP, and the only way to see it is to query every arm
+with text NO arm was built from.
+
+BACKLOG UPDATE:
+  "install a real embedder" STRUCK -- build_semantic_index is one, it is unsupervised, it needs no
+       learned weights, and it builds over 14,704 words in 3.3 s.
+  NEW P0.14 -- WIRE THE SEMANTIC ARM INTO RetrievalPolicy as a second scorer, gated by the SAME
+       null-calibrated threshold. ACCEPT: measured on the held-out EXAMPLE probe with both arms and
+       their union, multi-draw, and the fusion weight (if any) chosen on a disjoint query set --
+       the precondition P1.12 established, since the two arms must agree on term identity first.
+  NEW P0.15 -- every benchmark in this repo gets a LEAK CHECK: for each arm, report its score when
+       queried with the text it indexes. If that number is far above the held-out number, the
+       benchmark is measuring lookup.
+
+## CAN THE GLSL PATH CARRY A 20M-TOKEN CORPUS? MEASURED, AND THE ANSWER IS YES -- WITH ONE SURPRISE
+
+Question: people run leCore in front of an LLM to reach 20M+ token contexts. Does the GLSL path
+scale the same way? Measured rather than asserted, on the real shader.
+
+INDEX SIZE, measured then extrapolated:
+    4.23M tokens, 17,226 distinct (15 bits), 2.45M posting entries
+    packed stream 7.9 MB, postings (id+tf) 7.0 MB  ->  1.88 MB per MILLION tokens
+    extrapolated to 20M tokens: 38 MB packed stream + 33 MB postings = ~71 MB
+That is comfortable in GPU memory and workable in a browser via IndexedDB or fetched shards. It is
+NOT shippable as a single self-contained HTML file -- the 192 KB page form tops out around
+100k tokens. The arithmetic scales; the DELIVERY MECHANISM is what does not, and those are
+different claims.
+
+GLSL SCALING, the actual shader, one fragment per document on a 2D render target (documents now
+exceed a texture row, so the output is addressed as x + y*width):
+    passages   tokens     index MB   GPU ms/query   ms per 1M tokens
+    5,000      718,633     3.8        6.5            9.1
+    20,000     2,859,741  13.3       20.7            7.3
+    29,221     4,230,774  19.8       27.7            6.6
+COST PER TOKEN FALLS AS THE CORPUS GROWS (9.1 -> 6.6 ms/Mtok): fixed per-draw overhead amortises,
+and the binary search is logarithmic in document length rather than linear in corpus size. Linear
+extrapolation to 20M tokens gives ~130 ms/query ON A SOFTWARE RASTERISER. A real GPU is the
+untested factor and the reason no throughput claim is made -- but llvmpipe is CPU-only and
+single-digit-thread, so the direction is not in doubt.
+
+THE SURPRISE, and it changes the architecture advice: AN INVERTED INDEX BUYS ALMOST NOTHING HERE.
+    candidate fraction for an 8-term query: median 0.518, mean 0.524, 90th pct 0.788
+Half the corpus is touched by a typical query's posting union, so restricting the scan to
+candidates saves 2x, not the 100x the textbook shape implies. The reason is Zipf: query terms
+drawn from real text include high-df terms whose postings cover most of the corpus. SO THE
+FULL-SCAN SHADER IS THE RIGHT DESIGN, NOT A NAIVE ONE -- it is branch-free, coalesced, and costs
+2x the theoretical minimum while avoiding posting-list gather entirely. The standard fix for the
+remaining 2x is WAND / block-max WAND early termination, which is a BRANCHY, data-dependent
+algorithm -- exactly the shape a fragment shader is worst at. Recorded so nobody ports it
+expecting a win.
+
+WHAT THIS MEANS FOR THE 20M-TOKEN CLAIM: the GLSL retrieval path can carry it. ~71 MB of index,
+~130 ms/query on software raster with the per-token cost still falling, no algorithmic wall, and
+the flat 2D texture addressing already removed the 16,384-row limit (one 16384^2 texture holds
+268M texels). What it CANNOT do is arrive as one HTML file, and what has NOT been measured is a
+real GPU.
+
+BACKLOG UPDATE:
+  NEW P0.16 -- SHARDED DELIVERY for corpora past ~100k tokens: fetch or IndexedDB the packed
+       stream in blocks, build the derived index per shard, score shards in sequence and merge
+       top-k. T4 (tiled_max_eq_global) already proves the merge is exact, so this is assembly.
+  NEW P0.17 -- measure the candidate fraction on a NON-self-sampled query distribution. Queries
+       here are drawn from a document's own terms, which over-represents that document's
+       vocabulary; real user queries are shorter and rarer, and the inverted index may pay off
+       there. The 2x figure is honest for THIS query distribution and should not be generalised.
+  WAND / block-max: DECLARED NEGATIVE for the shader path, with the reason (data-dependent
+       branching), not merely unbuilt.
+
+## TWO ORDERS OF MAGNITUDE, FOUND BY FIXING A DENOMINATOR I CHOSE BADLY
+
+"An inverted index buys only 2x" was WRONG, and the error was in the measurement, not the world.
+0.518 is the fraction of DOCUMENTS a query touches. It is not the WORK done:
+    full scan     K * nq * log2(terms/doc) = 29,221 * 8 * 7 = 1,636,376 fetches
+    posting walk  sum(df) over the 8 query terms = 19,717 median visits
+    RATIO 83x
+Two orders of magnitude were hiding behind the wrong denominator.
+
+AND THE OBJECTION THAT MADE ME SKIP IT WAS ALSO WRONG. "A fragment shader cannot scatter" is true
+of the FRAGMENT stage; the VERTEX stage places a primitive anywhere, and ADDITIVE BLENDING is a
+hardware scatter-add. So: ONE POINT PER POSTING, positioned at its document's output texel,
+carrying its BM25 contribution, blend func ONE/ONE. The classic GPGPU histogram trick IS an
+inverted index, and it is WebGL2-legal.
+
+MEASURED, llvmpipe, against the full-scan shader on the same corpus:
+    K        postings    scatter ms/query   work ratio   top-1 vs reference
+    5,000      468,996     1.02             72x          12/12
+    20,000   1,648,301     4.20             65x          12/12
+    29,221   2,450,366     6.91             63x          12/12
+    (full-scan shader on the same 29,221 corpus: 27.7 ms -> 4.0x wall-clock, 63x less work)
+Wall-clock gains less than work because llvmpipe's blend path is CPU-serialised; on hardware the
+blend is fixed-function, which is exactly where the remaining ~15x should live. NOT CLAIMED.
+
+TWO BUGS FOUND, BOTH MINE, BOTH IN THE HARNESS:
+1. MULTIPLE GL CONTEXTS. My sweep built one Scatter per corpus size, each creating its own
+   standalone context; the newest silently becomes current and every draw from an older one lands
+   in the WRONG FRAMEBUFFER. Measured: 4,744 of 5,000 documents wrong, max score error 56.4, and
+   GL REPORTED NO ERROR AT ALL. Fixed with one shared context per process. This is what produced
+   a "0.67 relative error" and a sweep whose numbers flapped between runs.
+2. NON-IDEMPOTENT TOKENIZATION, THIRD APPEARANCE, IN MY OWN REFERENCE. I compared against
+   bm.scores(" ".join(q)) where q was ALREADY normalised, so the reference re-normalised and
+   searched for different terms: rais->rai, setting->sett, clos->clo. Against the correct
+   reference the scatter path is exact:
+       vs the re-tokenised reference : 2.084e-01   (the harness bug)
+       vs the correct reference      : 1.488e-07   (f32 accumulation, as expected)
+       top-1 identical               : 12/12
+   I BUILT A DETECTOR FOR THIS EXACT TRAP TWO TURNS AGO AND STILL WALKED INTO IT, because the
+   detector lives on RetrievalPolicy and this harness called BM25 directly. A guard that only
+   covers one entry point is not a guard.
+
+KEPT NEGATIVE, stated before anyone ships it: BLEND ORDER IS UNSPECIFIED and float addition is not
+associative, so accumulated scores are NOT bit-reproducible run to run. Observed here as ~1e-7
+relative, decisions unaffected (T1's margin bound is the right instrument, and margin/2eps is
+enormous at that error). But "reproducible to the bit" is a property this path GIVES UP, and any
+determinism claim in this engine must exclude it.
+
+## P1.12 FOLLOW-UP -- THE DOUBLE-TOKENISATION TRAP IS KILLED AT ITS SOURCE, NOT AT ONE CALLER
+
+Three separate bugs in this arc came from the same cause, and the third was inside my own
+reference harness after I had already built a detector for it. The detector lived on
+RetrievalPolicy; the harness called BM25 directly. A GUARD THAT COVERS ONE ENTRY POINT IS NOT A
+GUARD.
+
+THE ROOT CAUSE WAS THE API, NOT THE CALLERS. BM25 accepted only strings, so anyone holding tokens
+wrote `" ".join(toks)` -- and tokenize is deliberately not idempotent ('settings' -> 'setting' ->
+'sett'), so the index or the query was silently over-stemmed. The workaround existed because the
+supported path did not.
+
+FIXED: `tokenize_once(x)` -- normalise a string, pass an already-normalised token list through
+untouched -- and BM25's constructor AND `scores()` both route through it. Passing tokens is now
+the supported path, so the join-and-re-tokenise workaround has no reason to exist. Additive: every
+existing string caller is unchanged.
+
+MEASURED ON THE REAL CORPUS, 20,000 documents, 15 queries, comparing the scatter shader against
+BM25 both ways:
+    old path  bm.scores(" ".join(tokens))   max rel err 5.268e-01   <- the trap, still visible
+    new path  bm.scores(tokens)             max rel err 1.495e-07   <- f32 accumulation only
+    top-1 identical                         15/15
+Half a unit of relative error was the API forcing a lossy round trip. The remaining 1.5e-07 is the
+scatter path's f32 accumulation and nothing else.
+
+PINNED IN THE MODULE SELFTEST IN BOTH DIRECTIONS: passing tokens must NOT re-normalise them; the
+join-and-re-tokenise path must remain VISIBLY DIFFERENT, with a message saying that tokenize
+becoming idempotent is a behaviour change to be re-measured rather than a bug fix. A pin that only
+asserts the good path goes to sleep the moment the bad path stops existing for the wrong reason.
+
+Audits 0/0/0; policy, bm25_rank and the retrieval faculty all verified unchanged; capdoc/docgen
+regenerated.
+
+BACKLOG UPDATE:
+  P1.12 follow-up CLOSED.
+  NEW P1.14 -- audit every OTHER string-only entry point in the engine for the same shape. This
+       fix removes the trap from BM25; `route_semantic`, the semantic index and the encyclopedia
+       reader all take strings, and any of them handed already-normalised text has the same
+       failure mode with no symptom.
+
+## P1.14 -- THE NORMALISATION TRAP IS NOW AUDITED MECHANICALLY, AND THE FIRST AUDIT WAS WRONG
+
+tools/normalization_audit.py: for every text entry point, can a caller holding TOKENS pass them
+through safely? SAFE = accepts a token list. TRAP = string-only AND non-idempotent, so a caller
+must join and the join is silently re-normalised. REFUSED = rejects a list outright, which is
+honest because the caller finds out.
+
+THE FIRST VERSION OF THE AUDIT ASKED THE WRONG QUESTION and reported 6 of 8 entry points failing.
+It compared result(raw) with result(normalise(raw)) -- which EVERY normaliser fails by
+construction, including `canonical_terms`, which IS the normaliser, and including `BM25.scores`,
+which I had already fixed. A test that flags the fix as a failure is measuring the wrong property.
+Corrected, then re-run:
+
+    BM25.scores              SAFE     token list accepted
+    BM25(docs) ctor          SAFE     token list accepted
+    mind.retrieval_verdict   SAFE     token list accepted
+    mind.encode_hash         SAFE     token list accepted
+    mind.bm25_rank           SAFE
+    mind.route_semantic      SAFE
+    mind.canonical_terms     TRAP     re-normalising the input changes the answer
+    semantic_index.find      TRAP     re-normalising the input changes the answer
+    mind.find_capability     TRAP     re-normalising the input changes the answer
+    -> 3 TRAP sites of 9
+
+DAMAGE ASSESSED BEFORE FIXING, because a trap nobody triggers is a note and not a bug:
+  * canonical_terms -- BY DESIGN. It is the normaliser and its selftest already pins the
+    non-idempotence in both directions. Not a bug; the note belongs on the docstring.
+  * semantic_index.find -- normalised vs re-normalised returns ['process','surface','class'] vs
+    ['process','mesh','class']. Second hit changes. Real, mild.
+  * mind.find_capability -- normalised input returns THREE capabilities; re-normalised returns
+    AN EMPTY LIST. That is the severe one: over-stemming ('process'->'proces') destroys the match
+    entirely, so a pipeline that pre-normalises its query would find NOTHING and look like a
+    corpus problem rather than a tokenisation one.
+Both live entry points take USER PROSE and never token lists today, so the trap is LATENT -- it
+fires only when a caller pre-normalises, which is exactly what a pipeline built on
+canonical_terms would do. That is the pipeline this arc has been building.
+
+INSTRUMENT ERRORS 28 AND 29, both mine, both in tooling: the audit asked the wrong question
+(above), and my patch script computed a slice using `s.index()` on a string that occurs EARLIER in
+the file than the anchor, producing a negative-length region that corrupted the file into an
+IndentationError. Rewrote the tool rather than patch it again -- when a patcher has mangled a
+file once, the honest move is to author the file, not to author another patch.
+
+BACKLOG UPDATE:
+  P1.14 partially closed: the audit exists, runs, and names 3 sites with measured damage.
+  NEW P1.15 -- make find_capability accept a token list (tokenize_once), since an empty result
+       from over-stemming is the worst failure mode on the board: it looks like "nothing matches"
+       rather than "your query was mangled".
+  NEW P1.16 -- add the audit to the standing lint set beside skill_lint / catalog_gaps /
+       reachability_audit, so a new string-only entry point is flagged when it lands rather than
+       when it bites.
+
+## P1.15 / P1.16 -- THE AUDIT'S SECOND CORRECTION CHANGED THE REPAIR, NOT JUST THE REPORT
+
+P1.15 said "make find_capability accept a token list, because an empty result from over-stemming
+is the worst failure mode on the board". I checked whose normaliser was actually at fault before
+writing the fix, and the item was WRONG.
+
+    catalog tokenizer (regex + stopwords, NO stemming) self-idempotent : True
+    find_capability(raw)              -> Canonical element / Semantic scene / Spin up local work
+    find_capability(its OWN tokens)   -> IDENTICAL
+    find_capability(BM25 tokens)      -> Resource policy / drive_process / post_process
+find_capability is SELF-IDEMPOTENT. It breaks only when handed text stemmed by a DIFFERENT
+component ('process' -> 'proces'). So the repair is the ONE NORMALISATION BOUNDARY the pipeline
+already has (canonical_terms / term_id), NOT a change to the catalog -- and "fix find_capability"
+would have edited the wrong file and left the real hazard in place.
+
+THE AUDIT NOW SEPARATES THE TWO HAZARDS, because merging them sends you to the wrong repair:
+    TRAP   non-idempotent under its OWN normaliser        -> fix the entry point
+    CROSS  breaks on text normalised by another component -> fix the pipeline's boundary
+Re-run:
+    BM25.scores / ctor / retrieval_verdict / encode_hash / route_semantic   SAFE
+    mind.canonical_terms      TRAP    (BY DESIGN -- it IS the normaliser, pinned both ways)
+    mind.bm25_rank            CROSS
+    semantic_index.find       CROSS
+    mind.find_capability      CROSS
+    -> 1 TRAP, 3 CROSS, and the TRAP is the intended one.
+
+P1.16 DONE: the audit is now a GATE with a budget that MAY SHRINK AND MUST NEVER GROW -- the same
+convention skill_lint uses for its does-length exemptions. Each budgeted entry carries the reason
+it is acceptable today, a new hazard fails the gate, and a budget entry that goes clean is
+reported so it gets deleted rather than lingering as permission. Currently: 0 new hazards,
+4 budgeted, exit 0.
+
+THIS IS THE THIRD TIME THE INSTRUMENT WAS THE THING THAT WAS WRONG IN THIS ITEM: first the audit
+asked "does this normalise?" (every normaliser fails), then it conflated self- and
+cross-normalisation (sending the repair to the wrong file), and only the third version asks a
+question whose answer implies an action. AN AUDIT THAT DOES NOT NAME THE REPAIR IS NOT FINISHED --
+that is the rule worth keeping from this, and it is why the verdict column now says which file to
+open.
+
+BACKLOG UPDATE:
+  P1.15 STRUCK, with the measurement: find_capability needs no change; the hazard is cross-
+       normaliser mixing and it is already budgeted and gated.
+  P1.16 CLOSED.
+  NEW P1.17 -- route the SHIPPED pipeline (retrieval policy -> semantic arm -> find_capability)
+       through canonical_terms end to end, so no stage ever receives another stage's stemmed
+       output. The gate now catches a regression; nothing yet PREVENTS the mixing.
+
+## P0.14 / P1.17 -- A SEMANTIC ARM THAT SHARES THE BOUNDARY, AND THE PARAPHRASE BRIDGE THAT ACTUALLY WORKS
+
+SHIPPED: RetrievalPolicy.attach_semantic / semantic_scores -- an optional MEANING arm built from
+the vendored dictionary, unsupervised, no learned weights. Every term on every path goes through
+`self.terms()`, THE SAME boundary the lexical arm uses, so the two arms cannot disagree about what
+a term is. The audit gate added last turn CATCHES cross-normaliser mixing; this PREVENTS it inside
+the policy, which is what P1.17 asked for.
+
+MEASURED IN BOTH REGIMES, and the answer is "off by default", which is why it is optional:
+    REGIME A, source text, terms from the gold passage (lexical's home ground)
+        lexical top-1 0.893 | semantic top-1 0.367 | union top-10 1.000
+    REGIME B, paraphrase (query = dictionary GLOSSES of the gold's terms, zero surface overlap)
+        lexical top-1 0.000 | semantic top-1 0.000 | union 0.000, chance 0.00033
+
+THE SEMANTIC ARM FAILS PARAPHRASE TOO, AND THE REASON IS STRUCTURAL RATHER THAN A BUG. The index
+places a WORD near its GLOSS words; a query written IN gloss words encodes one hop further out,
+not at the same point. So `build_semantic_index` is a word->word instrument -- a reverse dictionary
+-- and lifting it to documents by summing meaning vectors does NOT bridge vocabulary. Kept, because
+"we have an embedder" was the conclusion I reached two turns ago and it is only half true: it
+answers "which word means this", not "which document is about this".
+
+THE BRIDGE THAT WORKS NEEDS NO MODEL: DOCUMENT EXPANSION. Expand each document with the dictionary
+glosses of its own terms, so a query written in gloss vocabulary has something to match. That is
+doc2query without the neural part, and the dictionary is already vendored (57% of corpus terms have
+a definition).
+    PARAPHRASE queries, n=150, chance 0.00033
+        BM25 on raw documents       top-1 0.000
+        BM25 on EXPANDED documents  top-1 0.213      <- 640x chance, from nothing
+    COST on exact-term queries, 4 draws x 150, the regime expansion should leave alone
+        raw 0.867  expanded 0.852   per-draw -0.0150 sd 0.0191, pooled p=0.29440  ns
+        index 427,523 -> 1,791,935 tokens (4.2x)
+So expansion buys the paraphrase regime outright and costs ~1.5 points on exact match, NOT
+significant across four draws -- but it costs 4.2x THE INDEX, which is the real price and the one
+a 20M-token deployment would feel. THE HONEST RECOMMENDATION IS A CHOICE, NOT A DEFAULT: expand
+when queries are prose, do not when they are identifiers, and the numbers for both are on record.
+
+Audits: skill_lint 0, catalog_gaps 0, reachability_audit 0 duplicates, normalization_audit 0 new
+hazards (4 budgeted).
+
+BACKLOG UPDATE:
+  P0.14 CLOSED (arm shipped, both regimes measured, default off with the reason).
+  P1.17 CLOSED inside the policy; the gate covers the rest.
+  NEW P0.19 -- SELECTIVE EXPANSION. Expanding every document costs 4.2x; expanding only the terms
+       a query actually reaches would cost far less. ACCEPT: paraphrase top-1 within noise of
+       0.213 at under 2x index size, measured multi-draw with the exact-match cost reported beside
+       it.
+  KEPT NEGATIVE: build_semantic_index is a REVERSE DICTIONARY (word->word), not a document
+       retriever. Summing its word vectors into document vectors scores 0.367 where lexical scores
+       0.893, and 0.000 on paraphrase. Do not reach for it as an embedder.
+
+## P0.19 -- BOTH CHEAP BRIDGES REFUTED. FULL EXPANSION STANDS AT 4.2x, AND THE REASON IS BACKWARDS
+
+The item asked for paraphrase performance within noise of full expansion at under 2x index size.
+Two candidates, both measured over 3 draws x 120 queries, against the no-expansion baseline:
+
+    index tokens   raw | A full 4.2x | B idf-gated 2.3x | C query-side 1.0x (+32,444-entry map)
+    PARAPHRASE     none 0.000 | A 0.164 | B 0.044 | C 0.031
+    EXACT-TERM     none 0.892 | A 0.856 | B 0.892 | C 0.747
+
+NEITHER CHEAP ARM WORKS, and the way they fail is the interesting part.
+
+B, IDF-GATED EXPANSION, COLLAPSES THE BRIDGE (0.164 -> 0.044) while costing nothing on exact match.
+I dropped the top-decile-frequency gloss words expecting to shed bulk and keep signal. THE
+OPPOSITE IS TRUE: the COMMON gloss vocabulary is what carries the bridge, because a paraphrase
+query is WRITTEN IN THAT VOCABULARY. Discriminative terms are exactly the ones a paraphrase does
+not use -- if it used them it would not be a paraphrase. The instinct "keep the rare words" is
+right for indexing a document and wrong for bridging to a description of it.
+
+C, QUERY-SIDE EXPANSION, IS WORSE ON BOTH AXES (paraphrase 0.031, exact 0.892 -> 0.747). Expanding
+the query injects every corpus term a gloss word helps define, and those candidates outrank the
+true target. It is the cheapest option by far (1.0x index, a 32k-entry map shared across corpora
+rather than multiplied into each) and it is not usable as built. The lever-3 instinct -- store the
+generator, not the expansion -- was right in shape and wrong in effect, and the measurement is the
+only thing that could have said so.
+
+SO FULL EXPANSION STANDS, AT ITS FULL PRICE: 4.2x the index, ~1.5 points of exact-match cost (ns
+over four draws), and the paraphrase regime bought outright from 0.000. That is the trade, and
+P0.19 is CLOSED AS REFUTED rather than left open to lure a fourth attempt.
+
+CORRECTION TO MY OWN NUMBER, by the multi-draw rule: full expansion measured 0.213 on a single
+draw last turn and 0.164 +- 0.039 over three. The single draw was 1.3 sd high. THE HONEST FIGURE
+IS 0.164, and the 640x-chance framing should be read against that.
+
+BACKLOG UPDATE:
+  P0.19 CLOSED AS REFUTED, with both failed arms and their reasons recorded so they are not
+       re-proposed. The open question is no longer "make expansion cheaper" but "is 4.2x
+       acceptable for a prose-query deployment", which is a product decision with numbers on both
+       sides rather than an engineering gap.
+
+## P0.17 -- THE QUERY DISTRIBUTION WAS HIDING FOUR ORDERS OF MAGNITUDE
+
+Every "candidate fraction" and "work ratio" in this arc was measured on SELF-SAMPLED queries --
+eight terms drawn from the gold document. That over-represents the target's vocabulary and, worse,
+guarantees several HIGH-df terms whose posting lists cover most of the corpus. Measured against a
+realistic distribution (2-4 terms sampled from the vocabulary, not from a document), K=20,000:
+
+    candidate fraction   self-sampled 8-term  median 0.485   |  realistic 2-4 term  median 0.005
+    posting visits       self-sampled         median 12,409  |  realistic           median 98
+    work ratio vs full scan (1,120,000 fetches)        90x   |                      11,371x
+
+FOUR ORDERS OF MAGNITUDE were hidden by a fixture. The "an inverted index only buys 2x" claim was
+wrong twice over -- first because I measured documents touched instead of work done (that cost
+83x), and now because the query distribution itself was unrealistic (that cost another 126x).
+
+VERIFIED ON THE SHADER, not just in the arithmetic, on the distribution that matters:
+    REALISTIC 2-4 term queries, K=20,000
+        scatter top-1 identical to BM25 : 40/40   (tokens passed directly, no join, no re-stemming)
+        posting visits per query        : 255
+        scatter GPU time                : 0.195 ms/query
+        full-scan shader, same corpus   : ~20.7 ms/query
+        -> 106x WALL CLOCK, on a software rasteriser
+So the scatter path is not a 4x refinement, it is a 100x one, and the earlier 4x figure was an
+artefact of asking it to answer eight-term queries built from the answer.
+
+THE LESSON, and it is the same one three times now in different clothes: A FIXTURE CHOSEN FOR
+CONVENIENCE IS A CLAIM ABOUT THE WORLD. Self-sampled queries were convenient because they come
+with a ground-truth label for free. They also made the corpus easier (every query term is present
+in the target), made fusion look pointless (recall@10 saturated at 1.000), and made the inverted
+index look worthless. Two of those three conclusions have now been overturned by changing only
+the query distribution.
+
+BACKLOG UPDATE:
+  P0.17 CLOSED.
+  P0.18 (land the scatter path as the shipped scorer) IS NOW THE HIGHEST-VALUE ITEM ON THE BOARD
+       at 106x, and it needs one portability check first: WebGL2 float blending requires the
+       EXT_float_blend extension. The page must detect it and fall back to the full-scan shader
+       when absent, which is a real branch and not a formality.
+  RE-OPENED, because the query distribution moved: P0.6 (fusion) and P0.11's saturation finding
+       were both concluded on self-sampled queries where lexical recall@10 was 1.000. On realistic
+       2-4 term queries recall is NOT saturated, so "fusion has nothing to buy" is UNPROVEN in the
+       regime that matters. It is not re-refuted; it is un-measured, which is a different thing
+       and must not be quoted as settled.
+
+## THE FUSION REFUTATION SURVIVES THE REGIME CHANGE -- AND ITS JUSTIFICATION IS NOW BETTER
+
+I re-opened the fusion verdict last turn because it had been concluded where lexical recall@10 was
+saturated at 1.000, which turned out to be an artefact of EIGHT-term queries. Followed through
+rather than leaving it open. K=20,000, only the query LENGTH varies:
+
+    qlen  bm25 r@1  bm25 r@10  dense r@10  RRF r@1  RRF r@10  union r@10
+    2     0.073     0.347      0.047       0.027    0.147     0.347
+    3     0.207     0.713      0.093       0.053    0.227     0.720
+    4     0.460     0.927      0.167       0.093    0.453     0.927
+    8     0.793     1.000      0.387       0.380    0.767     1.000
+
+RECALL IS NOT SATURATED ON SHORT QUERIES -- 0.347 at two terms against 1.000 at eight. So P0.7's
+"coverage is answered" is correctly scoped to long queries and was over-claimed for short ones.
+
+BUT FUSION IS STILL WORSE AT EVERY LENGTH, and now for a stronger reason. Before, the excuse was
+"no headroom". Now there IS headroom -- 0.653 of it at two terms -- and the dense arm still fills
+NONE of it: union r@10 equals bm25 r@10 to three decimals at qlen 2 and 4, and beats it by 0.007
+(one query) at qlen 3. THE HASH-ATOM DENSE ARM CONTRIBUTES NO UNIQUE RECALL. RRF then actively
+harms, halving r@10 at two terms, because equal-rank fusion drags a 0.347 arm toward a 0.047 one.
+The verdict is unchanged; its justification moved from "nothing to buy" to "there is plenty to buy
+and this arm does not buy it", which is the version that will survive the next fixture change.
+
+P0.18 GATING UNKNOWN RESOLVED: a real GLES 3.2 driver exposes BOTH GL_EXT_color_buffer_float and
+GL_EXT_float_blend, so the scatter path's additive blending onto a float target is available where
+the full-scan path already works. The page must still DETECT it and fall back -- a driver that
+offers color_buffer_float without float_blend would otherwise silently produce zeros -- but the
+common case is supported and the fallback is a branch, not a redesign.
+
+BACKLOG UPDATE:
+  Fusion: CLOSED AGAIN, on better evidence. The remaining open question is not whether to fuse but
+       whether a DIFFERENT second arm (one with real semantics, unlike hash atoms) would add
+       unique recall -- and the honest answer from the paraphrase work is that the only bridge
+       measured so far is document expansion, at 4.2x the index.
+  P0.18 unblocked: implement the scatter scorer in the page behind an EXT_float_blend check, with
+       the full-scan shader as the fallback path and a visible line in the PASS table saying which
+       one ran. A silent fallback would make the 106x claim unfalsifiable from the page.
+
+## P0.18 SHIPPED -- THE PAGE NOW CARRIES BOTH SCORERS AND CHECKS THE FAST ONE AGAINST THE SLOW ONE
+
+lecore_search_webgl2.html, 227 KB, four shader programs. The scatter scorer -- one POINT per
+posting, placed by the VERTEX stage at its document's texel, summed by additive blending -- is now
+the page's scorer when the driver allows it, with the full-scan shader retained as the fallback
+AND as an in-page reference.
+
+THREE DESIGN DECISIONS, each because a silent version of it would be worse:
+  * EXT_float_blend IS REQUESTED AND THE PATH IS CHOSEN ON THE ANSWER. A driver can offer float
+    RENDER TARGETS without float BLENDING, and blending to one anyway produces zeros with no
+    error. A real GLES 3.2 driver exposes both, so the common case is supported -- but the check
+    is not a formality, it is the difference between a wrong answer and a slower one.
+  * THE PASS TABLE NAMES WHICH SCORER RAN. A silent fallback would make the 106x claim
+    unfalsifiable from the artifact.
+  * THE PAGE VERIFIES ITS OWN FAST PATH AGAINST ITS OWN SLOW PATH at load, over 20 embedded
+    queries, on both the score channel and the exact containment count. Both implementations ship,
+    so the correctness claim is checkable by opening the file rather than by reading my notes.
+    That is the inception shape applied to verification: the artifact contains its own reference.
+
+VERIFIED BEFORE SHIPPING: all FOUR programs (full-scan VS/FS and scatter VS/FS), lifted out of the
+page, compile AND link under a real GLSL ES compiler (GLSL ES 3.20); embedded verdicts still match
+mind.retrieval_verdict 60/60 on mode and exact ambiguity.
+
+PAGE GREW 192 -> 227 KB, and the reason is worth recording because it looks like a regression and
+is not: the STRATIFIED corpus builder means the same 500 passages now span all 12 families instead
+of an alphabetical prefix, so the vocabulary went 2,731 -> 6,725 distinct terms. The page is
+carrying a HARDER corpus at 18% more bytes, and the 13-bit packing assertion (T13) confirmed the
+width automatically rather than aliasing terms.
+
+BACKLOG UPDATE:
+  P0.18 CLOSED.
+  WHAT REMAINS, honestly: P0.15 (make the leak check a tool, not a habit), P0.16 (sharded delivery
+  past ~100k tokens), the P2.x GLSL faculties (HDRIFT / PBD / mesh / raster / procedural textures
+  / diffusion), and the three P3 items that need hardware this container does not have -- a real
+  browser, A4500 throughput, WGSL parity. Every timing number in this arc is software-raster until
+  P3.2, and that caveat has been attached to each of them.
+
+## P0.15 -- LEAKAGE IS NOW DETECTED BY A TOOL, NOT BY NOTICING THAT A NUMBER LOOKS TOO GOOD
+
+Three leaks in this arc were caught only because a result beat the published literature:
+a reverse-dictionary benchmark at 0.990 top-1 (the query WAS the document); a semantic-vs-lexical
+comparison where each arm won when queried with the text IT indexed; and a work-ratio measurement
+whose self-sampled queries hid four orders of magnitude. "Notice that it is implausibly good" is
+not a method.
+
+tools/leak_check.py builds the thing that makes it obvious: A MATRIX of arm x query-source
+accuracy. The DIAGONAL is each arm queried with the text it was built from, the off-diagonal is
+held out, and a big diagonal beside a small off-diagonal is lookup wearing a benchmark's name. It
+is obvious in a matrix and invisible in the single row a benchmark usually prints. The pairing of
+arm to its own source must be DECLARED by the author; guessing it is how a leak checker becomes
+decoration.
+
+APPLIED TO THE BENCHMARK WHOSE LEAK I FOUND BY HAND, it reproduces it:
+                        definition   syn+hypernym
+    bm25(syn+hyp)       0.100        0.883*
+    semantic(glosses)   0.900*       0.283
+    arm                 own-text  best held-out  ratio
+    bm25(syn+hyp)       0.883     0.100          8.83   LEAK
+    semantic(glosses)   0.900     0.283          3.18   LEAK
+Both arms flagged, which is correct: neither 0.883 nor 0.900 was a retrieval result.
+
+THE SELF-TEST'S FIRST PLANT DID NOT PLANT ANYTHING, and that is the part worth keeping. I built
+srcB as srcA plus small noise, so even the deliberately leaky arm matched the "held-out" source
+and the ratio came out 1.00 for both arms -- a self-test that would have passed on a leak checker
+that always returns 1.00. A HELD-OUT SOURCE HAS TO BE GENUINELY HELD OUT. With independent
+descriptions the plant separates cleanly: leaky ratio 60.00 against fair 1.00.
+
+BACKLOG UPDATE:
+  P0.15 CLOSED.
+  NEW P0.20 -- run leak_check over the EXISTING benchmarks in the repo (bench_revdict, the hard
+       corpus regimes, the scatter comparison) and record each one's ratio beside its headline
+       number, so a reader sees both. A benchmark without a leak ratio is now an unfinished
+       benchmark.
+
+## P0.20 -- THE LEAK CHECKER FLAGS MY OWN HEADLINE BENCHMARK, AND IT IS RIGHT TO
+
+Ran it over the hard-corpus benchmark every retrieval number in this arc was quoted from.
+Arms: lexical, lexical + document expansion, semantic. Sources: the three query regimes.
+
+                        R1 self-terms   R2 shared   R3 gloss
+    bm25                0.900*          0.342       0.000
+    bm25+expansion      0.875*          0.267       0.192
+    semantic            0.400*          0.158       0.000
+
+    arm               own-text  best held-out  ratio   verdict
+    bm25              0.900     0.342          2.63    LEAK
+    bm25+expansion    0.875     0.267          3.28    LEAK
+    semantic          0.400     0.158          2.53    LEAK
+
+ALL THREE ARMS FLAGGED. R1 draws its query terms FROM THE GOLD PASSAGE, which is the text the
+lexical index is built from, so "BM25 scores 0.90 top-1" was always a LOOKUP number. It is not
+wrong, but it answers "can it find a document from its own words", not "can it find a document
+from a description of it" -- and the second is what a retrieval system is for.
+
+THE HONEST HEADLINE, therefore, is the HELD-OUT COLUMN, and it is much lower:
+    bm25 0.342 on partially-held-out queries and 0.000 on fully-held-out ones;
+    expansion is the only arm that answers the fully-held-out regime at all (0.192).
+Every earlier claim of the form "BM25 is at its Bayes ceiling" remains true OF R1, and R1 is a
+lookup task. The ceiling argument (T11) is unaffected -- it bounds what any scorer can do on
+ambiguous queries -- but the 0.90 that ceiling was compared against is not a retrieval score.
+
+THE ONE ARM THAT LOOKS BEST BY RATIO IS THE WORST BY ABILITY, and that is a trap in the metric
+worth naming before someone optimises for it: `semantic` has the lowest own-text score (0.400) and
+a ratio of 2.53, which is not a mark of honesty, only of being weak everywhere. THE RATIO
+DIAGNOSES A BENCHMARK, IT DOES NOT RANK ARMS. Read it beside the held-out column, never instead.
+
+WHAT CHANGES: nothing in the code, everything in how the numbers are quoted. Going forward every
+retrieval figure in this repo carries its leak ratio and its held-out score. The R1-only figures
+stay on the record -- they are the right measure for identifier search, which is a real use case
+-- but they are now labelled as what they are.
+
+BACKLOG UPDATE:
+  P0.20 CLOSED.
+  NEW P0.21 -- build a FULLY held-out regime for the source corpus that is not gloss-based. R3
+       (dictionary glosses) is the only fully-held-out source available and it only covers the 57%
+       of terms the dictionary defines. Candidates: a module's CATALOG ENTRY as a description of
+       its code, or its docstring as a description of its body -- both are human-written
+       alternative descriptions of the same thing, which is exactly what a held-out source is.
+
+## P0.21 -- A FULLY HELD-OUT BENCHMARK, AND THE FIRST RETRIEVAL NUMBER IN THIS ARC THAT IS NOT LOOKUP
+
+bench_docstring.py: DOCUMENT = a module's code with EVERY docstring stripped; QUERY = that
+module's own module-level docstring; GOLD = the module. The docstring is a human-written
+description that shares no TEXT with the index once removed, neither was written for this
+benchmark, and the labels are free. It is also the real use case in one sentence: find the code
+that does what this sentence says.
+
+    737 modules, chance top-1 0.00136
+    fraction of QUERY terms present in the target's own code: mean 0.350, median 0.334
+        (a self-sampled benchmark is 1.000 here BY CONSTRUCTION -- that is the whole difference)
+    median query 148 distinct terms, median document 213
+
+                    top-1 (held out)   top-10 (held out)   leak ratio
+    bm25            0.763              0.950               1.26  ok
+    bm25+expansion  0.725              0.943               1.29  ok
+    semantic        0.102              0.263               2.00  ok
+
+THE LEAK CHECKER PASSES ALL THREE ARMS, which is what a fair benchmark looks like: the lexical arm
+scores 0.963 on body-sampled queries and 0.763 on docstrings -- only 26% better on its own text,
+against 163% better on the self-sampled corpus. So 0.763 IS A RETRIEVAL NUMBER, not a lookup one,
+and it is the first in this arc.
+
+THE 0.350 OVERLAP IS SIGNAL, NOT LEAKAGE, and the distinction matters: a docstring and its code
+share technical vocabulary because they are ABOUT THE SAME THING. That is precisely the regime the
+2026 record says lexical retrieval owns (BM25 beating text-embedding-3-large on precise-terminology
+corpora), and our number reproduces it on a task with free, human-written labels.
+
+EXPANSION HURTS HERE (0.763 -> 0.725) and the reason completes the picture from P0.19: gloss
+expansion helps only when the query is written in GENERIC vocabulary, because that is the
+vocabulary glosses supply. A technical docstring already shares the code's technical terms, so
+expansion adds generic noise to a query that did not need bridging. THREE REGIMES, THREE VERDICTS:
+gloss queries need expansion (0.000 -> 0.192), technical prose is hurt by it (-0.038), identifier
+queries are unaffected (ns). Expansion is a switch, and this is the third measurement saying so.
+
+THE SEMANTIC ARM IS 0.102 HERE, its worst showing yet, and consistent with everything else: it is
+a word->word instrument and this is a prose->code task.
+
+BACKLOG UPDATE:
+  P0.21 CLOSED. bench_docstring is now the DEFAULT benchmark for retrieval claims in this repo;
+       the self-sampled corpus stays for identifier-search claims, labelled as lookup.
+  NEW P0.22 -- re-run the arc's live conclusions on THIS benchmark: the fusion refutation, the
+       proximity reranker's +0.053, and the scatter path's exactness were all measured on
+       self-sampled queries. Exactness will not move; the two accuracy claims might.
+
+## P0.22 -- THE HELD-OUT BENCHMARK BROKE THE RERANKER, AND THE BREAK WAS A LENGTH PRIOR
+
+Re-ran the arc's live conclusions on the fully held-out docstring->code benchmark (leak ratio 1.26,
+against 2.63 for the self-sampled corpus), five DISJOINT folds of 737 queries.
+
+FUSION: refutation HOLDS. bm25 0.763 +- 0.023, rrf 0.714 +- 0.027, -0.0488 p=0.00055 SIGNIFICANT.
+Third regime, third time. Note the dense arm is far stronger here (0.578) than on self-sampled
+short queries (0.085) -- long docstring queries give bag-of-atoms real overlap to work with -- and
+fusion STILL loses, which is the cleanest version of this result yet: it is not that the second arm
+is useless, it is that equal-rank fusion costs more than the second arm adds.
+
+RERANKER: 0.000 ON ALL 737 QUERIES. Not a weak result, a DEGENERATE one. Diagnosed rather than
+reported: `proximity_key` puts raw COVERAGE first, and with a 148-term query THE LONGEST CANDIDATE
+COVERS THE MOST TERMS. Measured -- the reranker picked the longest candidate 89% of the time, its
+pick equalled the highest-coverage candidate 100% of the time, and across every query it chose only
+SIX DISTINCT DOCUMENTS out of 737. Raw coverage is a document-length prior in disguise.
+
+THE FIX IS THE ONE BM25 ALREADY MAKES: normalise coverage by document length. Re-measured both ways
+on both benchmarks, and the trade is real and now explicit:
+    HELD-OUT (docstring, 148-term queries)   raw 0.000        normalised 0.824  (+0.0611, p=0.00100)
+    SELF-SAMPLED (8-term queries)            raw 0.852        normalised 0.815  (-0.0021, ns)
+Length normalisation RESCUES long queries outright and costs nothing measurable on short ones, so
+it is the DEFAULT and the raw key stays reachable via `length_norm=False`. THE RERANKER'S HEADLINE
+IS NOW 0.763 -> 0.824 ON HELD-OUT DATA, which is a better claim than the +0.053 it had on lookup
+data, and it exists only because a fixture change exposed the degeneracy.
+
+PINNED IN THE SELFTEST IN BOTH DIRECTIONS: a long document padded with the query's terms must
+outrank a short exact match with normalisation OFF (so the trap is still visible) and must lose to
+it with normalisation ON. A pin that only asserts the fixed behaviour cannot tell you the bug is
+still there when someone removes the fix for the wrong reason.
+
+Audits 0/0/0/0; capdoc/docgen regenerated.
+
+BACKLOG UPDATE:
+  P0.22 CLOSED. Fusion refuted a third time; reranker fixed and improved; scatter exactness is
+       arithmetic and unaffected by query distribution, so it was not re-run.
+  THE PATTERN THIS ARC KEEPS PRODUCING, stated once more because it just paid again: EVERY TIME
+  THE FIXTURE GOT HARDER, SOMETHING BROKE THAT LOOKED FINE. Self-sampled queries hid a length
+  prior in the reranker for four turns; the only reason it surfaced is that the benchmark stopped
+  drawing its queries out of the answer.
+
+## THE SHIPPED POLICY SILENTLY DEGRADED ON PROSE QUERIES -- PARTIALLY FIXED, DEFECT RECORDED
+
+The policy had only ever been validated on self-sampled queries. On the held-out prose benchmark:
+    modes: answer 1.000  set 0.000  abstain 0.000
+    containment set EMPTY for 100% of queries
+Its ambiguity test was an exact AND -- documents holding EVERY query term -- which is a SHORT-QUERY
+notion. With 148-term docstrings nothing satisfies it, so the three-way behaviour collapsed to
+"always answer" while accuracy still looked healthy at 0.817. THAT IS EXACTLY THE FAILURE MODE THE
+POLICY EXISTS TO PREVENT, shipped and unnoticed for several turns.
+
+GENERALISED, PARAMETER-FREE: the ambiguity set is now the documents at MAXIMUM query-term coverage.
+For a short query where several documents contain every term that IS the old exact-AND set, so the
+regime it was designed for is unchanged by construction. A coverage THRESHOLD was rejected
+deliberately -- it would need tuning per corpus, and a tuned number inside a safety gate is one
+nobody can defend later.
+
+MEASURED BOTH REGIMES, and the result is a partial success reported as such:
+    PROSE  answer 0.959 set 0.041 abstain 0.000 | acc|ans 0.822 | set-recall 0.000 | med amb 1
+    SHORT  answer 0.825 set 0.165 abstain 0.010 | acc|ans 0.994 | set-recall 1.000 | med amb 1
+    (before: PROSE 1.000/0.000/0.000 with containment empty; SHORT 0.683/0.317/0.000)
+THE SHORT REGIME IMPROVED -- it answers more often (0.683 -> 0.825) and much more accurately when
+it does (0.963 -> 0.994), with set-recall still 1.000.
+THE PROSE REGIME IS STRUCTURALLY FIXED BUT NOT YET USEFUL: the set is non-empty and the ambiguity
+count is live, but SET-RECALL IS 0.000 on the 4.1% of queries that reach it. Max coverage on a
+148-term query ties on GENERIC vocabulary, so the tied documents are not the right ones. The
+signal exists; it is not yet correct.
+
+DIAGNOSIS FOR THE REMAINING PIECE, so the next attempt does not start from scratch: BM25 weights
+terms by idf, so a tie in RAW COVERAGE is not a tie in SCORE. The right ambiguity notion for a long
+query is a near-tie in the WEIGHTED score, not in the unweighted count -- which is a different
+computation from the one the inverted index gives for free, and is why this fix stops here rather
+than guessing.
+
+Audits 0/0/0/0; capdoc/docgen regenerated; long-query containment pinned in the selftest.
+
+BACKLOG UPDATE:
+  NEW P0.23 -- ambiguity by WEIGHTED near-tie for long queries. ACCEPT: prose set-recall
+       materially above 0.000 with short-regime set-recall still 1.000, measured multi-draw, and
+       no tuned threshold in the gate.
+
+## P0.23 -- THE PREMISE WAS REFUTED, AND THE FIX WAS TO REMOVE A FALSE SIGNAL RATHER THAN ADD ONE
+
+P0.23 asked for a better ambiguity notion for long queries, on the assumption that prose set-recall
+of 0.000 meant the detector was failing. Measured two candidates before building either:
+
+    PROSE   max coverage  fires 2.2%   set-recall 0.000    signature  fires 0.000%
+    SHORT   max coverage  fires 17.2%  set-recall 1.000    signature  fires 17.2%  set-recall 1.000
+
+THE PREMISE WAS WRONG. With a 148-term query no two documents match the same term subset, so a
+presence-based scorer CAN separate them: LONG PROSE QUERIES ARE NOT AMBIGUOUS. "Always answer" was
+the correct verdict all along -- the exact-AND simply reached it for the wrong reason, being unable
+to express "no document holds every term". The 0.000 set-recall was not a detector failing to find
+ambiguity; it was max coverage INVENTING ambiguity that is not there, and a false hedge is worse
+than no hedge.
+
+SHIPPED: containment is now the MATCHED-TERM SIGNATURE -- documents matching the same SET of query
+terms as the top-scoring one. It is identical to the old behaviour exactly where ambiguity is real
+(short queries, 17.2%, set-recall 1.000) and silent where it is not (prose, 0.000%). Final state of
+the shipped faculty across three iterations of this notion:
+
+    exact-AND    PROSE answer 1.000 (containment EMPTY 100%)     SHORT 0.683/0.317, acc|ans 0.963
+    max-coverage PROSE answer 0.959 set 0.041 set-recall 0.000   SHORT 0.825/0.165, acc|ans 0.994
+    signature    PROSE answer 1.000 set 0.000 (correctly)        SHORT 0.825/0.165, acc|ans 0.994
+
+Pinned in BOTH directions: a long query whose terms no document fully holds must still find the
+twins (they match the same subset and nothing else does), AND a query no two documents match
+identically must return a SINGLETON rather than a false tie.
+
+Audits 0/0/0/0; capdoc/docgen regenerated.
+
+THE GENERAL LESSON, and it is the counterweight to this arc's other one: a hard fixture exposes
+real defects, and it also produces symptoms that are not defects. Prose set-recall 0.000 looked
+exactly like the reranker's 0.000 from the turn before -- one was a genuine degeneracy (a length
+prior) and one was the system being correct. Measuring the CANDIDATE FIX in both regimes before
+building it is what told them apart.
+
+## P0.16 -- SHARDING IS NOT SPLITTING THE LOOP. IT NEEDED AN API SEAM, AND THE MEASUREMENT SAID SO
+
+T4 proves a tiled max equals the single-pass max, so merging shard top-k lists is exact -- IF the
+shards produce comparable scores. They did not, and the reason is structural: BM25 BAKES the
+per-(term, doc) weight AT FIT TIME from local idf and avgdl. Measured on 6,000 documents:
+
+    shards   naive sharding: max rel err   top-1 vs a single index
+    4        3.140e-01                     0.760
+    16       2.743e-01                     0.840
+    64       3.422e-01                     0.840
+    256      5.083e-01                     0.840
+
+MY FIRST FIX DID NOTHING AND THE INSTRUMENT SAID SO CLEARLY: patching `.idf` and `.avgdl` after
+construction produced results BYTE-IDENTICAL to not patching them, because the weights were
+already baked. Two arms agreeing exactly is not a null result, it is a signal that one of them is
+not doing what its name says.
+
+SHIPPED, additive: `BM25(docs, stats=...)` and `corpus_stats()`. Fit shards with the corpus's
+statistics and they are BIT-IDENTICAL to a single index:
+    shards   WITH corpus stats: max ABS err   top-1
+    4/16/64/256   0.000e+00                   1.000
+Absent, behaviour is unchanged.
+
+TWO INSTRUMENT ERRORS ON THE WAY, both mine: a closure captured the loop's query variable so every
+shard scored the LAST query (caught by a shape mismatch, not by a wrong number -- luck); and
+overriding `bm.N` broke the shard because N serves TWO roles, the corpus size idf is computed from
+AND the length of the score array. That conflation is precisely the kind of thing that makes a
+sharded index quietly wrong, and it is why the seam replaces idf and avgdl but leaves N local.
+
+PINNED IN BOTH DIRECTIONS: shards WITH stats must be bit-identical; shards WITHOUT must still
+DIFFER, with a message saying that if they stop differing the weights are no longer baked at fit
+time and the seam needs re-measuring.
+
+Audits 0/0/0/0; capdoc/docgen regenerated.
+
+BACKLOG UPDATE:
+  P0.16 CLOSED for the arithmetic. What remains is transport -- fetching or IndexedDB-ing the
+       packed shards in a browser -- which is engineering with no open question left in it: the
+       scores are exact, the merge is proved, and the per-shard payload is the same packed format
+       the page already ships.
+
+## P2.7 -- DIFFUSION IN GLSL, WITH ITS KEPT NEGATIVE CARRIED IN AS AN ASSERTION
+
+One diffusion step as a ping-pong pass: two textures, alternate reads and writes, one pass per
+step. Five-point Laplacian, INSULATED (Neumann) edges to match diffuse_heat's stated semantics, so
+the differential test is against the engine's own behaviour rather than a convenient variant.
+
+    grid      steps  r      max rel err   heat drift GPU   heat drift CPU
+    64x64     1      0.20   1.042e-07     9.5e-10          1.6e-16
+    64x64     100    0.24   1.704e-07     9.0e-09          0.0
+    128x96    100    0.24   1.976e-07     1.6e-08          0.0
+    256x256   100    0.24   1.887e-07     1.8e-09          0.0
+f32 against f64 at ~2e-07 after a HUNDRED steps, with no growth in the error across grid sizes --
+the stencil is stable and the error does not compound, which is the thing worth checking about an
+iterated shader. Heat conservation drifts to 1e-8 on the GPU against exactly 0 on the CPU: f32
+summation is not exact, and an insulated boundary that conserves heat ANALYTICALLY does not
+conserve it NUMERICALLY. Stated, because "total heat conserved" appears in the faculty's docstring
+and is now true only to f32.
+
+BOUNDARY DETAIL WORTH WRITING DOWN, since it is the classic wrong-by-a-little: a boundary texel's
+missing neighbour is replaced by ITSELF (zero flux). Clamping the fetch instead samples the
+interior neighbour TWICE and leaks heat inward -- it looks right, runs fine, and slowly biases the
+field.
+
+THE KEPT NEGATIVE IS AN ASSERTION, NOT A COMMENT. The record says a denoiser fed a RECALL OUTPUT
+dropped cosine 0.13 -> -0.06; a shared kernel is not a shared manifold. The integration test
+reshapes a recall vector into a field, diffuses it 20 steps, and ASSERTS the cosine collapses:
+    cosine to the original after 20 steps: 0.212
+So the shader FAILS LOUDLY if anyone ever wires diffusion after retrieval and it stops being
+destructive -- which would mean either the recall path or the diffusion changed and the pairing
+needs re-measuring. That is the cross-faculty integration test the constitution asks for, in the
+only form that keeps working when nobody is reading the docstring.
+
+BACKLOG UPDATE:
+  P2.7 CLOSED.
+  P2.x remaining: HDRIFT (N-body step), PBD (ping-pong, drift 0.0 measured on the installed path),
+  mesh_program_obj as a vertex shader, raster_program_pgm as a fragment shader, and the procedural
+  texture menu. All four are the same shape as this one -- an exact NumPy reference plus a shader
+  -- and the ping-pong scaffolding here is reusable for PBD directly.
+
+## P2.2 -- PBD IN GLSL: THE FIRST FACULTY THAT COMPOSES BOTH SHADER TRICKS
+
+Diffusion needed ping-pong. Scatter BM25 needed additive blending. PBD needs BOTH: a distance
+constraint touches TWO particles so applying corrections is a scatter-add, and the solver iterates
+so the state ping-pongs. This is the first faculty here that composes them, which is the real test
+of whether the pieces fit together rather than each working alone.
+
+JACOBI, NOT GAUSS-SEIDEL, AND THE CHOICE IS DECLARED RATHER THAN HIDDEN. The engine's CPU projector
+sweeps constraints in ORDER, so each sees the previous one's correction. A GPU cannot: every
+constraint runs at once against the SAME input state. So the shader is NOT bit-comparable to a
+sequential sweep, and claiming it were would be the mistake. What IS comparable is Jacobi-on-GPU
+against Jacobi-on-CPU, plus the physical invariant both must satisfy. Both measured:
+
+    cloth    particles  constraints  iters  GPU vs CPU rel err   residual: start -> GPU -> CPU
+    16x16    256        480          10     9.6e-08             0.4667 -> 0.0830 -> 0.0830
+    16x16    256        480          60     2.1e-07             0.4667 -> 0.0193 -> 0.0193
+    32x32    1024       1984         60     8.6e-07             0.4715 -> 0.0248 -> 0.0248
+    48x48    2304       4512         60     3.6e-07             0.4674 -> 0.0230 -> 0.0230
+
+The GPU and CPU Jacobi solvers agree to f32 (~1e-7 to 9e-7) and reach the SAME residual to four
+decimals at every size, and the residual falls monotonically with iterations -- the invariant that
+says the solver is solving rather than merely moving. Averaging the accumulated correction BY THE
+ACCUMULATED COUNT is what makes it stable: a particle in ten constraints would otherwise move ten
+times as far as one in a single constraint, and Jacobi would explode. The count rides in the blue
+channel of the same RGB scatter target, so it costs nothing extra.
+
+INSTRUMENT ERROR 30, and it is the SAME one as number 20: a uniform declared in the fragment shader
+but never READ (uW, since the fragment uses gl_FragCoord directly) is eliminated by the compiler,
+and setting it raises KeyError. Twice now. The general rule is written down here rather than fixed
+per-site: NEVER ASSUME A DECLARED UNIFORM SURVIVES COMPILATION -- if the shader does not read it,
+it does not exist.
+
+UNFRIENDLY INPUT ON PURPOSE: the cloth starts as a grid DISTURBED by 0.35 of a cell in each axis,
+not a perfect lattice, so the solver has real work to do and the residual has somewhere to fall
+from (0.467). A pristine grid starts at residual ~0 and would have made every arm look identical.
+
+BACKLOG UPDATE:
+  P2.2 CLOSED.
+  P2.x remaining: HDRIFT (N-body -- the scatter machinery here applies directly), mesh_program_obj
+  as a vertex shader, raster_program_pgm as a fragment shader, the procedural texture menu.
+
+## P2.6 -- THE TEXTURE MENU THROUGH THE EMITTER INTO GLSL, EXECUTED, AND THE REFUSALS ARE THE RESULT
+
+This closes a loop opened earlier in the arc. The `glsl` dialect was a PINNED NEGATIVE, flipped
+deliberately once f32 decisions were certified; until now its only execution evidence was
+HAND-WRITTEN shaders. Here the EMITTER generates the GLSL, a fragment shader RUNS it, and the
+output is compared to the same function evaluated in Python.
+
+    kernel     emit     executed   max abs err vs Python
+    stripes    ok       yes        3.727e-07
+    rings      ok       yes        1.305e-06
+    marble     ok       yes        7.633e-07
+    fbm4       ok       yes        1.019e-07
+    wood       REFUSED  -          unknown call 'float': not in the intrinsic table
+    voronoi    REFUSED  -          only `for <name> in range(<non-negative int literal>)`
+    checker    REFUSED  -          unknown call 'fmod': not in the intrinsic table
+
+FOUR EMITTED AND EXECUTED AT ~1e-6, INCLUDING A LOOP-CARRYING fbm. THREE REFUSED, and the refusals
+are the measurement rather than a shortfall -- they name exactly where the emitter's language stops
+on REAL workloads instead of on a toy:
+  * `float(int(r))` -- truncation is not an intrinsic. GLSL has `floor`; the emitter simply does
+    not know the Python spelling.
+  * a VARIABLE loop trip count -- the emitter requires a literal, by design, because an unbounded
+    loop is not a shader kernel.
+  * `fmod` / `floor` -- absent from the intrinsic table, though both exist in GLSL.
+TWO OF THE THREE ARE VOCABULARY GAPS, NOT LANGUAGE LIMITS: floor, fmod, trunc, sign, clamp, mix and
+step all exist in GLSL, WGSL and C, and adding them is one row each in the intrinsic table. The
+third (variable trip count) is a real boundary and should stay refused. So the honest headline is
+that the emitter covers the arithmetic core of the menu and is three table entries away from
+covering most of the rest -- which is a very different statement from "3 of 7 failed".
+
+UNFRIENDLY BY CONSTRUCTION: the kernels are the actual arithmetic cores of the menu's wave, rings,
+marble and fbm entries, chosen to INCLUDE cases expected to fail. A set of seven that all passed
+would have measured nothing.
+
+BACKLOG UPDATE:
+  P2.6 CLOSED.
+  NEW P2.8 -- add floor / fmod / trunc / sign / clamp / mix / step to the intrinsic table (one row
+       each, mirrored across c/wgsl/glsl/js as the glsl column already is). ACCEPT: wood and
+       checker emit and execute within f32 of Python, and the variable-trip-count refusal STAYS.
+  P2.x remaining: HDRIFT (needs the FPE encoder in-shader -- materially bigger than the others and
+       not attempted rather than half-attempted), mesh_program_obj as a vertex shader,
+       raster_program_pgm as a fragment shader.
+
+## P2.8 -- TWO INTRINSICS ADDED, FIVE REFUSED, AND THE REFUSALS WERE MEASURED NOT ASSUMED
+
+The item asked for seven intrinsics (floor, fmod, trunc, sign, clamp, mix, step). Checked what each
+MEANS in every dialect the table serves before adding any:
+
+    fmod   C's remainder takes the sign of the DIVIDEND; GLSL's `mod` takes the sign of the
+           DIVISOR. Measured: fmod(-7,3) = -1 against mod = 2, fmod(7,-3) = 1 against mod = -2.
+           A fmod -> mod mapping WOULD COMPILE AND BE WRONG on every mixed-sign input.
+    sign   absent from C (only copysign). clamp / mix / step absent from C, and from JS too.
+    floor, trunc  spelled AND defined identically in C, GLSL, WGSL and JS.
+
+SO TWO WENT IN AND FIVE STAYED REFUSED. An intrinsic whose availability depends on the dialect
+defeats the point of a shared table, and a silently wrong emission is worse than a refusal the
+caller can read. Adding all seven would have looked like more progress and shipped a bug.
+
+RESULT ON THE TEXTURE MENU, re-run:
+    stripes / rings / marble / fbm4 / wood / checker   emitted and EXECUTED, err 1e-7 to 1.3e-6
+    checker is EXACT (0.000e+00) -- it is integer-valued arithmetic, so f32 is not approximating
+    voronoi        REFUSED: variable loop trip count (a real boundary, and it stays)
+    checker_fmod   REFUSED: fmod (the measured semantic divergence, and it stays)
+    -> 6 of 8 emit and execute, against 4 of 7 before.
+The checker was REWRITTEN the way a shader author would (`s - 2*floor(s*0.5)`) rather than by
+bending the table to accept fmod -- which is the honest response to a refusal that is correct.
+
+PINNED IN THE EMITTER'S OWN SELFTEST: floor emits in all four dialects, and fmod/clamp/mix/step
+each still raise, with the reason in the assertion message. The boundary cannot drift now without
+a test failing.
+
+Audits 0/0/0/0; capdoc/docgen regenerated.
+
+BACKLOG UPDATE:
+  P2.8 CLOSED.
+  P2.x remaining: HDRIFT (needs the FPE encoder in-shader; materially bigger, not attempted rather
+  than half-attempted), mesh_program_obj as a vertex shader, raster_program_pgm as a fragment
+  shader.
+
+## P2.3 ATTEMPTED AND NOT COMPLETED -- TRANSFORM FEEDBACK PRODUCES NOTHING IN THIS CONFIGURATION
+
+Rigid mesh transforms through the VERTEX stage, read back by transform feedback. Every faculty
+shipped in this arc so far used the fragment stage; vertex processing is what a GPU was built for,
+and `mesh_program_obj` already certifies rigid transforms as BLOCKDIAG with a byte-exact CPU path,
+so this is the one place where the shader form is the NATIVE form rather than a translation.
+
+IT DOES NOT WORK HERE, AND THE CAUSE IS NOT THE MATH. Four diagnostics, each ruling something out:
+  1. chained transforms: max rel err ~1.0, but EDGE LENGTHS PRESERVED to 3.4e-08 -- so something
+     rigid was happening, which looked like a matrix-convention bug.
+  2. identity transform returned ALL ZEROS -- not a convention bug; nothing was written at all.
+  3. replaced the mat3 uniform with three vec3 columns (GL pads a mat3 to three vec4 slots, so a
+     36-byte write into a 48-byte slot is silently wrong) -- STILL zeros, so uniforms are ruled out.
+  4. minimal program, `b = a*2+1` over eight floats, transform feedback into a reserved buffer:
+        input  [0 1 2 3 4 5 6 7]
+        output [0 0 0 0 0 0 0 0]
+     TRANSFORM FEEDBACK ITSELF PRODUCES NOTHING on Mesa llvmpipe 25.2.8 / GL 4.5 core via
+     moderngl's EGL standalone context. The mesh math is therefore UNTESTED, which is a different
+     and more honest statement than "the transform is wrong".
+
+RECORDED RATHER THAN ROUTED AROUND. The obvious workaround -- compute the transform in a FRAGMENT
+shader indexed by vertex id -- would produce correct numbers while testing nothing about the vertex
+stage, which is the entire point of this item. A green result from the wrong stage is worse than a
+red one from the right stage.
+
+WHAT THIS DOES NOT SAY: nothing about WebGL2 or real hardware. Transform feedback is core in GL 3.0
+and WebGL2 and is widely used; this is a software-rasteriser or binding-layer gap, and it is the
+second thing on the board (with P3.2) that needs hardware to settle rather than more code.
+
+BACKLOG UPDATE:
+  P2.3 BLOCKED, not failed: the shader and the differential harness are written and shipped
+       (glsl_meshvs.py); they need a configuration where transform feedback works. ACCEPT when
+       the identity chain round-trips and the 64-step chain matches NumPy within f32 with edge
+       lengths preserved.
+  P2.x remaining: HDRIFT (needs the FPE encoder in-shader), raster_program_pgm as a fragment
+       shader -- the latter is unblocked and is the fragment-stage sibling of this item.
+
+## P2.4 -- IMAGE FORMATION AS A FRAGMENT SHADER, AND THE BYTE-EXACTNESS CONTRACT IS LUCK
+
+raster_program_pgm runs an installed chain (scene params -> pixels), and the engine certifies
+linear formation models as RECTANGULAR -- so a map from L lights to W*H pixels is
+`pixel = dot(basis_row, params)`, one fragment per pixel with a loop over L. Nothing is translated;
+the shader form IS the arithmetic the certificate describes.
+
+The faculty states its own quantisation boundary -- "pixels clipped to [0,255] ints at emit
+(quantization is the SERIALIZER's job); byte-exactness vs the live path is a testable contract" --
+so there are TWO contracts, and only checking the float one would pass a shader that ships a
+different picture.
+
+    image     lights  float max abs err   quantised pixels differing
+    8x8       3       8.642e-06           0 of 64
+    64x64     16      1.015e-04           0 of 4096
+    64x64     64      6.656e-04           0 of 4096
+Byte-identical everywhere, at every size and light count.
+
+THEN I CHECKED WHETHER THAT WAS LUCK, AND IT IS. Rounding flips when a value lands within the float
+error of a .5 boundary, so the right instrument is the MARGIN -- the same one T1 uses for argmax:
+
+    lights   float err    min distance to a .5 boundary    safety ratio
+    3        1.685e-05    4.588e-06                        0x   (ERROR EXCEEDS THE MARGIN)
+    16       1.015e-04    1.307e-04                        1x
+    64       6.656e-04    1.914e-04                        0x
+    256      2.500e-03    1.368e-05                        0x
+THE MARGIN IS SMALLER THAN THE ERROR AT THREE OF FOUR LIGHT COUNTS. Every pixel matched anyway
+because the pixels that are CLOSE to a boundary are few and the error at those particular pixels
+happened to point the right way. A scene whose pixels land nearer the boundaries WILL differ, and
+an adversarial one is easy to build: driving the field onto exact .5 boundaries puts 5 of 4,096
+pixels within 1e-3 of a flip.
+
+SO THE HONEST CONTRACT IS NARROWER THAN "byte-exact": THE FLOAT CHAIN AGREES TO ~1e-4 TO 1e-3 AND
+THE QUANTISED IMAGE AGREES ONLY WHEN NO PIXEL SITS WITHIN THAT OF A ROUNDING BOUNDARY. That
+condition is checkable per scene -- it is one min() over the fractional parts -- and a renderer
+claiming byte-exactness should check it rather than assume it. Reporting "0 of 4096 differ" without
+the margin would have been the same mistake as reporting a single-draw p-value.
+
+BACKLOG UPDATE:
+  P2.4 CLOSED, with the contract corrected from "byte-exact" to "byte-exact WHEN the boundary
+       margin exceeds the float error", and the margin measurement shipped beside the shader.
+  NEW P2.9 -- have raster_program_pgm REPORT its boundary margin alongside the image, so a caller
+       can see whether the byte-exactness contract holds for THEIR scene. One min() over the
+       fractional parts; the number already exists, it is simply not surfaced.
+
+## P2.9 -- THE ROUNDING MARGIN IS NOW REPORTED, AND T14 IS THE HALF OF T1 THAT WAS MISSING
+
+raster_program_pgm now returns `rounding_margin` in its manifest: the minimum distance from any
+pixel to a .5 rounding boundary. The number always existed inside the function -- one min over the
+fractional parts -- it was simply not surfaced, so a caller could not tell whether the
+byte-exactness contract held for THEIR scene. Additive: one manifest key, nothing else moves.
+
+T14 (threshold_decision_stable / threshold_can_flip, machine-checked, [propext, Quot.sound]) is
+the rounding half of what T1 does for argmax: a value stays on its side of a boundary exactly
+while the perturbation is smaller than the distance to it. Both directions are stated, and the
+second one is why the margin has to be REPORTED rather than assumed -- a perturbation at least as
+large as the margin CAN cross.
+
+THE LINTER CAUGHT AN OVERSTATED HYPOTHESIS IN BOTH THEOREMS: `hx : x < t` was unused, because
+`e < t - x` alone gives `x + e < t`. Dropped rather than silenced. Third time in this arc that
+Lean's unused-variable warning has found an assumption a theorem did not need, and each time the
+weaker statement is the more useful one.
+
+TWO PATCH ERRORS ON THE WAY, both caught by assertions rather than by the result:
+  * `return "\\n".join(lines) + "\\n", man` occurs TWICE in the file, so a count==1 assert refused
+    to patch -- it would otherwise have edited the wrong function and the selftest might not have
+    noticed, since both return manifests.
+  * the first attempt aborted mid-script, and because the write happens last the file was left
+    UNCHANGED rather than half-edited. That ordering is worth keeping deliberately: compute the
+    whole new text, assert, then write once.
+
+Module selftest passes; audits 0/0/0/0; capdoc/docgen regenerated.
+
+BACKLOG UPDATE:
+  P2.9 CLOSED.
+  P2.x remaining: HDRIFT (needs the FPE encoder in-shader), mesh vertex shader (BLOCKED on
+  transform feedback in this configuration -- harness shipped, needs hardware).
+
+## P2.1 -- HDRIFT'S FIELD GRADIENT IN GLSL, AND THE BLOCKER DISSOLVED ON CONTACT
+
+The item carried "needs the FPE encoder in-shader" and was deferred twice as materially bigger
+than the other P2 faculties. PROBING THE ENCODER INSTEAD OF READING IT DISSOLVED THAT:
+
+    rfft(enc(x)) has CONSTANT UNIT MAGNITUDES, and phases LINEAR in x -- the per-unit phase
+    advance measured IDENTICAL at x=0.2 and x=0.6 to 1e-3.
+
+So <enc(x), mu> = sum_k |M_k| cos(arg M_k - w_k x): A SUM OF PLANE WAVES, and its derivative is a
+sum of sines. THERE IS NO ENCODER TO PORT. There is a frequency table (w, |M|, arg M) computed once
+on the host, and a fragment that sums plane waves -- the oldest shader in the demoscene. The
+faculty deferred as the dearest of the P2 set turned out to be the cheapest.
+
+MEASURED against a central difference of the ACTUAL encoder (not of my reconstruction), on a
+DELIBERATELY MULTIMODAL field -- three tight clusters, where a plane-wave sum is worst because the
+gradient between modes is steep:
+
+    dim    data pts  particles  field offset (const)   gradient max abs err   rel err
+    64     120       96         1.6e-12                2.026e-05              2.0e-07
+    256    120       96         4.6e-12                4.075e-05              3.4e-07
+    1024   120       96         7.4e-13                8.039e-05              6.5e-07
+
+f32 relative error 2e-07 to 6.5e-07, holding across a 16x range of dimension.
+
+TWO THINGS THE MEASUREMENT CORRECTED, both mine:
+  * "phase advance is linear: FALSE" on the first probe -- because I compared phase differences
+    over spans of 0.25 and 0.50, where large omegas WRAP and unwrap cannot recover them. A small
+    step made it obviously true. The instrument, not the encoder.
+  * my first plane-wave reconstruction was off by a CONSTANT 0.625 at every x: I doubled every
+    rfft bin except DC, forgetting the NYQUIST bin is also real and must not be doubled. A constant
+    offset is the signature of a mishandled DC/Nyquist term -- and it does not affect the GRADIENT
+    at all, which is precisely why the gradient is what gets tested and the field offset is
+    REPORTED beside it (now 1e-12, i.e. fixed).
+
+WHAT THIS IS AND IS NOT: it is the expensive inner piece of HDRIFT -- attraction to the data field
+-- verified in isolation. The full drift_sample also does batch self-repulsion and annealing, both
+of which are the same shape (a gather over particles, already demonstrated by the PBD scatter), but
+they are NOT built here and are not claimed.
+
+BACKLOG UPDATE:
+  P2.1 CLOSED for the field gradient; the repulsion/annealing wrapper is a separate, smaller item
+       now that the encoder question is answered.
+  P2.x remaining: only the mesh VERTEX shader, which is BLOCKED on transform feedback producing
+       nothing in this configuration -- hardware, not code.
+
+## P2.1b -- THE FULL DRIFT STEP IN SHADERS, AND MY FIRST HYPERPARAMETERS COLLAPSED IT
+
+The step is TWO PASSES THAT MIRROR EACH OTHER: one fragment per frequency BIN accumulating the
+batch's own spectrum from the particles, then one fragment per PARTICLE consuming it. Nothing
+crosses back to the host inside a step. The batch field cannot be a host-side table because it
+changes every step -- but in the frequency domain it is just sum_j exp(i(phi0_k + w_k x_j)), which
+is a gather, so it does not need to be.
+
+THE SHADER IS FAITHFUL: GPU vs the same scheme in NumPy, 2.2e-08 without repulsion and 1.1e-07
+with, over 60 steps.
+
+THE DYNAMICS WERE NOT, AND THE FIRST RUN SAID SO LOUDLY: particle spread 0.0000 -- TOTAL COLLAPSE
+to a single point -- with and without repulsion, so the memorisation control could not distinguish
+anything. That is a fixture error, not a shader error, and the arithmetic said which: the field
+gradient reaches 112 in magnitude, so lr=0.002 moves a particle 0.22 per step across a [0,1]
+domain. Every particle overshoots into the same basin on step one.
+
+SWEPT, and the regime is narrow:
+    lr        repel  spread   nearest-data   modes covered (of 3)
+    2e-03     0.0    0.0000   0.07129        0
+    2e-03     0.5    0.0000   0.07129        0
+    2e-04     0.5    0.0546   0.07091        1
+    2e-05     0.0    0.1571   0.06888        2
+    2e-05     0.5    0.1983   0.05526        3      <- repulsion earns its place here
+    2e-06     0.5    0.2564   0.04184        3
+AT lr=2e-05 REPULSION IS THE DIFFERENCE BETWEEN COVERING TWO MODES AND COVERING ALL THREE, and it
+lowers the nearest-data distance (0.0689 -> 0.0553) rather than raising it -- particles spread AND
+land closer, which is what a corrective for attraction-only memorisation should do. At 2e-06 both
+arms cover all three and repulsion stops mattering, because the steps are too small to have
+over-concentrated in the first place.
+
+SO THE CONTROL ONLY WORKS IN A WINDOW, and reporting the 2e-05 row alone would have been a
+one-cell result. The honest statement is that repulsion matters when the step size is large enough
+to concentrate and small enough not to collapse, and both bounds are measured here.
+
+BACKLOG UPDATE:
+  P2.1b CLOSED. The remaining piece of drift_sample is annealed noise, which is one uniform and a
+  hash -- not a structural question.
+  P2.x remaining: only the mesh VERTEX shader, BLOCKED on transform feedback in this configuration.
+
+## THE GLSL ARC IS NOW REAL: NINE VERIFIED KERNELS, WIRED, CATALOGUED, EACH WITH ITS KEPT NEGATIVE
+
+Every shader in this arc lived as a loose script, which by the governing rule means it did not
+exist. holographic_glslkernels now carries all nine as a family module, wired as mind.glsl_kernels
+/ mind.glsl_kernel and registered in the catalog with 5/5 discoverability on stranger phrasings.
+
+SOURCE, NOT A RUNNER, and the reason is constitutional rather than convenient: core is NumPy /
+Flask / stdlib / hashlib, and moderngl is not a core dependency. So the module holds the SHADER
+TEXT and the measurement that verified it -- exactly as the dialect emitter hands back WGSL it does
+not execute. The harnesses that DID compile and run these ship beside the repo as glsl_*.py and are
+the provenance for every figure.
+
+    bm25_score        top-1 identical 40/40, containment EXACT, 1.331e-07 rel
+    scatter_bm25_vs   63x less work, 106x wall clock, top-1 identical 40/40
+    scatter_bm25_fs   the fragment half of that pair
+    diffuse           2e-07 after 100 steps, no growth with grid size
+    pbd_scatter_vs    1e-7 to 9e-7 vs CPU Jacobi, identical residuals to 4 decimals
+    raster_form       quantised image byte-identical at every size tested
+    hdrift_grad       2e-07 to 6.5e-07 across a 16x range of dimension
+    hdrift_spectrum   the batch-field pass
+    hdrift_step       2.2e-08 (repel=0), 1.1e-07 (repel=0.5) over 60 steps
+
+THE SELFTEST REFUSES A KERNEL SHIPPED WITHOUT ITS VERIFICATION NOTE, and it fired immediately: two
+entries carried "see scatter_bm25_vs" and "see hdrift_step" instead of their own numbers. A
+cross-reference is not provenance -- someone reading THAT entry sees a pointer, not a measurement --
+so both were given their own. The assertion existed for exactly one turn before it caught something,
+which is the argument for writing it at all.
+
+EVERY ENTRY CARRIES ITS BOUNDARY, because a shader exact in one regime and not another is a trap
+unless the limit travels with the code: scatter GIVES UP bit-reproducibility (blend order is
+unspecified and float addition is not associative), diffusion conserves heat only to f32, PBD is
+JACOBI and not comparable to a sequential sweep, raster byte-exactness holds only while the scene's
+rounding margin exceeds the float error.
+
+Catalog `does` tightened to fit the cap rather than budgeted; audits 0/0/0/0; capdoc/docgen
+regenerated.
+
+BACKLOG UPDATE:
+  The GLSL faculty set is CLOSED and DISCOVERABLE. What remains needs hardware this container does
+  not have: the mesh VERTEX shader (transform feedback produces nothing here), a real browser, GPU
+  throughput on the A4500, and WGSL parity. Every timing figure in this arc is software-raster and
+  is labelled so at each site.
+
+## P0.16 CLOSED -- SHARDED DELIVERY, VERIFIED END TO END UNDER NODE
+
+The arithmetic was already settled: T4 proves the merge exact, and the `stats=` seam makes shards
+fitted with the corpus's statistics BIT-IDENTICAL to a single index. What remained was TRANSPORT,
+whose risk is not arithmetic -- it is that the shipped bytes and the JS that reassembles them
+disagree with the Python that produced them.
+
+BUNDLE: 6,000 documents, 8 shards, 14 bits/symbol, 1,477 KB of packed payload plus a 496 KB
+manifest carrying the vocabulary and the GLOBAL idf keyed by term HASH. That side-channel is what
+makes sharding exact -- one float per distinct term, so a shard never needs the corpus to compute
+its own statistics.
+
+VERIFIED UNDER NODE against Python on the whole corpus, with realistic 2-4 term queries drawn from
+the vocabulary rather than from any document:
+    JS sharded vs Python single index: max rel err 5.786e-13
+    top-1 identical: 60/60
+A browser adds nothing to THIS question, so it was not used to answer it -- the question is whether
+reassembly and global statistics reproduce the index, and Node answers that exactly.
+
+THREE TIMEOUTS AND WHAT THEY ACTUALLY MEANT, because the diagnosis is the useful part:
+  1. The first loader walked EVERY document for EVERY query. That is the full-scan shape this arc
+     already measured as the slow one -- the same finding arriving again in a different language.
+     Switched to postings.
+  2. The switch SILENTLY DID NOTHING: a Python str.replace with no matching anchor and no assert.
+     Instrument error 31, and the fix is the rule already used everywhere else in this session --
+     assert the anchor count before writing.
+  3. The real bug: `Buffer.from(b64, "base64").buffer` is the shared POOL, not that buffer. I
+     called Buffer.from TWICE and took `.buffer` from one and `.byteOffset` from the other, so the
+     Uint32Array pointed into unrelated pool memory. Offsets came back as garbage and
+     `for (i = off[d]; i < off[d+1]; i++)` ran effectively forever. IT DID NOT CRASH, IT HUNG --
+     which is why three timeouts said nothing about the cause, and why the fix is to COPY rather
+     than alias. A hang is a wrong answer that never arrives; treat it as a data bug, not a
+     performance one.
+
+BACKLOG UPDATE:
+  P0.16 CLOSED. Every remaining item needs hardware this container does not have: the mesh VERTEX
+  shader (transform feedback produces nothing on this stack), a real browser, GPU throughput on the
+  A4500, and WGSL parity.
+
+## P3.3 PARTIALLY ADVANCED: A WGSL PORTABILITY AUDIT OF THE NINE KERNELS, GROUNDED IN THE SPEC
+
+Full WGSL parity needs a GPU. What does NOT need one is knowing WHICH of the nine verified kernels
+port and which hit a WebGPU feature gap -- that is spec work, and doing it here saves a future
+session from discovering it at the hardware. Grounded in the WGSL spec, the Chrome WebGPU release
+notes and the gpuweb issue tracker rather than from memory:
+
+  PORT CLEANLY (fragment-stage arithmetic over textures; texelFetch -> textureLoad,
+  gl_FragCoord -> @builtin(position), uniforms -> a uniform buffer):
+      bm25_score, diffuse, raster_form, hdrift_grad, hdrift_spectrum, hdrift_step
+      -- six of nine, and they are the ones carrying the measured numbers.
+
+  HIT A REAL FEATURE GAP:
+      scatter_bm25_vs / scatter_bm25_fs / pbd_scatter_vs -- all three depend on POINT PRIMITIVES
+      PLACED BY THE VERTEX STAGE AND SUMMED BY ADDITIVE BLENDING. WGSL DOES NOT SUPPORT POINT SIZES
+      GREATER THAN ONE (gpuweb#2193), which is survivable since these points ARE single texels --
+      but the accumulation is the problem, and the WebGPU answer is different machinery: a COMPUTE
+      shader with atomics into a storage buffer, or instanced quads. That is a REWRITE, not a port.
+
+  AND A SEPARATE HAZARD ON THE SAME PATH: blending to a float32 target is gated behind the
+  `float32-blendable` feature, and Chrome has been PHASING OUT its incorrect acceptance of any
+  filterable float texture as blendable. So the EXT_float_blend check the page already performs has
+  a direct WebGPU counterpart that must also be requested -- the fallback branch shipped in the
+  page is not WebGL-specific paranoia, it is the portable shape.
+
+WHAT THIS CHANGES IN THE PLAN: the scatter scorer's 106x is the arc's largest measured win, and on
+WebGPU it is NOT a translation exercise. Compute + atomics is the native form there and would very
+likely be FASTER than the blending trick -- atomicAdd on a storage buffer is exactly an inverted
+index -- but it is a different implementation with its own differential test, and pretending
+otherwise would have been discovered only after buying hardware.
+
+ALSO WORTH RECORDING, because it decides how a future port is verified: WebGPU has NO SYNCHRONOUS
+READBACK. Every differential test in this arc reads pixels back immediately and compares to NumPy;
+under WebGPU that becomes an async staging-buffer copy. The harnesses are all structured as
+"render, read, compare", so the read step is the one that changes, and it changes in every one of
+them.
+
+BACKLOG UPDATE:
+  P3.3 SPLIT: the six fragment kernels are a port (mechanical, needs a GPU to verify); the three
+       scatter kernels are a REWRITE to compute+atomics with a fresh differential test. Recorded
+       with the spec citations so the next session starts from the gap, not from the surprise.
+  Everything else still needs hardware: the mesh VERTEX shader (transform feedback dead on this
+  stack), a real browser, and A4500 throughput.
+
+## MERGED FROM THE OTHER BRANCH: PERFECT RECALL, RECALL GUARD, RETRIEVAL DISPATCH -- AND WHAT I VERIFIED
+
+Three new retrieval modules plus eleven BEIR harnesses and three test files. All three module
+selftests pass unmodified. Their faculties (perfect_recall_index, guard_candidates,
+retrieval_dispatch) were TRANSPLANTED into my p08_bake rather than taking their file wholesale,
+because their BM25 is OLDER than mine -- it lacks tokenize_once, corpus_stats and the sharding seam.
+TAKING THEIR FILE WOULD HAVE SILENTLY REVERTED THREE CLOSED ITEMS. Merge direction matters as much
+as merge content.
+
+VERIFIED THE PERFECT-RECALL CLAIM ON MY OWN UNFRIENDLY DATA, not just its fixture. 20,000
+stratified repo passages, brute-force ground truth:
+    rare terms (df<=20)      30/30 exact
+    mixed vocabulary         30/30 exact
+    ubiquitous (df>=2000)    30/30 exact, mean 363 candidates
+    zero false negatives and zero false positives everywhere.
+BUT MY FIRST RUN WAS TWO-THIRDS EMPTY AND I ALMOST QUOTED IT: for rare and mixed vocabulary the
+AND-containment truth set is EMPTY (mean 0), so "exact" was empty==empty. EXACTNESS ON AN EMPTY SET
+IS NOT EVIDENCE. Re-ran with terms drawn FROM a document so the truth is non-empty: 40/40 exact,
+containment median 2 and max 106. THAT is the informative regime, and the claim holds in it.
+
+THE RECALL GUARD DOES NOTHING ON THIS BENCHMARK, AND THAT IS THE HONEST RESULT:
+    budget   gold in ranked top-k    gold in GUARDED list
+    10       0.947                   0.947
+    50       0.992                   0.992
+    200      1.000                   1.000
+Identical at every budget. The guard exists to recover lexically-reachable answers a ranked
+truncation lost -- measured on NFCorpus as 1,090 of 3,551. On docstring->code the ranker ALREADY
+has recall 1.000 at 200 and 0.992 at 50, so there is nothing to recover. The module is not wrong;
+MY CORPUS IS THE WRONG PLACE TO TEST IT, which is the same lesson as "state the available headroom
+alongside any reranking result" -- a null where the ceiling is 0.008 above the baseline says
+nothing about the method. The BEIR harnesses that came with the branch are where this claim lives,
+and they need the BEIR corpora.
+
+WHAT I HAVE NOT VERIFIED, stated so nobody reads silence as endorsement: the BEIR numbers
+themselves (the corpora are not in this container), the dispatch cascade's cost claim on a real
+workload, and the guard's NFCorpus recovery figure. Their selftests pass; their headline claims
+are theirs until measured here.
+
+Audits 0/0/0/0; capdoc/docgen regenerated.
+
+## PERFECT RECALL WIRED TO THE GLSL STACK -- AND IT IS THE FIRST KERNEL WITH NO SPEEDUP
+
+The merged PerfectRecallIndex is two halves with different natures, and only one of them may move:
+  * the CANDIDATE half -- tile probes culled by an AND of query bits, then per-doc filter tests --
+    is bitwise arithmetic over fixed-width words. That is a fragment shader, and it is the O(N) part.
+  * the VERIFY half -- exact sha256 term-hash membership -- IS NOT PORTED AND MUST NOT BE. It is
+    what buys ZERO FALSE POSITIVES, and moving a correctness guarantee onto a substrate whose float
+    behaviour this project spent an arc bounding would trade the one exact thing in the module for
+    speed. It stays on the host and only ever sees candidates.
+
+So the shader's contract is not "matches the final answer" but the stricter checkable one: it must
+never drop a true candidate, because that would silently break the zero-false-negative claim.
+
+    regime                  candidates SUPERSET truth   exact after host verify   mean cands
+    terms from a document   25/25                        25/25                     82
+    ubiquitous (df>=2000)   25/25                        25/25                     340
+
+MY FIRST DIFFERENTIAL SAID 20/25 AND THE SHADER WAS RIGHT. I compared against a host rule I wrote
+in the harness that omitted the TILE stage, so the shader looked wrong for culling MORE. The
+direction settled it in one measurement: shader-only 0, host-only 296, and TRUTH MISSING FROM
+SHADER: 0. The shader keeps every true containment doc and culls 5.5x harder (65 candidates against
+361). Instrument error 32, and the same shape as every other one this arc -- the reference, not the
+thing under test.
+
+KEPT NEGATIVE, LOUD, AND IT IS THE FIRST OF ITS KIND HERE: ON llvmpipe THIS KERNEL IS SLOWER THAN
+THE HOST -- 87 ms against 60 ms. Every other GLSL kernel in the set either won or was measured
+against a CPU-vs-CPU caveat; this one loses outright. The reason is structural rather than
+software-raster: the pass is bit-parallel AND/compare over u32 words, which NumPy already vectorises
+into the same instructions, so there is no arithmetic the GPU does better -- only memory to move and
+a readback to wait for. A real GPU may change the ratio; it will not change the fact that this is
+the weakest case in the set, and the kernel ships saying so.
+
+Registered as `perfect_recall_candidates` in holographic_glslkernels (now ten kernels), so it is
+discoverable with its verdict attached. Audits 0/0/0/0; capdoc/docgen regenerated.
+
+## TIMING VERDICT RETRACTED, AND A HARNESS BUILT THAT REFUSES TO REPEAT THE MISTAKE
+
+I published "the perfect-recall candidate pass is SLOWER on the GPU (87 ms against 60 ms)". That
+number came from Mesa llvmpipe, which is a CPU rasteriser -- so it is CPU-vs-CPU with extra copies
+and says nothing about hardware. RETRACTED from the shipped kernel entry, not caveated: the entry
+now reads "NO TIMING CLAIM ... speed is UNMEASURED until bench_gpu.py runs on a real device."
+Labelling a bad measurement does not make it a measurement, and every other timing figure in this
+arc inherits the same status.
+
+bench_gpu.py -- standalone, numpy + moderngl only, runs on Windows/WGL or Linux/EGL:
+  * DETECTS software rasterisers (llvmpipe / softpipe / swiftshader / lavapipe) and REFUSES to
+    print a timing table on one. Correctness still runs. --allow-software exists and says why you
+    should not want it. A benchmark that silently accepts llvmpipe is exactly how the retracted
+    number happened.
+  * CORRECTNESS FIRST, and a failing kernel prints NO TIMING AT ALL -- a fast wrong answer is not a
+    result.
+  * One untimed warm-up before every measurement, because the first call pays for shader validation
+    and buffer allocation on most drivers and including it makes a GPU look slow.
+  * Reports median AND spread over repeats, per the multi-draw rule this arc already adopted for
+    accuracy claims -- a single timing is a lottery ticket for the same reason a single p-value is.
+  * --json writes machine-readable results, so the laptop run and the A4500 run can be diffed
+    rather than eyeballed.
+
+THE HARNESS CAUGHT ITS OWN BUG BEFORE IT REACHED HARDWARE, which is the argument for correctness
+gating: image formation failed at max rel err 1.000, EVERY pixel wrong. Cause was one this arc had
+already solved once -- a (lights x pixels) texture is 65,536 rows tall at 256x256, past
+GL_MAX_TEXTURE_SIZE on most devices. IT DOES NOT RAISE; IT SAMPLES GARBAGE. Fixed with the flat 2D
+addressing the flat-index work established (i -> (i % W, i / W)), and now 3.861e-07 with 0 of
+65,536 quantised pixels differing. Had this shipped untested, the first hardware run would have
+looked like a driver problem.
+
+Correctness on the container (software raster, timing suppressed):
+    diffuse (ping-pong)    2.015e-07   512x512, 40 steps
+    hdrift plane waves     2.321e-06   4096 particles x 2048 waves
+    image formation        3.861e-07   256x256, 64 lights; 0/65536 px differ, margin 4.90e-06
+
+WHAT TO RUN, on the laptop and on the A4500 box:
+    pip install numpy moderngl
+    python bench_gpu.py --json results_<machine>.json
+Two runs on different devices are worth more than either alone: the laptop is the portability
+check (does it even build a context, does correctness hold on another vendor's compiler) and the
+A4500 is the throughput claim. Until both exist, this repo has NO GPU timing numbers, and the
+NOTES now say that rather than implying otherwise.
+
+## REPO HYGIENE: 74 LOOSE ROOT SCRIPTS -> 13 ENTRY POINTS, AND THAT WAS MY MESS
+
+The delivery zip's root held 74 `.py` files sitting beside `setup.py` and `lecore.py`, so nothing
+distinguished an entry point from a scratch script. Most of them are mine, dropped there across
+this arc; the rest are earlier arcs that were never filed either. THE STRUCTURE ALREADY EXISTED --
+`scripts/README.md` sets the exact precedent, a closed arc's one-offs with a README explaining the
+arc and its verdicts -- I simply did not use it.
+
+    root .py:  74 -> 13   (lecore, app, setup, capdoc, docgen, docmap, facultymap, apiquickref,
+                           servicedoc, holographic_service, holographic_mcp, flat_mount,
+                           signature_tests -- entry points and packaging, nothing else)
+    research/shader_retrieval/  37   GLSL kernels, retrieval benchmarks, corpus fixtures, page
+                                     generators, bench_gpu.py
+    research/capacity_laws/     13   capacity/tiling/nesting sweeps, MC probes, compressibility nulls
+    research/program_induction/  9
+    research/demos/              2
+
+VERIFIED RATHER THAN ASSUMED, because a move that breaks an import is silent until something runs:
+nothing inside `holographic/`, `tools/` or `tests/` imports a root script (checked before moving);
+one script from EACH arc was run after the move; the three doc generators still import; and all
+four standing audits are 0/0/0/0. Intra-arc imports (`import hard_corpus`) keep working because
+Python puts the script's own directory on sys.path -- `PYTHONPATH=. python3 research/<arc>/<x>.py`
+is the documented invocation and both halves are needed.
+
+GENERATED OUTPUT WENT TO .gitignore, NOT INTO THE PACKER. `shards/` (from make_shards.py) and
+`reorg_output/` were being shipped as if they were source. make_repo_zip mirrors .gitignore
+deliberately -- its own docstring records that an exclusion list living inside one tool is the one
+that goes stale -- so the fix belongs in .gitignore and nowhere else. `shards/` also moved next to
+its generator, so the artefact and the thing that makes it live together.
+
+Two READMEs written: `research/README.md` (the arc table and how to run) and
+`research/shader_retrieval/README.md` (which script does what, and that bench_gpu.py is the one to
+run on real hardware). Both state the rule that matters: THE VERDICTS LIVE IN NOTES_concepts.md,
+NOT IN THE SCRIPTS. A harness is provenance for a finding, not the finding.
+
+## DISSOLVED: BACKLOG_organics.md (crystals, grass, trees, plants, creatures)
+
+This shipped as a standalone root-level backlog, outside the `docs/*BACKLOG*.md` ignore pattern that
+exists precisely to stop backlogs becoming a second place to look. Folded in verbatim below and the
+file removed -- not summarised, because a summary of a backlog is how items get quietly dropped.
+The audit it records was performed with `find_capability` over 30 phrasings against a live mind, and
+its own verdict is worth repeating at the top: MOST OF THIS ALREADY EXISTS; the work is promotion
+and wiring, not invention.
+
+# BACKLOG — Crystals, Grass, Trees, Plants, Creatures
+
+Audit performed with `find_capability` against a live `UnifiedMind(dim=256, seed=0)`, 30 phrasings.
+Verdict: **most of this exists; the work is promotion + wiring, not invention.** Two items are genuinely new.
+
+Legend: **[W]** wire an existing module · **[X]** extend an existing module · **[N]** new module (audit returned only fallbacks)
+
+---
+
+## TIER 0 — Promote what is already built but dark (do first; cheapest wins)
+
+### O-1 [W] Wire the L-system / grammar faculty — *blocking trees AND plants*
+`holographic/agents_and_reasoning/holographic_grammar.py` ships `LSystem`, `productions_record`,
+`turtle_to_segments`, `segments_to_scene`, `grow_plant`, `greeble_panel`. Only `mind.lsystem` is wired.
+`mind.grow_plant`, `mind.turtle_to_segments`, `mind.segments_to_scene`, `mind.greeble_panel` are **MISSING**.
+
+- Add four delegating faculties on `UnifiedMind`.
+- Catalog entries with aliases **from the user's mouth**: `"procedural tree"`, `"grow a tree"`,
+  `"branching plant"`, `"l-system"`, `"turtle graphics"`, `"foliage"`, `"vegetation"`.
+- Discoverability gate: `assert "grow_plant" in str(mind.find_capability("procedural tree")[:3])`.
+  Today that query returns *Texture graph* and *fit_shape* — a pure catalog failure.
+
+### O-2 [W] Wire the procgen composition layer
+`holographic/io_and_interop/holographic_procgen.py` ships `procedural_object`, `object_to_mesh`,
+`greeble_mesh`, `scatter_on_terrain`. Only `vegetated_terrain` is wired — the composition is reachable
+but none of its parts are. Wire all four; aliases `"scatter plants on terrain"`, `"seed to 3D object"`.
+
+### O-3 [W] Alias sweep on the shipped organics
+These are wired but unfindable under the words a user types:
+
+| Faculty | Add aliases |
+|---|---|
+| `scatter_surface` | grass field, scatter grass, place rocks on a hill, barnacles, instancing on a surface |
+| `groom_hair` | grass blades, fur, strands, scatter hair |
+| `creature` / `creature_pose` | Spore, body plan, torso and spine, add legs, monster generator |
+| `skin_skeleton` | wrap a stick figure, thickness around a spine, B-Mesh |
+| `metaball_mesh` | blob body, soft torso |
+
+Zero code. Pure `register_capability` aliases. Probably the single highest value/effort ratio in this list.
+
+---
+
+## TIER 1 — Crystals
+
+### C-1 [N] `holographic/mesh_and_geometry/holographic_lattice.py` — Bravais lattices
+The only true blank slate. Audit returned `domain_repeat` (SDF modulo), `fpe_lattice_resonator`
+(unrelated FHRR factoring), `crystal_material` (Voronoi colour). None is a crystal lattice.
+
+Correction on the premise, kept loud: there are **7 crystal systems** but **14 Bravais lattices**
+(the systems × centring types P/I/F/C). Build the 14; the 7 fall out as a grouping.
+
+```
+lattice_basis(system, a, b, c, alpha, beta, gamma, centring="P") -> (3,3) basis + motif offsets
+lattice_points(basis, motif, extent) -> (N,3) deterministic point set
+```
+- `_selftest` asserts the **exact numeric contract**: FCC packing fraction 0.7405 ±1e-4,
+  BCC 0.6802, HCP c/a = sqrt(8/3) to 1e-12. Not "no exception."
+- Kept negative to record up front: no space groups (230 of them), no symmetry operators —
+  translation lattices only. Say so in the docstring before someone asks.
+
+### C-2 [X] Lattice → geometry, by reuse not new code
+`lattice_points` feeds three shipped faculties directly:
+- `metaball_mesh(centers=...)` → ball-and-stick / atomic blob model.
+- `sweep_tube` along nearest-neighbour pairs → bonds.
+- `scatter_surface` payload → instanced unit cells.
+
+Nothing new. This is the *generalize-on-contact* check: the lattice is just a point set,
+and the engine already eats point sets four ways.
+
+### C-3 [X] Faceted crystal habit — extend `mesh_csg`
+A crystal's outward form is the intersection of half-spaces whose normals are lattice plane
+(Miller-index) directions. `mesh_csg` and the SDF algebra already do half-space intersection.
+Add `crystal_habit(system, miller_faces, sizes)` as a thin composer over them — do **not** write
+a new convex-hull path.
+
+---
+
+## TIER 2 — Grass & scattering (the instancing gap)
+
+### S-1 [X] Scatter on a **mesh**, not just an SDF — *the real blocker*
+`ScatterLayer.apply` takes `sdf_eval` and calls `emit_from_surface`. Your grass has to land on a
+mesh surface area. Add a sibling path (default-off, additive):
+
+```
+ScatterLayer.apply_mesh(verts, faces, density=None)
+```
+- Triangle-area-weighted face selection + barycentric jitter; per-point normal from the face,
+  tangent from `curve_frame`/the UV gradient so blades have a consistent up **and** a facing.
+- Optional blue-noise relaxation via the shipped `mind.blue_noise_sample` — do not write a new
+  Poisson sampler.
+- Density from a vertex-attribute or a texture map through the existing UV faculties.
+
+### S-2 [N-small] Placements → **real geometry** (the missing return type)
+Today `apply()` returns points, normals, and *hypervectors*. Nothing turns a placement list into
+a mesh you can render. This is the one-line gap that makes "grass meshes applied and scattered" fail.
+
+```
+realize_scatter(placements, source_mesh, mode="merge"|"instanced") -> mesh | InstancedScene
+```
+- `merge`: `transform_mesh` per placement + `weld_mesh` → one blob. Honest about cost.
+- `instanced`: build through the shipped `instanced_scene` / `mind.instance` so a million blades
+  are one definition + a transform array.
+- Placement transform = normal-aligned frame × random yaw × scale jitter × per-instance bend.
+  All seeded; all `hashlib`-derived per cell so re-running is bit-identical.
+
+This is the up/down/sideways payoff: the same `realize_scatter` serves grass, rocks, barnacles,
+plant permutations (T-3), and crystal unit cells (C-2). Build it once, four callers.
+
+### S-3 [X] Grass blades from the groom layer
+`groom_hair` already emits strands rooted on a surface with curl/lean/jitter, and `hair_wind`
+already blows them. A grass blade is a strand with a **ribbon** cross-section, not a tube.
+Add `profile="ribbon"|"tube"` to `build_strand_body`. Default `"tube"` — existing outputs must not flip.
+
+### S-4 Bake + LOD (the deferred half, already flagged as a kept negative)
+The scatterlayer docstring already declares dense scatter needs "part 2 / the performance half."
+That is still open. Distant grass → billboard cards; midfield → decimated mesh via the shipped
+CVT remesh. **Do not claim a scatter perf number without a baseline, variance across seeds, and
+the kept negatives.** Measure before pinning.
+
+---
+
+## TIER 3 — Trees & plants
+
+### T-1 [X] Space colonization as a second growth model
+`grow_plant` is rule-based L-system. Space colonization (Runions et al. 2007) grows toward an
+attractor cloud and gives far more natural limb distribution and a defined crown envelope.
+
+Before writing it, apply the *walls-are-bad-approaches* check: `dielectric_breakdown` and `grow_ice`
+already do attractor-driven branching growth on a grid. **Read them first.** If a DLA step generalizes
+to a continuous attractor set, this is an extension, not a new module. That audit result decides
+whether T-1 is [X] or [N] — do not pre-commit.
+
+### T-2 [X] Skeleton → limb mesh (already solved, needs composing)
+Branch segments → `skin_skeleton` (B-Mesh, radii per node) or `sweep_tube` with a per-node radius
+array. Add **da Vinci taper** (child radius² sums to parent radius²) as a helper on the segment list.
+No new meshing code — both meshers ship and are wired.
+
+### T-3 [X] Permutations / variation
+"Scatter permutations of plants" needs a variation axis, not a new generator. Add a seeded
+`variant(spec, seed)` that perturbs L-system stochastic weights, taper, and phyllotaxis angle.
+Then `realize_scatter` (S-2) draws from a *pool* of N pre-built variants rather than one source mesh —
+the standard trick, and it keeps the instanced path intact.
+
+### T-4 [X] Foliage placement
+Leaves are a scatter *on the branch skeleton* with a phyllotaxis angle (137.5° golden angle),
+not a random scatter. Same `realize_scatter`, different point generator. One helper:
+`phyllotaxis_points(segments, per_node, angle=137.5)`.
+
+---
+
+## TIER 4 — Creatures (extend the shipped builder; resist writing a second one)
+
+`Creature` already does spine + limbs + mirror + constrained IK. The declared kept negatives in its
+docstring **are** your backlog. Everything below is an extension of that one module — a sibling
+creature builder would be a discoverability tax.
+
+### R-1 [X] Metaball spine/limb skin with auto-density + per-ball thickness (merges old R-1 + R-5)
+Spore's skin is NOT a capsule union: it is a chain of SPHERICAL metaballs distributed along the spine
+and limbs, with spacing computed from the implicit-surface parameters so stretching a segment adds
+balls automatically, and per-ball radius editing for local fat/thin sculpting (Hecker, "My Liner
+Notes for Spore"; Rempton Games breakdown). `metaball_mesh` is already shipped and wired -- what's
+missing is the layer between the rig and the balls:
+
+```
+creature_metaballs(creature) -> centers (N,3), radii (N,), bone_of (N,)  # auto-spaced along bones
+Creature.set_thickness(node_or_t, radius)   # scalar spine_radius becomes a profile; scalar path unchanged
+```
+- Spacing rule: ball interval as a function of radius and blob threshold so the union stays smooth
+  under stretch -- the "neat bit of math" Hecker describes; derive it, assert smoothness numerically
+  in `_selftest` (max surface dent below tolerance for a straight stretched chain).
+- Kept negative on record from the source: spherical balls only; ellipsoids widen the shape space but
+  are orientation-dependent and slower to evaluate -- same trade-off, same decision, cite it.
+
+### R-2 [X] Spine editing operations
+`Creature` builds a spine from a spec but cannot **edit** one interactively — Spore's core loop.
+Add: `extend_spine(n)`, `insert_node(t)`, `move_node(i, p)`, `set_radius(i, r)`.
+Each returns a **new** spec dict (immutable, serialisable, deterministic, `/invoke`-able).
+
+### R-3 [X] Part library as RIGBLOCKS (parameterized parts), not bare meshes
+Spore's hands/mouths/spikes were hand-crafted "rigblocks": snap-on parts, each with its OWN
+pre-defined deformation handles (scale/stretch/transform ranges). So a part in the spec is
+`{mesh_or_sdf, socket, params: {handle: value}, mirror: bool}` where handles map to the shipped
+`lattice_deform` / morph machinery -- the part deforms within authored bounds, it isn't just placed.
+Sockets resolve to a surface point + frame via closest-point-on-mesh. Asymmetric placement
+(`mirror: False`) must be a first-class override, same as Spore's hold-A.
+
+### R-4 [X] Radial / other symmetry
+Docstring negative: *"bilateral symmetry only."* Generalize `_mirror` into a symmetry-group
+transform list: bilateral (current default), radial-N, none. Default unchanged.
+
+### R-6 Self-collision -- record as a **declared negative**, do not build yet
+Docstring already says *"angle limits only, NO self-collision."* Leave it. Pin it with a test so
+nobody quietly assumes it works, and revisit only with a measured cost.
+
+### R-7 [X] Skin weights from metaball provenance
+Spore generates bone weights from WHICH body part generated WHICH metaball -- each vertex's weight
+is the per-bone share of the field it sits in. With R-1's `bone_of` array this is a small function
+feeding the shipped `skin_bind_weights` / `skin_mesh`, and it is what makes `creature_pose` deform
+the mesh smoothly instead of re-evaluating the primitive skin from scratch.
+Kept negative to import verbatim from the source: big spine segments can give non-smooth weights
+and fat torsos can SHEAR -- a known limitation of the method, not a bug to chase.
+
+### R-8 Gait / morphology-independent animation -- declared negative (scoped out, on the record)
+Posing is covered (`creature_pose`, constrained IK). Full animation on arbitrary body plans is the
+Hecker et al. SIGGRAPH 2008 system: animations authored in a MORPHOLOGY-INDEPENDENT form and
+retargeted at runtime, plus a gait solver and passive secondary motion. That is a real research arc
+of its own -- and note for the panel: the morphology-independent motion encoding is a role/filler
+representation, i.e. VSA-shaped. Log it as future scope in NOTES; do not start it inside this backlog.
+
+### R-10 [X] Idle animation: animate the joint LIMITS (default-off, tiny, high payoff)
+An optional basic idle that flexes knees/elbows/hips etc. to SHOW where each joint is and which way
+it bends. Audit result: this is the stored constraint data, animated -- `Creature` already keeps, per
+limb, a cone limit at the mount and an auto-plane one-way hinge with a `hinge_deg` cap at every
+interior joint. So the idle is not animation authoring; it is a readout:
+
+```
+creature_idle(spec, t) -> pose            # one deterministic pose at time t
+creature_idle_frames(spec, n_frames, amplitude=0.35, period=2.0) -> [poses]
+```
+- Each interior joint flexes sinusoidally around its OWN hinge plane, in its one legal direction,
+  to `amplitude` x its hinge range -- never violating the limit, because the limit IS the driver.
+  Mounts sway a small fraction of their cone. Result: elbows/knees visibly hinge the correct way,
+  hips/shoulders circle slightly, and an impossible bend can never appear.
+- Per-limb phase offset from a `hashlib` hash of the chain name (deterministic, no stored state);
+  mirrored limbs get opposite phase for a natural alternating sway.
+- Playback is pure reuse: frames feed the shipped `pose_asset` / `timeline` / `render_animation`
+  (keyframes -> frames -> GIF), and once R-7 lands the same poses drive the skinned mesh smoothly.
+- Default OFF -- a helper you call, never something `creature()` starts doing. Existing outputs
+  cannot flip.
+- Kept negative, stated up front: this is a LIMITS DEMO, not locomotion -- no ground contact, no
+  gait, no balance. The line between R-10 and R-8 (the real Hecker-style animation arc) stays sharp
+  so nobody mistakes one for the other.
+
+### R-9 [X] Procedural paint mode (later)
+Spore's paint mode procedurally applies a chosen colour/texture over the whole creature. The engine
+already has the substrate: procedural colour sockets (`crystal_material` is one), the texture graph,
+and the UV faculties. A `creature_paint(mesh, style, palette, seed)` composer is cheap once the skin
+mesh (R-1) and UVs exist. Low priority; listed so it isn't rediscovered as "new."
+
+---
+
+## TIER 5 — Growth scrubbing (cross-cutting: trees, plants, crystals, ice)
+
+### G-1 [X] The staged-growth contract: every grower exposes `t`
+Purpose: SCRUB through growth to verify it is being done correctly. Audit: the playback half is
+fully shipped and wired -- `timeline` (keyframes), `transport` (play/scrub control), `frame_cache`
+(sparse tiered DELTA cache built precisely for scrub playback), `render_animation` (frames -> GIF).
+The gap is the generator side: growers return only their END state. One shared contract fixes all
+of them:
+
+```
+grow_stages(kind, spec, n_stages) -> [geometry_0 ... geometry_n]   # discrete checkpoints
+grow_at(kind, spec, t)            -> geometry                      # continuous t in [0,1]
+```
+
+Per grower, the staging is cheap because each is already sequential inside:
+- **L-system plants** (`grow_plant`): stage = iteration count; CONTINUOUS t between iterations by
+  scaling the newest generation's segment lengths from 0 -> full (buds extend, then branch) --
+  turtle segments already carry generation depth.
+- **Space colonization trees** (T-1): the algorithm IS a step loop; keep the segment list in growth
+  order and reveal a prefix. Free.
+- **Crystals** (C-1): reveal lattice points in nucleation order (distance from a seed point, ties
+  broken by hashlib) -- the physically honest picture of a crystal accreting from a nucleus. Facet
+  habit (C-3) scrubs by growing the half-space offsets outward.
+- **Ice/DLA** (`grow_ice`): already steps internally; add a `checkpoint_every=` that records
+  snapshots instead of discarding them. Default off -- existing outputs unchanged.
+
+**The verification contract (the actual point) -- assert, don't eyeball:**
+- *Determinism*: `grow_at(spec, t)` is a pure function -- same t, same bytes, regardless of what
+  was scrubbed before. No hidden playback state.
+- *Monotone prefix*: geometry at t is a SUBSET of geometry at t' > t (nothing retracts or teleports).
+  `_selftest` asserts both on every grower; a scrub that fails prefix is a growth-order bug caught
+  numerically, not visually.
+- Deltas between consecutive stages are exactly what `frame_cache` wants -- growth is append-only,
+  so the delta encoding is maximally sparse. Wire `grow_stages` output straight into it.
+
+Wire as `mind.grow_stages` / `mind.grow_at` (delegating), catalog aliases from the user's mouth:
+"scrub growth", "watch the tree grow", "step through crystal formation", "growth preview",
+"intermediate growth stages". Kept negative up front: t is GROWTH PROGRESS, not physical time --
+no claim that stage spacing matches real growth rates.
+
+---
+
+## Suggested order
+
+1. **O-3, O-1, O-2** — alias sweep + wiring. No new algorithms, immediately makes trees/plants discoverable.
+2. **S-2 `realize_scatter`** — the keystone. Unblocks grass, plants, crystals, rocks simultaneously.
+3. **S-1 mesh scatter** — grass lands on your surface area.
+4. **C-1 Bravais** — self-contained, exact numeric self-test, no dependencies.
+5. **R-1/R-2** — metaball skin with per-ball thickness + spine editing: the Spore loop.
+6. **R-10** — idle animation (tiny; mostly a readout of stored limits + shipped playback).
+7. **T-1** — only *after* reading `dielectric_breakdown` and `grow_ice`.
+8. **G-1** — staged-growth contract, right after the growers it stages exist (grow_plant wired, C-1, T-1).
+9. **R-3/R-4/R-7, T-2/T-3/T-4, C-2/C-3** — composition layers, cheap once the keystone lands.
+10. **S-4** — perf, last, with a proper baseline.
+
+## Per-item exit criteria
+Every item above closes with the standard loop, no exceptions: audit → build in the right family
+module → `_selftest` with a numeric contract → delegating `UnifiedMind` faculty → catalog entry with
+stranger-phrasing aliases → discoverability assert → static + selftest + end-to-end (+ `/invoke` for
+agent-facing) → `reachability_audit` / `catalog_gaps` / `skill_lint` at 0/0/0 → `capdoc.py` + `docgen.py`
+→ `NOTES_concepts.md` appended with kept negatives loud.
+
+## FIRST REAL GPU NUMBERS -- RTX A4500. TWO KERNELS WIN BY 110x AND 200x; ONE LOSES, AND WHY MATTERS
+
+bench_gpu.py run on an RTX A4500 (NVIDIA 565.90, GL 3.3, Windows AMD64, numpy 2.5.2). Every timing
+figure this arc produced before now came from Mesa llvmpipe and has been treated as unmeasured;
+these replace them for the three kernels covered.
+
+    kernel                max rel err   GPU ms         NumPy ms        speedup
+    diffuse (ping-pong)   2.352e-07     2.52 +-0.13    277.82 +-5.73   110.10x
+    hdrift plane waves    2.953e-06     1.18 +-0.17    235.13 +-6.60   199.81x
+    image formation       3.861e-07     2.53 +-0.18     0.94 +-0.09     0.37x
+
+CORRECTNESS SURVIVED A COMPLETE CHANGE OF VENDOR, which is the result I care about most and the one
+the speedups do not show. Against the container's Mesa run: diffusion 2.015e-07 -> 2.352e-07 (17%),
+plane waves 2.321e-06 -> 2.953e-06 (27%), and image formation 3.861e-07 -> 3.861e-07, IDENTICAL to
+four significant figures. Two independent GLSL compilers, one written for a CPU and one for an
+NVIDIA GPU, agree to within f32 noise on kernels validated against NumPy references. That is the
+whole differential-testing discipline paying out.
+
+THE ONE THAT LOSES IS THE ONE THAT IS A BLAS CALL IN DISGUISE. Image formation is
+`pixel = dot(basis_row, params)` -- a GEMV. NumPy routes that to BLAS; the shader does 64 dependent
+texture fetches per pixel with no reuse and then reads 65,536 floats back. Losing 0.37x there is not
+a GPU failing, it is the correct answer to "should this be a shader": NO, unless the result stays on
+the device. The two that win have no BLAS equivalent -- a 40-pass stencil and 2,048 transcendentals
+per particle -- which is the actual rule this table teaches.
+
+AND THE TABLE RAISES A HYPOTHESIS IT CANNOT SETTLE, so a probe was added rather than a guess
+recorded. Diffusion does FORTY passes and image formation does ONE, yet both land near 2.5 ms; the
+plane-wave kernel, reading back 16-64x fewer floats, is the only one under 2 ms. Per float read:
+9.6 ns (diffuse), 38.6 ns (image formation), 288 ns (plane waves) -- inverted with respect to
+compute, which is the shape of a FIXED PER-CALL COST dominated by readback. bench_gpu.py now runs a
+`readback floor` row first: an empty shader timed at each kernel's readback size. Without it,
+"image formation is 0.37x" reads as "the GPU is bad at GEMV" when it may mostly be the bus, and a
+benchmark that cannot separate those is measuring the bus and calling it the kernel.
+
+SCOPE, stated so the table is not over-read: THREE of the ten shipped kernels are covered. The
+scatter inverted index -- the arc's largest claimed win at 106x, and the one whose claim came from
+llvmpipe -- is NOT in this harness and remains unmeasured on hardware, as do BM25 scoring, PBD, the
+perfect-recall candidate pass, and the texture menu.
+
+INSTRUMENT ERROR 33, mine, and the same shape as the shell-heredoc rule already on record: I spliced
+prose containing an apostrophe ("two vendors' compilers") into a %r-quoted single-quoted literal and
+broke the module. NEVER SPLICE RAW PROSE INTO A QUOTED LITERAL -- rewrite the value through the
+parser, not the text through replace.
+
+BACKLOG UPDATE:
+  P3.2 PARTIALLY CLOSED: three kernels have hardware numbers and the shipped entries now carry them.
+  NEW P3.4 -- extend bench_gpu.py to the remaining seven kernels, scatter FIRST, since its 106x is
+       the largest number this arc has quoted and it is still a software-raster figure.
+  NEW P3.5 -- re-run with the readback floor row on the A4500 and subtract it. If image formation's
+       2.53 ms is mostly readback, the honest verdict changes from "the GPU loses" to "the bus
+       loses, and a kernel whose output stays on the device would win".
+
+## A SELF-CONTAINED BENCHMARK RUNNER, AND THE SCATTER KERNEL FINALLY IN THE HARNESS
+
+run_bench.bat (and run_bench.sh for MINGW64) build a THROWAWAY venv at `.venv-bench/` beside the
+script, install numpy + moderngl + glcontext into it, set PYTHONPATH so the benchmark finds the real
+repo corpus, and write `results_<machine>.json`. Nothing touches the system Python. `--clean`
+rebuilds the venv; deleting the folder is a complete uninstall. Both the venv and the per-machine
+results are gitignored, so a benchmark run cannot pollute the source tree either.
+
+SCATTER IS NOW IN THE HARNESS -- the kernel whose 106x is the largest number this arc ever quoted,
+and which had only a software-raster figure behind it. It scores 24/24 top-1 against the NumPy
+postings reference at 1.466e-07 relative on the real 20,000-passage corpus.
+
+TWO FIXTURE BUGS THE RUNNER EXPOSED, both of which would have quietly weakened the test:
+  1. THE CORPUS PATH WAS CWD-DEPENDENT. hard_corpus globs `holographic/*/...` relative to the
+     working directory, so running the benchmark from anywhere except the repo root silently fell
+     back to a synthetic Zipf corpus. The fallback existed for bare checkouts and was doing its job
+     -- but a benchmark that quietly swaps in an easier fixture is the exact failure this arc kept
+     catching, so the corpus loader now resolves the repo root from __file__ and chdir's for the
+     glob.
+  2. THE FALLBACK DID NOT SAY WHY IT FIRED, and making it say so paid immediately: the reason was
+     `ValueError: too many values to unpack` -- MY bug, unpacking BM25.docs_tokens (a list of token
+     lists) as if it were (name, tokens) pairs. Without the reason printed I would have gone looking
+     for a missing repo instead of a wrong line. A FALLBACK THAT DOES NOT NAME ITS CAUSE IS A
+     SILENT DOWNGRADE.
+
+WHAT THE CONTAINER RUN CAN AND CANNOT SAY: correctness is real everywhere (scatter 1.466e-07, top-1
+24/24 on the real corpus). The timings are llvmpipe and remain worthless -- the harness suppresses
+them unless --allow-software is passed, and every ratio printed under that flag is CPU-vs-CPU.
+
+BACKLOG UPDATE:
+  P3.4 partially closed: scatter is in the harness. STILL ABSENT and still without hardware
+       numbers: BM25 full-scan (the baseline scatter's 106x is measured AGAINST, so the claim needs
+       both in one run), PBD, the perfect-recall candidate pass, and the texture menu.
+  The next A4500 run answers the arc's biggest open question -- whether scatter's 106x survives real
+  hardware, where the full-scan kernel it beats also gets a proper GPU instead of a CPU pretending.
+
+## THE HARNESS IS READY FOR A DECISIVE RUN: SIX KERNELS, ONE SHARED FIXTURE, THE HEADLINE PRINTED
+
+Added the two kernels that make the A4500 run answer the arc's biggest open question, plus the
+comparison line that question needs.
+
+  * BM25 FULL SCAN -- the baseline scatter's ratio is measured AGAINST. It shares ONE corpus, ONE
+    index and ONE query set with the scatter bench, cached at module level. If each built its own,
+    the headline ratio would be comparing fixtures rather than kernels, which is the same mistake
+    this arc caught in three previous disguises.
+  * PBD CLOTH (Jacobi) -- blending scatter-add plus ping-pong, the two-trick kernel. Its CPU
+    reference is Jacobi too, and the run reports the CONSTRAINT RESIDUAL for both paths beside the
+    numeric error, because a solver that agrees numerically while not converging is not verified.
+  * THE HEADLINE LINE -- scatter against full scan on the SAME DEVICE, printed explicitly rather
+    than left for the reader to divide two rows. A headline that must be reconstructed is one that
+    gets misquoted.
+
+Container run (llvmpipe -- CORRECTNESS ONLY, every timing below is CPU-vs-CPU and the harness
+stamps it):
+    scatter inverted index  1.466e-07   top-1 24/24   repo corpus, 20,000 docs, 1,648,660 postings
+    bm25 full scan          1.466e-07   top-1 24/24   same corpus and queries, by construction
+    pbd cloth (Jacobi)      2.407e-06   residual 0.4717 -> 0.0311 GPU / 0.0311 CPU, identical
+    headline                scatter is 65.9x the full scan  [SOFTWARE RASTER -- not a result]
+
+WHAT THE HARDWARE RUN WILL SETTLE, and it can go either way: on llvmpipe the full scan is a CPU
+walking 20,000 documents with a binary search each, which is close to its worst case, while scatter
+touches only postings. A real GPU gives the full scan thousands of parallel fragments -- exactly
+what it was starved of here -- so 65.9x is as likely to SHRINK as to grow. That is the point of
+running it: the 106x this arc has been quoting was never a hardware number, and the honest outcome
+is whatever the A4500 says.
+
+Runner: run_bench.bat (Windows) / run_bench.sh (MINGW64), throwaway venv at .venv-bench/, deps
+auto-installed, results_<machine>.json written, nothing touched system-wide. Both the venv and the
+results are gitignored.
+
+STILL ABSENT from the harness, stated so the table is not read as complete: the perfect-recall
+candidate pass and the texture menu. Four of the ten shipped kernels will have hardware numbers
+after this run; six of ten counting the three already measured.
+
+## A4500, SIX KERNELS: THE 106x IS DEAD, PBD WINS 51x, AND MY READBACK HYPOTHESIS WAS REFUTED
+
+    kernel                max rel err   GPU ms   NumPy ms   NumPy/GPU   readback share of GPU ms
+    readback floor        0.000e+00        --         --          --    4k 0.25ms, 64k 0.24ms, 256k 1.02ms
+    diffuse (ping-pong)   2.352e-07      2.20     293.99     133.74x    46%
+    hdrift plane waves    2.953e-06      1.22     375.87     307.16x    20%
+    image formation       3.861e-07      2.47       0.84       0.34x    10%
+    scatter inverted      1.685e-07      5.43       1.40       0.26x     5%
+    bm25 full scan        1.685e-07      7.16       2.30       0.32x     3%
+    pbd cloth (Jacobi)    2.407e-06      1.51      77.37      51.27x    17%
+
+THE HEADLINE: SCATTER IS 1.3x THE FULL SCAN, NOT 106x. RETRACTED, in both kernel entries that
+carried it -- and the assert caught the second one, which the fragment half held and which nobody
+would have thought to check. The old figure came from llvmpipe, where the full scan is a CPU
+walking 20,000 documents with a binary search each while scatter touches only postings. A real GPU
+hands the full scan the thousands of parallel fragments it was starved of and the gap collapses.
+THIS WAS THE PREDICTED OUTCOME -- the note written before the run said 65.9x was "as likely to
+SHRINK as to grow" -- but predicting a retraction is not the same as being owed one, and the number
+this project quoted for weeks was wrong by ~80x.
+
+BOTH RETRIEVAL KERNELS ALSO LOSE TO NUMPY (0.26x, 0.32x), which is the more useful finding: a
+postings walk is a few thousand indexed multiply-adds, far too little work to cover a draw call.
+Retrieval at this corpus size does not want a GPU at all.
+
+MY READBACK HYPOTHESIS WAS REFUTED BY THE PROBE I ADDED TO TEST IT. I proposed that image
+formation's 0.34x was mostly the bus. It is not -- readback is 10% of its 2.47 ms, so the GEMV
+genuinely loses to BLAS. And the kernel where readback DOES dominate is diffusion at 46%, which
+still wins 134x. The floor row cost one extra shader and overturned the explanation I was about to
+publish; without it "image formation is slow because of readback" would have gone into the notes as
+fact.
+
+PBD IS THE STANDOUT AT 51x, and it is the two-trick kernel -- blending scatter-add plus ping-pong --
+with the constraint residual falling 0.4717 -> 0.0311 IDENTICALLY on GPU and CPU. It converges, it
+does not merely agree.
+
+WINDOWS PATH BUG, AND THE FALLBACK REASON EARNED ITS KEEP AGAIN: the scatter and bm25 rows ran on
+the SYNTHETIC corpus, not the repo, because `glob` returns BACKSLASH paths on Windows and
+hard_corpus did `f.split("/")[1]` -- IndexError, silent fallback. The printed reason turned that
+into a one-line diagnosis from a screenshot instead of a debugging session on a machine I cannot
+reach. Fixed with pathlib.PurePath.parts, verified against a simulated Windows path. THE 1.3x
+THEREFORE NEEDS ONE CONFIRMING RUN on real text; the synthetic corpus is the same scale (1.92M
+postings against 1.65M) so the conclusion is unlikely to move, but "unlikely to move" is not a
+measurement.
+
+Six of ten shipped kernels now carry hardware numbers. Audits 0/0/0/0.
+
+## COST MODEL FOR A PRE-LLM STACK: WHERE 90-99% ACTUALLY COMES FROM, AND WHY GLSL IS NOT THE LEVER
+
+openzoo.fun builds on leCore and reports 30-90% cost reduction; the target is 90-99%. Cost in a
+pre-LLM stack is TOKENS SENT TO THE MODEL, so this is measurable rather than aspirational.
+Measured on the HELD-OUT benchmark (docstring -> code, leak ratio 1.26), 371 queries, 741 passages,
+REAL token lengths -- passages average 1,103 tokens.
+
+    baseline, top-20 into the prompt      127,019 tokens/query   recall 0.984
+    leCore policy verdict (answer arm)        823 tokens/query   recall 0.803
+    -> 99.4% TOKEN REDUCTION, AT A COST OF 0.181 RECALL. That is a trade, not a win, and quoting
+       the 99.4% without the recall column is how a benchmark becomes marketing.
+
+FIXED-K IS THE WRONG SHAPE, and the ladder shows why:
+    top-1     3,436 tokens   recall 0.763   97.3% reduction
+    top-3    27,453          0.852          78.4%
+    top-5    49,721          0.892          60.9%
+    top-10   86,803          0.946          31.7%
+    top-20  127,019          0.984           0.0%
+Each recall point past 0.85 costs roughly an order of magnitude more tokens. Nobody should buy that
+uniformly -- which is the whole argument for spending per query rather than per corpus.
+
+MARGIN-GATED ESCALATION IS THE LEVER. Send ONE passage when the ranker is confident
+((s1-s2)/s1 >= m), escalate only when it is not:
+    margin  escalate-to  escalated%   tokens/query   recall   reduction
+    0.02    top-5           6.2%          6,141      0.787    95.2%
+    0.02    top-20          6.2%         10,751      0.814    91.5%
+    0.05    top-5          14.0%          9,504      0.827    92.5%
+    0.10    top-20         28.6%         37,716      0.908    70.3%
+    0.20    top-20         53.1%         68,013      0.976    46.5%
+90-99% IS REACHABLE AND THE PRICE IS NAMED: 91.5% at recall 0.814, or 95.2% at 0.787. Pushing to
+recall 0.976 costs the reduction back down to 46.5%. THE HONEST HEADLINE FOR openzoo IS A CURVE,
+NOT A NUMBER -- and a customer who needs 0.97 recall cannot have 95% savings on this corpus.
+
+AN UNEXPECTED SECOND LEVER, found in the numbers rather than looked for: the policy's answer arm
+averages 823 tokens against top-1's 3,436 for the SAME task. The length-normalised proximity
+reranker prefers SHORT exact matches, so it is not only more accurate (0.763 -> 0.824 held-out) but
+4x CHEAPER PER ANSWER. Length normalisation was added to fix a degeneracy; it turns out to be a
+cost lever, and that is worth saying out loud because nobody would find it by looking for one.
+
+AND THE HONEST REDIRECT: GLSL IS NOT THE LEVER FOR THIS. Measured on an RTX A4500 this session,
+the retrieval kernels LOSE to NumPy -- scatter 0.26x, BM25 full scan 0.32x -- because a postings
+walk is a few thousand indexed multiply-adds, too little work to cover a draw call. The scatter
+index is 1.3x the full scan on hardware, not the 106x this project quoted from a software
+rasteriser. GPU wins in this repo are real but they are in the FIELD kernels: diffusion 134x,
+plane waves 307x, PBD 51x. If the goal is cost per query in a retrieval stack, the GPU work is not
+where it comes from; the policy, the escalation gate and the reranker are.
+
+WHAT WOULD PLAUSIBLY PUSH PAST 95% WITHOUT PAYING RECALL, in priority order and each already
+half-built here:
+  1. THE ABSTAIN ARM SPENDS ZERO TOKENS. It fires 0.000 on this corpus because every prose query is
+     answerable; on a real traffic mix with out-of-corpus questions it is the single largest saving
+     available, and it is already calibrated from a scrambled-query null rather than from
+     evaluation data.
+  2. EXACT CONTAINMENT ANSWERS WITHOUT THE MODEL AT ALL. PerfectRecallIndex returns the exact
+     AND-set with zero false negatives; when that set is a singleton the query never needs an LLM.
+     Verified 40/40 on non-empty truth sets at 20,000 docs.
+  3. SHARDED DELIVERY makes corpus size a non-issue: shards fitted with corpus_stats are
+     BIT-IDENTICAL to a single index (0.000e+00 at 4 to 256 shards), so cost does not grow with the
+     library.
+  4. DOCUMENT EXPANSION buys the paraphrase regime (0.000 -> 0.164) at 4.2x the INDEX, which is
+     storage, not per-query tokens -- the right trade when queries are prose.
+
+## A BILLION-TOKEN CONTEXT IS AN INDEX, NOT A WINDOW -- WHAT leCore MEASURES, AND WHAT leOS TAUGHT
+
+openzoo.fun states its own product in one line: "bind a corpus once, ask it anything. Local x402
+proxy + MCP. ~435 models. No account." So the unit of value is A BOUND CORPUS THAT ANSWERS, and
+cost is tokens forwarded to whichever of the 435 models gets picked. That reframes the 1B-token
+question correctly: THE MODEL'S WINDOW STAYS WHATEVER IT IS. What changes is what you put in it.
+Nobody needs a billion tokens in a window; they need a billion tokens INDEXED and the right ten
+thousand handed over.
+
+SCALING MEASURED, not asserted, on the stratified repo corpus:
+    passages   tokens      build s   index MB   postings     query ms (2-4 term)
+      5,000      718,480      1.5       5.2       469,271      0.04
+     20,000    2,859,097      7.7      18.9     1,648,736      0.02
+     29,348    4,248,897     10.3      28.2     2,461,643      0.03
+    log-log slopes: build 1.13, index MB 0.95, postings 0.93, QUERY -0.21
+EXTRAPOLATED TO 1e9 TOKENS: index ~6.6 GB, build ~0.7 hours single-threaded and divisible by shard
+count, and QUERY COST THAT DOES NOT GROW. The measured query slope is NEGATIVE (-0.21) because a
+2-4 term query touches only its posting lists, and idf makes the discriminative terms rarer as the
+corpus grows. THE WALL IS NOT QUERY TIME. It is RAM for the postings and the ubiquitous-term case,
+both of which shard: shards fitted with corpus_stats are BIT-IDENTICAL to a single index
+(0.000e+00 at 4 through 256 shards, verified end to end under Node).
+
+SO 1B IS AN ENGINEERING NUMBER, NOT A RESEARCH ONE. What is NOT yet measured, and must be before
+anyone claims it: the perfect-recall index at that scale (built 20k docs in 27.8 s, so ~2.7 hours
+extrapolated, and its ubiquitous-term path degenerates toward an O(N) verify scan BY DESIGN -- the
+module says so), and whether the abstention null stays calibrated when the corpus is 300x larger.
+
+WHAT leOS ALREADY SOLVED, AND leCore SHOULD NOT REINVENT (from its README, read this session):
+  * TIERED EXECUTION LADDER -- Tier 0 FABRIK (free, no LLM), Tier 1 intern 0.8B on CPU, Tier 2 main
+    9B on GPU, with a retry button that bumps exactly one rung and records tier_used.
+  * SUBSTRATE GATHER -- a pre-LLM decision tree that answers from the KB directly at confidence
+    >= 0.70, hands the LLM a PRE-FILLED DRAFT at mid confidence, and only falls through at low.
+  * 8-LAYER CONTEXT ASSEMBLY WITH PER-LAYER TOKEN BUDGETS -- scope identity, current task, plan
+    state, recent activity, relevant knowledge, parent scope, institutional memory, siblings.
+    Lower layers trimmed when the budget runs out.
+  * CURIOSITY LOOP WITH COVERAGE SATURATION -- the stopping rule matters as much as the pursuit
+    rule. Internal cross-reference runs BEFORE any external fetch.
+  * SCOPES AS CONTEXT ISOLATION -- child scope work never pollutes the parent; only a compact
+    deliverable crosses the boundary.
+  * "THE LLM SHOULD ONLY RUN WHEN THERE IS THINKING TO DO." Waiting for a download is not thinking.
+
+WHAT leCORE ADDS THAT leOS COULD NOT, and it is one word: GUARANTEES. leOS's substrate gather is
+embedding similarity -- approximate, and it can miss. leCore's containment path returns the EXACT
+AND-set with ZERO false negatives (Bloom superposition cannot miss) and ZERO false positives
+(every candidate exactly verified), measured 40/40 against brute force on non-empty truth sets at
+20,000 docs. That is the difference between "we think we found it" and "this is provably every
+document containing these terms". A router that can PROVE it has the answer can skip the model;
+one that can only estimate must hedge, and hedging is what costs tokens.
+
+THE HONEST COST CURVE FOR openzoo, from this session's held-out measurement (371 queries, real
+token lengths, passages averaging 1,103 tokens):
+    top-20 baseline          127,019 tokens/query   recall 0.984
+    margin gate 0.02 -> top-20  10,751              0.814      91.5% saved
+    margin gate 0.02 -> top-5    6,141              0.787      95.2% saved
+    policy answer arm              823              0.803      99.4% saved
+90-99% IS REACHABLE AND THE PRICE IS NAMED. A customer needing 0.97 recall gets 46.5%, not 95%.
+Publishing the curve rather than the best cell is the difference between a claim that survives a
+customer's own benchmark and one that does not.
+
+WHERE THE REMAINING SAVINGS ACTUALLY ARE, in measured priority order:
+  1. THE ABSTAIN ARM SPENDS ZERO TOKENS and fires 0.000 on this corpus because every query is
+     answerable. On real traffic with out-of-corpus questions it is the single largest lever, and
+     it is calibrated from a scrambled-query null rather than from evaluation data.
+  2. EXACT CONTAINMENT ANSWERS WITHOUT A MODEL when the AND-set is a singleton.
+  3. THE LENGTH-NORMALISED RERANKER IS A COST LEVER NOBODY LOOKED FOR: 823 tokens against top-1's
+     3,436 for the same task, because it prefers SHORT exact matches. 4x cheaper per answer AND
+     more accurate (0.763 -> 0.824 held-out).
+  4. leOS's TIER LADDER, which leCore has no equivalent of. openzoo has ~435 models; the cheapest
+     one that can plausibly answer should get it first, with escalation on dissatisfaction. That is
+     a routing decision leCore can make deterministically and does not currently make at all.
+
+AND THE MEASURED REDIRECT: GPU IS NOT THE LEVER HERE. On an RTX A4500 the retrieval kernels LOSE to
+NumPy (scatter 0.26x, full scan 0.32x) because a postings walk is too little work to cover a draw
+call. The GPU wins are in the FIELD kernels (diffusion 134x, plane waves 307x, PBD 51x). Expanding
+context and cutting cost comes from the policy, the gate and the reranker -- not from the shader.
+
+## THE PAGES ARE IN THE REPO NOW, AND FIXING THE BUILD EXPOSED THREE OLDER BUGS
+
+The five WebGL2 pages were gitignored as "build artefacts" and therefore absent from the delivery
+zip -- so the deliverable of the entire browser goal could not be opened without re-downloading it
+from a chat. THE CLASSIFICATION WAS WRONG: I sorted them by HOW THEY ARE PRODUCED (generated ->
+ignore) instead of WHAT THEY ARE FOR. CAPABILITIES.md and REFERENCE.md are already
+generated-but-shipped here; these belong in that bucket. Un-ignored, moved to `pages/` with a
+README, and `build_pages.bat` / `build_pages.sh` rebuild them in a throwaway venv and open the
+search page. Nobody should have to run Python to look at a demo.
+
+THREE BUGS SURFACED, and the third is the one worth remembering:
+
+1. GENERATORS MUST RUN WITH THE REPO ROOT AS CWD -- they write into it, the corpus loader globs
+   relative to it, and several import engine modules by their FLAT name. Building from `pages/`
+   broke four of five. The scripts now build from the root and MOVE the output.
+
+2. FLAT ENGINE IMPORTS left over from before the package reorg (`import holographic_hashatom`).
+   Fixed to package paths -- but my regex only rewrote the FIRST target of a MULTI-TARGET import
+   (`import A as HA, holographic_phasor as PH, glsl_hier as H`), because the pattern required the
+   literal word `import` immediately before the module name. That cost four rounds of whack-a-mole
+   in which I kept re-guessing WHICH FILES to fix instead of reading the failing LINE. THE THIRD
+   ROUND IS THE SIGNAL TO STOP GUESSING AND READ THE ERROR.
+
+3. A VENV MISSING A DEPENDENCY THE HOST HAPPENS TO HAVE IS A FALSE GREEN. I installed numpy only,
+   reasoning that page generation needs no GL binding. True for two of five; the other three import
+   glsl_hier, which builds a GL context. They PASSED when I ran them by hand (system moderngl) and
+   FAILED inside the venv. The whole point of the venv is that the host's accidents do not leak in
+   -- so when a script works outside it and not inside, the venv is right and the reasoning that
+   picked its dependency list is wrong. Both build scripts now install moderngl.
+
+All five generators verified end to end through the script: search page 227 KB (500 passages, 6,767
+terms, 0 hash collisions), vsa 208 KB (beam acc 0.9703), typed 204 KB, full 317 KB (flat 0.9703 /
+beam 0.9604), plus the small algebra page.
+
+## P3.1 CLOSED -- THE PAGES RAN IN CHROME. THREE OF FIVE ALL-PASS, AND THE TWO FAILURES ARE ONE BUG
+
+The oldest open item in this arc is closed: every page ran in Chrome on the A4500 box, WebGL 2.0
+(OpenGL ES 3.0 Chromium), from file:// with no server.
+
+    lecore_webgl2.html        ALL PASS   bind 6.677e-7, unbind 6.909e-7, scores 7.823e-8,
+                                         tiled max == single pass (T4), ARGMAX gpu=f64=planted=7,
+                                         T1 gate margin 0.865 vs 2*eps 1.565e-7 -> safety x5,531,327
+    lecore_webgl2_full.html   ALL PASS   3-tier beam walk 101/101 IDENTICAL to f64, accuracy
+                                         0.9604 == f64 0.9604, 45 dots vs 101 flat, 4.67 ms
+    lecore_search_webgl2.html ALL PASS   EXT_float_blend PRESENT and the SCATTER path selected --
+                                         the predicted outcome; scatter == full scan at 1.73e-7 with
+                                         coverage diff 0; verdict 60/60, ambiguity 60/60 exact,
+                                         reranked answer 58/58; 0 of 6,767 hash collisions; 1.55 ms
+    lecore_webgl2_typed.html  2 FAILED   encode+recall 2/101, accuracy 0.0198 against f64 0.9703
+    lecore_webgl2_vsa.html    2 FAILED   the same two rows; every algebra row PASSED (5/5 roles)
+
+THE TWO FAILURES ARE THE SAME BUG, AND ITS SHAPE IS DIAGNOSTIC. 2/101 is chance (1/101 = 0.0099;
+0.0198 = 2/101), so the query vectors are not slightly wrong, they are RANDOM. And the split across
+pages localises it precisely: every page that UPLOADS precomputed vectors passes, and the only two
+that EXPAND TOKEN HASHES INTO ATOM VALUES INSIDE A SHADER fail. Bind, unbind, score, argmax, tiled
+max, the beam walk, BM25, containment, the scatter index and the whole answer/set/abstain policy are
+all correct in Chrome. ONE SHADER IS WRONG: the hash -> atom encoder.
+
+THAT SHADER WAS VERIFIED BIT-IDENTICAL ACROSS NumPy, GLSL AND JS -- UNDER MESA. Chrome on Windows
+runs ANGLE, and ANGLE breaks a bit-identity that llvmpipe satisfied. This is exactly the class of
+finding the ES compiler could not produce and the reason the browser run mattered: "compiles and
+links under a real GLSL ES compiler" was never the same claim as "computes the same values".
+
+pages/encoder_probe.html ISOLATES IT IN FOUR STAGES rather than guessing, each compared against the
+same arithmetic in JavaScript so the FIRST failing row names the layer:
+  1. read the R32UI token texture straight back  -> is the upload/usampler2D path exact?
+  2. pcg(hash ^ i) as an INTEGER, no float       -> does the unsigned multiply/shift agree?
+  3. the encoder verbatim from the failing pages -> is it the loop or the sign test?
+  4. the same encoder with a CONSTANT loop bound -> does ANGLE mishandle a uniform bound?
+Leading suspects in order: the dynamic loop bound (stage 4), unsigned multiply overflow under
+ANGLE's HLSL translation (stage 2), and the R32UI upload (stage 1) -- which the search page's clean
+run makes least likely, since it reads usampler2D textures heavily and is exact.
+
+ALSO OBSERVED, and worth checking rather than assuming: the search page calibrated its abstain
+threshold IN-PAGE at 13.015 against Python's 13.347 -- two samples of the same scrambled-query null,
+so a small gap is expected, but it moves the abstain boundary and nobody has measured how far. And
+the live query "holographic vector memory cleanup" ABSTAINED at top score 10.883 with ambiguity 4,
+on a corpus that contains a cleanup module. That may be a correct refusal on a 500-passage slice or
+a FALSE ABSTAIN; the page cannot tell you which, and the honest reading is that it is unverified.
+
+BACKLOG UPDATE:
+  P3.1 CLOSED. P3.2 already closed on the A4500. Remaining: P3.3 (WGSL, split into a 6-kernel port
+  and a 3-kernel compute+atomics rewrite), P2.3 (mesh vertex shader, blocked on transform feedback).
+  NEW P3.6 -- run pages/encoder_probe.html in Chrome and fix the layer it names.
+  NEW P3.7 -- measure the in-page vs Python null gap over repeated page loads, and check whether the
+       "holographic vector memory cleanup" abstain is correct against the f64 engine on the same
+       500-passage slice. A false abstain is the one failure mode the policy is supposed to prevent.
+
+## THE BROWSER ENCODER BUG WAS MINE, NOT ANGLE'S -- WRONG HASH, FIXED, AND THE OTHER TWO WORRIES CLEARED
+
+I wrote that Chrome "breaks a bit-identity that llvmpipe satisfied" and named ANGLE as the leading
+suspect. WRONG. Chrome computed exactly what the shader asked for; the shader asked for the wrong
+function.
+
+DIAGNOSED IN PYTHON, WITHOUT A BROWSER, by simulating the page's exact pipeline against the
+reference it is tested against:
+    JS fnv1a vs Python HA.fnv1a on every probe token   IDENTICAL
+    page pipeline vs HA.encode_hash                    COSINE -0.077  (orthogonal, i.e. chance)
+So the terms were right and the ATOMS were wrong. The engine's atom hash is PCG --
+`v*747796405u + 2891336453u; ((s >> ((s >> 28u)+4u)) ^ s) * 277803737u; (w>>22u)^w` -- and
+holographic_determinism's docstring carries that exact GLSL precisely so a port cannot drift. The
+page generators shipped the LOWBIAS32 constants (0x7feb352d / 0x846ca68b) instead: a different
+permutation, and one this project's own notes already record as a duplicate that was REMOVED from
+the engine. The wrong hash survived in the generators after the engine dropped it.
+
+FIXED in five sites across four generators. The first pattern matched two; three more were the same
+mix written on ONE LINE and slipped through -- the same whack-a-mole this session already paid for
+once, so the sweep was redone on the CONSTANTS, which cannot hide behind formatting. Verified before
+regenerating: the corrected shader body simulated in Python reproduces HA.encode_hash at COSINE
+1.000000, max |diff| 0.000e+00, on three different token lists. Pages rebuilt.
+
+WHY THE OTHER PAGES PASSED, which is the part that makes this obvious in hindsight: every passing
+page UPLOADS precomputed vectors and never runs the atom hash. `_full` does the same beam walk on
+the same corpus and scores 101/101. Only the two pages that EXPAND HASHES IN-SHADER touched the
+broken function. The failure was perfectly localised the whole time and I still reached for the
+substrate first.
+
+THE OTHER TWO WORRIES, both settled here rather than sent back as another test run:
+
+  * THE LIVE ABSTAIN WAS CORRECT. "holographic vector memory cleanup" through the f64 engine on the
+    same 500-passage slice: mode=abstain, ambiguity=4, top score 10.883 -- IDENTICAL to the page,
+    to three decimals. The top hit is holographic_energy at 10.883 and the real cleanup module is
+    not in this 500-passage slice at all. NOT a false abstain; the policy refused because the
+    answer genuinely is not there.
+  * THE THRESHOLD GAP IS NOISE. Twelve independent 200-query nulls on the same corpus: mean 13.141,
+    sd 0.311. Python shipped 13.347, the browser calibrated 13.015 -- a gap of 0.332, or 1.1 sd.
+    Within the estimator's own spread, not a browser bias. WORTH RECORDING SEPARATELY: the abstain
+    threshold itself has a sd of 0.31, so any query scoring within ~0.6 of it can flip verdict
+    between two honest calibrations. That is a property of the gate nobody had measured.
+
+BACKLOG UPDATE:
+  P3.6 CLOSED (the probe is no longer needed to find the bug; it ships anyway as a regression tool).
+  P3.7 CLOSED -- abstain correct, threshold gap is noise, and the gate's own sd is now on record.
+  NEXT BROWSER RUN should show typed and vsa at parity with _full; if they do not, ANGLE becomes a
+  real suspect for the first time.
+
+## ALL FIVE PAGES ALL-PASS IN CHROME. THE FIX HELD, AND ANGLE WAS INNOCENT THE WHOLE TIME
+
+    lecore_webgl2_vsa.html    ALL PASS  encode+recall 101/101 IDENTICAL, accuracy 0.9703 == f64
+                                        0.9703, algebra 5/5 roles, 6 programs, 6.70 ms
+    lecore_webgl2_typed.html  ALL PASS  encode+recall 101/101 IDENTICAL, accuracy 0.9703 == f64
+                                        0.9703, 45 dots vs 101 flat, 8.78 ms
+    (plus the three that already passed: lecore_webgl2, _full, and the search page)
+
+FIVE OF FIVE. The browser goal is closed: leCore's read path, the VSA algebra, BM25 with exact
+containment, the scatter inverted index and the whole answer/set/abstain policy all run in WebGL2
+and match the f64 engine. The bug was a wrong hash in my own generators, diagnosed in Python
+without a browser, and the correction is confirmed on hardware.
+
+I NAMED ANGLE AS THE SUSPECT AND ANGLE WAS INNOCENT. Worth keeping because the reasoning was
+seductive: the failure appeared only in the browser, only on the two pages that ran integer
+arithmetic in a shader, and the arc had just finished documenting that ANGLE translates to HLSL
+with different integer semantics. Every one of those observations was true and the conclusion was
+still wrong. THE SUBSTRATE IS THE LAST SUSPECT, NOT THE FIRST -- and the thing that actually
+localised it was simulating my own pipeline against my own reference in ten lines of Python.
+
+AND THE DETAIL THAT SHOULD HAVE CAUGHT IT EARLIER: on the BROKEN page the interactive box returned
+plausible-looking hits -- holographic_codeverbal, holographic_codecompose, holographic_burn,
+holographic_leap -- with margin 0.0215. Every name in this corpus starts with `holographic_`, so
+random retrieval STILL LOOKS LIKE RETRIEVAL. After the fix the same query returns
+holographic_transform / superposed / provenance / leap at margin 0.1277 -- SIX TIMES the margin.
+PLAUSIBLE OUTPUT FROM A BROKEN SYSTEM IS THE NORM WHEN EVERY CANDIDATE SHARES A PREFIX; the margin
+was the tell and nobody was reading it.
+
+STATUS OF THE THREE ORIGINAL GLSL GOALS, now that the browser has spoken:
+  * BROWSER STARTING POINT -- DONE. Five pages, checked in under pages/, open from file://, each
+    self-verifying against embedded f64 answers, all green on a real GPU.
+  * FASTER OR BETTER -- SPLIT, AND THE SPLIT IS THE RESULT. Field kernels win big on hardware
+    (plane waves 307x, diffusion 134x, PBD 51x); retrieval kernels LOSE to NumPy (0.26x, 0.32x)
+    and the scatter index is 1.3x the full scan, not the 106x measured on a software rasteriser.
+  * NEW PERSPECTIVE -> LESSONS BACK TO THE FRAMEWORK -- the largest yield. The postings insight,
+    flat 2D addressing, the margin instrument generalised from argmax to rounding, the sharding
+    seam, tokenize_once, length-normalised coverage as a cost lever, kept negatives as executable
+    assertions, the leak checker, the readback-floor probe, and now: a port must carry the
+    constants of the function it ports, and the docstring that pins them is load-bearing.
+
+## THE GLSL GUIDE'S FRAMING WAS WRONG, AND FIXING IT PRODUCED A WORSE RESULT FOR GLSL, NOT A BETTER ONE
+
+First draft compared every kernel to NumPy and told the reader "if you are building retrieval, use
+the engine's NumPy path". That assumes a Python backend. A large share of the audience -- static
+sites, browser extensions, offline apps -- does not have one, so the comparison was against
+something they cannot choose.
+
+Reframed around what a browser-only developer CAN choose, and measured the alternative that framing
+had hidden: PURE JAVASCRIPT, same algorithm, same corpus.
+
+    passages   terms     JS index build   JS query      GPU query (A4500, Chrome)
+    500        6,767      33 ms           0.002 ms      1.55 ms
+    5,000     10,954     237 ms           0.016 ms      --
+    20,000    15,533     545 ms           0.076 ms      --
+
+JAVASCRIPT IS ROUGHLY 300x FASTER THAN THE GPU PATH AT PAGE SCALE, and still 20x faster at forty
+times the corpus. The cause is structural: a 2-4 term postings walk is a few thousand indexed
+multiply-adds, and on the A4500 an EMPTY shader reading back 262,144 floats already costs 1.02 ms.
+(JS timed under Node on this container, GPU in Chrome on the A4500 -- not a controlled comparison,
+but the gap is three orders of magnitude and the machine difference cannot explain it.)
+
+SO THE HONEST RECOMMENDATION FOR BROWSER RETRIEVAL IS JAVASCRIPT, NOT GLSL. The correction the user
+asked for was "do not tell people to use Python if they cannot"; following it properly moved the
+recommendation further from GLSL, because the real in-browser alternative had never been measured. A
+reframing that is done honestly can cost you the conclusion you were hoping to reach.
+
+WHAT THE RETRIEVAL SHADERS ARE STILL FOR, stated in the guide rather than quietly dropped:
+  1. They are DIFFERENTIAL TESTS -- 60/60 mode, 60/60 exact ambiguity integers, 58/58 reranked
+     answer against the f64 engine. That is what makes a JavaScript port trustworthy.
+  2. They are the shape that scales past a tab: the scatter kernel does 63x less WORK, and the
+     wall-clock loss is per-call overhead that would amortise if the corpus lived on the GPU across
+     many queries with no readback. NOBODY HAS BUILT THAT; the status is "plausible, unmeasured",
+     and the guide says so.
+
+GLSL's case is unchanged and unchallenged where it was always strong: fields, physics and
+generative visuals, where JavaScript would loop over hundreds of thousands of elements per frame --
+plane waves 307x, diffusion 134x, PBD 51x.
+
+docs/GLSL_GUIDE.md now opens with a three-row substrate table (Python -> the engine; browser +
+retrieval -> JavaScript; browser + fields/physics -> GLSL) rather than a speed table, because the
+first question is which substrate the reader can actually use.
+
+## GPU LOSS-REVERSAL BACKLOG -- WITH THE TWO CHEAP HYPOTHESES ALREADY TESTED
+
+Two experiments run before writing any of this down, so the items carry evidence instead of hope.
+INSTRUMENT NOTE: llvmpipe is invalid for GPU-vs-CPU, but a GPU-vs-GPU comparison of two SHADER
+VARIANTS on the same rasteriser is fair -- both sides pay the same substrate tax. Directional, not
+final, because the bottleneck can move on hardware.
+
+TESTED 1 -- RASTER, 64 TEXTURE FETCHES PER PIXEL vs PARAMS IN A UNIFORM ARRAY:
+    texelFetch variant  37.45 ms      uniform variant  28.73 ms      1.30x, outputs IDENTICAL
+A real but modest win. It does NOT close 0.34x on its own; the kernel is genuinely a GEMV and BLAS
+is genuinely good at those.
+
+TESTED 2 -- THE READBACK FLOOR BY SIZE (empty shader, the cost every kernel pays):
+    4 floats 0.009 ms | 500 0.026 | 4,096 0.126 | 20,000 0.332 | 65,536 0.249
+    A4500, measured earlier: 0.25 ms at 4k, 0.24 at 64k, 1.02 at 262k -- NEARLY FLAT below ~64k.
+So a GPU-side top-k shrinks the 500-doc page's readback from 500 floats to 4 -- and recovers almost
+nothing, because the floor is per-CALL, not per-BYTE. THAT KILLS THE OBVIOUS FIX, and knowing it
+before building saves the build.
+
+---------------------------------------------------------------------------------------------
+THE BACKLOG, ordered by expected value, with what would count as success stated up front.
+
+G1  BATCH QUERIES INTO ONE PASS.                                      [highest value, unbuilt]
+    The floor is per-CALL. 200 queries currently cost 200 floors. Score Q queries in one draw
+    (query index on the second output axis) and read back once. Earlier measurement on the tier
+    walk showed 2-3x from batching alone; here the ceiling is far higher because the per-call cost
+    IS the whole loss. ACCEPT: 200 queries in one pass at under 2x the cost of one query, top-1
+    identical to the engine on every one.
+
+G2  DECIDE ON THE GPU, RETURN ONLY THE VERDICT.                              [pairs with G1]
+    Not for the readback bytes (G-tested: nearly free) but to make G1 possible -- a batched pass
+    cannot return N*Q floats. Tiled argmax already exists and is proved exact (T4). ACCEPT: the
+    page returns (doc id, score, coverage) per query and never materialises a score array.
+
+G3  RASTER: PARAMS IN A UNIFORM BLOCK.                          [tested: 1.30x, outputs identical]
+    Cheap, safe, already validated. Do it, but do not expect it to flip 0.34x by itself.
+
+G4  FIND THE JS/GPU CROSSOVER AND STOP OPTIMISING BELOW IT.              [the honest framing item]
+    Measured: pure JS is 0.002 ms/query at 500 passages, 0.076 ms at 20,000 -- roughly linear in
+    corpus. The GPU path is ~1.55 ms and roughly FLAT. Extrapolating, JS stays ahead until the
+    corpus is in the millions of passages. ACCEPT: publish the crossover curve; if it lands beyond
+    any realistic browser corpus, SAY SO and close the retrieval-speed items as unwinnable rather
+    than grinding on them.
+
+G5  MEASURE THE FOUR KERNELS THAT HAVE NO HARDWARE NUMBER.                    [cannot plan blind]
+    bm25_score, hdrift_spectrum, perfect_recall_candidates, scatter_bm25_fs. The perfect-recall
+    candidate pass is the interesting one -- its only timing was a retracted llvmpipe figure.
+
+G6  ASYNC READBACK VIA PBO + fenceSync.                                    [unknown, worth a probe]
+    WebGL2 has pixel buffer objects and fences; every harness here uses a synchronous readPixels
+    plus finish(), which stalls the pipeline. If the floor is a STALL rather than a transfer, this
+    removes it and G1 gets much better. ACCEPT: measure the floor with and without PBO on hardware
+    before building anything on top of it.
+
+G7  PERSISTENT-CORPUS BENCHMARK.                                    [the claim nobody has tested]
+    The guide currently says the scatter kernel "would amortise if the corpus lived on the GPU
+    across many queries with no readback" and labels it plausible-unmeasured. G1+G2+G6 together ARE
+    that experiment. ACCEPT: either a measured win at some corpus size, or the claim is withdrawn
+    from the guide.
+
+---------------------------------------------------------------------------------------------
+DECLARED UNWINNABLE, so nobody spends a week on them:
+  * BEATING NUMPY OR BLAS AT A GEMV. raster_form is a dense mat-vec with no reuse. G3 helps; the
+    substrate does not change the shape of the problem.
+  * BEATING PURE JAVASCRIPT AT SMALL-CORPUS RETRIEVAL. A 2-4 term postings walk is a few thousand
+    multiply-adds. No amount of shader work makes a draw call cheaper than 0.002 ms.
+  * THE 106x. Retracted, measured at 1.3x on hardware, and not coming back.
+
+WHAT IS ALREADY WON AND SHOULD NOT BE RE-LITIGATED: plane waves 307x, diffusion 134x, PBD 51x.
+Those are the workloads GLSL exists for, and none of them appears in this backlog because none of
+them is losing.
+
+## BACKLOG WORKED: G1+G2 BUILT AND EXACT, G3 APPLIED, G4 MEASURED -- AND G4 CLOSES THE SPEED ARC
+
+G1 + G2 SHIPPED as research/shader_retrieval/glsl_batch.py, wired into bench_gpu.py as
+"batched scatter (G1+G2)" so the A4500 can settle it. The construction follows from the floor
+measurement rather than from taste: the readback floor is per-CALL (4 floats 0.009 ms, 65,536
+floats 0.249 ms), so the lever is FEWER CALLS. The host flattens the entire batch into ONE
+contribution list -- (doc, tf, query_row, idf) per posting per term per query -- and ONE draw
+scatters all of it into a single target with the query as a second axis; a reduce pass then returns
+only Q verdicts, which is what makes the batch possible at all (a batched pass cannot hand back
+N*Q floats).
+
+    top-1 identical to the engine : 200/200 at 20,000 documents
+    queries   one-at-a-time   batched   per-query batched   speedup
+    1         1.5 ms          1.5 ms    1.489 ms            1x
+    10       14.8             5.4       0.538               3x
+    50       73.4            23.6       0.473               3x
+    200     302.3            92.0       0.460               3x
+Batching converges to ~3x and then FLATTENS -- per-query cost stops falling at 0.46 ms. So the
+per-call floor is amortised after about ten queries and something else becomes the bottleneck.
+[Software rasteriser: GPU-vs-GPU variant comparison is fair, GPU-vs-CPU is not.]
+
+THREE INSTRUMENT ERRORS ON THE WAY, ALL THREE ALREADY IN THIS FILE:
+  * An (N x Q) score target is 20,000 texels wide -- past GL_MAX_TEXTURE_SIZE. The framebuffer came
+    back INCOMPLETE with no warning. FLAT 2D ADDRESSING IS NOT AN OPTIMISATION, IT IS THE ONLY
+    CORRECT WAY TO INDEX A LARGE ARRAY IN GL, and I reached for the natural 2D shape anyway. Third
+    time this session.
+  * `uQ` became unread once flat indexing replaced it, so the compiler eliminated it and setting it
+    raised KeyError. Instrument errors 20 and 30 were the same thing.
+  * The correctness check had to come first and did: 200/200 before any timing was reported.
+
+G3 APPLIED: raster params moved from a texture fetch per light per pixel into a uniform array.
+1.30x, outputs byte-identical, recorded on the shipped kernel entry.
+
+G4 MEASURED, AND IT IS THE ITEM THAT CLOSES THE OTHERS. Pure JS is 0.002 ms/query at 500 passages
+and 0.076 ms at 20,000 -- roughly LINEAR in corpus. The batched GPU path is 0.46 ms/query and FLAT
+in corpus. Setting those equal, the crossover is around 130,000 passages -- but that is the
+SOFTWARE-RASTER GPU number, so on hardware the flat line drops and the crossover moves down. The
+shape is the finding: JS is linear, the GPU is flat, so THERE IS A CROSSOVER AND IT IS NOT
+ASTRONOMICAL. The earlier guess of "millions of passages" was made before batching existed and is
+withdrawn.
+
+BACKLOG STATE:
+  G1 CLOSED (built, exact, wired for hardware).   G2 CLOSED (verdicts only, no score array).
+  G3 CLOSED (1.30x, applied).                     G4 CLOSED as a measurement; the number needs the
+       A4500 run to be final, and the guide should say "there is a crossover near ~10^5 passages,
+       measured on software raster" rather than either of the previous claims.
+  G5 OPEN -- four kernels still have no hardware number; needs the A4500.
+  G6 OPEN -- PBO + fenceSync async readback. Now MORE interesting, not less: batching flattened at
+       0.46 ms/query, which means the remaining cost is not the per-call floor. A PBO probe is the
+       cheapest way to find out whether what is left is a STALL.
+  G7 OPEN -- the persistent-corpus claim. G1+G2 are two thirds of it; G6 is the missing third.
+
+UNWINNABLE LIST UNCHANGED, and one item on it got firmer: no draw call will ever be cheaper than
+JavaScript's 0.002 ms, so small-corpus retrieval on the GPU stays lost. What changed is that the
+crossover is now a number to measure rather than a hand-wave.
+
+## THE LEVERS APPLIED TO THE GPU LOSSES -- AND LEVER 5 WAS ALREADY PROVED AND SHIPPED AND IGNORED
+
+Rule 0 on the levers themselves: holographic_levers carries the canonical six, ordered by cost,
+with the doctrine "walk them in order and stop at the first that applies". I had been reaching for
+constructions instead of walking the list, which is exactly the failure that module exists to
+prevent.
+
+MEASURED WHERE THE COST WAS before choosing a lever, on the batched scorer at 20,000 documents:
+    whole verdicts()      27.91 ms   (0.436 ms/query)
+    scatter pass only     10.81 ms
+    REDUCE pass           17.10 ms   = 61% OF THE TOTAL
+The reduce shader looped ALL 20,000 documents in a SINGLE fragment per query -- one thread doing
+twenty thousand serial iterations while the GPU sat idle. That is lever 5's exact trigger: "the
+whole will not fit but a piece will, and pieces are independent".
+
+AND THE TILING WAS ALREADY PROVED AND ALREADY SHIPPED. T4 (tiled_max_eq_global, machine-checked)
+says a tiled max EQUALS the single-pass max; glsl_fast.py has carried a tiled argmax since early in
+the arc. I wrote a serial reduce anyway. THE ANSWER WAS IMPLEMENTED ELSEWHERE IN THIS REPO AND I DID
+NOT LOOK -- which is the whole reason Rule 0 exists and the reason the user asked.
+
+LEVER 5 APPLIED: one fragment per (query, TILE) reducing its own slice, then a second pass over the
+tile winners only.
+    before   0.436 ms/query, reduce 61% of cost
+    after    0.322 ms/query  -- 1.35x overall, and the per-query floor fell from 0.46 to 0.33
+    top-1 identical to the engine: 200/200, unchanged
+
+LEVER 6 THEN CHOSE THE TILE SIZE INSTEAD OF ME GUESSING IT ("a measured limit is a TILE SIZE"):
+    tile   64    128   256   512   1024  4096
+    ms/q   .336  .331  .322  .330  .330  .448
+    answers stable at EVERY tile size -- which is T4 being EXERCISED, not assumed.
+256 wins, and the curve is flat from 64 to 1024 then degrades: past ~1024 each fragment is serial
+again, which is the same wall one level up. The cliff number became the group size, exactly as
+lever 6 says.
+
+WHERE THE OTHER LEVERS LAND ON WHAT REMAINS, walked in order and recorded so the next session does
+not re-derive them:
+  1 CACHE LOCALITY -- partially taken. Document lengths are baked; the per-term idf is still
+    recomputed on the host per query. Small, and it is host-side, so it does not touch the GPU
+    floor. Worth doing, not worth leading with.
+  2 COMMUTATIVE MONOID -- ALREADY TAKEN TWICE and both are proved: additive blending IS the monoid
+    (T8, append_eq_rebuild) and sharded scoring merges exactly (T4). G1's whole-batch-in-one-draw
+    is this lever applied to the query axis.
+  3 DETERMINISM INSTEAD OF STORAGE -- ALREADY THE CORE TRICK. Atoms are functions of their names;
+    the page ships 0 bytes of vocabulary. Nothing left to take here.
+  4 MORE DIMENSIONS -- NOT YET TAKEN, and it is the next one. The score target is RG32F carrying
+    (score, coverage); an RGBA32F target could carry TWO queries per texel, halving the texels the
+    scatter writes and the reduce reads. Untested, and it is the honest next step rather than a
+    claim.
+  5 TILE THE DOMAIN -- TAKEN, above, 1.35x.
+  6 LIMIT AS TILE SIZE -- TAKEN, above; 256 chosen by measurement.
+
+BACKLOG UPDATE:
+  NEW G8 -- lever 4 on the score target: pack two queries per RGBA texel. ACCEPT: same verdicts,
+       measurably fewer texels touched, and the answer column stays identical (it must -- packing
+       changes layout, not arithmetic).
+  NEW G9 -- lever 1 on idf: bake a per-term idf table once instead of per query. Host-side, small.
+  G4's crossover estimate MOVES with this: the batched GPU path is now 0.33 ms/query flat against
+       JavaScript's linear 0.002 ms at 500 and 0.076 ms at 20,000 -- crossover near ~90,000
+       passages on software raster, and lower on hardware. Still to be settled by the A4500 run.
+
+## G8 + G9 -- LEVERS 4 AND 1 TAKEN. THE PER-QUERY FLOOR IS NOW 0.20 ms, DOWN FROM 0.46
+
+G8, LEVER 4 (more dimensions): the score target was RG32F carrying (score, coverage) for ONE
+(doc, query) pair. It is now RGBA32F carrying TWO queries per texel. Blending is uniform across
+channels, so a contribution selects its half by writing zeros in the other -- even query
+vec4(c,1,0,0), odd vec4(0,0,c,1) -- and ONE/ONE sums each half correctly. The win is NOT the
+halved memory; it is that one reduce fragment now reads each texel ONCE and updates BOTH queries,
+so the reduce's fetch count halves. Two render targets (MRT) let that fragment emit both halves.
+
+G9, LEVER 1 (cache locality): idf depends only on the term, and was being recomputed for every
+(query, term) pair. Baked once per term at construction.
+
+    per-query cost, 20,000 documents, batches of 200
+      serial reduce, RG target        0.460 ms      <- where G1+G2 landed
+      + lever 5 tiled reduce          0.335 ms      1.37x
+      + lever 4 two queries per texel 0.214 ms      1.57x
+      + lever 1 baked idf             0.223 ms      no change (host-side, inside the noise)
+    TOTAL 0.46 -> ~0.21 ms/query, a 2.2x compound win, with top-1 IDENTICAL to the engine at every
+    step (200/200).
+
+LEVER 6 RE-RUN AFTER THE REPACK, because the fetch pattern changed and the old tile size was chosen
+for the old layout:
+    tile   64     128    256    512    1024   2048
+    ms/q   .2073  .2103  .2017  .2030  .2039  .2382     answers stable at EVERY size
+256 still wins and the plateau is still 64-1024. T4 is exercised again -- a tiled max equals the
+single-pass max, so the answer column MUST be uniform, and it is.
+
+G9 MEASURED AS NO CHANGE, and that is recorded rather than dropped: the idf bake is host-side and
+the host is not the bottleneck. It stays because it is correct and free, but it is a KEPT NEGATIVE
+against the instinct that every lever pays -- the doctrine says walk them in order, not that each
+one wins.
+
+WHAT THIS DOES TO THE CROSSOVER (G4): the batched path is now ~0.21 ms/query and FLAT in corpus
+size; JavaScript is 0.002 ms at 500 passages and 0.076 ms at 20,000, roughly LINEAR. Extrapolating
+the JS line to 0.21 ms puts the crossover near ~55,000 passages ON SOFTWARE RASTER. Every lever
+taken so far has moved it down by roughly the speedup, and the A4500 will move it further. The
+earlier "millions of passages" and "~130,000" estimates are both superseded; the honest statement is
+that the crossover is a moving number and each estimate has been lower than the last.
+
+BACKLOG: G8 CLOSED, G9 CLOSED (as a no-change, kept). G5 / G6 / G7 still need hardware. The next
+run_bench.bat gives the batched row on the A4500, which is what turns the crossover into a real
+number instead of an extrapolation from a CPU rasteriser.
+
+## SWEEP: THE RESONATOR WAS PBD IN A DIFFERENT COSTUME, AND THE ENGINE HAD ALREADY SAID SO
+
+RULE 0 FOUND IT, NOT INVENTION. `project_onto_constraints`'s own docstring states plainly that the
+SBC resonator, `denoise(method='pnp')` and a PBD constraint sweep are ONE ENGINE -- alternating
+projection, Macklin's observation. PBD was ported and wins 51x on an A4500; the resonator is the
+same shape and had never been ported. The capability was one costume change away and the docstring
+said so.
+
+SHIPPED: research/shader_retrieval/glsl_resonator.py, assembled from parts already verified here --
+probe (elementwise), score (a gather, same shape as bm25_score), reduce (T4 makes tiling exact),
+project. FOUR PASSES PER ITERATION REGARDLESS OF FACTOR COUNT, because all F factors update from
+the same state. That is Jacobi, which is exactly what PBD taught: Gauss-Seidel needs 4F passes and
+converges in fewer iterations, and on a GPU that trade goes the other way.
+
+    D     F  M    trials   GPU exact   CPU (same scheme)   chance
+    256   3  8    20       20/20       20/20               0.0020
+    512   3  16   20       20/20       20/20               0.0002
+    512   4  16   20       0/20        0/20                0.0000
+    1024  4  16   20       0/20        0/20                0.0000
+
+THREE CORRECTIONS ON THE WAY, EACH ONE ALREADY ANSWERED SOMEWHERE IN THIS REPO:
+  1. HARD ARGMAX DOES NOT RESONATE. First version selected a codebook entry each iteration and
+     recovered 1/30. GPU and CPU agreed EXACTLY at 1/30, which is how I knew the scheme and not the
+     shader was wrong. `project_onto_constraints` documents omega<1 under-relaxation as "PBD's
+     stability trick"; a hard argmax is omega=1 with no damping, so every factor jumps to a corner
+     from a state where all of them are simultaneously wrong and it limit-cycles on step one.
+  2. THE SOFT PROJECTION IS THE PUBLISHED STEP: x_f <- sign(C_f^T (C_f * probe)), no selection
+     during iteration. 1/30 -> 9/30. Better, still not convergent.
+  3. RESTARTS WERE IN THE FUNCTION SIGNATURE THE WHOLE TIME -- factor_composite(..., restarts=20).
+     Resonators land in limit cycles; the answer is to restart and keep the run whose RECONSTRUCTION
+     matches, which is a verify step and not a vote (a cycling resonator produces a CONFIDENT wrong
+     answer, so re-binding the estimate is the only safe selector). 9/30 -> 20/20.
+
+AND ONE CORRECTION TO MY OWN INSTRUMENT: after adding restarts to the GPU I was comparing it
+against a CPU reference that still ran a SINGLE pass -- 30/30 against 6/30, which looks like a
+substrate win and is a method difference. A REFERENCE THAT RUNS A DIFFERENT METHOD IS NOT A
+REFERENCE, IT IS A SECOND EXPERIMENT. Symmetrised, both columns read 20/20.
+
+KEPT NEGATIVE, LOUD: F=4 FAILS COMPLETELY at 0/20 on both substrates, at D=512 AND at D=1024, so
+doubling the dimension did not help. That is not a shader limit and not a restart-count limit --
+it is the resonator's own capacity cliff, and this measurement says the cliff is between 3 and 4
+factors at these codebook sizes, not somewhere comfortable. Anyone reaching for this at F>=4 needs
+`recursive_factor` (which exists, and whose catalog entry is literally "past the resonator's
+cliff") rather than more iterations here.
+
+BACKLOG:
+  NEW G10 -- BATCH THE RESTARTS AS EXTRA ROWS. 20 restarts are currently 20 sequential GPU runs;
+       they are independent, so they are the F axis extended to R*F rows and one run. That is
+       lever 2 applied to the restart axis, exactly as G1 applied it to the query axis.
+  NEW G11 -- measure the F=3/F=4 cliff properly against `recursive_factor`, and record where the
+       tiered form takes over. The cliff is now a measured number and lever 6 says a measured limit
+       is a tile size.
+
+## PERSISTENCE: THE GAP WAS WIRING, NOT ALGORITHM -- ONE FORMAT FOR DISK AND BROWSER
+
+RULE 0 FIRST, and it changed the shape of the work. `mind.save`/`load` already persist the MIND
+well (decision-safe quantisation, rANS on low-rank arrays), so writing a second serialiser would
+have been the silly move. Measured what they actually cover: after save+load, `retrieval_policy`
+REBUILDS FROM DOCUMENTS THE CALLER MUST STILL BE HOLDING. That is the gap -- the mind persists, the
+INDEX does not -- and the format to fill it already existed as a research script whose merge is
+bit-identical at 4 to 256 shards and whose reassembly was verified under Node at 5.8e-13.
+
+SHIPPED holographic_indexstore (`lecore-index/1`), wired as mind.index_save / mind.index_load,
+catalogued, 5/5 discoverability on stranger phrasings.
+
+FOUR DECISIONS, EACH THE NON-SILLY ONE:
+  * STORE THE GENERATOR, NOT THE INDEX. The bundle carries the bit-packed token stream, offsets,
+    vocabulary and global statistics. Postings, tf tables and document lengths are DERIVED on load
+    in milliseconds. Storing them too would be duplicate state that can drift from the stream that
+    describes it -- the same lesson the page learned when it stopped shipping two layouts.
+  * SELF-VERIFYING BY DEFAULT. load() recomputes the sha256 and REFUSES a mismatch, because a
+    truncated write or an aborted IndexedDB transaction leaves a payload that PARSES CLEANLY AND
+    ANSWERS WRONGLY. The selftest tampers with a bundle and asserts the refusal, so the digest
+    cannot become decoration.
+  * INDEXEDDB, NOT localStorage, AND THE REASON IS ARITHMETIC. localStorage is synchronous,
+    string-only, and capped near 5 MB everywhere; an index is ~1.9 MB per MILLION TOKENS packed, so
+    localStorage runs out at roughly two million tokens and blocks the main thread getting there.
+    IndexedDB is async, takes ArrayBuffers without base64 inflation, and its quota is a share of
+    free disk. localStorage ships as a fallback with a 2 MB cap that REFUSES rather than silently
+    truncating.
+  * TOKENS IN, NOT TEXT. tokenize is not idempotent, so re-normalising on the way into the store
+    would silently over-stem the index -- the trap this arc has now paid for four times.
+
+CROSS-CHECKED BOTH SIDES, because a store that writes on one and refuses on the other is worse than
+no store: Python's digest and the JavaScript digest agree byte-for-byte on a real 500-passage
+bundle (7558791198e1ffe1...), the token stream round-trips exactly in JS over the first 50
+documents, and the derived index comes back as 500 docs / 6,746 terms / avgdl 141.3 with all 6,746
+global idf entries carried.
+
+Also fixed on the way: the JS transaction resolves on COMPLETE, not on the request's success -- a
+request can succeed inside a transaction that later aborts on quota, and resolving early reports a
+save that did not happen.
+
+Audits 0/0/0/0; capdoc/docgen regenerated.
+
+BACKLOG: NEW P0.24 -- teach the search page to IMPORT a bundle from disk and cache it in IndexedDB,
+so a corpus baked on a workstation is served from a tab with no rebuild. The store and the page
+both exist; nothing connects them yet.
+
+## P0.24 -- THE PAGE NOW IMPORTS AND CACHES A BUNDLE, AND THE EMBEDDED CORPUS IS THAT SAME FORMAT
+
+The store and the page both existed and nothing connected them. Connected, with the embedded corpus
+CONVERTED to a `lecore-index/1` bundle so there is ONE format for disk, IndexedDB and the page --
+two names for the same bytes is how a store and its consumer drift apart. Verified: Python's
+`holographic_indexstore.digest()` agrees with the bundle the page ships (500 docs, 70,635 tokens,
+13 bits), shaders still compile and link, references still 60/60 against the faculty.
+
+FOUR DECISIONS THAT KEEP IT FROM BEING A TRAP:
+  * THE STORE IS INLINED, NOT IMPORTED. An ES-module import from file:// is blocked by CORS in
+    Chrome, and these pages exist to be double-clicked. Same code as pages/idb_store.js, same
+    digest, cross-checked against Python.
+  * CACHE-FIRST, BUT ONLY IF IT VERIFIES. A cached bundle whose digest fails is IGNORED and the row
+    says so; the embedded corpus is used instead. A page that silently answers from a corrupt cache
+    is the failure a checksum exists to prevent.
+  * VERIFY BEFORE CACHING, NOT AFTER. `useBundle` throws on a bad digest and the `idbPut` only runs
+    if it returned -- caching first and validating later is exactly how a corpus that answers
+    wrongly becomes the one you load every visit.
+  * A CLEAR-CACHE BUTTON. A store you cannot empty is a trap the moment a bundle goes stale.
+
+THE INDEX IS NOW A FUNCTION OF THE STORED STREAM AT RUNTIME, not just at build time: the derivation
+is wrapped in `rebuildIndex()` so an imported bundle re-derives without a page reload. Postings, tf
+tables and lengths are never stored, only computed -- which is why swapping the corpus cannot leave
+a stale index behind.
+
+INSTRUMENT ERROR: my first attempt to wrap the derivation sliced `s[:start] + block` and DROPPED
+THE ENTIRE TAIL of the generator. It never wrote, because the exception fired before `write_text` --
+the "compute the whole new text, assert, then write once" ordering turned a truncation into a no-op
+instead of a corrupted generator. That ordering has now saved this file twice.
+
+Also corrected while in there: the page carried a comment claiming the scatter path was "106x wall
+clock". Retracted long ago and measured at 1.3x on an A4500; the comment now says so. A stale number
+in a comment is a claim someone will quote.
+
+## A DEMO THAT SHOWS THE STRONG HALF -- pages/field_demo.html
+
+Every page in this repo so far demonstrates RETRIEVAL, which the hardware measurements say is the
+weak half: the retrieval kernels lose to plain JavaScript and the scatter index is 1.3x the full
+scan, not the retracted 106x. A demo built on that would be showing off the part that loses. This
+one is built on the part that wins -- plane waves 307x, PBD 51x, diffusion 134x on an A4500.
+
+WHAT IT IS: type words, and each is hashed to a frequency and a phase; the field drawn is the SUM
+OF THOSE PLANE WAVES, which is fractional-power encoding made visible rather than stored. 16,384
+particles follow the field's gradient, repel off their own splatted density, and leave a diffusing
+trail. Four passes per frame -- drift, splat, diffuse, blit -- and ZERO READBACKS, which is the
+design rule the readback-floor measurement produced.
+
+THREE THINGS IN IT THAT ARE ARGUMENTS, NOT DECORATION:
+  * THE VOCABULARY IS A FUNCTION. Type a word that has never existed and its wave appears. Nothing
+    is stored. The demo uses the ENGINE'S hash and it is CHECKED AGAINST PYTHON in this session --
+    fnv1a and hash32_pcg agree on every probe token. Substituting a different 32-bit mixer draws a
+    field orthogonal to what leCore would draw, which is precisely the bug that cost a day earlier
+    in this arc, and the check exists because of it.
+  * REPULSION HAS AN OFF BUTTON. Turn it off and every particle collapses onto one ridge. That is
+    the attraction-only memorisation finding from the HDRIFT work, made visible instead of tabulated
+    -- a kept negative you can see.
+  * EXT_float_blend IS CHECKED, NOT ASSUMED. Without it the accumulation buffer is silently zeros,
+    so the demo disables trails and SAYS SO in the status line rather than showing nothing and
+    calling it art.
+
+VERIFIED BEFORE SHIPPING, the same way every page has been: all four programs compile AND LINK
+under a real GLSL ES compiler, and the demo's JS hash is differentially tested against the engine's.
+
+GUIDE UPDATED (docs/GLSL_GUIDE.md, 432 lines) with four sections that did not exist: the demo, how
+far batching moves the retrieval floor (0.46 -> 0.21 ms/query and which levers did it), persistence
+(one bundle format for disk and browser, self-verifying, and why IndexedDB rather than localStorage
+is arithmetic and not taste), and the resonator including its F=3/F=4 cliff. The crossover estimate
+is now labelled PROVISIONAL in the guide, because it has moved three times as levers landed and a
+reader quoting an old draft would be quoting a number this project no longer believes.
+
+## THE FIELD DEMO SHIPPED BLANK, AND "COMPILES AND LINKS" WAS NEVER "DRAWS SOMETHING"
+
+Reported: 60 fps, 16,384 particles, four passes, and an empty canvas. I had verified that all four
+programs compile AND LINK under a real GLSL ES compiler and then written "verified before shipping"
+-- which is the same overclaim this arc has criticised repeatedly, made by me, one message after
+writing the guide that warns about it. A COMPILER VALIDATES SYNTAX AND LINKAGE. IT SAYS NOTHING
+ABOUT WHETHER THE LOOP DRAWS.
+
+THREE BUGS, FOUND BY SIMULATING THE LOOP IN NUMPY -- the discipline every kernel in this repo
+already has, applied to the one artifact I skipped it for:
+
+ 1. THE DENSITY TEXTURES WERE NEVER CLEARED. `texImage2D(..., null)` leaves contents UNDEFINED, and
+    on many drivers that is NaN. The drift shader samples that texture for the repulsion gradient
+    on frame 0, so NaN entered every particle position on the first step and they were gone before
+    anything was ever splatted. A TEXTURE YOU ALLOCATE IS NOT A TEXTURE YOU INITIALISED. Cleared,
+    plus a NaN guard in the integrator, because a non-finite particle can never recover and one bad
+    frame would empty the screen for good.
+
+ 2. THE PALETTE WAS TOO DARK TO SEE. Both ends of the background mix were near-black, so even a
+    working field rendered as "off".
+
+ 3. THE DYNAMIC RANGE WAS WRONG, and only the simulation could have shown it: over 240 steps the
+    density spans 0.01 to ~11,000 IN THE SAME FRAME because particles pile into the field's wells,
+    while the mean is 2.8 and only 0.6% of cells are occupied. A linear brightness ramp shows a
+    handful of blown-out pixels and nothing else -- which is what "empty" looked like. Now a log
+    mapping spanning that range, with stronger repulsion and jitter so the wells do not swallow
+    everything.
+
+AND A FOURTH, CAUGHT BY THE COMPILE CHECK IN ONE RUN: I put a BACKTICK inside a JS TEMPLATE LITERAL
+-- `x != x` in a shader comment terminated the shader string mid-source. Identical in class to
+instrument error 33 (an apostrophe inside a repr-quoted literal). NEVER SPLICE A DELIMITER INTO A
+QUOTED BODY, in any language, ever.
+
+STILL UNVERIFIED, STATED PLAINLY: I cannot run WebGL interactively here. The shaders link, the loop
+is simulated and produces structure (all finite over 240 steps, mean speed 0.0058, occupancy and
+brightness both non-zero), and the three causes of a blank screen are fixed. Whether it now LOOKS
+like anything is a claim only a browser can settle, and the previous version of this note should
+have said that instead of "verified before shipping".
+
+## THE DEMO'S REAL BUG: FLOAT TEXTURES ARE NOT FILTERABLE, AND AN INCOMPLETE TEXTURE READS ZERO
+
+Second report: a UNIFORM MID-BLUE canvas. That is not "nothing" -- it is a diagnosis. The blit runs
+`bg = mix(dark, blue, smoothstep(-0.5, 0.6, f))` and smoothstep(-0.5, 0.6, 0) is ~0.4, which is
+exactly that shade. So f == 0 EVERYWHERE. f sums cos(dot(c.xy, x) + c.z) and x varies across the
+screen, so the only way f is constant is c.xy reading as ZERO -- the frequency table texture was
+coming back empty. The same zero read explains the missing particles: the splat's VERTEX shader
+fetches positions from a float texture too, so every particle sat at the origin.
+
+THE CAUSE, ONE LINE: `texF()` set LINEAR filtering on every RGBA32F texture. IN WebGL2 FLOAT
+TEXTURES ARE NOT FILTERABLE unless OES_texture_float_linear is present. A texture carrying an
+unsupported filter is INCOMPLETE, and every sample of an incomplete texture returns (0,0,0,1) --
+silently, with no GL error and no console warning. THAT is why it compiled, linked, ran at a steady
+60 fps and drew a flat rectangle. The extension is now requested and the filter chosen from the
+answer, exactly as EXT_float_blend already was two shaders away in the same file.
+
+THE DEEPER FAILURE IS MINE AND IT IS NOT THE FILTER. I had no way to tell "the pipeline is broken"
+from "the field is boring", because NOTHING IN THE DEMO EVER LOOKED AT A VALUE. Every other page in
+this repo carries a PASS table that checks itself against a reference; the demo carried a frame
+counter, which reports 60 fps just as happily when every texture reads zero. I shipped the one
+artifact without the discipline the rest of the repo runs on, twice, one message after writing a
+guide that says differential testing is the method.
+
+FIXED BOTH WAYS: the filter, and a STARTUP SELF-CHECK that reads back the frequency table and a
+sample of particle positions ONCE and says so on the page -- "table ok (max |freq| 12.7)" or
+"TABLE READS ZERO -- the field will be flat". One readback, at startup, never per frame. A demo that
+cannot tell broken from boring wastes the viewer's time and the author's.
+
+THE GENERAL RULE, worth more than the demo: IN WebGL, A SILENT ZERO IS THE DEFAULT FAILURE MODE.
+Incomplete textures read (0,0,0,1); blending to an unsupported float target writes zeros; a uniform
+the shader does not read does not exist. None of these raise. Anything that samples a texture it
+did not create in the same function should check that the texture is complete, and any page that
+draws should assert on a value rather than on a frame count.
+
+## CLOTH: PHYSICS YOU CAN DRAG -- AND A CHECKER THAT FINALLY VALIDATES WHAT THE BROWSER COMPILES
+
+pages/cloth_demo.html: 4,096 particles, 8,064 distance constraints, position-based dynamics solved
+entirely on the GPU. Predict, then per iteration scatter every constraint's correction to both
+endpoints by additive blending and apply the average. Drag it; toggle wind; change the pin mode and
+the iteration count. This is the kernel that measures 51x against NumPy on an A4500.
+
+IT CARRIES THE DIFFERENTIAL TEST THE OTHER DEMO SHIPPED WITHOUT, and the test is the point: on load
+it runs FOUR SOLVER ITERATIONS ON THE GPU and the SAME Jacobi scheme in JavaScript from the same
+state, compares every particle, and reports the constraint residual before and after. Three lines
+on the page: float blending present, GPU == CPU Jacobi with max |diff|, and residual FALLS from x
+to y. A PHYSICS DEMO THAT CANNOT TELL "STABLE" FROM "FROZEN" IS A SCREENSAVER.
+
+THE CHECKER WAS VALIDATING TEXT NO COMPILER WILL EVER SEE. The cloth shaders are JS template
+literals carrying ${N} and ${REST.toFixed(8)}; the browser interpolates before compiling and my
+extractor did not, so it compiled the raw source and reported four syntax errors that do not exist.
+Fixed by substituting the same values the page will -- and the corrected checker IMMEDIATELY FOUND
+A REAL BUG the old one could not see: VS_SCATTER declared a `usampler2D` with NO PRECISION
+QUALIFIER, which is a compile error in ES 3.00 and it is the shader that does the solving.
+
+THEN THE SAME SCAN FOUND THE FIELD DEMO'S THIRD BUG. VS_SPLAT samples `uPos` with no precision
+qualifier either. MESA ACCEPTS THE OMISSION -- which is why my checker passed that page four times
+-- but ES 3.00 gives samplers NO default precision in a vertex shader, so ANGLE is entitled to
+reject it, and a rejected splat program draws exactly nothing while the page keeps reporting 60 fps.
+That is a better explanation of "blank canvas" than either of the two I proposed, and it was
+invisible because my instrument was more permissive than the target. A CHECK THAT IS LOOSER THAN
+PRODUCTION IS NOT A CHECK.
+
+Shipped as tools/check_pages.py so it is not a one-off: it interpolates, compiles, LINKS, and
+syntax-checks the JS for every demo page. Both pages now report LINK / js ok.
+
+Also: the field demo now REPORTS a compile or link failure on the page instead of throwing into the
+console, because a page that animates at 60 fps with nothing on it is the worst possible error
+message.
+
+FOURTH HARNESS ERROR IN THE SAME HOUR, worth naming as a class: I put the checker in a shell `-c`
+string, the `${N}` got backslash-escaped, the substitution never matched, and it reported the cloth
+shaders BROKEN when they compile fine. Backtick inside a template literal, apostrophe inside a repr,
+`${}` inside shell quotes -- SAME BUG THREE TIMES: A DELIMITER SPLICED INTO A QUOTED BODY. The
+checker now lives in a file.
+
+## THE CLOTH STRETCHED AND FELL OFF SCREEN: TWO ARITHMETIC BUGS, BOTH FINDABLE WITHOUT A BROWSER
+
+Reported: stretches forever, then falls off screen. Both diagnosed by arithmetic before touching a
+shader, which is what the previous two rounds should have done.
+
+ 1. GRAVITY WAS 120x TOO STRONG. The integrator is VERLET, where `v` is a DISPLACEMENT per step, not
+    a velocity -- so an acceleration must enter as a*dt*dt. I wrote a*dt, which at 60 Hz with the
+    demo's halved step is 0.010 world units per frame against a correct 0.000083. In a [-1,1] world
+    that leaves the screen in about 200 steps, exactly as observed. THE OBVIOUS-LOOKING FORM IS THE
+    WRONG ONE, and dimensional analysis catches it in one line.
+
+ 2. ITERATIONS CANNOT MAKE A JACOBI SHEET STIFF. A correction travels ONE CELL PER ITERATION, so a
+    48-wide sheet needs ~48 iterations before the pinned edge is felt at the far corner. At 16 it
+    never converges and hangs stretched no matter how long you wait.
+
+SETTLED IN NUMPY BEFORE WRITING ANY GLSL -- the step both previous demos skipped:
+    substeps  iters   rel residual   verdict
+    1         16      0.0693         stretchy
+    1         40      0.1140         stretchy (WORSE than 16 -- more iterations is not more stiffness)
+    4         10      0.0267         holds
+    8         6       0.0105         holds
+    12        4       0.0068         holds
+SUBSTEPS, NOT ITERATIONS. Substepping never lets the sheet get far from satisfied in the first
+place, so the propagation limit stops mattering. That one substep with 40 iterations is WORSE than
+16 is the result worth keeping: it refutes the instinct that drove the original design.
+
+REWRITTEN with correct Verlet, 8 substeps x 6 iterations, a FIXED timestep (a frame-rate-dependent
+dt behaves differently on every machine and turns one dropped frame into an explosion), and a
+constraint set that is now STRUCTURAL + SHEAR + BEND -- 13,346 constraints, because structural
+alone shears into a parallelogram and has no bending stiffness, which reads as a fishing net rather
+than fabric. Rest lengths differ per type so they travel in a texture. Drawn as a shaded triangle
+mesh with normals from the local compression instead of a point cloud.
+
+VERIFIED THE WAY IT SHOULD HAVE BEEN THE FIRST TIME: the demo's EXACT parameters run through the
+NumPy reference for TEN SIMULATED SECONDS -- two corners, residual 0.0147, lowest point -0.316, all
+finite, ON SCREEN; top edge, residual 0.0050. Plus the in-page self-check against a JS reference.
+
+THREE MORE HARNESS FAILURES, all in the checker rather than the artifact:
+  * The extractor required `const X = \x60` with spaces; the rewrite used `const VSQ=\x60`, so it found
+    NO shaders and then KeyErrored. It now matches either and REPORTS "CANNOT FIND" as a failure --
+    a checker that cannot locate what it was told to check must say so, not crash and not pass.
+  * It could not evaluate `${(0.9/(N-1)).toFixed(8)}` because that is a JS method call. Rather than
+    teach the checker JavaScript, the shader now takes the spacing as a UNIFORM. FEWER TEMPLATE
+    PLACEHOLDERS IS STRICTLY BETTER: every one is a chance for the checker and the browser to
+    compile different text.
+  * It now reads N from the page instead of a hardcoded map, so changing the grid cannot silently
+    make it validate the wrong source.
+
+## "SLOWER AND WORSE" -- BOTH TRUE, BOTH MEASURED, AND THE SECOND ONE HAD A REAL BUG UNDER IT
+
+Took the complaint literally and measured both halves instead of adjusting to taste.
+
+SLOWER, and not subtly. The stiffness rewrite went from 8,064 constraints x 16 iterations x 1
+substep = 258,048 corrections per frame to 13,346 x 6 x 8 = 1,281,216. FIVE TIMES THE WORK, and
+draw calls 33 -> 104. I bought stiffness with a 5x bill and never checked the bill.
+
+WORSE, and this is a genuine bug, not a preference: DAMPING COMPOUNDS PER SUBSTEP. The factor 0.996
+was applied once per substep, so at 8 substeps the sheet retained 0.996^8 = 0.968 of its motion per
+frame instead of 0.996 -- EIGHT TIMES THE INTENDED DAMPING. It looked dead because it was dead.
+Damping is a per-FRAME quantity; the per-substep factor is its root, and the shader now takes it as
+a uniform computed as pow(0.999, 1/substeps).
+
+SWEPT THE PARAMETER SPACE rather than guessing a replacement, scoring on three axes at once --
+work, residual, and motion still present after four seconds:
+    N   bend  sub  it   constraints   work/frame   residual  motion@4s
+    48  yes   8    6    13,346        1,281,216    0.0515    0.00175    <- shipped
+    48  no    8    6     8,930          857,280    0.0585    0.00311
+    40  yes   6    5     9,202          552,120    0.0510    0.00404    <- chosen
+    40  no    6    5     6,162          369,720    0.1058    0.00180    (too stretchy)
+    36  yes   6    6     7,418          534,096    0.0190    0.00331
+CHOSEN 40 x 40, 6 substeps x 5 iterations: 2.3x LESS WORK than what I shipped, and the liveliest
+motion of anything that met the stiffness bar. Dropping the bend constraints saves a third of the
+work and doubles the residual -- kept, and now on record as a measured trade rather than a hunch.
+
+Verified at the shipped parameters over TEN simulated seconds: two corners residual 0.031 / sag
+-0.342, top edge 0.019 / -0.305, and released from a 0.4 pull 0.087 / -0.424 with motion still
+0.0012 at ten seconds -- it swings and keeps swinging. All finite.
+
+Also fixed while there: the weave pattern ran 150 cycles across the sheet, which at 40 texels wide
+is pure aliasing. Tied to the grid, one cycle per cell.
+
+THE LESSON I KEEP RE-LEARNING IN THIS DEMO: I fixed "stretches" without measuring what the fix
+cost, then shipped it. A fix with no cost measurement is half a change. The sweep above took two
+minutes and would have caught it before the user did.
+
+## 14 FPS ON AN A4500 WITH A 40x40 BUFFER: THE GPU WAS IDLE AND I WAS TALKING TO THE DRIVER
+
+The user cranked the sliders to 12x12 and got 14 fps. That is not a GPU result -- the simulation
+buffer is 40x40, which is 1,600 texels, and an A4500 does 2.65 million constraint corrections
+without noticing. Counted the CPU-side API calls instead:
+
+    draw calls per frame            300
+    gl.getUniformLocation per frame 1,224   <-- IN THE HOT LOOP
+    at 60 fps: 73,440 driver string lookups per second
+
+gl.getUniformLocation IS A SYNCHRONOUS STRING LOOKUP INTO THE DRIVER and I called it on every draw
+of every pass, in all four programs. This is the single most documented WebGL hot-loop mistake and
+I made it everywhere. Locations are now looked up ONCE at program creation.
+
+AND THE FRAMING WAS ARITHMETIC I NEVER DID: the sheet is 0.9 wide in a [-1,1] clip space, divided
+by a 1.60 aspect, so it occupied 28% of the canvas width and sat as a postage stamp on a black
+field. Scaled to fill the frame -- and the PICKING now undoes exactly the same transform, because a
+grab that lands on a different particle than the one under the cursor feels like broken physics
+when it is a broken camera.
+
+Also caught before it shipped: VIEW_SCALE was declared next to pick() but read by draw() on frame
+one, and a `const` is in the TEMPORAL DEAD ZONE until its declaration runs -- the first frame would
+have thrown. Hoisted.
+
+THE HONEST PART. The user's comparison is fair: three.js would look better than this, by a lot, and
+it is not close. What three.js gives you is a renderer -- materials, lighting, shadows, tone
+mapping, antialiasing -- built by people who do only that. THIS DEMO IS NOT A RENDERER AND SHOULD
+NOT PRETEND TO BE ONE. Its claim is the SOLVER: 9,202 constraints stepped entirely on the GPU with
+its own correctness check against a CPU reference on screen. That claim is worth making and the
+rendering around it is worth being modest about. If the goal is something that impresses on looks,
+the right move is to feed these positions INTO three.js as a BufferGeometry and let it shade them,
+not to keep hand-rolling lighting in a demo whose point is the physics.
+
+## SPIKES AND BEIGE: THREE DEFECTS, TWO PROVABLE FROM ARITHMETIC, AND I FIXED THE WRONG ONE FIRST
+
+The user's screenshot: a flat beige square with spikes radiating out, floating fragments, 15 fps.
+And his own diagnosis -- "it worked better before you tried meshing it" -- which is the strongest
+evidence available and I should weight it above my theories.
+
+ 1. THE EDGE TEXTURE WAS 18,404 TEXELS WIDE. GL_MAX_TEXTURE_SIZE is 16,384 on a great many drivers;
+    past it texImage2D fails with INVALID_VALUE, the texture is INCOMPLETE, and EVERY FETCH RETURNS
+    ZERO with no error -- so every constraint pulls toward particle 0 and draws as spikes radiating
+    from one point. It happens to FIT on an A4500 (limit 32,768), which is worse than failing
+    everywhere. I WROTE THE FLAT-ADDRESSING RULE IN THE GLSL GUIDE AND THEN BROKE IT IN THE DEMO.
+    Both tables now pack to 1024-wide grids.
+
+ 2. THE PALETTE ASKED FOR MUD. base = mix(blue(0.16,0.34,0.62), orange(0.95,0.58,0.30), vS*0.5+0.5),
+    and an unstretched sheet has vS = 0, so EVERY vertex sat at the exact midpoint (0.56,0.46,0.46)
+    -- the beige in the screenshot. Mixing complementary colours puts the rest state at the ugliest
+    point on the ramp. One hue now, varied in lightness, warming only under real stretch.
+
+ 3. I OPTIMISED THE WRONG THING. Caching the uniform locations was worth doing and was NOT the
+    bottleneck: at 12x12 the demo issues 300 DRAW CALLS PER FRAME, which is 18,000/sec at 60 fps,
+    and WebGL tops out around 10-20k/sec once FBO switches are involved. 12x12 cannot reach 60 fps
+    on any hardware and no micro-optimisation changes that. The status line now shows draw calls per
+    frame so the sliders' cost is legible instead of mysterious.
+
+REVERTED THE MESH AS THE DEFAULT. The user compared the two directly and the point view read
+better; the mesh stays behind the toggle. My fake normals were derived from in-plane compression
+because a 2D sheet has no z to shade -- that was always a hack, and a hack that loses to a plain
+point cloud should not be the thing people see first.
+
+ADDED THE DIAGNOSTIC THAT WOULD HAVE ANSWERED THIS WITHOUT A SCREENSHOT: the self-check now reads
+back the first sixteen edge indices and compares them to what was uploaded, and counts particles
+outside the sheet's own extent. An incomplete edge table and a diverging solver both draw as spikes;
+only a readback tells them apart. I spent this round guessing between three theories that a single
+readback would have settled.
+
+## THE CLOTH STOPPED SOLVING ENTIRELY, AND IT WAS INSTRUMENT ERROR 31 AGAIN
+
+Three symptoms reported: pins do not hold, iterations and substeps change nothing, a grabbed point
+stretches without resistance. THREE SYMPTOMS, ONE CAUSE -- the constraint solver was computing
+nothing at all. Iterations and substeps only change how many times nothing happens; a pinned
+particle gets dragged by nonsense corrections; a grabbed point meets no resistance because no
+constraint is acting on it.
+
+THE CAUSE IS MY OWN INSTRUMENT ERROR 31, WHICH IS IN THIS FILE: A str.replace WITH NO ASSERT IS A
+SILENT NO-OP. When I flattened the edge/rest textures I added `uniform int uEW,uRW;` to the shader
+and wrote an edit to set them -- but I anchored on `'  gl.uniform1i(uScat.uRest,2);'` with two
+leading spaces, and that call sits MID-LINE after activeTexture/bindTexture. The replacement never
+matched. uEW and uRW stayed unset, which means 0. The shader then computes (2*c) % 0, and INTEGER
+DIVISION BY ZERO IS UNDEFINED IN GLSL, so every constraint read a garbage index. The page compiled,
+linked, passed the JS syntax check and ran at full speed, computing nothing.
+
+THREE FIXES, in increasing order of how much they matter:
+ 1. The uniforms are set, and the edit that sets them was asserted this time.
+ 2. `locs()` now REPORTS any uniform it could not find. gl.uniform*(null, ...) is SILENTLY IGNORED,
+    so a uniform that was never looked up -- or was eliminated because the shader does not read it --
+    keeps its default of 0 forever. That silence is the whole reason this survived every check.
+ 3. THE SELF-CHECK NOW TESTS THE USER'S ACTUAL COMPLAINT. It pulls one interior particle 0.30 out of
+    place, runs eight iterations, and asserts BOTH that the particle is dragged back AND that its
+    neighbour is dragged toward it. "CONSTRAINTS ARE NOT ACTING" now appears on the page. Every
+    check I had -- shaders compile, programs link, GPU matches CPU, residual falls -- was run on a
+    state I overwrote immediately afterwards, so none of them exercised the live loop.
+
+Verified the addressing independently: all 9,202 constraints recover their exact indices and rest
+lengths through the shader's modulo arithmetic against a 1024-wide packing, and the largest particle
+index referenced is 1,599 in a grid of 1,600.
+
+THE PATTERN ACROSS THIS WHOLE DEMO, WORTH MORE THAN THE DEMO: every failure has been a SILENT ZERO.
+An incomplete texture reads zero. An unset uniform is zero. A null uniform location swallows the
+write. Division by zero is undefined rather than fatal. NONE OF THEM RAISE. In WebGL the default
+failure mode is not a crash, it is a plausible-looking wrong answer at full frame rate -- so every
+value that matters has to be read back and asserted at least once, and I have now paid for that
+lesson five times in one file.
+
+## NEVER SETTLES, GRAVITY INERT, WIND UNREADABLE -- ALL THREE MEASURED, AND ONE WAS NOT A BUG
+
+ 1. NEVER STOPS MOVING -- I ASKED FOR THAT. The sweep two rounds ago scored candidates on "motion
+    still present at four seconds" and I picked the liveliest config that met the stiffness bar.
+    0.999 per frame decays to 0.94 per SECOND, a ~16 s time constant, which reads as perpetual
+    jitter. Re-scored on TIME TO SETTLE:
+        damp/frame  decay/sec  settles   motion@1s   verdict
+        0.999       0.942      6.4 s     0.0039      still moving
+        0.995       0.740      4.9 s     0.0038      still moving
+        0.980       0.298      2.9 s     0.0025      SETTLES, still swings
+    Shipped 0.98. A METRIC YOU CHOOSE IS A BEHAVIOUR YOU GET, and I chose the wrong one.
+
+ 2. GRAVITY WAS NEVER BROKEN -- THE SETUP WAS. A square inextensible cloth pinned at its own two top
+    corners STARTS IN EQUILIBRIUM: it is already at full extension at t=0, so gravity has nowhere to
+    take it. Measured fall from a hanging start: 0.080. Narrowing the pin gap from 0.90 to 0.30
+    barely moved it (0.076 to 0.114), because the vertical extent is set by the sheet's own height,
+    not the pin spacing. Started as a FLAG instead -- the pinned row mapped to a VERTICAL edge with
+    the cloth extending sideways -- and the measured fall is 0.400, FIVE TIMES as visible, with the
+    same solver and the same gravity. View scale dropped 1.85 -> 1.42 because a 0.9 pinned edge plus
+    a 0.40 fall needs 1.3 of vertical room and 1.85 only showed 1.08.
+
+ 3. WIND HAD NO DIRECTION TO SHOW. The field was pure turbulence -- sin(y)*cos(x) with no global
+    vector -- so there was nothing an arrow could honestly point at. It is now a COHERENT GUST that
+    drifts in bearing and strength, with turbulence layered on top, and it is DRAWN: an arrow plus a
+    strength bar in the corner, and a "wind 37 deg at 0.82" readout in the status line. A CONTROL
+    WHOSE STATE YOU CANNOT SEE IS A CONTROL YOU CANNOT USE, which is precisely what was reported.
+
+Five programs now, all compiling and linking, and tools/check_pages.py was updated to cover the new
+arrow program rather than being left to drift behind the page again.
+
+## SEARCHED THE 2026 LANDSCAPE BEFORE CLAIMING ANYTHING, AND THE SEARCH KILLED THE HEADLINE
+
+Asked to show off the framework's strength against three.js, so I checked what exists first. What
+exists, as of 2026:
+  * three.js ships an OFFICIAL WebGPU compute-cloth example (Verlet in compute shaders).
+  * Mature WebGPU XPBD cloth simulators are common -- jspdown/cloth, ccincotti3, nakjun.
+  * WebGPU has ~95% browser coverage since Safari 26 (Sept 2025); three.js r171+ has a
+    production WebGPU renderer and r184 (March 2026) cut per-frame allocations.
+  * The standard reference states plainly that WebGL 2 has NO COMPUTE STAGE, so WebGL-only projects
+    fall back to float textures plus full-screen fragment passes -- and that this fallback
+    "can't do arbitrary writes".
+
+SO THE HONEST HEADLINE IS NOT "BETTER THAN THREE.JS CLOTH". It is not better, and saying so would
+have been exactly the bold claim that does not survive contact. A compute shader with atomics is the
+right tool for this job and three.js gives you a renderer besides.
+
+WHAT SURVIVES IS NARROWER AND SHARPER, and it is the one place the literature's own description is
+incomplete: THIS PAGE DOES ARBITRARY WRITES ON THE WEBGL 2 FALLBACK PATH. Each constraint emits a
+POINT PRIMITIVE from the VERTEX stage onto the particle it corrects, and additive blending performs
+the scatter-add in hardware. That is a solver, not an update rule, running where the reference says
+you cannot have one. leCore uses the same primitive for its inverted-index scorer and its resonator;
+cloth is the graspable version of it.
+
+The second difference is bookkeeping rather than graphics: the page CHECKS ITS OWN SOLVER against a
+JS reference, and the kernel it runs is the catalogued one whose verification note carries measured
+numbers (2.407e-06 rel, 51x on an A4500, residual falling identically on both paths).
+
+ALSO DONE THIS ROUND:
+  * UI rebuilt as labelled control groups with segmented toggles instead of a wrapped row of
+    cycling buttons whose state you had to read off their own labels.
+  * FOUR PIN MODES -- top edge, top corners, side edge, side corners -- sharing ONE `pinned()`
+    function used by both predict and apply, so the two cannot drift apart. The unpinned mode is
+    GONE: an unpinned cloth leaves the screen and never returns, which is not a mode, it is a bug
+    you can select. Changing pin mode re-seats the cloth, because a pin change otherwise leaves it
+    stretched from its old anchor.
+  * WIND IN EVERY DIRECTION. The old form multiplied the y component by 0.35, so it could only ever
+    blow roughly sideways -- a bias in the code, not in the physics. The bearing now sweeps the full
+    circle and the arrow shows it.
+
+BACKLOG: the demo still hand-writes its shader instead of pulling mind.glsl_kernel('pbd_scatter_vs')
+from the catalog at generation time. Until it does, "it runs leCore's verified kernel" is a claim
+about a lookalike. That wiring is the next honest step and it is not done.
+
+## leCore x three.js: STOP COMPETING WITH THE RENDERER, FILL THE HOLE IT LEAVES
+
+pages/cloth_three.html, generated by research/shader_retrieval/make_cloth_three.py. THREE.JS
+RENDERS, leCORE SOLVES -- and the split is not a compromise, it is the actual argument.
+
+WHY THERE IS A HOLE TO FILL, checked against the 2026 landscape rather than assumed: three.js ships
+an official WebGPU compute-cloth example and several mature WebGPU XPBD simulators exist, but WEBGL 2
+HAS NO COMPUTE STAGE. On the fallback path three.js has no cloth solver at all, and the standard
+reference says that fallback "can't do arbitrary writes". leCore's scatter-add does them anyway --
+one POINT PRIMITIVE per constraint from the VERTEX stage, summed by additive blending in hardware.
+That is what makes a SOLVER, not merely an update rule, expressible there.
+
+THE PHYSICS NOW COMES FROM THE ENGINE, WHICH IS THE PART THAT WAS MISSING. Last round's demo
+hand-wrote a lookalike; this one pulls `mind.glsl_kernel('pbd_scatter_vs')` from the catalog at
+BUILD time and embeds the source AND its verification note in the page, so the claim on screen is
+the engine's measured claim. The f64 reference the page checks itself against is computed by the
+engine too.
+
+RENDERING IS THREE.JS'S JOB AND IT DOES IT PROPERLY: MeshStandardMaterial patched via
+onBeforeCompile to take vertex positions from the solver's render target, real lights, shadow maps,
+ACES tone mapping, sRGB output. No more hand-rolled fake normals -- that was always a hack losing to
+a point cloud.
+
+SELF-CONTAINED, WHICH TOOK MORE WORK THAN THE PHYSICS. The pages must open from file:// with no
+network, and three.js ships only ES modules split across three.module.min.js + three.core.min.js.
+The two MINIFIED halves cannot be concatenated -- both declare `e` at top level -- so each is wrapped
+in its own function scope, the core's exports become a return value and the module's imports a
+destructure. THREE FORMS had to be handled and assuming one of each broke three attempts:
+`import{...}from"./core"`, `export{...}`, and a RE-EXPORT `export{...}from"./core"` which looks like
+an export to a naive regex and leaves `from"..."` dangling. tools/build_three_inline.py does it
+reproducibly and FAILS if any symbol the pages use is missing. Result: three r185, 739 KB, ZERO
+network references in the page.
+
+Instrument error: the generator's ROOT was two dirname() calls up when the script sits three levels
+deep, so it looked for the vendor file under research/. Root discovery now walks up until it finds
+lecore.py -- anchoring on a known file rather than counting directories.
+
+tools/check_pages.py extended: it now also validates the raw GLSL 300 es pair in cloth_three.html
+(the three.js ShaderMaterial bodies are prefixed by three at compile time and a bare compiler cannot
+judge them) and asserts ZERO network references, since a page that quietly needs a CDN is not a page
+that opens from file://.
+
+STILL TRUE AND STILL WORTH SAYING: this is not a better cloth simulator than three.js's WebGPU
+example. It is a solver for the path that example cannot reach, wearing that example's renderer.
+
+## THE THREE.JS PAGE FAILED IN THE BROWSER AND MY CHECK PASSED IT -- BECAUSE THE CHECK WAS STANDALONE
+
+Reported: `#version directive must occur before anything else` on both halves of the solver, and a
+deprecation warning for PCFSoftShadowMap.
+
+THE BUG: three.js PREPENDS ITS OWN DEFINES to every material's source -- `#define SHADER_TYPE
+RawShaderMaterial`, `#define SHADER_NAME` -- including for RawShaderMaterial. A `#version 300 es`
+written into the shader body is therefore no longer the first line, and GLSL rejects it. The
+supported route is `glslVersion: THREE.GLSL3` with NO version line in the source; three emits the
+directive itself, in the right place. Fixed, and PCFSoftShadowMap -> PCFShadowMap (deprecated in
+r185).
+
+THE REAL FAILURE IS MINE AND IT IS THE SAME SHAPE AS TWO ROUNDS AGO. My compiler check compiled the
+kernel STANDALONE, with `#version` as line one -- which is not the environment three.js compiles it
+in. It passed a shader that could never compile in the actual page. A CHECK THAT DOES NOT MODEL THE
+COMPILATION ENVIRONMENT IS NOT A CHECK; it is a check of a different program that happens to share
+the source text. The earlier version of this same mistake was validating un-interpolated template
+literals.
+
+tools/check_pages.py now prepends THREE'S OWN PROLOGUE before compiling, and refuses any shader that
+carries its own `#version` line.
+
+AND I PROVED THE CHECK FAILS ON THE BUG IT SHIPPED, because a check nobody has watched fail is a
+check nobody should trust. Reinstated the version line in a copy of the page and ran the checker
+against it: first attempt CRASHED with an AttributeError instead of reporting, because with the
+version line prepended the marker no longer started the template literal and the regex missed. That
+is a failure, but a useless one. Now it matches the whole literal CONTAINING the marker and prints
+"SHADER CARRIES ITS OWN #version -- three.js prepends defines, so it will be rejected". Verified
+against the deliberately broken copy.
+
+## THE THREE.JS CLOTH REGRESSED BECAUSE AdditiveBlending IS NOT ONE/ONE
+
+Reported: no errors, but the cloth stopped behaving like cloth -- a regression from the raw-WebGL
+page. Found in the vendored three.js source rather than by guessing:
+
+    AdditiveBlending WITH premultipliedAlpha    -> blendFunc(ONE, ONE)
+    AdditiveBlending WITHOUT premultipliedAlpha -> blendFuncSeparate(SRC_ALPHA, ONE, ONE, ONE)
+
+The raw page set `gl.blendFunc(ONE, ONE)` explicitly. The three.js port asked for
+`THREE.AdditiveBlending` on a material with default premultipliedAlpha, so the factor was SRC_ALPHA
+-- and the scatter fragment writes `vec4(vD, 0.0)`. ALPHA ZERO. EVERY CONSTRAINT CORRECTION WAS
+MULTIPLIED BY ZERO. The cloth was running Verlet with gravity and NO CONSTRAINTS AT ALL, which is
+exactly "not behaving like cloth", and it produced no error because multiplying by zero never does.
+
+Fixed with CustomBlending and explicit ONE/ONE on colour AND alpha. THE LESSON GENERALISES BEYOND
+THIS BUG: a named preset in a library means what THAT library decided it means. A scatter-add needs
+EXACT FACTORS, and porting a raw-GL call to a framework preset is a silent semantic change unless
+you read the framework's source. I did not, and it cost a working demo.
+
+TWO MORE DEFECTS FOUND WHILE FIXING IT:
+
+ 1. THE SELF-CHECK'S "NO PIN" MODE WAS PINNING. `pinned()` ended in a bare `return sideEdge && ...`,
+    so the check's sentinel value fell through to the side-corner branch and its probe particle was
+    held in place. Now `m>=4` returns false explicitly. A CHECK THAT RUNS IN A DIFFERENT STATE THAN
+    IT CLAIMS IS NOT A CHECK.
+
+ 2. THE REFERENCE STATE WAS A TERRIBLE TEST. It was a uniform 45% stretch -- which is nearly a
+    rigid-body scale, so every constraint is violated by the same ratio, the Jacobi corrections
+    mostly cancel, and the residual falls only 3.7% in four iterations (13% in thirty-two). The
+    page's "residual falls by 10%" assertion would have CRIED WOLF even with a perfect solver.
+    Replaced with ONE INTERIOR PARTICLE PULLED 0.30 OUT OF PLACE: residual 0.4200 -> 0.0577 in the
+    same four iterations, an 86% drop, and it is what a user actually does when they grab the cloth.
+    The page now checks every particle against the f64 solution from that same state, and asserts
+    both that the pulled particle recovers and that its neighbour is dragged along.
+
+A CHECK THAT CRIES WOLF GETS IGNORED, WHICH IS WORSE THAN NO CHECK -- and this one would have been
+crying wolf beside a genuinely broken solver, which is the worst possible combination.
+
+## READ THE THREE.JS COMPUTE-CLOTH SOURCE. IT IS BETTER THAN MINE, AND IT SHOWS ME MY OWN MISTAKE
+
+Fetched mrdoob/three.js examples/webgpu_compute_cloth.html and read the solver rather than guessing.
+582 lines total, 339 code lines, and THE ENTIRE SOLVER IS ~50 LINES OF TSL IN TWO COMPUTE PASSES.
+The rest is scene, HDR environment, OrbitControls, Inspector -- polish I am not competing with.
+
+THE ARCHITECTURAL POINT, AND IT IS THE ONE THAT MATTERS: THEY DO NOT SCATTER AT ALL.
+  pass 1  one thread per SPRING -> writes that spring's force to springForceBuffer[springId]
+  pass 2  one thread per VERTEX -> GATHERS over its own spring list (a CSR: pointer + count),
+          signing each force with select(springVertexIds.x == instanceIndex, +1, -1)
+A per-vertex adjacency list turns the scatter into a GATHER. That needs no atomics, no blending, no
+EXT_float_blend, no accumulation buffer, no count channel, and NO SEPARATE APPLY PASS -- and it works
+just as well in a FRAGMENT shader, so it is not even a WebGPU-only trick.
+
+THAT ONE CHANGE WOULD HAVE PREVENTED THREE OF THE BUGS I SHIPPED THIS WEEK: the missing
+EXT_float_blend branch, AdditiveBlending silently being SRC_ALPHA/ONE against an alpha-0 fragment,
+and the divide-by-count. I reached for the scatter-add because it is leCore's signature primitive,
+and I never asked whether the problem needed it. THE ANSWER TO "WHICH LEVER" IS NOT ALWAYS "THE ONE
+I AM PROUD OF."
+
+WHERE leCORE IS GENUINELY BETTER, MEASURED ON IDENTICAL GEOMETRY (40x40, 9,202 constraints, 600
+frames, pinned edge):
+    stiffness   explicit springs (their method)   PBD projection (leCore)
+    0.05        stable                            stable
+    0.20        stable                            stable
+    0.50        stable                            stable
+    1.00        EXPLODED at frame 24              stable
+    1.50        EXPLODED at frame 12              stable
+    2.00        EXPLODED at frame  9              stable
+Their solver is an EXPLICIT mass-spring force integrator, which is CONDITIONALLY stable: there is a
+stiffness above which it blows up, and it is not far above their default. PBD projection is
+unconditionally stable -- you can ask for inextensible cloth and get it. That is a real, measurable
+improvement and it is the ONLY one I am willing to claim.
+
+SO THE HONEST ANSWER TO "CAN leCORE IMPROVE ON IT, WITH LESS CODE":
+  * LESS CODE: no. Their solver is ~50 lines and already minimal. Adopting THEIR CSR-gather
+    structure makes MY code smaller, not the other way round.
+  * BETTER: yes, in exactly one respect -- unconditional stability under stiffness. Not rendering,
+    not polish, not line count.
+  * THE RIGHT MOVE is a hybrid: their gather structure, our projection method. One fragment pass per
+    iteration, no blending, no float-blend dependency, unconditionally stable at any stiffness.
+    That is strictly smaller than what I have now AND better behaved than theirs at high stiffness.
+
+BACKLOG: rebuild the cloth solver as a CSR GATHER with PBD projection. It deletes the scatter pass,
+the accumulation target, the count channel, the blending configuration and the float-blend branch --
+and it is the shape the comparison says is right, not the shape that flatters the framework.
+
+## STOP DEMOING CLOTH. THE SUPERPOWER IS ZERO-BYTE CONTENT, AND THE THREE.JS SOURCE TAUGHT US TWO THINGS
+
+WAS UNCONDITIONAL STABILITY THE BEST WE HAD? Yes, and that is the point: it is a footnote. leCore is
+not a physics engine, three.js's cloth is already good, and competing there is a category error. A
+demo whose best claim is "ours does not explode at stiffness 1.5" is a demo that should not exist.
+
+WHAT leCORE ACTUALLY HAS THAT three.js DOES NOT -- and the number that decides it:
+    1,000 atoms at dim 256  stored as f32:   1.0 MB   leCore ships: 0 bytes
+   10,000 atoms at dim 512  stored as f32:  20.5 MB   leCore ships: 0 bytes
+  100,000 atoms at dim 1024 stored as f32: 409.6 MB   leCore ships: 0 bytes
+ATOMS ARE FUNCTIONS OF THEIR NAMES. Verified all session and not a claim: the search page ships a
+6,767-term vocabulary as ZERO BYTES, and the field demo invents a wave for a word that has never
+existed, deterministically, identically in NumPy, JS and GLSL. THE WEB'S 3D PROBLEM IS ASSET WEIGHT
+-- the industry's own 2026 framing is "models under 500MB belong in three.js" -- and leCore's core
+trick is content that is COMPUTED rather than SHIPPED. That is the demo: a scene with no downloads,
+where naming a thing is enough to have it, at any scale, bit-identically on every machine.
+
+TWO THINGS FROM THEIR SOURCE THAT IMPROVE OUR CORE:
+
+ 1. THE SCATTER/GATHER DUALITY, AND IT HALVES OUR OWN KERNEL. Our PBD scatter runs one invocation
+    per constraint ENDPOINT -- 18,404 for 9,202 constraints -- and EACH ONE RECOMPUTES THE SAME
+    delta, length and correction. Their split computes each spring's force ONCE (9,202 threads) and
+    gathers it per vertex through a CSR adjacency (1,600 threads). Exactly 2.0x less constraint
+    math per iteration, and it deletes the blending, the accumulation target and the count channel
+    along with it. THE CORRECTION IS SYMMETRIC AND WE WERE COMPUTING BOTH HALVES SEPARATELY.
+
+ 2. WHERE THE GATHER DOES *NOT* APPLY, measured so nobody generalises it wrongly. Our other scatter
+    users are the BM25 inverted index and the resonator. For BM25: a 3-term query over 5,000 docs
+    and 469,370 postings touches 129 distinct documents, so a per-document CSR would gather only
+    those 129 -- except that BUILDING THE CANDIDATE SET *IS* THE SCATTER. The gather wins when the
+    adjacency is STATIC (cloth: the springs never change) and cannot help when it is
+    QUERY-DEPENDENT (retrieval: the postings differ every query). KEPT NEGATIVE, and it is the
+    difference between a lever and a fashion.
+
+ALSO WORTH STEALING: they call `.setPBO(true)` on exactly the buffers that need pixel-buffer-object
+handling on the WebGL fallback path -- an explicit, per-buffer portability marker rather than a
+global mode. That is the right shape for our WGSL port, where three of nine kernels need a different
+implementation and the difference is currently only in prose.
+
+BACKLOG:
+  NEW G12 -- rebuild the PBD kernel as compute-once + CSR gather. 2.0x less constraint math, no
+       blending, no accumulation target, no count channel, no EXT_float_blend dependency. Measured,
+       not hoped.
+  NEW D-series -- the demo that is actually ours: a three.js scene with ZERO downloaded assets,
+       every object, material and placement a deterministic function of a name. The comparison
+       against a glTF of the same scene is a byte count, which is the only kind of claim that
+       survives contact.
+
+## BACKLOG FROM THE CLOTH ARC, AND WHERE TO POINT leCORE AT three.js NEXT
+
+### PART 1 -- WHAT THE CLOTH WORK ACTUALLY TAUGHT, AS WORK ITEMS
+
+G12  COMPUTE-ONCE + CSR GATHER for the PBD kernel.                          [measured: 2.0x]
+     Our scatter runs one invocation per constraint ENDPOINT (18,404 for 9,202 constraints) and each
+     recomputes the SAME delta, length and correction. Split it: one thread per constraint writes
+     its correction once, one thread per particle gathers through a static adjacency. Deletes the
+     blending config, the accumulation target, the count channel and the EXT_float_blend branch.
+     ACCEPT: identical verdicts, 2.0x fewer constraint evaluations, no blending anywhere.
+
+G13  PER-BUFFER PORTABILITY MARKERS, stolen from their `.setPBO(true)`.
+     Three of our nine WGSL-bound kernels need a different implementation and that fact currently
+     lives only in prose. Mark it ON THE KERNEL, in the catalog entry, so a porter is told by the
+     data and not by a document they may not read.
+
+G14  A SCATTER/GATHER DECISION RULE in the levers module, with its negative attached.
+     The gather wins when the adjacency is STATIC. It cannot help when the adjacency is
+     QUERY-DEPENDENT -- measured: a 3-term query over 5,000 docs touches 129 distinct documents, but
+     BUILDING that candidate set IS the scatter. Without the negative this becomes a fashion.
+
+G15  ASSERT THE BLEND FACTORS, never a named preset. THREE.AdditiveBlending without
+     premultipliedAlpha is SRC_ALPHA/ONE, which silently zeroed every correction against an alpha-0
+     fragment. Any kernel whose correctness depends on exact blend factors must set them explicitly
+     AND the page must assert the resulting behaviour, not the requested mode.
+
+G16  RETIRE THE CLOTH DEMO AS A HEADLINE. Its best honest claim is "does not explode at stiffness
+     1.5". Keep it as a kernel test; stop presenting it as the showcase.
+
+### PART 2 -- WHERE leCORE COULD ACTUALLY TURBO-CHARGE three.js
+
+Pulled the real examples index (588 examples across 14 categories) rather than recalling it, then
+sorted BY leCORE'S MEASURED STRENGTHS instead of three.js's taxonomy. Rule 0 run on each: every
+candidate below already has a faculty, which is why they are candidates and not wishes.
+
+  A. ZERO-ASSET SCENES -- the headline, and the only one that is uniquely ours.
+     Targets: webgl_loader_3dtiles, webgl_loader_gltf_compressed, misc_exporter_draco,
+     webgl_batch_lod_bvh. Their whole subject is MOVING BYTES: Draco, KTX2, meshopt, 3D tiles,
+     progressive LOD -- 16 examples exist purely to make assets smaller or arrive sooner. leCore's
+     answer is that content is a FUNCTION OF ITS NAME: 100,000 atoms at dim 1024 would be 409.6 MB
+     stored and are 0 bytes shipped. Faculties already present: instancing (canonical element +
+     delta chain), terrain, scatter bake & LOD. THE CLAIM IS A BYTE COUNT against a glTF of the same
+     scene, which is the only kind that survives contact.
+
+  B. FIELDS THE GPU ALREADY WINS AT -- 21 volume/fluid examples, and our numbers are hardware.
+     Targets: webgl_volume_cloud, webgl_volume_perlin, webgpu_volume_fire, webgpu_volume_caustics,
+     webgl_gpgpu_water. Measured on an A4500: plane waves 307x, diffusion 134x. Faculties present:
+     Gabor cloud render (single-scatter), Cloud stack (closed-form shadow rays). A volumetric cloud
+     whose density is a SUM OF PLANE WAVES rather than a 3D texture is both faster and weightless --
+     the same trick as the field demo, pointed at something people already want.
+
+  C. FLOCKS AND PARTICLES WITH STRUCTURE -- webgl_gpgpu_birds, webgl_gpgpu_protoplanet, plus 50
+     instancing/points examples. Faculty present: holographic_steering, steering_regress. The
+     differentiator is not speed, it is that each agent's behaviour is BOUND to a name, so a flock
+     of 100,000 has per-agent personality with zero per-agent storage.
+
+  D. HOLOGRAPHIC LOD -- webgl_batch_lod_bvh, webgl_lod. Faculty present: "Scatter bake & level of
+     detail". A bundle holds many objects and unbind-by-key returns one; capacity is MEASURED
+     (k* ~ 0.13*D linear readout, sparse decoders ~8.7x more). That is a compressed scene graph with
+     a known, published capacity law rather than a heuristic.
+
+  E. HONEST NON-TARGETS, so effort does not leak there: the 58 postprocessing examples (that is a
+     renderer's job and three.js does it well), the 13 physics examples (Rapier/Jolt/Ammo are
+     mature and our only edge is a stability footnote), and the 26 XR examples (nothing here has
+     ever run under WebXR and no structural argument is evidence).
+
+  NEXT DEMO, decided: (A). A three.js scene with ZERO downloaded assets where naming a thing is
+  enough to have it. It is the only one of these that three.js cannot already do better, and the
+  claim it makes is a number.
+
+## THE DEMO THAT IS ACTUALLY OURS: pages/zeroasset_three.html
+
+Generated by research/shader_retrieval/make_zeroasset_three.py. three.js renders; leCore decides what
+exists. 24,000 towers, one base geometry, one material, and EVERY position, height, width, rotation
+and colour recomputed in the browser from THE NAME OF THE DISTRICT.
+
+    towers                                                  24,000
+    glTF with EXT_mesh_gpu_instancing would carry           1.25 MB   (13 floats per instance)
+    scene data this page ships                              62 bytes  (the names)
+    ratio                                                   20,129x
+
+THE BASELINE IS THE STRONGEST HONEST ONE, not a strawman: EXT_mesh_gpu_instancing is the BEST case
+for the other side -- one base mesh plus per-instance TRS -- not an uninstanced dump. Compare against
+a naive glTF and the number would be far larger and far less defensible.
+
+THE SKYLINE IS A SUM OF PLANE WAVES, and that is the argument rather than the decoration. White noise
+from a hash gives a field of unrelated towers; fractional-power encoding gives a dense centre,
+thinning outskirts, ridges and clearings, out of the same hash. The page includes a "field" view so
+the structure is VISIBLE rather than asserted, and the self-check measures it: neighbouring samples
+must differ several times less than distant ones, or the page says the field is behaving like noise.
+
+VERIFIED HEADLESSLY BEFORE ANYONE OPENED IT -- the check the field demo shipped without and paid for
+three times. The page's JS fnv1a, its PCG expansion and all twelve wave-table entries for five names
+were extracted from the HTML, run under Node, and compared to the ENGINE'S values: IDENTICAL. That
+matters because the entire claim is "the same name gives the same city on every machine", which is
+only true if the arithmetic matches. The page repeats the same check on load against 64 embedded
+reference expansions per name and says so on screen.
+
+Also: zero network references, confirmed mechanically by tools/check_pages.py, which now covers
+JS-only pages too -- for this page a stray fetch would falsify the HEADLINE, not merely slow it.
+
+WHY THIS AND NOT CLOTH. Sixteen of three.js's own examples exist to make assets smaller or arrive
+sooner. That is the wound, and leCore's core trick -- content as a function of its name -- is the
+only thing in this repo that three.js cannot already do better. The cloth demo's best honest claim
+was "does not explode at stiffness 1.5"; this one's is a byte count.
+
+## EVERY DEMO NOW CARRIES A HEAD-TO-HEAD AGAINST VANILLA THREE.JS, INCLUDING THE COLUMNS WE LOSE
+
+zeroasset_three.html runs BOTH arms in the same browser and asserts they produce the SAME SCENE
+before reporting a number -- a comparison whose arms disagree is two different programs being timed,
+not a benchmark. Verified headlessly by tools/bench_pages.py before shipping:
+
+    arms agree                    YES (max |diff| 2.68e-07 over 24,000 instance matrices)
+    instances                     24,000
+    vanilla  bytes downloaded     1.25 MB   (glTF, EXT_mesh_gpu_instancing: 13 floats/instance)
+    leCore   bytes downloaded     16 bytes  (the name)
+    bytes ratio                   78,000x
+    vanilla  decode -> matrices   44.6 ms
+    leCore   regenerate from name 27.6 ms   (1.6x faster on CPU)
+    transfer at 25 Mbps            399 ms vs 0.01 ms    [ARITHMETIC, not measured]
+    transfer at  5 Mbps           1997 ms vs 0.03 ms    [ARITHMETIC, not measured]
+
+THREE DISCIPLINES BAKED INTO THE HARNESS, and they are the point as much as the numbers:
+  * THE ARMS MUST AGREE FIRST. The page prints "DIFFERENT SCENES -- ignore everything below" if the
+    max difference exceeds 1e-5, and the headless tool exits non-zero. Both arms call the SAME
+    generator, so there is no second code path to drift.
+  * THE LOSING COLUMN IS PRINTED. If regeneration were slower than decoding the page would say so
+    in the same row, with the ratio. It happens to be 1.6x faster here, which is a bonus and not the
+    argument -- the argument is bytes.
+  * ARITHMETIC IS LABELLED AS ARITHMETIC. Transfer time is bytes divided by a stated rate and is
+    marked "[arithmetic, not measured]" everywhere it appears. A modelled number presented as a
+    measured one is the oldest trick in benchmarking and this project does not get to use it.
+
+BASELINE DISCIPLINE HELD: the vanilla arm is EXT_mesh_gpu_instancing, the BEST case for the other
+side -- one base mesh plus per-instance TRS. An uninstanced glTF would have produced a far larger
+ratio and a far weaker claim.
+
+tools/bench_pages.py is the reusable harness; every demo from here registers a probe in BENCHES and
+gets the same treatment, including a hard failure when the arms diverge.
+
+## THE ZERO-ASSET DEMO USED NO GLSL AT ALL, AND THE BENCHMARK SAID SO OUT LOUD
+
+Reported from a laptop: 4.9x SLOWER on CPU, and the comparison columns unreadable ("399 ms vs
+0.27 ms" -- which is which?). Both complaints are correct and the first one is the serious one.
+
+I BUILT A leCORE GLSL SHOWCASE THAT CONTAINED NO GLSL. The generator ran in JavaScript, on the CPU,
+one instance at a time -- so the honest measurement was that we are slower than a memcpy, and the
+demo's only argument was bytes. "An atom is a function of its name" IS A SHADER: one fragment per
+instance, hashing and summing plane waves in parallel. I wrote the CPU version because it was the
+easy one and never asked whether it demonstrated the thing it existed to demonstrate.
+
+REWRITTEN AS A GPU PASS: a RawShaderMaterial with three float targets (transform, scale, colour),
+one fragment per instance, running the ENGINE'S PCG and the plane-wave sum in-shader. The
+InstancedMesh's vertex shader then reads those textures by gl_InstanceID and builds each tower's
+transform itself, so NOTHING IS READ BACK and no per-instance data ever touches the CPU. The only
+readback in the file exists inside the benchmark, to prove the two arms agree.
+
+COLUMNS NOW LABELLED. The accounting table has explicit "vanilla three.js" and "leCore GLSL"
+headers and one row per claim -- where the scene comes from, bytes downloaded, how the instances are
+built, what is read back. "X vs Y" with no header tells the reader nothing, and a benchmark nobody
+can parse is a benchmark nobody should trust.
+
+Verified before shipping: the generator shaders compile AND link under a real GLSL ES compiler with
+three's own prologue prepended, they carry no `#version` of their own, the page's JS parses, and
+there are zero network references. tools/check_pages.py now checks this page as a KERNEL page rather
+than a JS-only one -- it ships a shader, so it gets a shader's treatment.
+
+THE LESSON, and it is not a small one: A DEMO OF A CAPABILITY MUST USE THE CAPABILITY. The bytes
+argument was real and the page could make it without a single line of GLSL, which is exactly why it
+ended up without one.
+
+## "undeclared identifier xf": THE CHUNK ORDER, AND A SECOND BUG THE ERROR WAS HIDING
+
+three runs <beginnormal_vertex> BEFORE <begin_vertex>. I declared the instance fetch in the POSITION
+block and used it in the NORMAL block, so it did not exist yet. Fetch moved to the block that runs
+first; the position block reuses it. Obvious once the error names the line, invisible before.
+
+AND A SECOND BUG THE COMPILE ERROR WAS HIDING: castShadow renders through MeshDepthMaterial, which
+NEVER SEES onBeforeCompile. Every shadow would have been cast by an untransformed box sitting at the
+origin -- a wrong picture with no error at all, which is worse than the one that stopped the page.
+A customDepthMaterial now carries the same vertex patch, and patchVertex() is shared so the two
+cannot drift.
+
+Also removed a duplicate `const mat` the edit left behind -- two declarations in one scope, which
+the browser rejects at parse time.
+
+WHY MY CHECKER MISSED IT, AND THE FIX. It only ever compiled the RawShaderMaterial pair. The
+onBeforeCompile patch is SPLICED INTO THREE'S OWN SHADER, so it was never compiled anywhere: a
+variable declared in the wrong chunk is an undeclared identifier at runtime and nowhere else.
+tools/check_pages.py now has a PATCH_PAGES stage that pulls three's chunk table out of the vendored
+library IN THE PAGE, applies the page's replacements in THREE'S ORDER, and compiles the result.
+
+PROVED THE STAGE FAILS ON THE BUG IT SHIPPED: moved the fetch back out in a copy of the page and ran
+the checker against it -- "onBeforeCompile patch FAILS", exit non-zero. A stage nobody has watched
+fail is a stage nobody should trust, and this is the third time that habit has caught something.
+
+THE PATTERN ACROSS THIS WHOLE ARC, now four instances deep: EVERY TIME A CHECK PASSED SOMETHING
+BROKEN, IT WAS BECAUSE THE CHECK COMPILED DIFFERENT TEXT THAN THE BROWSER DOES -- un-interpolated
+template literals, a missing three prologue, a standalone #version, and now a chunk the checker
+never assembled. The rule is not "compile the shader"; it is "compile what the target will compile".
+
+## THE SHADOW PASS GUARDS THE NORMAL CHUNK, AND THAT KILLS ANY CROSS-BLOCK ASSUMPTION
+
+Second failure on the same page, this time in MeshDepthMaterial. Read three's `depth_vert` rather
+than guessing:
+
+    #ifdef USE_DISPLACEMENTMAP
+        #include <beginnormal_vertex>
+        ...
+    #endif
+    #include <begin_vertex>
+
+With no displacement map that block NEVER COMPILES. My fetch lived there, so in the shadow pass it
+simply did not exist and <begin_vertex> used undeclared identifiers -- the error's line 438 is
+literally the `#endif`.
+
+THE FIX IS NOT A DIFFERENT ORDERING, IT IS NO ORDERING ASSUMPTION AT ALL. Each injected block now
+fetches for itself through an `lcCell()` helper declared in the prologue, declares `transformed` and
+`objectNormal` at FUNCTION scope, and keeps its temporaries in a brace block so the two cannot
+collide. Two texelFetches instead of one is a rounding error; a block that only works when a
+neighbouring block happened to compile is a trap that fires on whichever material three guards next.
+
+Caught while writing it: my first attempt used a JS `.replace()` to slip the declaration in, which
+would have put `vec3 objectNormal` INSIDE the braces -- block-scoped, invisible to every later chunk
+that reads it. Declared it properly instead.
+
+AND THE CHECKER MADE THE SAME ASSUMPTION THE CODE DID. It compiled the two blocks TOGETHER, so a
+block leaning on its neighbour looked fine. It now compiles EACH BLOCK INDEPENDENTLY, which is the
+strictest correct model: three may include any one of them and not the other. Proved it fails on the
+bug that just shipped -- removed the fetch from the position block in a copy and the checker
+rejected it.
+
+FIFTH INSTANCE OF THE SAME ROOT CAUSE IN THIS ARC, and the rule has now sharpened twice:
+  "compile the shader"                   -> not enough
+  "compile what the target will compile" -> not enough either
+  "compile what the target will compile, ON ITS OWN, because the target decides what else is there"
+Un-interpolated templates, a missing prologue, a standalone #version, an unassembled chunk, and now
+a chunk the target conditionally omits. Every one was the checker seeing different text than the GPU.
+
+## DEMO 2: A VOLUMETRIC CLOUD WITH NO VOLUME (pages/volume_three.html)
+
+three.js's own webgl_volume_cloud builds a 128^3 Perlin volume, uploads 2,097,152 bytes, and
+raymarches it. leCore's arm evaluates a CLOSED-FORM SUM OF 20 PLANE WAVES inside the raymarch loop --
+the same construction as the field demo and the shape of the hdrift_grad kernel (307x on an A4500).
+Both arms are the SAME material with a uniform switch, so the comparison is one shader against
+itself and cannot drift into two programs.
+
+    vanilla three.js (3D texture)              leCore GLSL (closed form)
+    a 128^3 uploaded volume                    20 plane waves, from the name
+    2.10 MB of volume data                     the name (a few bytes)
+    CPU build + upload, timed on the page      0 ms -- there is nothing to build
+    frame time, same view and step count       whichever wins is printed, with the ratio
+    8-bit quantised along a ray                every real-valued point
+    fixed at 128^3 -- voxels when you zoom     no resolution to run out of
+
+THE THIRD ROW IS NOT A RACE AND THE PAGE SAYS SO. Bytes and build time favour the closed form by a
+wide margin; FRAME TIME MIGHT NOT, because a hardware-filtered 3D fetch is one cached lookup while
+the closed form is 20 cosines per step. Whichever wins is printed with the ratio. The row that is
+genuinely a capability rather than a speed is RESOLUTION: the page marches the same ray through both
+arms and counts distinct density values -- an 8-bit volume can produce at most 256, the closed form
+produces a different value at every sample. That is the argument, and it is measured, not asserted.
+
+Same rules as demo 1: both arms in the same browser, the page proves its density against 48 f64
+reference probes per cloud computed by the engine, columns are LABELLED, transfer time is marked
+arithmetic, and there are zero network references.
+
+THREE DEFECTS CAUGHT BEFORE SHIPPING, two of them by checks added this session:
+ 1. ${...} INSIDE DOUBLE QUOTES IS LITERAL TEXT IN JS -- it only interpolates inside backticks. Three
+    rows would have printed "a ${P.grid}³ uploaded volume" verbatim. tools/check_pages.py now scans
+    for this, and the first version of that scan FALSE-POSITIVED on row()'s own template literal, so
+    it strips backtick spans before looking.
+ 2. `arm` was read by accounting() but declared with `let` further down -- temporal dead zone, so the
+    first call would have thrown. Identical to the VIEW_SCALE bug two demos ago; hoisted.
+ 3. The volume shader pair compiles AND links with three's prologue prepended and carries no
+    #version of its own, checked before the page was opened.
+
+## "BARELY VISIBLE" WAS A NUMBER, AND IT WAS 0.14
+
+He was right and it was measurable. Sampled the shipped density and computed the optical depth a ray
+actually accumulates across the box:
+
+    before:  cumulus 0.14  ->  13% opacity      storm front 0.02  ->  2% opacity
+    after:   cumulus 2.14  ->  88%              storm 2.24 -> 89%   cirrus 3.95 -> 98%
+    a cloud needs tau in the 2-8 band to read as a cloud; mine was two orders of magnitude under it.
+
+THREE CAUSES, all in the density and all fixed in closed form:
+ 1. THE WAVE SUM IS ZERO-MEAN and I clipped the negative half away, so the mean density was ~0.03.
+ 2. I NORMALISED BY THE SUM OF AMPLITUDES, but cosines cancel -- the field's actual range is a
+    fraction of that, so the shaped density never approached 1. Now normalised by the field's own
+    QUANTILES, computed per name by the engine and shipped as two floats, so a coverage threshold
+    means the same thing for every cloud. A name that has never existed is normalised the same way
+    in the browser.
+ 3. THE FALLOFF MADE IT SMOOTH -- blobs, not billows. Added a DOMAIN WARP: one wave sum displacing
+    the coordinates of another. That is composition of fields, which is what HRR does, and it stays
+    closed form and zero bytes.
+
+AND THE LIGHTING WAS THE OTHER HALF. What real cloud renderers do that mine did not:
+  * HENYEY-GREENSTEIN phase -- forward scattering is the silver lining. Mine was a flat mix.
+  * BEER-POWDER (Guerrilla) -- plain Beer's law gives flat grey; the powder term darkens the cores.
+  * A MULTI-TAP SUN MARCH (six, geometrically spaced) instead of one -- one tap is flat lighting.
+  * AN ANALYTIC SKY with a sun disc and glow to sit in, rather than a flat dark background.
+None of that costs a byte either; it is all closed form.
+
+Both arms still share ONE density function -- the vanilla volume is built by quantising the same
+shaped() the shader evaluates -- so the only difference between the arms remains the grid, which is
+the whole point of the comparison.
+
+## THE FLAT BLUE BOX WAS A CLOUD WHERE EVERY VOXEL GOT THE SAME COLOUR
+
+Not "no cloud" -- a fully rendered cloud in which the lighting had collapsed to a constant. Worked
+out from the shipped constants rather than guessed:
+
+    sun-march step lengths 0.055 .. 0.492, total 1.29
+    density 0.02 -> sd*absorb =   2.3 -> beerPowder 0.195
+    density 0.10 -> sd*absorb =  11.6 -> beerPowder 0.000019
+    density 0.90 -> sd*absorb = 104.2 -> beerPowder 0.000000
+
+BEER-POWDER SATURATES ABOVE ~8 AND THE SMALLEST CASE WAS 26. Every sample got zero sunlight plus a
+CONSTANT ambient, so the box filled with one flat colour -- exactly the screenshot. The cause is a
+coefficient reused where it did not belong: the primary ray integrates over ~2 units of box, the sun
+march over ~1.3, and 90 was tuned for the former. A separate uShadow=7 over a SHORTER march now
+spreads beerPowder across 0.14 to 0.77 -- a range of 0.62 where it was 0.
+
+FIVE FIXES, all from measurements:
+ 1. SEPARATE SHADOW COEFFICIENT, three taps over a short distance instead of six over a long one,
+    and an ambient that varies with height so the cloud has a lit top and a shadowed base.
+ 2. 22 FPS: each dens() is 38 cosines and 110 steps x (1 primary + 6 sun taps) is ~29,000 cosines
+    PER PIXEL. Steps 110 -> 64, taps 6 -> 3, and the taps now use a CHEAP density (no domain warp,
+    base band only -- standard practice, the shadow does not need the detail). 7.4x fewer cosines.
+ 3. CONTEXT LOST followed a 2.6 s CPU volume bake plus that shader load. Grid 128 -> 64 is 8x fewer
+    samples; the byte claim is computed from the grid ACTUALLY BUILT (0.26 MB), so it stays honest
+    rather than quoting a volume the page no longer makes.
+ 4. FRAME TIMES OF 0.01 ms FOR A 64-STEP RAYMARCH ARE NOT MEASUREMENTS -- finish() left the draws
+    queued. A one-pixel readback is a real sync point.
+ 5. THE 1e-6 SELF-CHECK THRESHOLD WAS TOO TIGHT. The domain warp amplifies a float rounding
+    difference in its divisor into ~1e-5 downstream, so 1.5e-5 was reported as "a different cloud"
+    when it was arithmetic. 2e-4, with the reason written next to it. A CHECK THAT CRIES WOLF GETS
+    IGNORED -- this is the second time that exact mistake has shipped in this arc.
+
+## THE BLUE CUBE *WAS* THE SKY, CLIPPED TO THE BOX
+
+Not a density problem and not a lighting problem this time -- a COMPOSITION problem. The volume
+shader returned `acc + bg*T`, so every fragment of the box painted the sky gradient, and outside the
+box there was nothing but scene.background (near-black). The bright blue quadrilateral in the
+screenshot was the sky, wearing the cube's silhouette, with the cloud drawn as dark wisps ON it.
+That is why it read as a painted surface rather than a volume.
+
+FIXED BY MOVING THE SKY OUT OF THE VOLUME:
+  * a full-screen sky pass -- an inverted sphere carrying the SAME analytic sky the cloud is lit by,
+    so the two agree by construction rather than by two copies of a gradient
+  * the sky mesh is re-centred on the camera each frame, or the gradient swims as you orbit
+  * the volume now emits ONLY the cloud, PREMULTIPLIED, with alpha = 1 - T, and the material is
+    marked premultipliedAlpha so three's NormalBlending resolves to exactly
+    blendFunc(ONE, ONE_MINUS_SRC_ALPHA). That is the same "read what the preset actually means"
+    lesson the cloth arm taught, applied before it could bite.
+  * the sun colour lifted above 1.0 so lit cloud reads WHITE against blue instead of blue on blue
+
+The box silhouette is now invisible: what remains on screen is cloud against sky.
+
+tools/check_pages.py gained a second shader pair for the same page (keyed "path#sky"), which
+immediately exposed that the key was being used as a filename in the template-hole scan -- fixed by
+stripping the fragment wherever a key is used as a path.
+
+## SEARCHED THE CLOUD LITERATURE, AND IT SAYS MY BASIS FUNCTION WAS WRONG
+
+No amount of lighting was going to fix that smudge, because the density was built from the wrong
+primitive. Every serious cloud renderer -- Guerrilla, Frostbite, Red Dead 2, the Shadertoy canon,
+and every survey paper found -- builds density from PERLIN-WORLEY noise, and for one reason:
+
+    "The cellular look of Worley noise will be utilized to create billowy clumps of clouds."
+    "By inverting Worley noise it is possible to change between wispy and billowing edges."
+    "Erosion: subtract a high-frequency noise layer from the base cloud shapes."
+
+A SUM OF COSINES IS SMOOTH BY CONSTRUCTION. It makes coherent structure -- which is exactly why it
+works for the city skyline in the other demo -- and it CANNOT billow. I picked it because it was
+leCore's signature trick and never asked whether it was the right primitive for this subject. That
+is the same mistake as reaching for the scatter-add in the cloth demo, two demos apart.
+
+REBUILT ON WORLEY, AND IT STAYS ZERO-BYTE. Worley needs feature points, and leCore already has a
+deterministic uint->uint hash: cell = floor(p*f), hash the cell to a point inside it, take the
+minimum distance over the 27 neighbours. Closed form, no texture, still a function of the name, and
+now CELLULAR. Measured against the old field on the same points:
+
+    local contrast |d(base)| over a 0.06 step:   cosine sum ~0.010     Worley fbm 0.079
+    base range:                                  narrow, smooth        0.09 .. 0.88
+
+Plus the rest of what the papers actually specify, none of which costs a byte:
+  * INVERTED WORLEY IN OCTAVES for the base shape (0.55/0.30/0.15)
+  * a COVERAGE MAP from the low-frequency plane waves -- the waves are the weather, not the cloud
+  * an ALTITUDE PROFILE: flat bases, round tops, via smoothstep on normalised height
+  * remap() coverage carving rather than a hard threshold, as every paper writes it
+  * EROSION: a 12x-frequency Worley pass subtracted, weighted toward the thin parts, which is what
+    turns a blob into wisps
+  * a WIDE FLAT SLAB instead of a cube -- a cloud LAYER between two heights, because a cube
+    silhouette reads as a box whatever is inside it
+
+The vanilla arm now bakes the SAME Worley density in JS, so the two arms still differ only by the
+grid. Both shader pairs compile and link; all pages clean.
+
+## 11.4 BILLION WORLEY CELL VISITS PER FRAME. THAT WAS THE PERFORMANCE PROBLEM.
+
+Counted rather than guessed:
+
+    Worley cells per density call : 108 full (3 fbm octaves + erosion), 27 cheap
+    per ray step                  : 189 cells (1 primary + 3 sun taps)
+    per pixel                     : 15,120 cells = 45,360 PCG hashes
+    per frame at 756,320 px       : 11.4 BILLION cell visits
+
+The optimisation literature on this exact subject prescribes two things and I had applied NEITHER:
+"render the clouds to an offscreen buffer at one quarter resolution", and skip empty space.
+
+FIX 1 -- EMPTY-SPACE SKIPPING, IN COST ORDER. The altitude profile is free, the weather map is six
+cosines, ONE Worley octave is 27 cells. Only where all three survive does the shader pay for the
+other two octaves and the erosion pass. The early-out uses a genuine UPPER BOUND -- octaves two and
+three contribute at most 0.45, so if (o1 + 0.45) * profile cannot clear the coverage threshold there
+is provably nothing there. That is a skip that cannot drop a cloud, not a heuristic.
+
+FIX 2 -- QUARTER RESOLUTION. The clouds render into an offscreen target at 1/4 the linear size, 16x
+fewer pixels, and are composited full-screen over a FULL-RESOLUTION sky. Only the low-frequency part
+is upscaled, which is why the papers all do exactly this.
+
+    before                     11.4 billion
+    + early-out                 6.53 billion
+    + quarter resolution        0.41 billion      ~28x less work
+
+The dense steps still pay full price, which is correct -- that is where the cloud actually is.
+
+The composite pass is a THIRD shader pair on this page and is registered with the checker, because
+an unchecked pass that draws every frame is exactly the gap this session keeps finding.
+
+## THE SKY WAS BEING ERASED BY MY OWN COMPOSITE PASS
+
+renderer.autoClear defaults to TRUE. The frame drew the sky, then the composite pass CLEARED THE
+FRAMEBUFFER and drew the clouds onto black. That is the pure-black background in the screenshot --
+and it is also why the cloud read grey and dead: its ambient term is lit by a sky that never reached
+the screen, so the only light it ever had was a sun term against nothing. Fixed by turning autoClear
+off and clearing explicitly once.
+
+THE LESSON IS THE ONE THIS ARC KEEPS TEACHING IN NEW COSTUMES: a framework default that is right for
+a single render pass is wrong the moment there are three, and it fails by ERASING rather than by
+throwing. First AdditiveBlending meaning SRC_ALPHA/ONE, then a chunk guarded by #ifdef, now
+autoClear. Read what the framework does; do not assume the default matches the shape of your frame.
+
+ALSO THIS ROUND:
+  * TWO-SPEED MARCH -- stride through empty space at 3x the step, back up and refine the moment
+    something is found, resume striding after six empty samples. Most of a cloud volume is nothing
+    and paying the fine step for it is where the frame time went.
+  * JITTERED RAY START, hashed per pixel so it is stable rather than crawling. The optimisation
+    papers use exactly this to keep the step count low without banding.
+  * The cloud now reaches WHITE where lit (sun colour above 1.0, since ACES pulls it back), and the
+    ambient is split -- sky above, dimmer bounce below -- so bases read blue-grey instead of flat.
+  * Camera framed low and close to the layer, which is how cloudscapes are shot; from orbit a slab
+    reads as a lump.
+
+## STOP COMPETING ON THE TEXTURE'S HOME TURF. COMPETE WHERE THE BAKED ALTERNATIVE CANNOT EXIST.
+
+A cached 3D fetch is one hardware lookup and 108 Worley cells is not; frame time was never winnable
+and chasing it was the mistake. THE DECISIVE ROWS ARE THE ONES THE TEXTURE ARM CANNOT ANSWER AT ALL,
+and they now lead the table:
+
+    animate the cloud       re-bake every frame -- 343 ms, a 2.9 fps ceiling  |  FREE, a phase offset
+    fly beyond the volume   the texture ends                                  |  defined everywhere
+    zoom in close           voxels, fixed at 64^3                             |  no grid to run out of
+    switch to a new cloud   343 ms                                            |  0 ms
+    scene data downloaded   0.26 MB                                           |  the name
+
+Animation is the one to show someone: a 3D texture is STATIC. Advecting the sample point and drifting
+the phase costs the closed form nothing, and the texture arm would have to rebuild 262,144 voxels per
+frame. That is not a 2x argument, it is a categorical one. The losing rows -- frame time, where the
+fetch wins -- are still printed with their ratio, because a table that hides its losses is an advert.
+
+AND THE THING THAT MADE THE SHADER FAST IS leCORE'S OWN LEVER 1, BAKE-ONCE / SAMPLE O(1), which
+NOTES already records as "coarse/fine split: discrete anchor + graded residual". Applied here:
+
+  * A GPU pass bakes a 192x192 COARSE OCCUPANCY MAP -- per (x,z) column, the maximum density over
+    the layer and the height range containing it. Baked once per cloud, on the GPU, in one draw.
+  * The marcher fetches that map before evaluating anything: one texture fetch answers "is there
+    anything in this column, and between which heights" where 27 Worley cells used to.
+  * The map is a conservative UPPER BOUND (first Worley octave plus the 0.45 the other two can
+    contribute), so a skip it permits CANNOT drop cloud. That is a proof, not a heuristic.
+  * IT COSTS ZERO DOWNLOADED BYTES, because it is generated rather than shipped -- the thesis of the
+    demo, turned around and used to make the demo fast.
+
+Four shader pairs on this page now (volume, sky, composite, occupancy) and the checker compiles and
+links every one of them.
+
+## THE OCCUPANCY MAP EMPTIED THE SKY AND MADE IT SLOWER. REVERTED.
+
+Both slower AND empty is the signature of an optimisation that is CULLING what it was supposed to be
+skipping past -- it pays for the test and then throws away the work the test was meant to protect.
+NOTES has had the rule for this since long before today: CONSECUTIVE REGRESSIONS SIGNAL TO REVERT,
+NOT ESCALATE. Reverted, and the dead bake pass removed entirely rather than left running for a
+consumer that no longer exists.
+
+KEPT NEGATIVE -- THE SUSPECTED CAUSE, so it is not reinvented blind:
+The map stores, per column, a max density and the HEIGHT BAND containing it, and empty columns store
+the sentinel (lo = 1.0, hi = 0.0). It is sampled with LinearFilter. Interpolating a real height band
+against that sentinel pulls lo UP and hi DOWN, SHRINKING the accepted band at every cloud edge --
+so the filter culls precisely the boundary the marcher needs, and every column near an edge reads as
+empty. A conservative acceleration structure must store PERMISSIVE sentinels (lo = 0, hi = 1) or be
+sampled with NearestFilter. THE UPPER BOUND ON DENSITY WAS SOUND; THE INTERPOLATION OF THE BAND WAS
+NOT. Not to be attempted again until it can be tested in isolation against a known-good march.
+
+SURVIVING AND VERIFIED PRESENT: the animation (the decisive row -- 371 ms re-bake against a phase
+offset), the two-speed march, quarter-resolution rendering with a full-resolution sky, autoClear
+disabled so the composite stops erasing the sky, and the early-out whose upper bound IS provably
+safe because it bounds the fbm's own remaining octaves rather than interpolating anything.
+
+Three shader pairs on the page now, all compiling and linking.
+
+## THE CLOUD ADVECTED ITSELF OUT OF EXISTENCE
+
+advect(p) = p + vec3(t*0.055, 0, t*0.021), and densityClosed used the ADVECTED point for EVERYTHING
+-- including the radial fade 1 - (length(p.xz) - 1.1)/0.9 and the height profile. So the SHAPE
+ENVELOPE drifted with the weather:
+
+    t =  0s   advection 0.00   fade 1.00
+    t = 15s   advection 0.88   fade 1.00
+    t = 30s   advection 1.77   fade 0.26
+    t = 60s   advection 3.53   fade 0.00   <- gone
+
+The screenshot was taken well past that, so the fade was zero everywhere and the marcher accumulated
+nothing. AND THE TELL WAS IN THE TABLE: frame time read 1.62 ms and "5.08x faster" in the same
+screenshot. A SPEED THAT IMPROVES AS THE PICTURE EMPTIES IS NOT A SPEEDUP -- that number should have
+been read as an alarm, not a win, and it is the second time this arc that an empty result reported
+itself as a fast one.
+
+FIXED BY SEPARATING TWO COORDINATE SYSTEMS THAT WERE BEING CONFLATED. pw is the world point and owns
+the SHAPE -- height profile, radial fade -- which must never move. pn is the advected point and owns
+only the NOISE. That is what makes the cloud churn while the layer stays put. The drift also WRAPS
+now, because an unbounded offset walks the sample point away from the origin forever and costs float
+precision in the hash for no visual gain.
+
+AND A BACKTICK IN A GLSL COMMENT TRUNCATED THE PAGE -- instrument error 33, paid a second time. The
+shader lives inside a JS template literal, so `pw` written in a comment closes the string. Removed -- and the check I
+added for it turned out to be DEAD CODE THAT CAN NEVER FIRE: the extractor matches
+`([^`]*MARKER[^`]*)`, a regex that excludes backticks by construction, so the body it returns can
+never contain one. Deleted the theatre and verified WHICH stage really catches it: the COMPILE
+stage, because the literal truncates and the shader loses its closing brace. A copy with the
+backtick reinstated reports "leCore kernel BROKEN ... syntax error, unexpected end of file" plus a
+JS parse failure. THE COVERAGE WAS ALREADY REAL; THE CHECK I WROTE FOR IT WAS NOT. Writing the probe
+is what told the difference -- a check nobody has watched fail may not even be reachable.
+
+## THREE RENDERING ARTIFACTS, THREE DISTINCT CAUSES
+
+The clouds finally look like clouds, and the defects that remained were each traceable rather than
+cosmetic.
+
+1. DARK SPECKLES -- THE TWO-SPEED MARCH WAS EATING ITS OWN STEP BUDGET. On finding cloud at the
+   coarse stride it did  p -= d*dt*stride  with stride STILL 3.0, then added one fine step: net
+   -2dt, WHILE THE LOOP COUNTER KEPT ADVANCING. A ray crossing cloud more than once therefore ran
+   out of steps MID-CLOUD and terminated with transmittance still high -- a dark dot exactly where
+   the integral was cut short. REMOVED. I never measured that march in isolation; it was assumed
+   good because it sounded good, and it cost two rounds. densityClosed already rejects empty space
+   after ONE Worley octave, which is the cheap test the march was duplicating.
+
+2. BLOCKY STAIR-STEPS AT EVERY EDGE -- quarter resolution was the wrong call. A cloud's INTERIOR is
+   low frequency, which is what the optimisation papers rely on, but its SILHOUETTE is not, and a
+   linear upscale of a high-contrast edge cannot hide a 4x4 block. Half resolution instead. THE
+   PAPERS' ASSUMPTION IS ABOUT THE INTERIOR AND I APPLIED IT TO THE WHOLE IMAGE.
+
+3. THE SPECKLE HAD BLOCKY STRUCTURE -- a per-pixel HASH jitter is white noise, and at reduced
+   resolution it is white noise smeared over a block of final pixels. Replaced with a 4x4 ORDERED
+   (Bayer) offset, which spreads sample positions evenly across the step so neighbouring pixels
+   sample complementary parts of the interval instead of randomly colliding.
+
+PAYING FOR IT HONESTLY, since half resolution is 4x the pixels of quarter and the march no longer
+skips:
+  * the step COUNT now scales with the span the ray actually crosses inside the slab -- a grazing
+    ray through 0.4 units does not need the 96 samples a diagonal does, and step SIZE governs
+    quality, not count
+  * the transmittance cutoff moves 0.004 -> 0.02; two percent is not visible and carrying rays four
+    times further to reach it is not free
+
+## THE OCCUPANCY MAP, REBUILT WITHOUT THE TWO THINGS THAT BROKE IT
+
+The kept negative from the failed attempt named both faults precisely, and neither was the idea:
+
+  FAULT 1 -- it stored a HEIGHT BAND with a restrictive sentinel (lo=1, hi=0) and was sampled
+  LINEAR, so interpolation between a real band and that sentinel SHRANK the accepted band at every
+  cloud edge. FIX: store MAX DENSITY ONLY, no band, and sample NEAREST so nothing is interpolated
+  at all.
+
+  FAULT 2 -- the noise is read at ADVECTED coordinates, which drift out of the baked region. FIX:
+  bake IN the advected frame and re-bake on a timer, with a dilation that provably covers the drift
+  between bakes.
+
+THE SAFETY ARGUMENT IS NOW A STACK OF PROVABLE SLACKS, not a hope:
+  * fbm octaves two and three can add at most 0.45 to the first, so bounding with (o1 + 0.45)
+    cannot understate the density
+  * the texel itself is the dilation -- 128 texels over 4.8 units is 0.0375 per texel, and four
+    corner samples bound the texel's interior
+  * drift is 0.055 units/s, so one texel covers 0.68 s while the re-bake period is 0.25 s
+A zero in this map therefore provably means nothing to draw, and a skip it permits cannot cull.
+
+WHAT IT BUYS, counted the same way as the 55.51 ms build:
+    empty step before : 6 cosines + 27 Worley cells
+    empty step after  : 1 texture fetch
+    full step         : unchanged at 189 cells -- that is where the cloud is, and it should pay
+    bake cost         : 1.8 M cell visits at 4 Hz = 7 M/s, against ~1.8 BILLION per frame before
+
+The first bake sizing was 256 texels with a 3x3 dilation loop -- 159 M visits, 637 M/s, a third of a
+frame every quarter second. THE 3x3 LOOP WAS A 9x COST FOR A MARGIN A COARSER GRID ALREADY GIVES
+FOR FREE, since the texel size IS the dilation. Halving the resolution and taking four corner
+samples gives the same guarantee for 90x less.
+
+## THE BLINK WAS A DOUBLE-COUNTED DRIFT, AND FIVE CLOUD TYPES FROM THE REFERENCE
+
+THE BLINK. The occupancy bake writes, at texel uv, the value for world position
+(uv - 0.5)*extent + drift_at_bake -- the drift is ALREADY IN THE MAP. The marcher then looked it up
+at advect(p).xz/extent + 0.5, ADDING THE DRIFT A SECOND TIME. The map was therefore sampled at an
+offset of 2*drift, which grows to 64 before wrapping, so the sampled location slid continuously
+across a repeating texture and columns flickered between occupied and empty. Lookup now uses the
+WORLD point. THE RULE: WHEN A TRANSFORM IS BAKED INTO DATA, THE LOOKUP MUST NOT APPLY IT AGAIN --
+and both halves were written by me, an hour apart, which is exactly when this happens.
+
+FIVE TYPES, EACH TRACED TO THE WMO/NOAA DESCRIPTION RATHER THAN TUNED BY FEEL:
+  cumulus       "detached, sharp outlines, rising mounds and domes with cauliflower tops; sunlit
+                 parts brilliant white, bases relatively dark and horizontal"
+  stratocumulus "patchy grey and white, honeycomb appearance, distinct bases, low and extensive"
+  stratus       "flat, featureless, layered; a thin white sheet covering most of the sky"
+  cirrus        "delicate white filaments in patches or narrow bands, ice crystals, silky sheen"
+  cumulonimbus  "dense, towering, dark-based, vertically developed"
+Seven shape parameters carry the difference -- base frequency, coverage bias, layer bottom and top,
+erosion strength, VERTICAL STRETCH (towers for cumulus, sheets for stratus, filaments for cirrus)
+and how dark the base gets. Plus per-type absorption, shadow strength and sun colour.
+
+THE OCCUPANCY BAKE TAKES THE SAME PARAMETERS. If it did not, its upper bound would stop bounding
+the density it is meant to bound, and the skip would start culling -- which is exactly the failure
+mode that cost two rounds already.
+
+AND I SWEPT EVERY TYPE BEFORE SHIPPING, because a preset that yields an empty sky is a button that
+looks broken. The sweep uses a fixed coverage baseline rather than the live weather field, so its
+absolute numbers are not the page's -- but the ORDERING is fair, and cirrus came out at EXACTLY 0.0%
+fill, which no baseline choice explains. Cirrus is meant to be THIN, not ABSENT. Rebalanced.
+
+## PUSHING leCoreGLSL WITH leCORE'S OWN LEVERS: MULTI-CHANNEL AND ADAPTIVE DISPATCH
+
+Two problems in the cumulonimbus case: THE BOUNDING BOX WAS VISIBLE (hard side walls and a flat
+ceiling) and it ran at 62.95 ms, 14.53x slower than the texture arm. Both had a lever waiting.
+
+LEVER 4 -- MORE CHANNELS. The occupancy bake was writing .r and THROWING .gba AWAY on every bake.
+Now .g carries a COARSER dilation: the max over a 5-texel neighbourhood. One fetch, two
+granularities, and the marcher takes a 5-texel jump where .g is empty and a 1-texel jump where only
+.r is. The outer ring is sampled sparsely because it only has to BOUND the neighbourhood, not
+resolve it. The coarse level is what pays in the dense cases, which is exactly where the single
+level had stopped firing.
+
+    empty step, open sky    1 fetch, jump 5 texels   (was 1 texel)   -> 5x reach per fetch
+    empty step, near cloud  1 fetch, jump 1 texel     unchanged
+
+ADAPTIVE DISPATCH -- SPEND SHADOW WORK IN PROPORTION TO WHAT IS LEFT. The sun march is three Worley
+evaluations producing a colour that is then multiplied by T. Once T is low that work buys nothing
+visible. Three taps above T=0.55, one between 0.55 and 0.15, none below -- with the single tap
+scaled up to stand in for three, and the fully-shadowed case bounded from the local density, or deep
+cloud turns bright.
+
+    lit sample   T>0.55    189 cells   unchanged
+    dim sample   T>0.15    135 cells   1.40x less
+    dark sample  T<0.15    108 cells   1.75x less
+
+CUMULONIMBUS IS ALMOST ENTIRELY DIM AND DARK SAMPLES -- deep inside its own shadow -- which is
+precisely the case that was 14.53x slower.
+
+AND THE VISIBLE BOX. The fade tapered only radially in XZ and only past radius 1.1, so a type with
+top=0.86 reached the slab ceiling and was CUT STRAIGHT. It now tapers on every face, height
+included. A VOLUME WHOSE BOUNDING BOX YOU CAN SEE IS A BOX WITH CLOUD IN IT.
+
+## A NEGATIVE, A SELF-INFLICTED REGRESSION, AND A CONTAINER TOO SMALL FOR ITS CONTENTS
+
+KEPT NEGATIVE -- DISTANCE-BASED OCTAVE LOD DOES NOT APPLY HERE, and the numbers killed it before a
+line was written. The idea was to drop the high fbm octaves with distance, as mip-mapping does for
+textures. But at 8 units one pixel covers 0.0106 units while octave-3 features are 0.0754 -- FIVE
+TIMES LARGER than the pixel footprint at the far wall of the box. The octave is still visible
+everywhere in this scene, so dropping it would be a quality loss, not a free one. The technique is
+sound; the SCENE IS TOO SMALL FOR IT. Not shipped, and not to be reinvented at this scale.
+
+THE REGRESSION WAS MINE AND IT WAS ONE NUMBER. Last round I lowered cumulus covBias from 0.00 to
+-0.05 on the strength of a sweep that used a FIXED coverage baseline instead of the live weather
+field -- a sweep I had ALREADY LABELLED as not the page's numbers, in the same message. A lower
+threshold means more cloud, and more cloud means more full-cost samples. 38 fps -> 15 fps is mostly
+that. I USED EVIDENCE I HAD MYSELF MARKED AS UNFAITHFUL, because it was the only evidence I had.
+
+THE CONTAINER WAS TOO SMALL FOR ITS CONTENTS, which he spotted from the picture. The slab was
+exactly as tall as the tallest type, so cumulonimbus was cut by the BOX WALL rather than by its own
+taper. Box is now 4.8 x 2.8 x 4.8 against a 1.7-tall layer -- the container has to out-reach the
+thing it contains. The occupancy extent follows to 5.0, and the two height mappings were re-verified
+to agree, because if the bake and the marcher disagree about where the layer sits the upper bound
+stops bounding and the skip starts culling.
+
+WHAT REPLACED THE LOD IDEA: grow the step as transmittance falls. The error in the accumulated
+colour scales with T, so where little is left to add, a longer step costs nothing visible.
+    T > 0.35 -> 1.0x    T > 0.10 -> 1.6x    T < 0.10 -> 2.6x
+    a ray reaching 2% transmittance: 87 samples before, 55 after -- 1.6x fewer, in exactly the
+    dense interior where the sample count hurts most.
+
+## ENLARGING THE CONTAINER MADE IT SLOWER, AND THE REASON WAS IN MY OWN NOTES
+
+The occupancy map culls in XZ ONLY -- I removed the height band because interpolating it was what
+broke the first version. So growing the box from 1.7 to 2.8 units tall added 1.1 units of EMPTY AIR
+that every ray marched at full step cost, one texture fetch and one step each, with no way to know
+it was empty. 65% more steps through nothing.
+
+THE CONTAINER AND THE MARCHED INTERVAL ARE TWO DIFFERENT THINGS AND I CONFLATED THEM. The mesh has
+to be large enough that the camera cannot clip through it; the RAY INTERVAL only has to cover the
+LAYER, whose taper already reaches zero at its own edge. hitBox now returns the layer (2.35 x 0.86 x
+2.35) while the mesh stays 4.8 x 2.8 x 4.8. 39% fewer steps and nothing visible removed.
+
+AND THE HEIGHT BAND IS BACK, stored the way the kept negative said it had to be: PERMISSIVE
+SENTINELS. An empty column writes (lo=0, hi=1), which accepts everything, so no reading can shrink
+the band and cull a cloud -- the failed version wrote (lo=1, hi=0) and sampled LINEAR, which pulled
+the band shut at every edge. Sampled NEAREST, so there is no interpolation at all. THE BAND WAS
+NEVER THE PROBLEM; THE SENTINEL AND THE FILTER WERE, and the note said so precisely enough to
+rebuild from.
+
+Too bright: the sun colours had been lifted above 1.0 to reach white through ACES and overshot.
+Brought down about 25% across all five types, exposure 1.0 -> 0.92.
+
+## RULE 0 ANSWERED THE PERFORMANCE QUESTION, AND THE ANSWER WAS NOT ONE I WOULD HAVE PICKED
+
+Asked the engine about the bottleneck instead of guessing at it. Five phrasings of "the same
+expensive thing is recomputed every frame with a small change":
+
+    "reuse a result from the previous frame"        -> temporal_reuse | Fat-margin cache
+    "cache a function of a continuous input"        -> Bake a function into one vector | Memoize
+    "decide how much effort to spend per query"     -> Learned navigator | Tiled matmul-reduce
+    "skip work where the answer will not change"    -> Partition-invariant sums | Dependency cache
+
+THE FAT-MARGIN CACHE'S OWN DOCSTRING IS THE SOLUTION, WORD FOR WORD: "when a query DRIFTS -- a
+camera nudging forward, a cursor, an agent -- do not key the cache on the exact query: bake an
+ENLARGED region around it and serve everything that lands inside. Catto's enlarged AABB, generalized
+past physics." That is precisely this frame: the camera orbits slowly, the weather drifts slowly,
+and every frame was re-paying full price for a raymarch nearly identical to the last.
+
+IMPLEMENTED AS THE CACHE DESCRIBES IT:
+  * a HISTORY BUFFER is the enlarged region
+  * the Bayer jitter now ROTATES BY THE GOLDEN RATIO PER FRAME, so successive frames sample
+    different parts of the step -- without that the history averages the same answer with itself
+    and adds nothing
+  * uBlend is the margin test: 0.28 while the view DRIFTS, 1.00 the moment it JUMPS more than 0.06
+    units. Without the jump case the cache smears on every cut, which is what "leaving the margin"
+    means
+  * accumulate and display are TWO SEPARATE RENDERS, because sampling a target while writing it is
+    undefined
+
+    steps/ray 96 -> 52          1.85x fewer, and after 4 frames a pixel has seen 208 distinct
+                                sample positions against the 96 it used to pay for every frame
+
+THE POINT WORTH KEEPING: I had been reaching for shader techniques from the graphics literature all
+session. The engine's catalogue already held the right abstraction -- a cache keyed on a REGION
+rather than a point, for queries that drift -- and it is filed under physics, not rendering. RULE 0
+IS NOT A FORMALITY; IT FOUND A BETTER ANSWER THAN THE ONE I WAS ABOUT TO WRITE.
+
+## "CANNOT SET PROPERTIES OF UNDEFINED" -- REVERTED THE TEMPORAL CACHE, AND MADE THE ERROR NAME ITSELF
+
+Static diffing said every uniform written was declared, on every material, and reading the source
+twice more did not find it. THE TEMPORAL CACHE WAS THE ONLY THING ADDED SINCE THE LAST BUILD THAT
+RAN, so it goes -- history buffer, blend, margin test, per-frame jitter rotation, halved step count,
+all of it. CONSECUTIVE FAILED DIAGNOSES ARE THE SAME SIGNAL AS CONSECUTIVE REGRESSIONS: stop, revert
+to what worked, and stop paying for the guess.
+
+The fat-margin cache is still the right idea and Rule 0 was right to surface it -- a drifting camera
+should not re-pay full price. It needs to go back in on its own, against a build that runs, with the
+accumulate and display passes proven separately rather than added in one step alongside a step-count
+change. That is the kept item, not a kept negative.
+
+AND THE ERROR CLASS IS NOW SELF-NAMING. `mat.uniforms.uX.value = v` dies with "cannot set properties
+of undefined" the moment a preset gains a key a material does not declare, and the message says
+NOTHING about which key -- which is why three attempts failed to find it by reading. applyType()
+now assigns through a guard that warns with the uniform's NAME. The next occurrence of this costs
+one glance instead of an hour.
+
+## AN EMPTY old STRING IN str.replace IS WORSE THAN A NO-OP
+
+While repairing the previous fault I introduced a new one: the slice
+  old = s[s.index("function applyType(){") : s.index("let arm = 1;\nlet table = null;")]
+came out EMPTY, because the two markers were in the opposite order to what I assumed. str.replace
+with an empty old string does not fail and does not no-op -- IT PREPENDS AT POSITION 0. The
+generator ended up with a JavaScript function pasted above its own docstring, and the next run died
+with a Python SyntaxError on line 3.
+
+Instrument error 31 in a new costume. The recorded rule was "str.replace with no assert is a silent
+no-op"; the sharper rule is:
+    ASSERT THE ANCHOR IS NON-EMPTY AND ORDERED, not merely that the replace happened.
+    A slice between two markers is only a slice if the markers are in the order you assumed.
+
+Repaired by stripping the prepended block; the generator parses and regenerates cleanly, and the
+page has zero temporal-cache leftovers.
+
+STATE AS SHIPPED: the temporal cache is fully reverted, five cloud types with the reference-derived
+shape parameters are in, the two-level occupancy skip with permissive sentinels is in, the ray
+interval is clipped to the layer rather than the container, and the four shader pairs compile and
+link. The fat-margin cache goes back in on its own, against a build that runs.
+
+## THE CONTAINER MUST BE BIGGER THAN ITS CONTENTS BY A MARGIN YOU CAN SEE
+
+Third time this has come back, and the reason is that I kept fixing the WALL instead of the MARGIN.
+The taper reached zero at radius 1.90 while the ray was clipped at 2.35 -- 0.45 of slack, and
+cumulonimbus spreads past that, so the silhouette on screen was still the box.
+
+    before   taper 1.90, ray 2.35   ->  0.45 radial margin
+    after    taper 1.55, ray 2.90   ->  1.35 radial margin, and 0.40 vertical
+    mesh 6.4 x 3.4 x 6.4 so the camera cannot clip through it
+
+Pulled the taper IN and pushed the walls OUT, rather than only pushing the walls. The cloud now ends
+because it ends. The extra empty space costs almost nothing because it is exactly what the two-level
+occupancy skip is for -- one texture fetch per five texels, and .g is empty out there.
+
+ALSO: VERTICAL LOOK. Dragging up and down moves the eye above and below the layer, which is the view
+that shows it IS a layer rather than a slab in a box. And ORBIT IS OFF BY DEFAULT -- a moving camera
+sweeps the container's edges through frame after frame, which is the opposite of what this demo is
+for. He was right that the orbit was making the box obvious.
+
+## THE CROSSHATCH WAS THE BAYER PATTERN, AND leCORE ALREADY HAD THE WORD FOR IT
+
+Rule 0 on "structured error is worse than random error" returned the fat-margin cache and
+COARSE-FIRST REFINE. Both applied.
+
+THE ARTIFACT. A 4x4 ordered dither is STRUCTURED error, and at half resolution each cell becomes an
+8x8 block in the final image -- which is exactly the weave across the whole cloud. Replaced with
+INTERLEAVED GRADIENT NOISE, which is built so the error is high-frequency and does not tile.
+three.js uses the same function in its own shadow filtering, so this is their fix, not an invention.
+I chose Bayer two rounds ago BECAUSE it was ordered -- "spreads samples evenly" -- without asking
+what an ordered pattern looks like after a 2x upscale. EVEN COVERAGE AND INVISIBLE ERROR ARE
+DIFFERENT GOALS.
+
+COARSE-FIRST REFINE, from the same query. The occupancy map's .x is an UPPER BOUND on the column's
+density, and the marcher was only using it to SKIP. It now also chooses the STEP RATE: where the
+bound is small the field cannot change fast, so a longer step cannot miss anything the short step
+would have drawn. Full rate only where the column can actually be dense.
+    oc.x > 0.35  ->  1.0x      oc.x > 0.12  ->  1.5x      otherwise  ->  2.2x
+Composes with the transmittance schedule already there, so a thin column deep in shadow steps at
+2.2 x 2.6.
+
+TOO BRIGHT, third pass: sun colours down another ~20% across all five types and exposure
+0.92 -> 0.82. Steps 76 -> 56, because the container grew and the step count never came down to match.
+
+## COARSE-FIRST REFINE WAS BUILT ON A FALSE INFERENCE, AND THE STEP WAS ALREADY UNDERSAMPLED
+
+I wrote: "oc.x is an upper bound, so where it is small the field cannot change fast." THAT IS NOT
+WHAT AN UPPER BOUND SAYS. A small bound means the density is SMALL, not that it VARIES SLOWLY --
+and thin cloud has the SHARPEST gradients in the volume. The scale fired exactly where T is still
+near 1, so every error it made carried full weight. Reverted.
+
+THE AUDIT THAT SHOULD HAVE COME FIRST, and which found a second fault underneath:
+
+    dt at 56 steps over 5.8 units      0.1036 units
+    smallest fbm feature (octave 3)    0.0754 units
+    erosion feature                    0.0836 units
+
+THE BASE STEP WAS ALREADY 1.4x COARSER THAN THE FINEST DETAIL, before any growth factor. With the
+transmittance schedule's 2.6x it reached 0.269 -- 3.6x the feature -- and multiplying by another 2.2
+put it at 8x, which is the shredded, stripey holes. I cut the step count last round to pay for the
+bigger container and took the money out of the one place that had none to give.
+
+FIXED BY MEASURING THE STEP AGAINST THE FEATURE, not against the frame time: 88 steps puts dt at
+0.0659, comfortably under the 0.0754 feature, and the growth schedule comes in to 1.3/1.8 so even
+the deepest case stays near it.
+
+THE RULE: A STEP LENGTH IS ONLY VALID RELATIVE TO THE SMALLEST FEATURE THE FIELD CAN HOLD, and that
+number is computable from the noise frequencies -- 1/(freq) -- not negotiable against fps. The
+transmittance schedule survives only because it fires where T is low and its error is multiplied by
+a small number; any schedule without that protection has to keep dt under the feature size.
+
+## ONE COMMENT DELETED THREE UNIFORMS, AND IT CAUSED BOTH SYMPTOMS
+
+A step-count edit appended a `//` note to a line that STILL HAD DECLARATIONS AFTER IT:
+
+    uSteps:{value:88},   // dt must stay under the finest feature uAbsorb:{value:26.0}, uShadow:{value:14.0}, uArm:{value:1},
+
+uAbsorb, uShadow and uArm were commented out of existence. The page still PARSES PERFECTLY, which is
+why four rounds of reading, three static uniform diffs and a full revert never found it.
+
+BOTH REPORTED SYMPTOMS WERE THIS ONE FAULT:
+  * "Cannot set properties of undefined (setting 'value')" -- applyType writing uAbsorb
+  * "the light seems to pass straight through the cloud, like it has no density" -- uShadow was gone,
+    so the shadow term had no coefficient at all. HE DIAGNOSED IT FROM THE PICTURE before the tools
+    did.
+
+FOUND BY RUNNING IT, not reading it: a stub THREE whose material uniforms are a Proxy that THROWS
+WITH THE KEY NAME on any access to a uniform that does not exist. One run, one line: "UNIFORM DOES
+NOT EXIST: uAbsorb". Four rounds of static analysis had said every uniform was declared -- because
+the declaration was THERE IN THE SOURCE, just inside a comment.
+
+tools/check_pages.py now rejects any line where a `//` is followed by `:{value` -- the exact shape,
+caught cheaply, forever.
+
+AND THE SUN MARCH WAS TOO SHORT INDEPENDENTLY. Three taps totalling 0.28 units against a cloud ~1.5
+units across meant every sample sat in its own unshadowed bubble even when uShadow existed. Now four
+taps reaching ~1.5 units, geometrically spaced so the near field still resolves. A SHADOW RAY HAS TO
+CROSS THE THING IT IS SHADOWING.
+
+## I LENGTHENED THE SUN MARCH 5x AND LEFT THE COEFFICIENT TUNED FOR THE SHORT ONE
+
+The dark cores with bright rims are Beer-Powder saturating -- AGAIN, and from the opposite direction
+this time. Last round's fix stretched the sun march from 0.28 to 2.17 units and did not touch
+uShadow=14, so sd*uShadow now ran 0.42 to 27 while beerPowder is dead above ~6:
+
+    uShadow 14.0  ->  bp 0.416 0.005 0.000 0.000   over densities 0.05 .. 0.9
+    uShadow  2.2  ->  bp 0.53  0.72  0.28  0.06
+
+Everything but the thinnest wisp read as fully shadowed, which is exactly the picture. THE SAME
+FAULT AS THE FIRST FLAT-BLUE BUILD, approached from the other side: A SHADOW COEFFICIENT IS ONLY
+MEANINGFUL RELATIVE TO THE PATH LENGTH IT MULTIPLIES. Change one, re-derive the other, every time --
+and the derivation is four lines of arithmetic, not a guess.
+
+Re-derived per type against the new 1.78-unit path, and verified the spread before shipping rather
+than after: 0.46 to 0.66 across all five, where 14.0 gave a range that collapsed to zero by the
+second sample.
+
+Cost: taps 4 -> 3, still reaching 1.53 units, 25% less shadow work. Frame time was already 9.29 ms
+at 60 fps before this; the remaining 4.1x against a cached texture fetch is the honest standing
+result, and the table keeps printing it.
+
+## "THE LIGHTING IS ALMOST BACKWARDS" -- A SINGLE PHASE LOBE SWINGING THE WHOLE CLOUD 6.2x
+
+He read it off two screenshots taken from below, one facing the sun and one facing away, and he was
+exactly right. A single Henyey-Greenstein lobe at g=0.62, used as a multiplier on the ENTIRE sun
+term, does this:
+
+    facing the sun   hg 0.893  ->  0.5 + 3.2*hg = 3.36
+    side-on          hg 0.030  ->                 0.60
+    sun behind you   hg 0.012  ->                 0.54
+
+6.2x between the two views, applied uniformly across the whole volume. So facing the sun blows out
+and facing away goes flat grey -- which reads as the light being on the wrong side rather than as
+forward scattering, because NOTHING IN THE PICTURE VARIES WITH POSITION, only with the camera.
+
+FIXED WITH A DUAL LOBE, which is what every cloud paper actually specifies and which I had
+simplified away: a forward lobe for the silver lining plus a weaker BACKWARD lobe so the far side
+does not fall off a cliff.
+
+    facing the sun   1.82      side-on 0.86      sun behind you 0.91      ratio 2.0x
+
+The forward peak is still there -- the rim still lights up when you face the sun -- but the cloud
+stops swinging as a whole.
+
+THE PATTERN, THIRD TIME IN THIS SHADER: I took a term from the literature, kept the shape and
+dropped the part that bounded it. Beer's law without the powder term. One octave standing in for
+three. Now one phase lobe standing in for two. THE BOUNDING HALF IS THE HALF THAT MAKES IT LOOK
+RIGHT, and it is always the half that looks optional.
+
+## THE BLACK VOIDS ARE A MISSING TERM, NOT A TUNING PROBLEM
+
+Four rounds of adjusting coefficients did not fix the interior because the interior HAD NO LIGHT
+SOURCE. A single scattering term collapses to nothing wherever the sun ray crossed any cloud at all,
+so the deep volume goes black while the lit face clips to white -- which is every screenshot since
+the Worley rebuild.
+
+MULTIPLE-SCATTERING OCTAVES (Wrenninge), which is what real cloud renderers add and which I had
+never put in:  sum over n of  a^n * beerPowder(sd * sigma * b^n) * phase(g * c^n),  a=b=c=0.5.
+Each octave attenuates LESS and scatters FLATTER, so it survives exactly where the first is dead:
+
+    shadow depth   single term   three octaves
+        0.10          0.571          0.798
+        0.40          0.687          1.207
+        1.00          0.219          0.707      <- 3.2x, and this is the interior
+
+The single term collapses 0.69 -> 0.22 across the range; three octaves hold 1.21 -> 0.71. That
+difference IS the soft interior gradient a cloud has and mine did not.
+
+Sun colours rescaled by the ~1.8x the octave sum adds, or the lit face just clips white again --
+which is the mistake I have now made three times in a row: change a term, forget to re-derive what
+multiplies it.
+
+THE PATTERN, FOURTH TIME: I keep implementing the SHAPE of a lighting model and dropping the term
+that fills it in. Beer without powder. One octave of noise for three. One phase lobe for two. Now
+single scattering for multiple. EVERY ONE OF THOSE MISSING HALVES IS THE HALF THAT MAKES IT LOOK
+LIKE THE REFERENCE, and every one of them looked like an optimisation when I skipped it.
+
+## beerPowder(0) = 0 -- AN UNSHADOWED WISP WAS RECEIVING NO SUNLIGHT AT ALL
+
+He asked why the small detached clouds render DARK and why only the dense ones should be. That IS
+the answer, and it was one function.
+
+    beerPowder(x) = 2*exp(-x)*(1-exp(-2x))
+    beerPowder(0.00) = 0.000     <- a wisp with nothing between it and the sun
+    beerPowder(0.70) = 0.748
+
+THE CONFLATION: Guerrilla's formulation uses TWO DIFFERENT DEPTHS.
+    beer   = exp(-sd * sigma)        sd from the SHADOW RAY
+    powder = 1 - exp(-2 * dn * k)    dn is the LOCAL density at this sample
+I fused them into a single function of the shadow depth, so the powder term -- whose job is to
+darken the LIGHT-FACING EDGE of a dense lump -- was instead killing every thin sample in the volume.
+Separated, and verified across the range before shipping:
+
+    isolated unshadowed wisp   beer 0.978  powder 0.753   sum 1.49   bright
+    thin edge, some shadow     beer 0.719  powder 0.996   sum 1.37   bright
+    mid body                   beer 0.372  powder 1.000   sum 0.87   dark
+    deep dense core            beer 0.089  powder 1.000   sum 0.38   dark
+
+Which is exactly his statement of the requirement: ONLY DENSE OR THICK CLOUD SHOULD BE DARK, AND
+ONLY BECAUSE OF SHADOWING.
+
+TWO MORE, BOTH FROM HIS DESCRIPTION:
+  * "correct until the camera aligns with the sun" -- the sky pass drew a sun disc at
+    pow(sd,900)*22 and the cloud composites OVER it, so through thin cloud the disc blew out the
+    whole region. Capped at 3.0.
+  * the crosshatch is the half-res upscale on high-contrast edges: a 3x3 TENT over the cloud target
+    instead of a plain bilinear fetch, eight extra taps on a quarter-count buffer.
+
+FIFTH INSTANCE OF THE SAME ROOT CAUSE: I implemented the SHAPE of a term from the literature and
+dropped the part that bounded it. This time I did worse -- I merged two terms that take different
+inputs into one that takes the wrong input, and the fused version was WRONG AT ZERO, which is the
+most common case in the whole volume.
+
+## 2.64 ACCUMULATED AGAINST A CLIP POINT OF 1.0 -- THIRD TIME I CHANGED A TERM AND LEFT ITS MULTIPLIER
+
+The blowout is arithmetic, and I could have computed it before shipping instead of after:
+
+    lit face   ms 2.49  ->  sunLight 2.14  ->  accumulated 2.64      clip is ~1.0
+
+I rescaled the sun for the OCTAVE SUM two rounds ago, then split beer from powder -- which raised
+thin samples about 18x and lit samples about 1.6x ON TOP OF THAT -- and never re-derived. Solved
+directly: x0.38 puts the lit face at 1.00, with the ambient scaled to match since it rides the same
+accumulation.
+
+THE RULE I KEEP BREAKING, WRITTEN AS A PROCEDURE THIS TIME:
+    after ANY change to a lighting term, evaluate the accumulated result at four points --
+    wisp, lit face, mid body, deep core -- and check the brightest against the clip point.
+    It is four lines of arithmetic and it has now caught what four rounds of eyeballing did not.
+
+THE WEAVE: dt is already under the finest feature, so there is little banding left for the jitter to
+break -- and a FULL-STEP offset is exactly what makes interleaved gradient noise's own diagonal
+structure visible. Halved the amplitude: half the offset, half the pattern, and the banding it was
+protecting against is not there to return.
+
+## 2.64 ACCUMULATED AGAINST A CLIP POINT OF 1.0, AND AN EDIT THAT NEVER RAN
+
+The blowout was arithmetic I could have done before shipping:
+
+    lit face   ms 2.49  ->  sunLight 2.14  ->  accumulated 2.64      clip is ~1.0
+
+I rescaled the sun for the OCTAVE SUM two rounds ago, then split beer from powder -- which raised
+thin samples ~18x and lit samples ~1.6x on top of that -- and never re-derived. THIRD TIME IN A ROW
+I have changed a lighting term and left its multiplier alone.
+
+    after   sun x0.38, ambient x0.42
+    wisp 0.97   lit face 1.03   mid 0.63   core 0.37     all in range
+
+AND THE FIRST ATTEMPT AT THAT FIX NEVER RAN. The edit script threw on a tuple unpack BEFORE
+write_text, so the generator was untouched, the page regenerated identically, and every check
+downstream reported cleanly on the OLD build -- including the arithmetic probe, which printed
+"sun colour now 0.860 ... CLIPS" while the run exited 0 and shipped. AN EXCEPTION MID-SCRIPT LEAVES
+THE FILE UNCHANGED AND THE REST OF THE PIPELINE VALIDATING THE PREVIOUS BUILD. Re-done with an
+assert after every replace that the change actually landed.
+
+THE PROCEDURE, since eyeballing has now failed four rounds running:
+    after ANY change to a lighting term, evaluate the accumulated result at FOUR points --
+    wisp, lit face, mid body, deep core -- and check the brightest against the clip point.
+    Four lines of arithmetic. It caught what four rounds of looking did not.
+
+THE WEAVE: dt is already under the finest feature, so there is little banding left for the jitter to
+break, and a FULL-STEP offset is exactly what makes interleaved gradient noise's own diagonal
+structure visible. Halved the amplitude.
+
+## NO TOP HIGHLIGHT, AND CIRRUS'S BLOCKS WERE THE OCCUPANCY MAP CULLING REAL CLOUD
+
+BOTH FROM ARITHMETIC, neither from looking.
+
+1. THE SUN WAS AT 33 DEGREES. At that elevation a point on TOP and a point on the SUN-FACING SIDE
+   have nearly the same shadow path, so beer() has no geometric difference to express and the top
+   comes out the same brightness as the sides -- exactly what he described. Raised to 55 degrees;
+   now the top genuinely clears the cloud while the sides do not.
+
+2. THE CIRRUS BLOCKS ARE TEXEL-SHAPED BECAUSE THEY ARE TEXELS. The occupancy bake samples a fixed
+   10 heights over the layer and THEN multiplies y by uStretch before evaluating the noise, so the
+   spacing in NOISE space grows with the stretch:
+
+       cumulus        stretch 1.0  ->  0.170 units per sample
+       stratocumulus  stretch 1.9  ->  0.323
+       cirrus         stretch 5.5  ->  0.935   against a 0.526-unit feature
+
+   At cirrus the bake MISSED the cloud in most columns, so its "upper bound" was not a bound, and
+   the marcher culled real cloud in whole texels. 40 samples brings every type under its feature
+   size. A CONSERVATIVE STRUCTURE IS ONLY CONSERVATIVE IF IT SAMPLES FINELY ENOUGH TO SEE WHAT IT
+   CLAIMS TO BOUND -- and the one parameter that varies per type was the one I left fixed.
+
+## THE DIAGONAL HATCH IS THE JITTER'S OWN GEOMETRY, AND ON CIRRUS IT IS THE ONLY SIGNAL
+
+Interleaved gradient noise is fract(52.98 * fract(dot(fragCoord, vec2(0.0671, 0.0058)))) -- A DOT
+PRODUCT WITH A FIXED VECTOR, so its level sets are parallel lines at
+atan(0.00583715 / 0.06711056) = 5.0 DEGREES. That is exactly the angle of the hatch across the
+cirrus frames.
+
+It is invisible on cumulus because that cloud has the contrast to hide it. Cirrus is thin and
+low-contrast, so the jitter IS the picture.
+
+AND IT WAS BUYING NOTHING THERE. dt is 0.066 against the cirrus feature of 0.526 -- already 8x
+oversampled, so there is no banding left for the jitter to break. Scaled the amplitude by the ACTUAL
+undersampling, dt * uFreq * 5.1, instead of applying one offset every type has to live with:
+
+    cumulus 0.87   stratocumulus 1.00   stratus 0.50   cirrus 0.64   cumulonimbus 0.67
+
+I CHOSE IGN TWO ROUNDS AGO BECAUSE IT DOES NOT TILE. It does not tile -- and it is still perfectly
+structured, in straight lines, at a fixed angle. "NOT TILING" AND "NOT VISIBLE" ARE DIFFERENT
+PROPERTIES, and I have now made that same substitution twice: Bayer for even coverage, IGN for
+non-tiling, neither checked against what the eye actually picks out.
+
+Cirrus erosion also came down 0.80 -> 0.45; a high erosion rate punches fine holes a thin field
+cannot carry, which added to the noise it was already showing.
+
+## 20.77 ms: TOOK THE TWO PROVEN LEVERS AND REFUSED THE TEMPTING ONE
+
+    primary density   108 Worley cells   (3 fbm octaves + erosion)
+    shadow, 3 taps     81                 <- 43% of the frame
+    total             189 per lit sample
+
+TAKEN:
+  a) 1/3 RESOLUTION instead of 1/2 -- 2.25x fewer pixels. The 3x3 tent that fixed the crosshatch is
+     exactly what makes a coarser upscale survivable; at 1/2 it was barely earning its place.
+  b) SHADOW TAPS 3 -> 2, reaching 1.06 units and scaled 1.35x to stand in for three. 27 fewer cells
+     per lit sample.
+     combined 2.25 x 1.17 = 2.62x  ->  ~7.9 ms projected
+
+REFUSED, AND THIS IS THE POINT: baking a 2D shadow map along the sun ray. One texture fetch instead
+of 81 Worley cells is the biggest win left on the board by a distance. IT IS ALSO AN APPROXIMATION
+RATHER THAN A BOUND -- the shadow depth depends on all three coordinates and a 2D bake cannot
+represent that without guessing at the third. Every approximation I have added to this shader today
+came back as an artifact within a round: coarse-first refine shredded the cloud, the height band
+culled it, the fused beer-powder blacked out the wisps. THE OCCUPANCY MAP IS THE ONE THAT SURVIVED,
+AND IT SURVIVED BECAUSE IT IS PROVABLY CONSERVATIVE.
+
+I would rather ship 7.9 ms that is correct than 4 ms that needs another four rounds. The frame-time
+row was never the argument anyway -- 0.26 MB against 20 bytes, 632 ms of bake against zero, and a
+1.6 fps ceiling on animation against free, all still stand.
+
+## THE EXACT LEVER I HAD NOT TAKEN: A WORLEY CELL BOUND THAT SKIPS HASHES WITHOUT CHANGING A VALUE
+
+A Worley cell whose NEAREST POSSIBLE point is farther than the best distance found so far CANNOT
+contain a closer feature point. Feature points of cell n lie inside [n, n+1], so the closest point
+of that box to the query is clamp(0, lo, hi) in relative coordinates -- an EXACT bound, not an
+estimate.
+
+    mean cells visited   15.0 of 27      1.80x fewer PCG hashes
+    108 cells per sample -> 60
+
+PROVED IDENTICAL BEFORE SHIPPING, which is the whole reason to prefer it: naive and bounded Worley
+run over 400 random points agree to 8.9e-16 -- floating point noise, not a difference. IT CANNOT
+COME BACK AS AN ARTIFACT because it cannot change an output value.
+
+That is the distinction this shader has been teaching all session. Everything I approximated came
+back within a round -- coarse-first refine shredded it, the height band culled it, the fused
+beer-powder blacked out the wisps. Everything PROVABLE survived: the occupancy map's conservative
+bound, and now this. THE CHEAP WIN AND THE SAFE WIN ARE NOT ALWAYS THE SAME WIN, BUT WHEN THEY ARE,
+TAKE THAT ONE FIRST -- and I had 108 cells per sample sitting there for the whole session with an
+exact 1.8x in them.
+
+Applied to BOTH copies of worley -- the volume shader and the occupancy bake -- because if the two
+diverge the map's upper bound stops bounding the density it exists to bound.
+
+## FREETOKEN (arXiv 2608.16157, Berkeley/UT, Aug 2026) -- READ IT, AND IT ARRIVES AT TWO OF OUR SIX LEVERS
+
+Edge-native MoE serving: full expert pool in host RAM, LRU expert cache in VRAM, and the misses
+split between PCIe transfer and in-place CPU execution. Apache 2.0, serves the OpenAI and Anthropic
+APIs, 20+ MoE models, 8 GB laptop to 96 GB workstation.
+
+THREE THINGS THAT MATTER TO US.
+
+1. THEY DERIVED ADAPTIVE DISPATCH FROM MEASURED BANDWIDTHS, WHICH IS LEVER 2, AND THEY STATE THE
+   DISCIPLINE BETTER THAN I HAVE: "This optimal mixture cannot be read from specification sheets. A
+   fast design must therefore make this division quantitatively, on the machine it actually runs
+   on." Their q* = m * B_PCIe / B_Host is four lines of algebra from a residual-bandwidth argument
+   -- exactly the shape of the arithmetic that has fixed every real problem in the cloud shader
+   today, and the opposite of the tuning-by-eye that caused them.
+
+2. THEIR SEMANTIC-AWARE STATE CACHE IS THE FAT-MARGIN CACHE, AND THEY SOLVED THE PART I DID NOT
+   HAVE TO. Rule 0 handed me the fat-margin cache an hour ago -- "when a query DRIFTS, do not key
+   the cache on the exact query; bake an ENLARGED region and serve everything inside." They apply
+   it to agent context: checkpoints anchored at the SPECIAL-TOKEN BOUNDARIES agent harnesses
+   actually cut on (thinking blocks, tool calls, turns), because "the edit replaces or removes
+   whole blocks marked by special tokens". Worst-case TTFT 44 s against llama.cpp's 232 and
+   KTransformers' 946. THE INSIGHT WE DO NOT HAVE: the margin is worth more when it is placed where
+   the query is KNOWN to drift to, rather than symmetrically around where it is now. That
+   generalises straight back into leCore's cache.
+
+3. THEIR EXACT-MERGE DISCIPLINE IS THE LESSON I WROTE DOWN TODAY, INDEPENDENTLY. "the CPU and GPU
+   compute their respective partial sums and merge them, preserving the exact MoE output without
+   algorithmic approximation" -- and Related Work explicitly separates them from HOBBIT, SiDA and
+   SMoE, which "relax fidelity". Same conclusion the cloud shader forced on me this session: every
+   approximation came back as an artifact within a round; only the provable ones survived.
+
+A KEPT NEGATIVE, FROM THEM, THAT SAVES US A WRONG IDEA. Expert routing looks like a retrieval
+problem and leCore is a retrieval engine, so predicting the next experts is the obvious thing to
+reach for. THEY RULE IT OUT: "every miss is ultimately a PCIe transfer, so decode latency remains
+bounded by the link no matter how accurate prediction becomes, while host compute capacity sits
+idle." Better prediction is NOT the lever; serving the miss differently is. Do not spend a session
+on an expert predictor.
+
+CONCRETE FOR openzoo:
+  * FreeToken serves the ANTHROPIC AND OPENAI APIs under Apache 2.0, so it drops in behind the MCP
+    proxy as a LOCAL backend alongside the ~435 hosted models. leCore's job there is cutting
+    inference cost; this cuts the marginal cost to zero on hardware the user already owns.
+  * The A4500 (20 GB) sits between their 4060 laptop (8 GB, Qwen3.6-35B at 39.3 tok/s) and their
+    3090/4090 (24 GB) rows, so Qwen3.6-35B-A3B should serve on the box we already benchmark on.
+  * DeepSeek-V4-Flash is one of their three headline models and staccs already publishes
+    lecore-deepseek-v4-flash-hrr. That is a ready-made pairing to measure rather than argue about.
+
+AND ONE HONEST TENSION: FreeToken's premise is that the model stays UNMODIFIED -- "FreeToken keeps
+the routed computation exact and the model unmodified". The assimilation/installed stack modifies
+weights directly. Those are not compatible in one process; the assimilated model would need its own
+serving path or the modification would need to live outside the expert pool. Worth knowing before
+anyone assumes the two compose.
+
+## UP / DOWN / SIDEWAYS: WHAT THE GLSL WORK ACTUALLY PRODUCED, AND WHERE IT LANDS IN THE STACK
+
+Rule 0 first. The audit says most of what the shader taught ALREADY HAS A HOME, which is the point
+of running it before proposing anything.
+
+    "skip candidates that cannot win"      -> Precision ladder (certified int8 rung)
+    "argmax over many candidates"          -> VSA cleanup on ANY GPU (matvec + argmax, fused)
+    "install a capability into weights"    -> Simulation in the weights (installed physics step)
+    "prefilter before an expensive score"  -> Triage cascade
+    "spend effort where it is needed"      -> Learned navigator, surprise-weighted rate allocation
+
+STRIP THE CLOUDS OFF AND THE SHADER PRODUCED FIVE THINGS:
+
+  T1  EXACT CELL-BOUND SKIP. A Worley cell whose nearest possible point is farther than the best so
+      far cannot contain a winner, so the hash is skipped WITHOUT changing an output. 27 -> 15
+      visits, verified identical to 8.9e-16.
+  T2  A CONSERVATIVE BAKED PREFILTER. Upper bound per region, baked once, sampled O(1), PERMISSIVE
+      sentinels, sampled NEAREST so nothing interpolates the bound away.
+  T3  EFFORT PROPORTIONAL TO REMAINING INFLUENCE. Shadow taps and step length scale with T, because
+      an error there is multiplied by T.
+  T4  A SERIES THAT FILLS WHERE THE FIRST TERM DIES. Multiple-scattering octaves: each term
+      attenuates less and scatters flatter, so it carries signal where term one is zero.
+  T5  DISCRETISATION IS ONLY VALID RELATIVE TO THE FINEST FEATURE THE FIELD HOLDS -- and that
+      number is computable (1/freq), not negotiable against frame time.
+
+DOWN (does it work on components of its own input?)
+
+  T1 GENERALISES TO ANY MIN/MAX REDUCTION WITH A COMPUTABLE PER-CANDIDATE BOUND, which is cleanup,
+  the resonator's argmax, and top-k retrieval. leCore already certifies a QUANTIZATION bound (the
+  int8 ladder: "conservative candidates PROVABLY contain every true top-k row incl ties"). The
+  cell-bound is a GEOMETRIC bound on a different axis, so the two COMPOSE rather than compete.
+  The concrete item: partial-sum early termination in the cleanup similarity. The catalog says the
+  similarity is 98-100% of a cleanup's cost at any real M, so a bound that abandons a ROW mid-dot-
+  product is the whole win -- and it is exact, which is the only kind that survived this session.
+
+  T2 IS ALREADY IN THE CORE, in a stronger form than I built it: the int8 ladder's certified error
+  bound is exactly a conservative prefilter with a proof attached. NOTHING TO BUILD -- but the two
+  KEPT NEGATIVES transfer and are worth pinning there: a restrictive sentinel plus an interpolating
+  filter turns a conservative structure into a culling one, and a bound is only conservative if it
+  SAMPLES FINELY ENOUGH TO SEE WHAT IT CLAIMS TO BOUND (the cirrus failure: fixed sample count
+  against a per-type stretch).
+
+UP (when the result is a component of something larger?)
+
+  THIS IS THE ONE THAT MATTERS FOR UNICRON, AND IT IS A REAL GAP. The zero-asset demo proved the
+  atom function -- fnv1a, PCG, the plane-wave lift -- evaluates IDENTICALLY in NumPy, JS and GLSL.
+  That is what makes "install leCore" conceivable at all: you cannot put a vocabulary in weights,
+  but you can put a FUNCTION there, and a function that already survives three substrates is a
+  candidate for a fourth.
+
+  mind.sim_program_run(machine, step_program, init, n_steps) already does exactly the audit needed:
+  it compiles ONE step, iterates it INSTALLED, and returns a DRIFT CURVE against the live step --
+  measured identically 0.0 over a 100-step PBD chain. THE PBD CHAIN. The same solver the cloth demo
+  runs in GLSL is already installed in weights with zero drift.
+
+  SO THE OPEN QUESTION IS SHARP AND TESTABLE: run the ATOM FUNCTION through sim_program_run's drift
+  harness. If the hash and the plane-wave lift install at drift 0, "atoms are functions of their
+  names" survives assimilation and the vocabulary genuinely costs nothing inside the model. If it
+  drifts, the number tells us which stage breaks -- and integer hashing through linear projections
+  is precisely where I would expect it to.
+
+SIDEWAYS (which costumes does it wear?)
+
+  T3 is the abstain/escalation policy in another costume: spend model calls in proportion to how
+  much the answer can still change. Already present as the triage cascade and the learned navigator;
+  what the shader adds is the SPECIFIC WEIGHTING -- error multiplied by remaining influence -- which
+  is a sharper rule than "escalate on low margin".
+
+  T4 is the speculative one and I am flagging it as speculative. Bundle readout dies at capacity
+  (k* ~ 0.13*D linear); the octave trick is a series whose later terms attenuate LESS and so carry
+  signal where the first is dead. Whether a lower-extinction readout exists for an over-loaded
+  bundle is an open question, not a plan.
+
+  T5 in retrieval is: a quantization is only valid relative to the finest distinction the codebook
+  must make. The int8 ladder already certifies this. The shader's contribution is the FAILURE MODE
+  -- I cut the step to buy frame time and tore the detail, then could not see why for two rounds.
+
+BACKLOG, IN ORDER OF EVIDENCE:
+  U1  Atom function through sim_program_run's drift harness. Highest value, smallest, and it either
+      validates or kills the load-bearing claim for installing leCore. MEASURE, do not argue.
+  U2  Partial-sum early termination in cleanup similarity, with the identical-output proof the
+      Worley version got (naive vs bounded over N random queries, require < 1e-12).
+  U3  Pin the two conservative-structure negatives on the int8 ladder's docstring: permissive
+      sentinels, and sample-rate versus what is being bounded.
+  U4  Fold T3's weighting -- error times remaining influence -- into the escalation policy.
+  U5  T4 as a research question against the measured capacity laws, not as an implementation.
+
+AND THE META-LESSON, WHICH IS THE MOST TRANSFERABLE THING THE WHOLE ARC PRODUCED: every
+APPROXIMATION I added to that shader came back as an artifact within one round -- coarse-first
+refine, the interpolated height band, the fused beer-powder. Every PROVABLE structure survived
+untouched -- the conservative occupancy bound, the exact cell skip. leCore's core already runs on
+that discipline (certified bounds, kept negatives, abstain-not-error). THE SHADER WAS AN EXPENSIVE
+INDEPENDENT CONFIRMATION THAT THE DISCIPLINE IS RIGHT, and that is worth more to unicron than any
+cloud.
+
+## SECOND SWEEP: FOUR MORE FACULTIES ALREADY HOLD WHAT THE SHADER TAUGHT
+
+Widened the audit past unicron to the whole stack. Four hits I had not seen, and each one changes
+an item from "build" to "connect":
+
+  unicron_early_exit  "STOP CLIMBING WHEN THE ANSWER IS ALREADY DECIDED -- shortcuts through the
+                      layers." That is T3 -- effort proportional to remaining influence -- already
+                      installed at the LAYER level. The shader's contribution is the WEIGHTING
+                      (error x how much it can still change the answer), not the mechanism.
+
+  Shader-native atom  "Two zero-storage atom vocabularies from hash32_pcg -- an atom is RECOMPUTED
+  families           on a GPU or in a browser, never shipped. hash_atom/encode_hash: Rademacher,
+                      integer-only, VERIFIED IN CHROME (101/101 vs f64)."
+                      THE ZERO-ASSET DEMO WAS REDISCOVERING A SHIPPED FACULTY. It already carries
+                      the cross-substrate proof I spent a session re-establishing. What the demo
+                      adds is the FPE/plane-wave lift on top and the byte-count framing -- and what
+                      it does NOT yet have is the fourth substrate, installed weights.
+
+  Dialect emitters    "leCore's kernels are written once, in Python, and the browser needs them in
+  (WGSL/C/JS/Zig)     WGSL. mind.emit_kernel(fn, dialect) ... the hand-written compute shader
+                      becomes a PROJECTION of the authoritative kernel."
+                      SO THE WHOLE HAND-WRITTEN GLSL IS THE WRONG SHAPE. Every shader in
+                      volume_three.html and zeroasset_three.html was written by hand and kept in
+                      sync with the Python by care alone -- which is exactly how the occupancy bake
+                      and the marcher drifted apart twice today. They should be EMITTED.
+
+  logic_check_proof   "Independently verify a wire-format proof tree against the rule set."
+                      The bound proofs (cell-bound, fbm-remainder, dilation-covers-drift) are stated
+                      in comments and verified by one-off NumPy scripts. They are exactly the shape
+                      logic_check_proof takes.
+
+## CONSOLIDATED BACKLOG
+
+Ordered by evidence, and every item says whether it is CONNECT (the faculty exists) or BUILD.
+
+  U1  CONNECT  Atom function through sim_program_run's drift harness. hash_atom already survives
+               NumPy/JS/GLSL/Chrome; the fourth substrate is installed weights, and sim_program_run
+               already returns a drift curve (0.0 on a 100-step PBD chain). Either the vocabulary
+               costs nothing inside the model or the drift number says which stage breaks. SMALLEST
+               ITEM WITH THE LARGEST CONSEQUENCE.
+
+  G1  CONNECT  Emit the demo shaders through mind.emit_kernel instead of hand-writing them. The two
+               copies of worley drifting apart, the occupancy bake using a different sample count
+               than the marcher, the comment that ate three uniforms -- all of those are what
+               hand-maintained duplication costs, and the faculty to remove it already ships.
+
+  U2  BUILD    Partial-sum early termination in the cleanup similarity, with the identical-output
+               proof the Worley skip got (naive vs bounded, require < 1e-12). The catalog says
+               similarity is 98-100% of a cleanup's cost, so abandoning a row mid-dot-product is the
+               whole win. Composes with the int8 ladder's certified bound rather than replacing it.
+
+  L1  CONNECT  State the three shader bounds as logic_check_proof trees rather than comments:
+               (a) the Worley cell bound, (b) the fbm remainder <= 0.45, (c) one dilation texel
+               covers 0.68 s of drift against a 0.25 s re-bake. All three are already proved on
+               paper; none is machine-checked.
+
+  U4  CONNECT  Fold the shader's weighting into unicron_early_exit: stop when error x remaining
+               influence falls below threshold, not when a margin does. The mechanism is there.
+
+  N1  BUILD    Pin two kept negatives on the conservative structures in the core (int8 ladder,
+               triage cascade): PERMISSIVE SENTINELS, and SAMPLE RATE VERSUS WHAT IS BOUNDED. Both
+               cost a full round each in the shader and both are one assertion each here.
+
+  U5  RESEARCH T4 -- a series whose later terms attenuate less, tried against bundle readout past
+               capacity (k* ~ 0.13*D). Open question, measured against the capacity laws. NOT a plan.
+
+  D1  DECIDE   The demos are done. volume_three and zeroasset_three stay as they are, as evidence
+               and as regression fixtures for the emitted-kernel work (G1 has a ready-made target:
+               emit the shaders and require the page still passes check_pages and bench_pages).
+
+WHAT I AM NOT PROPOSING, AND WHY: no new demo, no expert predictor for FreeToken (their kept
+negative rules it out), no temporal cache retry until G1 lands (it failed once because it was added
+to a hand-maintained shader alongside a step-count change; emitted kernels make that a one-variable
+change instead of two).
+
+## THE CLOUD WORK BELONGS IN THE PIPELINE, AND RULE 0 SAYS IT IS AN UPGRADE PATH NOT A SUBSYSTEM
+
+Audited before proposing. What already ships:
+  make_cloud            fBm bake -> volume render, as a MONITORABLE BACKGROUND JOB (pause/resume/
+                        cancel across a process restart)
+  gabor_cloud_render    single-scatters a fitted GaborField; density protocol verified 1e-6 vs
+                        quadrature
+  Cloud stack           CLOSED-FORM line integral over an FPE density field + Henyey-Greenstein;
+                        cloud_transmittance is Beer-Lambert on a tau costing ONE INNER PRODUCT PER
+                        RAY -- no marching at all
+  Parametric sky        hour-driven gradient, sun arc, stars as a hash of direction, and SEVEN named
+                        cloud kinds already
+  proc_texture          voronoi (f1/f2/f2f1/cell/smooth) and musgrave already in the menu
+
+SO THE SHADER'S CONTRIBUTION IS NOT A RENDERER. It is (a) a better DENSITY -- Worley fbm base,
+plane-wave weather coverage, altitude profile, remap carving, erosion -- which is closed form and
+therefore satisfies the existing density protocol directly; (b) five type presets DERIVED FROM THE
+WMO/NOAA DESCRIPTIONS rather than tuned, which map onto the parametric sky's seven names; and (c)
+three lighting terms the cloud stack does not have, each of which was a visible defect until it went
+in: DUAL-LOBE PHASE (a single lobe swings the whole cloud 6.2x with the camera), BEER AND POWDER ON
+DIFFERENT DEPTHS (fused, beerPowder(0)=0 and an unshadowed wisp gets no light), and MULTIPLE-
+SCATTERING OCTAVES (without them the interior has no light source at all).
+
+AND THE BROWSER WAS ALWAYS THE CONSTRAINED CASE. make_cloud already runs as a background job with
+progress, so offline can afford full resolution instead of 1/3, more sun taps, more octaves, no step
+growth and no jitter. THE CLOUDS SHOULD LOOK BEST IN THE PIPELINE, NOT IN THE DEMO.
+
+Full backlog written to docs/BACKLOG_after_glsl_arc.md -- 15 items across unicron, kernel authoring
+and the cloud pipeline, each tagged CONNECT / BUILD / RESEARCH, with a suggested order and an
+explicit not-doing list.
+
+## SOTA SWEEP + PANEL REVIEW: THE BACKLOG WAS WRONG IN FIVE PLACES
+
+Searched the field through August 2026 before redoing the plan, and it moved four items and killed
+five.
+
+WHAT THE SWEEP FOUND:
+  * SMOLDER (IO Interactive, SIGGRAPH 2026 Advances, materials updated 8/14/2026) -- "a fully
+    integrated, scalable, real-time volumetric effect rendering framework ... fully integrated with
+    all lighting systems, as well as with the various layers in the scene -- opaque, transparent,
+    and volumetric fog." THE "MAKE IT A PIPELINE NOT A DEMO" INSTINCT IS THE FIELD'S OWN DIRECTION,
+    ONE WEEK OLD. The unit of value is integration with the layer stack, not the cloud.
+  * NUBIS3 (Guerrilla, SIGGRAPH 2023): left 2.5D for voxel clouds with "ray march acceleration using
+    COMPRESSED SIGNED DISTANCE FIELDS", light-sampling acceleration, and "dark edges and inner
+    glow". OUR OCCUPANCY MAP IS A WEAKER VERSION OF THEIR SDF. An SDF gives a conservative DISTANCE
+    to skip; ours gives a boolean per column. Same safety class, strictly more information -- and
+    leCore already ships signed_distance_field / _3d / interior_distance_field.
+  * "analytical integration + jittered offset + TAA -> visually similar results with 1/16 THE NUMBER
+    OF STEPS." WE TOOK THE JITTER AND THE STEP CUT AND LEFT THE ANALYTICAL INTEGRATION ON THE TABLE
+    -- which is exactly what makes a low step count CONSISTENT rather than torn, and it is behind
+    two of our regressions. leCore's Cloud stack ALREADY HAS the closed form: "volint's CLOSED-FORM
+    line integral ... ONE INNER PRODUCT PER RAY -- no marching." THE DEMO MARCHED PAST ITS OWN BAKE.
+  * Environmental Volumetric Neural Shading of Clouds (PACMCGIT 9(4), July 2026) -- neural
+    relighting. CONSTITUTIONALLY CLOSED TO US. Worth knowing so we never claim to beat it on quality.
+  * Gabor Fields: Orientation-Selective LOD for Volume Rendering (arXiv 2602.05081, 2026) -- and
+    leCore ALREADY SHIPS gabor_cloud_render and Gabor field volumes. WE REBUILT AN ISOTROPIC WORLEY
+    STACK BESIDE A 2026 RESEARCH LINE WE ALREADY OWN.
+
+PANEL, QUILEZ CHAIRING: "Bake expensive repeated work; regenerate cheap deterministic work. You did
+the second and skipped the first. Guerrilla bakes an SDF to skip; you baked a boolean. And you
+hand-wrote four shaders that had to agree with a Python original -- the arc's failure list is
+DUPLICATION, NOT MATHEMATICS."
+
+FIVE THINGS KILLED: competing on cloud frame time or quality (Nubis3 plus a closed neural line);
+hand-written GLSL; isotropic Worley as the PRIMARY pipeline density (demoted to fallback behind
+Gabor); the 2D shadow-map bake (approximation, not bound); the FreeToken expert predictor.
+
+AND THE HONEST POSITION, STATED ONCE SO IT STOPS DRIFTING: we are not the state of the art in cloud
+rendering and will not be. What we have that they do not, all measured: the density is a FUNCTION OF
+A NAME (0.26 MB -> 20 bytes), DEFINED EVERYWHERE rather than inside a grid, ANIMATES FOR FREE where
+a baked volume needs 632 ms per frame, and yields the SAME FIELD IN NUMPY, JS, GLSL AND CHROME --
+with installed weights as the fourth substrate, pending the drift measurement. Different axis.
+It is the only one worth arguing on.
+
+Full plan: docs/BACKLOG_v2_panel_reviewed.md.
+
+## SECOND SWEEP: SLANG IS THE SOTA FOR EXACTLY WHAT B1 DOES, AND IT SHIPS THE WRONG HALF
+
+Khronos-governed, NVIDIA-contributed, fifteen years of R&D. Targets SPIR-V, HLSL, GLSL, WGSL, MSL,
+CUDA and CPU from one source. IN THE VULKAN SDK since 1.3.296.0. VALVE COMPILED THE ENTIRE SOURCE 2
+HLSL CODEBASE WITH IT WHILE CHANGING TEN LINES. Autodesk runs the Aurora path tracer through it.
+
+That is Dialect emitters' problem statement, solved by a standards body, in production.
+
+THE ANSWER IS THAT SLANG IS A TARGET, NOT A REPLACEMENT, for three reasons in order of weight:
+
+ 1. ADOPTING IT INVERTS THE THESIS. Our emitter emits from the AUTHORITATIVE PYTHON AST -- the
+    shader is a PROJECTION of the Python kernel. Authoring in Slang makes SLANG the source and
+    Python the copy. That also breaks A1: you cannot install a Slang program into a model, you
+    install the Python kernel. THE PYTHON AST IS THE SYMBOLIC OBJECT; everything else is a
+    projection of it.
+ 2. CONSTITUTIONALLY IT CANNOT BE A CORE DEPENDENCY. NumPy/Flask/stdlib/hashlib only, and the
+    engine must run and pass every test without the opt-in accelerators. Slang is a C++ binary
+    toolchain -- numba/sympy class at best.
+ 3. WGSL, OUR PRIMARY BROWSER TARGET, IS THE ONE SLANG HAS NOT FINISHED. Their own docs: "WGSL
+    support is still work-in-progress." Adopting wholesale trades a working path for a WIP one.
+
+And its headline feature -- FIRST-CLASS AUTOMATIC DIFFERENTIATION -- is constitutionally irrelevant
+to us. We would inherit a dependency for the one thing we are forbidden to use.
+
+B1 REVISED: emit SLANG AS ONE MORE DIALECT beside WGSL/C/JS/Zig. Python stays authoritative; one
+emitted artifact then reaches SPIR-V, HLSL, MSL and CUDA through Slang's own compiler, opt-in and
+free. STRICTLY ADDITIVE, AND IT TURNS A COMPETITOR INTO A BACKEND.
+
+Also noted, lighter than Slang: naga (the wgpu team's translator) converts WGSL/GLSL/SPIR-V/MSL/HLSL
+and is a LIBRARY rather than a binary toolchain -- a cheaper validation path for emitted WGSL than
+standing up slangc.
+
+THE PATTERN ACROSS BOTH SWEEPS: every time I looked outward, the field had already built the thing
+I was about to hand-roll -- Guerrilla's SDF skip, the analytical integration, Gabor LOD, and now
+Slang. AND EVERY TIME, leCORE ALREADY HELD A VERSION OF IT (signed_distance_field_3d, volint's
+closed form, gabor_cloud_render, emit_kernel). THE GAP WAS NEVER CAPABILITY. IT WAS THAT I DID NOT
+LOOK -- OUTWARD OR INWARD -- BEFORE BUILDING.
+
+## FINAL AUDIT: SIX PLANNED ITEMS DELETED BECAUSE THE FACULTY ALREADY EXISTS
+
+Put every backlog item to find_capability before writing it down. Six were deleted outright:
+
+  a browser-vs-pipeline verification harness  -> sdf_emitters_agree, whose OWN DOCSTRING is the
+      lesson: "both emit a map() for one tree ... but only one was ever executed, so agreement was
+      NARRATIVE. mind.sdf_emitters_agree(tree) now RUNS BOTH." The exact pattern, already built,
+      already carrying the discipline. Generalise it; do not rebuild it.
+  a better upscale than the 3x3 tent          -> guided_upsample, "render colour SMALL, then upscale
+      it" -- purpose-built for exactly our half-res cloud buffer
+  cloud-layer compositing                     -> composite_layers, "the SHARED blend kernel (L-1)"
+  background render with progress             -> Background cloud bake (resumable)
+  text -> cloud parameters                    -> Describe a scene / Describe to document
+  a novelty check on the plan                 -> dpi_guard
+
+THAT LAST ONE IS THE SHARPEST. mind.dpi_guard(features, new_feature) reports novel_frac -- "the
+reproducibly-unexplained share, the MOST it could add" -- on a HOLDOUT, never train alone. WITH 16 OF
+21 ITEMS TAGGED CONNECT, THE HONEST QUESTION IS WHETHER THIS PLAN IS NEW INFORMATION OR A
+RE-DRESSING OF THE EXISTING CAPABILITY SET -- AND THE ENGINE HAS A FACULTY THAT ANSWERS THAT. It is
+now item one, ahead of everything else, because it is the cheapest possible check that we are not
+about to rebuild ourselves again.
+
+THE LESSON THE AUDIT ITSELF TAUGHT, and it never varied across two external sweeps and three
+internal ones: EVERY TECHNIQUE THE FIELD HAD, leCORE ALREADY HELD A VERSION OF.
+    Guerrilla's SDF skip          -> signed_distance_field_3d
+    analytical integration        -> volint's closed form, one inner product per ray
+    Gabor orientation LOD         -> gabor_cloud_render
+    single-source shaders (Slang) -> emit_kernel
+    executed-both-sides checking  -> sdf_emitters_agree
+    guided upsampling            -> guided_upsample
+    novelty check on a proposal   -> dpi_guard
+
+THE GAP WAS NEVER CAPABILITY. IT WAS THAT NOTHING LOOKED -- OUTWARD OR INWARD -- BEFORE BUILDING.
+Rule 0 exists for exactly this and it works; the failure was not running it early enough, often
+enough, or with enough phrasings. That is the cheapest correction available in the whole plan.
+
+Final: docs/BACKLOG_v3_final.md. 21 items, 16 CONNECT, 4 BUILD, 3 RESEARCH, 6 deleted.
+
+## THE DEPTH EXPERIMENT, RUN -- AND FOUR UNPUBLISHED RESULTS FOUND BY LOOKING OUTWARD THEN INWARD
+
+The external sweep set the bar: three dimensions spanning >=8x, or drop the novelty claim.
+
+  depth_probe worst_cosine (1.0 = that level is gone):
+     dim        d3      d4      d5      d6      d7   first-collapse
+    1024     0.9699  0.9899  0.9966  0.9988  0.9996     d3
+    4096     0.9644  0.9881  0.9961  0.9987  0.9996     d3
+   16384     0.9638  0.9877  0.9959  0.9986  0.9995     d3
+
+16x SPAN. THE COLLAPSE DEPTH DOES NOT MOVE AND THE CURVE BARELY MOVES. Published consensus (Plate
+1995; Gosmann & Eliasmith 2019; Recursive Binding on a Budget, ICML 2026) holds depth is crosstalk-
+limited and therefore IMPROVES with D. This says otherwise for the flat typed-tree encoder.
+
+AND THE ESCAPE ALREADY EXISTS -- the engine emits it as a RUNTIME WARNING: "tree depth 5 exceeds the
+flat encoder's measured wall (d5-7, dim-independent) ... use mind.encode_tree_carrier (leaf recovery
+0.94-1.00 at depths 7-32)". encode_tree_carrier puts each LEVEL on its own carrier, making depth
+contribution LINEAR INSTEAD OF GEOMETRIC. v4 SAID THE DEPTH WALL HAD NO ESCAPE. WRONG, AND ONE MORE
+PHRASING OF RULE 0 FOUND IT -- fifth time this session the audit beat my assumption.
+
+INSTRUMENT ERROR, KEPT LOUD: my first run GUESSED depth_probe's return shape, got nan, and printed
+"moves with dimension -- drop the novelty claim." THE EXACT OPPOSITE OF THE TRUTH, FROM AN UNCHECKED
+RETURN SHAPE. Docstring-vs-live-API, seventh occurrence. The key is 'worst_cosine' and there is a
+'separable' bool. PROBE THE SHAPE; NEVER INFER IT -- and never report a verdict computed from nan.
+
+FOUR RESULTS THE LITERATURE DOES NOT HAVE, ALL ALREADY BUILT AND MEASURED:
+  N1 dimension-independent depth collapse + carrier escape (0.94-1.00 at depths 7-32)
+  N2 exact-capacity cells with an EXACT key->cell directory (0.007 -> 1.000 across 71 cells)
+  N3 certified conservative candidate set at int8 speed, ties included, recall 1.000 @ 9.7 ms --
+     RaBitQ bounds estimation error PROBABILISTICALLY; every production int8 system re-ranks and
+     eats ~1% recall loss. NOBODY SHIPS A CERTIFIED SUPERSET.
+  N4 iterated drift of an installed program vs its live reference, 0.0 over a 100-step PBD chain --
+     Tracr/ALTA prove construction ONCE; editing work measures FACT forgetting. Nobody measures this.
+
+WHERE WE ARE HONESTLY AT SOTA: Raviv 2024 (Neural Computation 36(6)) linear codes give PROVABLY
+CORRECT factorization "strictly faster than resonator networks, often by an order of magnitude", in
+Python -- the correct NumPy-native route AROUND the F=4 wall, which we should implement and never
+claim to have broken. And Kleyko/Bybee/Kymn/Olshausen/Sommer 2023 EXPLICITLY endorse compressed-
+sensing decoders for VSA, so bundle_recover's CoSaMP/AMP members are on the published line.
+
+WHERE WE STRUCTURALLY CANNOT BE, and should stop implying otherwise: neural texture compression
+(NTC: 4x resolution at 30% less memory than BC-high) on ARBITRARY AUTHORED assets; MoE serving; and
+compiling into transformer weights. Our axis is exactness, determinism and certification.
+
+Full plan: docs/BACKLOG_v5_publish.md.
+
+## THE POSITIVE CONTROL KILLED N1's FRAMING AND PRODUCED A BETTER RESULT
+
+v5 claimed a dimension-independent nesting-depth CAPACITY COLLAPSE contradicting the crosstalk
+consensus. Ran the controls the standing rule requires.
+
+CONTROL A -- does the probe separate where it must? d1 0.70, d2 0.89. Instrument works.
+CONTROL C -- THE KILLER. An interference budget MUST depend on how many things are superposed:
+    n=2   d4 dim4096  worst_cosine 0.9881
+    n=8   d4 dim4096  worst_cosine 0.9881
+    n=32  d4 dim4096  worst_cosine 0.9884
+A 16x CHANGE IN BRANCHING MOVES IT BY 0.0003. IT IS NOT AN INTERFERENCE BUDGET.
+
+MECHANISM, CONFIRMED. The leaf's remaining share (1 - cosine) and its depth-to-depth ratio:
+    dim 1024   0.2959 0.0944 0.0301 0.0101 0.0034 0.0012   ratio mean 0.330
+    dim 4096   0.3194 0.1056 0.0356 0.0119 0.0039 0.0013   ratio mean 0.332
+    dim 16384  0.3246 0.1080 0.0362 0.0123 0.0041 0.0014   ratio mean 0.335
+A CONSTANT ~1/3 PER LEVEL, IDENTICAL ACROSS A 16x DIMENSION SPAN. This is GEOMETRIC DILUTION of the
+leaf's share of the holistic vector, NOT CROSSTALK. Interference falls with dimension; a fraction
+does not.
+
+SO THE CLAIM CHANGES. It does NOT contradict Plate / Gosmann & Eliasmith -- IT IS NOT CROSSTALK, so
+there is nothing to contradict; we never reached the interference regime because dilution got there
+first. The corrected claim is STRONGER: holistic leaf separability decays geometrically at ~1/3 per
+level, INVARIANT TO BOTH DIMENSION AND BRANCHING because it is dilution; and encode_tree_carrier
+makes depth contribution LINEAR INSTEAD OF GEOMETRIC, measured 0.94-1.00 at depths 7-32. A named
+mechanism with a measured constant and a working fix beats a contradiction claim that would not have
+survived review.
+
+SECONDARY FINDING, KEPT: DIMENSION BUYS STABILITY, NOT SEPARABILITY. Seed SD at d3 falls from
+0.00262 (dim 1024) to 0.00041 (dim 16384) -- a 6x tightening -- while the mean moves 0.4%.
+
+NEXT FOR IT (Cranmer's point): DERIVE the 1/3 from the encoder's normalisation. A constant that is
+derived is a theorem; a constant that is measured is a curve.
+
+AND THE LESSON, WHICH IS THE SAME ONE ALL SESSION: every failure was a check that existed and was
+not run -- a bound not consulted, a faculty not called, a proof in a comment, a return shape
+inferred instead of probed, a capacity law measured and ignored. NOW A HEADLINE CLAIM THAT SURVIVED
+FOUR BACKLOG VERSIONS AND DIED IN ONE CONTROL RUN THE STANDING RULE ALREADY REQUIRED.
+
+Full plan: docs/BACKLOG_v6_panel.md.
+
+## SWEEP ON THE VERBS: FOUR INSTRUMENTS, ZERO TO BUILD
+
+Every earlier sweep asked what the plan was ABOUT. This one asked what it needs to DO.
+
+  bootstrap CI on N1'        -> measure(run_once, seeds, n_boot=2000) -- "every headline number gets
+                                a mean, a spread and a 95% bootstrap CI, not a lucky-seed point
+                                estimate; assert_robust passes only if the LOWER CI bound clears"
+  prove N1' is not decoration-> ablation_table -- "for each subsystem, run the DUMBEST honest
+                                non-holographic baseline on the SAME task, data and metric; CIs
+                                decide the verdict -- load-bearing vs decorative"
+  make advise_scale ROUTE    -> adaptive_pipeline -- "MEASUREMENT-DRIVEN adaptive dispatcher ... route
+                                the data to the method its REGIME names instead of hard-coding one:
+                                ABSTAIN on null-indistinguishable input (the SETI gate)"
+  calibrate the abstain gate -> recall_calibrated -- "the nearest STORED INDIVIDUAL plus an HONEST
+                                FALSE-ALARM PROBABILITY"
+
+S1 IS NOT NEW MACHINERY. It is advise_scale wired into adaptive_pipeline's dispatch, with the two
+prescriptions N1' and N2 already supply: encode_tree_carrier for the depth law, celled_memory for
+the pair law. THEY HAVE NEVER BEEN CONNECTED.
+
+S5 IS NOT THRESHOLD-HUNTING. recall_calibrated already emits a false-alarm probability per answer. A
+71.6% false-abstain rate against an available per-answer probability is a gate reading a BOOLEAN
+where a CALIBRATED NUMBER was on offer.
+
+AND P2' MUST RUN ablation_table BEFORE THE CLAIM, not after: is carrier elevation load-bearing, or
+does the dumbest non-holographic baseline do as well? That is the question the panel asks next and
+the engine already answers it.
+
+CORRECTION: v6 listed variance_harness as ABSENT. THE METHOD IS `measure`, in holographic_measure --
+the catalog name is the TITLE, not the method. EIGHTH instance of catalog-title-vs-live-method this
+session. Probe, do not infer.
+
+NET: three of the top five items lost their build cost entirely. The plan is now almost entirely
+CONNECT THE INSTRUMENTS THE ENGINE ALREADY HAS TO THE DECISIONS IT ALREADY MAKES.
+
+## P2' DONE: THE DILUTION CONSTANT IS 1/3, INVARIANT TO DIMENSION AT 95% CONFIDENCE
+
+Ran the first backlog item with the instrument the last sweep found. measure(run_once, seeds,
+n_boot=2000) -- 10 seeds, 2000 bootstrap resamples, per dimension.
+
+  DILUTION RATIO, mean of (1-cos)[d+1]/(1-cos)[d] over depths 1..6:
+     dim 1024    mean 0.32988  sd 0.00556  CI [0.32640, 0.33284]
+     dim 4096    mean 0.33250  sd 0.00271  CI [0.33103, 0.33409]
+     dim 16384   mean 0.33327  sd 0.00167  CI [0.33221, 0.33421]
+
+  ALL THREE CIs OVERLAP ACROSS A 16x DIMENSION SPAN -> THE RATIO IS INVARIANT TO DIMENSION AT 95%.
+  And 1/3 = 0.33333 sits inside the two upper CIs and 0.0005 outside the lowest -- the constant is
+  1/3 to within the measurement, not a fitted number.
+
+  SECONDARY FINDING CONFIRMED WITH CIs: dimension buys STABILITY, not separability.
+     sd 0.00556 -> 0.00271 -> 0.00167 across 1024 -> 4096 -> 16384. A 3.3x tightening for 16x dim,
+     while the mean moves 1%.
+
+LOAD-BEARING TEST (the question ablation_table asks, answered on the same task/metric with CIs):
+  distinguishable share, flat encoder, dim 4096, 10 seeds:
+     d3  mean 0.03580  CI [0.03530, 0.03631]
+     d5  mean 0.00397  CI [0.00390, 0.00405]
+     d7  mean 0.00044  CI [0.00043, 0.00045]
+  The carrier encoder's measured claim is LEAF RECOVERY 0.94-1.00 at depths 7-32. At d7 the flat
+  encoder retains 0.00044 -- THREE ORDERS OF MAGNITUDE BELOW, with non-overlapping CIs by any
+  margin, and the gap WIDENS with depth. CARRIER ELEVATION IS LOAD-BEARING, NOT DECORATIVE.
+
+N1' AS IT NOW STANDS, AND IT IS PAPER-READY EXCEPT FOR THE DERIVATION:
+  Holistic leaf separability in the flat typed-tree encoder decays GEOMETRICALLY at a ratio of
+  1/3 per level, INVARIANT to dimension (16x, CIs overlap) and to branching factor (16x, delta
+  0.0003). The mechanism is DILUTION of the leaf's share of the holistic vector, NOT interference --
+  so it does not contradict crosstalk capacity theory, it sits underneath it. Carrier elevation
+  (each level on its own carrier) makes the depth contribution LINEAR instead of geometric and
+  restores leaf recovery to 0.94-1.00 at depths 7-32.
+
+REMAINING FOR P2' (Cranmer's item): DERIVE the 1/3 from the encoder's normalisation. A constant that
+is derived is a theorem; a constant that is measured is a curve -- and this one is now measured to
+three decimal places with a CI, which is exactly the state where a derivation is worth the effort.
+
+INSTRUMENT NOTE, NINTH OCCURRENCE: measure() returns keys ['ci','mean','n','scores','std'] -- 'ci'
+is a TUPLE, not 'ci_lo'/'ci_hi'. I guessed again and got a TypeError comparing None to None. THE RULE
+WORKED THE SECOND TIME BECAUSE I PROBED FIRST. Probe the shape; never infer it.
+
+## S1 SHIPPED PARTIALLY, AND THE CATALOG EDIT CHAIN WENT BAD -- RESTORED, NOT REPAIRED BLIND
+
+WHAT LANDED AND IS LIVE:
+  * holographic/caching_and_storage/holographic_capacitygate.py -- capacity_gate(advice) turns an
+    advise_scale result into PROCEED / REROUTE / ABSTAIN, and it ROUTES because every failing law
+    has a MEASURED escape that is never "more dim":
+        pair-capacity  -> celled_memory        0.007 -> 1.000 across 71 cells
+        nesting depth  -> encode_tree_carrier  leaf share 0.00044 at d7 -> recovery 0.94-1.00
+        bundle readout -> bundle_recover       cosamp/amp hold ~8.7x the linear ceiling
+    ABSTAINS rather than guessing when a failing law has no escape on record. Selftest asserts all
+    four verdicts including prefix-matching against a REFINED law string, so a better measurement
+    cannot silently break the routing.
+  * mind.capacity_gate(**advise_scale kwargs) wired into the P14 mixin. VERIFIED LIVE:
+        n=2000 vocab=6767 dim=512   -> reroute, route=celled_memory
+        n=50   vocab=200  dim=1024  -> reroute, route=celled_memory
+        n=20   vocab=64   dim=16384 -> proceed
+  * A REAL PRE-EXISTING BUG, FOUND BECAUSE THE GATE WAS THE FIRST THING TO CONSULT THE LAW:
+    pic_transition computed rho = 1/(2*log(1/delta)) and DIVIDED BY ZERO whenever delta == 1.0.
+    Unreachable until something actually called advise_scale on ordinary inputs -- which is the
+    entire premise of this item. Guarded by clamping delta below 1. 137 tests pass, 4 skipped.
+
+WHAT DID NOT LAND: the catalog entry. Three failures, each the same root cause.
+  (1) Anchored on the LAST register_capability in holographic_catalog.py -- that file holds exactly
+      ONE, and it is inside _selftest. The entry registered nothing.
+  (2) The retry computed offsets against a string it had ALREADY MUTATED and spliced the entry into
+      the module docstring at byte 40. FILE CORRUPTED.
+  (3) RESTORED FROM THE CANONICAL ZIP rather than repairing blind -- the rule on record, applied.
+      Verified: tree parses, mind boots, gate still live.
+THE CATALOG IS SPLIT ACROSS TEN FILES (holographic_catalog_p01..p06 plus others). The registry is
+NOT holographic_catalog.py. Finding that out is the item's real cost, and it is now written down.
+
+INSTRUMENT ERRORS THIS ITEM: 10th (assumed holographic_unified.py held advise_scale and used CRLF --
+it is a P14 mixin and it is LF), 11th (anchored by POSITION instead of MEANING), 12th (computed
+offsets against a mutated string). ALL THREE ARE THE SAME ERROR: grep for the true anchor, verify it
+is unique AND in the right function, and never derive a second offset from a changed buffer.
+
+S1 STATUS: faculty built, wired, tested, live, and it has already paid for itself by finding a
+divide-by-zero. NOT DISCOVERABLE until the catalog entry lands in a p0N part -- so by the engine's
+own rule the capability DOES NOT YET EXIST. That is the honest state and it is the next action.
+
+## S1 COMPLETE: THE CAPACITY GATE IS DISCOVERABLE 5/5, AUDITS 0/0/0
+
+The catalog entry landed on the FOURTH attempt, and the first three failed for the same reason each
+time: I ASSUMED THE CALL SHAPE INSTEAD OF READING ONE.
+
+  attempt 1  anchored on the last register_capability in holographic_catalog.py -- that file holds
+             ONE and it is inside _selftest. Registered nothing.
+  attempt 2  computed offsets against an ALREADY-MUTATED string; spliced into the module docstring
+             at byte 40. FILE CORRUPTED -> restored from the canonical zip, per the rule on record.
+  attempt 3  found the real registry (register_p01..p06) but searched for "\n    )\n" as the entry
+             terminator. There is none.
+  attempt 4  READ A LIVE ENTRY. The signature is POSITIONAL:
+                 c.register_capability("Title", "does ...", example=..., aliases=(tuple,))
+             closing with "))", aliases a TUPLE not a list. My keyword-style entry could never have
+             parsed as a call to this function. Anchored on the unique _PART line; it landed.
+
+RESULT: discoverability 5/5 on stranger phrasings ("will this fit in a bundle", "why did recall
+collapse", "what should I use instead of more dimension"). skill_lint 0, catalog_gaps 0,
+reachability_audit 0 duplicates. catalog_p06 selftest OK -- 276 capabilities, no duplicates.
+capdoc + docgen regenerated (745 modules, 265,869 lines). Targeted regression over the touched
+surfaces: 86 passed, 1 skipped.
+
+THE LESSON, WHICH IS THE SESSION'S ONLY LESSON: READ ONE LIVE EXAMPLE BEFORE WRITING THE SECOND.
+All twelve instrument errors this session -- tuple orders, return shapes, comment placement, CRLF
+assumptions, anchor positions, and now a call signature -- are the same error in different costumes:
+I INFERRED A SHAPE FROM MEMORY OR A DOCSTRING INSTEAD OF PROBING THE LIVE ARTIFACT. Rule 0 says
+audit before building. THE SHARPER FORM IS: AUDIT THE SHAPE, NOT JUST THE EXISTENCE.
+
+S1 IS NOW REAL by the engine's own definition -- discoverable, callable, wired, documented, audited.
+And it found a divide-by-zero in pic_transition on its first live call, which is exactly what a gate
+nothing had ever consulted was always going to do.
+
+## S5 MEASURED FIRST, AND IT IS WORSE AND SIMPLER THAN THE 71.6% FIGURE SUGGESTED
+
+Reproduced the false-abstain problem on the LIVE catalog with a stated ground truth (each probe
+query paired with the capability title it must return), so "correct but gated out" is exact rather
+than judged.
+
+  abstains 3/10 -- and in ALL THREE the correct capability was RANK 1 in find_capability:
+    z=0.36  "unmix a superposition"             -> Bundle recovery (unmix a superposition)   rank 1
+    z=0.04  "every headline number needs a CI"  -> Variance harness (honest measurement)      rank 1
+    z=0.79  "render colour small then upscale"  -> guided_upsample                            rank 1
+
+  100% OF ABSTAINS DISCARDED A RANK-1 CORRECT ANSWER. The first query is the capability's OWN TITLE
+  verbatim -- "Bundle recovery (unmix a superposition)" -- and the gate refused it at z=0.36.
+
+AND THE MECHANISM IS NOT A MIS-SET THRESHOLD. route_or_abstain RETURNS AN EMPTY HIT LIST WHEN IT
+ABSTAINS (hits=0 in every case above). It does not report the ranking it is refusing, so from the
+gate's own output "correct but gated out" is UNMEASURABLE -- I could only detect it by scoring
+find_capability separately and comparing. A gate that throws away its evidence cannot be calibrated,
+audited, or appealed.
+
+THE Z-SCORE IS THE WRONG STATISTIC HERE. It compares top-1 against a null of SCRAMBLED QUERIES built
+from the catalog's own vocabulary. When a query is phrased in the catalog's own words -- which is
+exactly what a well-written alias makes likely -- the scrambled null scores HIGH too, so the margin
+collapses and the gate refuses precisely the queries it should be most confident about. THE NULL IS
+TOO SIMILAR TO THE SIGNAL BY CONSTRUCTION.
+
+SO S5 CHANGES SHAPE. It is not "recalibrate the threshold". It is two separate defects:
+  D1  THE GATE MUST RETURN ITS EVIDENCE. An abstain should carry the ranking it refused plus the
+      z and p it refused on, so the decision is auditable and a caller can appeal. B9's "closest
+      alongside abstains at zero false-action cost" is the pattern; route_or_abstain does not follow
+      it. THIS IS THE FIX THAT MAKES EVERYTHING ELSE MEASURABLE, and it is small.
+  D2  THE NULL IS MIS-SPECIFIED for catalog-vocabulary queries. A scrambled-query null cannot
+      separate signal from noise when the signal is written in the null's own vocabulary. The
+      honest alternatives are a null over OTHER capabilities' text (not scrambled words), or the
+      exact ambiguity count the "Answer, return the set, or abstain" faculty already uses --
+      "the ambiguity count is EXACT (postings intersection), not a predicted confidence."
+
+KEPT NEGATIVE: do NOT simply lower z_min. Three of ten queries abstained at z 0.04-0.79 against a
+0.8 floor; lowering the floor to admit them admits the genuine noise cases too, because the
+statistic itself does not separate them. Fixing the null is the work; moving the threshold is the
+thing that looks like the work.
+
+NEXT ACTION: D1 first (return the evidence), because until the gate reports what it refused, every
+number about it -- including the 71.6% on record -- is measured from outside the gate rather than
+from it.
+
+## D1 SHIPPED: THE ABSTAIN NOW CARRIES ITS EVIDENCE, AND THE NUMBER IS MEASURABLE FROM THE GATE
+
+route_or_abstain's abstain branch returned hits=[] and DISCARDED `real` -- the ranking it had already
+computed. Additive fix: hits stays EMPTY (so no caller can act on a refused route) and a new
+`refused` key reports the ranking that was turned down.
+
+MEASURED FROM THE GATE'S OWN OUTPUT, which was impossible before:
+    ABSTAIN z=0.36  rank1-correct=True   "unmix a superposition"
+    ABSTAIN z=0.04  rank1-correct=True   "every headline number needs a CI"
+    ABSTAIN z=0.79  rank1-correct=True   "render colour small then upscale"
+    FALSE-ABSTAIN RATE: 3/3 abstains carried a rank-1 correct answer (100%)
+
+The first is a capability's OWN TITLE VERBATIM -- "Bundle recovery (unmix a superposition)" --
+refused at z=0.36. Before `refused`, detecting that required scoring find_capability separately and
+comparing by hand; now the gate reports it.
+
+WHY THIS IS THE RIGHT FIRST FIX AND NOT A THRESHOLD MOVE: the docstring's own kept negative says
+"a genuine query phrased entirely in words the catalog never uses will abstain -- that abstention is
+CORRECT; the fix is aliases, not a lower z_min." TRUE, AND NOT THIS CASE. These three queries are
+phrased in the catalog's own words -- which is precisely when the scrambled-vocabulary null scores
+HIGH, the margin collapses, and the gate refuses the queries it should be most confident about. THE
+NULL IS TOO SIMILAR TO THE SIGNAL BY CONSTRUCTION, and no threshold separates a statistic that does
+not separate.
+
+Verified: 194 tests pass over catalog/route/abstain; skill_lint 0; catalog_gaps 0; mind-level
+docstring updated to name `refused` (a docstring that disagrees with live code is the exact failure
+paid for twelve times this session); REFERENCE.md regenerated.
+
+NEXT (D2): replace or supplement the scrambled-vocabulary null. Two honest candidates already in the
+engine -- a null over OTHER CAPABILITIES' TEXT rather than scrambled words, or the EXACT postings-
+intersection ambiguity count the "Answer, return the set, or abstain" faculty already uses ("the
+ambiguity count is EXACT, not a predicted confidence"). Measure both against these 10 probes plus
+the two logged misroutes ('counter traders', 'purple monkey dishwasher') which MUST still abstain --
+that is the control, and any replacement that loses it is worse than what it replaces.
+
+## D2: TWO CANDIDATE STATISTICS MEASURED AND BOTH REFUTED -- THE DEFECT IS A STALE THRESHOLD
+
+Measured three statistics against the same probe set before building anything. The control is the
+two logged misroutes, which MUST stay below any line.
+
+CANDIDATE 1 -- NULL OVER OTHER CAPABILITIES' TEXT (instead of scrambled vocabulary). REFUTED:
+       TRUE  unmix a superposition            z_cap -0.61      z_scrambled  0.36
+       TRUE  check capacity before allocating z_cap  2.61      z_scrambled  4.13
+       FALSE purple monkey dishwasher         z_cap -0.51      z_scrambled -0.14
+    The weakest TRUE (-0.61) falls BELOW the strongest FALSE (-0.51) -- the classes OVERLAP. The
+    scrambled null does not overlap. THE PROPOSED REPLACEMENT IS STRICTLY WORSE. Kept negative.
+
+CANDIDATE 2 -- TOP1-VS-TOP2 MARGIN (the shape decide_or_abstain uses). REFUTED:
+       FALSE purple monkey dishwasher    top1 3.00  top2 1.00  ratio 0.667
+       TRUE  every headline number...    top1 4.00  top2 3.50  ratio 0.125
+    Word salad scores a HIGHER margin than four of six genuine queries, because a nonsense query
+    that happens to hit one capability hard has nothing in second place. Margin alone is worse than
+    the null. Kept negative.
+
+WHAT THE MEASUREMENT ACTUALLY SHOWS. On this probe set the scrambled-null z DOES separate the
+classes -- TRUE spans 0.04..4.13, FALSE spans -2.13..-0.14, and they do not overlap. THE STATISTIC
+IS FINE. THE LINE IS IN THE WRONG PLACE: z_min=0.8 sits far above the observed boundary near -0.05,
+so it refuses six-tenths of the true population.
+
+AND THE DOCSTRING PREDICTED THIS EXACTLY: "z is calibrated to the CURRENT vocabulary (not comparable
+across catalog versions) ... recalibration is owed whenever the catalog's vocabulary shifts
+substantially." 0.8 was chosen when the weakest genuine queries measured z=+1.02. THE CATALOG IS NOW
+276 CAPABILITIES AND THE WEAKEST GENUINE QUERY MEASURES z=+0.04. THE RECALIBRATION THE DOCSTRING
+PROMISED IS OVERDUE, and the drift is exactly the direction the kept negative warned about.
+
+SO D2 IS NOT A NEW STATISTIC. It is: (a) recalibrate z_min from a measured TRUE/FALSE population
+using `measure` for a bootstrap CI on the separation, not a hand-picked line; (b) make the
+recalibration AUTOMATIC -- the gate already caches the null keyed on capability COUNT as a staleness
+proxy, so it KNOWS when the catalog grew and could refuse to trust a stale line instead of silently
+applying it; (c) keep both refuted candidates on record so neither is reinvented.
+
+THE PATTERN, AND IT IS THE SESSION'S: the defect was not the mechanism, not the statistic, and not
+the null. IT WAS A NUMBER MEASURED ONCE, DOCUMENTED AS NEEDING REMEASUREMENT, AND NEVER REMEASURED --
+while the engine cached the very quantity that would have detected the drift.
+
+## D2 EXECUTED: THE LINE RECALIBRATED FROM A MEASURED POPULATION WITH A BOOTSTRAP CI
+
+Built a TRUE population of 15 stranger-phrased catalog queries and a FALSE population of 6 (the two
+logged misroutes plus in-domain word salad), scored every one, and PRICED EVERY CANDIDATE LINE by
+its two error rates -- rather than picking a number.
+
+   line   false-abstains   false-accepts
+   0.80    5/15             0/6      <- the incumbent
+   0.40    4/15             0/6
+   0.20    3/15             0/6
+   0.10    2/15             0/6      <- the knee
+   0.00    1/15             1/6      <- the first false accept
+
+BOOTSTRAP, 4000 resamples of both populations:
+   z_min 0.80  false-abstain 0.34 [0.13, 0.60]   false-accept 0.00 [0.00, 0.00]
+   z_min 0.20  false-abstain 0.20 [0.00, 0.40]   false-accept 0.00 [0.00, 0.00]
+   z_min 0.10  false-abstain 0.13 [0.00, 0.33]   false-accept 0.00 [0.00, 0.00]
+
+z_min = 0.10 CUTS THE FALSE-ABSTAIN RATE FROM 0.34 TO 0.13 WITH THE FALSE-ACCEPT RATE STILL EXACTLY
+ZERO AND ITS UPPER CI STILL ZERO. That is the measured knee, and it is the whole recalibration the
+docstring said was owed.
+
+THE POPULATIONS OVERLAP AT ONE POINT AND IT IS INSTRUCTIVE: the lowest TRUE is "compare two
+implementations" at z=-0.135, and the highest FALSE is "the the the and and" at z=0.000 -- a
+degenerate all-stopword query. So no line is perfectly clean, but every line at or above 0.10 has
+zero false accepts across the whole bootstrap.
+
+HONEST LIMIT, STATED RATHER THAN HIDDEN: n=15 TRUE and n=6 FALSE. The false-abstain CI at 0.10 is
+[0.00, 0.33] -- wide. The DIRECTION is solid (0.8 is measurably too high; its own CI lower bound of
+0.13 sits at the point estimate for 0.10) but the exact knee is not pinned. THE THRESHOLD IS NOT
+CHANGED IN CODE ON THIS EVIDENCE. What is owed first is a larger population drawn programmatically
+from the catalog's own aliases -- which is free, since every registered capability ships 5-11 of
+them and they are exactly "a phrase a stranger would type."
+
+AND THE STRUCTURAL FIX MATTERS MORE THAN THE NUMBER: the gate already caches its null keyed on
+CAPABILITY COUNT as a staleness proxy. IT KNOWS WHEN THE CATALOG GREW. It should refuse to apply a
+line calibrated at a different catalog size, or at minimum report the staleness alongside the
+verdict -- exactly as D1 made it report the ranking it refused. A number that is documented as
+needing remeasurement should not be silently reusable.
+
+NEXT: (a) generate the TRUE population from registered aliases (free, large, and unbiased by my
+choice of phrasing); (b) re-run the cost table and bootstrap at n in the hundreds; (c) then move the
+line and wire the staleness check.
+
+## D2 OVERTURNED BY ITS OWN NEXT MEASUREMENT: THE INCUMBENT LINE IS FINE AND THE DOCSTRING WAS RIGHT
+
+Built the unbiased TRUE population the last entry said was owed -- 300 multi-word aliases sampled
+from the catalog's own 7,348, each one literally "a phrase a stranger would type", with exact ground
+truth (the alias's OWN capability must be rank 1).
+
+   TRUE n=300 | rank-1 correct 299 (100%) | z: min 0.85  p10 3.49  median 3.97  max 5.81
+   REFUSED BY THE INCUMBENT LINE 0.8:  0/300  (0%)
+
+ZERO FALSE ABSTAINS. The minimum z across three hundred genuine queries is 0.85 -- ABOVE the 0.8
+line, by design, exactly as the original calibration claimed.
+
+SO MY HAND-PICKED 15 WERE AN ADVERSARIAL SAMPLE, NOT A REPRESENTATIVE ONE. I chose deliberately
+oblique phrasings and then measured a "34% false-abstain rate" from them. Checked directly:
+
+   unmix a superposition             registered-alias=False  z=0.36
+   every headline number needs a CI  registered-alias=False  z=0.04
+   render colour small then upscale  registered-alias=False  z=0.79
+   compare two implementations       registered-alias=False  z=-0.14
+   check capacity before allocating  registered-alias=True   z=4.13
+
+EVERY QUERY I FLAGGED AS A FALSE ABSTAIN IS A QUERY WITH NO REGISTERED ALIAS. THE ONE WITH AN ALIAS
+SCORES 4.13. And the docstring's kept negative said this in advance, in these words: "a genuine
+query phrased entirely in words the catalog never uses will abstain -- that abstention is CORRECT
+behaviour (the catalog truly has no purchase on it), but it READS AS A FALSE NEGATIVE TO A USER WHO
+KNOWS A CAPABILITY EXISTS UNDER OTHER WORDS; THE FIX IS ALIASES, NOT A LOWER z_min."
+
+I read that kept negative, quoted it, wrote "TRUE, AND NOT THIS CASE", and was wrong. It was exactly
+this case. The recalibration is NOT owed; z_min=0.8 stands; the threshold was never touched in code,
+which is the only reason this costs a paragraph instead of a regression.
+
+WHAT SURVIVES, AND IT IS WORTH MORE THAN THE CLAIM IT REPLACES:
+  * D1 STANDS AND IS VINDICATED. `refused` is what let me measure this at all -- and it is what makes
+    the RIGHT diagnosis visible: an abstain that carries its ranking shows a user the capability
+    exists and that the gap is an ALIAS, not a wall. That is the actionable form.
+  * THE REAL BACKLOG ITEM IS ALIAS COVERAGE, NOT CALIBRATION. 7,999 distinct aliases over 3,392
+    capabilities is ~2.4 each, while the registration convention asks for 5-11. skill_lint already
+    counts inert aliases; nothing measures MISSING ones. The honest metric is the one I stumbled
+    into: sample real user phrasings, and every abstain whose `refused` top-1 is correct is a
+    MISSING ALIAS with the target already named.
+  * BOTH REFUTED STATISTICS STAY REFUTED (capability-text null overlaps; top1-vs-top2 margin ranks
+    word salad above genuine queries). Those measurements were sound; only my population was not.
+
+THE LESSON, AND IT IS SHARPER THAN THE SESSION'S RUNNING ONE: I DID RUN THE MEASUREMENT, AND THE
+MEASUREMENT WAS HONEST -- BUT I CHOSE THE POPULATION MYSELF AND THE POPULATION CARRIED THE
+CONCLUSION. A control on the instrument is not enough; the SAMPLE needs a control too, and the
+cheapest one available was sitting in the catalog the whole time. When a kept negative predicts your
+result, believe it before you believe your own probe set.
+
+## ALIAS COVERAGE MEASURED: THE 50% FIGURE WAS AN AGGREGATE OVER TWO DIFFERENT POPULATIONS
+
+"7,999 aliases over 3,392 capabilities is ~2.4 each against a 5-11 convention" -- true, and
+misleading. SPLIT IT:
+
+   titled entries        count  579 | mean aliases 10.29 | zero-alias    1 (0%)
+   method-name entries   count 2813 | mean aliases  1.17 | zero-alias 1699 (60%)
+
+THE HAND-REGISTERED CATALOG IS AT 10.29 ALIASES PER ENTRY WITH EXACTLY ONE GAP. The convention is
+being met, comfortably, and my "alias coverage is the real backlog item" was an artifact of averaging
+hand-written titles together with auto-derived method entries.
+
+AND THE METHOD ENTRIES ARE NOT ORPHANS. They are auto-introspected from mind methods and SHADOWED by
+titled entries for the same capability -- 'ablation table' returns "False-discovery gate over an
+ablation table" and "VSA load-bearing audit (the ablation table)" at ranks 1-2, with the bare
+`ablation_table` at rank 3. Sampled 120 zero-alias method entries and asked the sharp question: is
+any of them reachable ONLY by its own identifier, with no word of its name appearing anywhere in the
+titled/alias vocabulary?
+
+   1 of 120 (1%).
+
+SO THERE IS NO ALIAS-COVERAGE PROBLEM. There is a ~1% orphan tail among auto-derived entries, which
+is a rounding error against 3,392 capabilities and is exactly what reachability_audit already exists
+to catch (it reports 0 gaps).
+
+BACKLOG STATUS AFTER THIS ARC -- what is DONE, what is REFUTED, what remains:
+
+  [x] S1  capacity_gate: built, wired, catalogued, discoverable 5/5, audits 0/0/0. Found and fixed a
+          live divide-by-zero in pic_transition on its first call.
+  [x] P2' N1' measured to paper grade: dilution ratio 1/3, CIs overlap across a 16x dimension span,
+          invariant to branching (16x -> 0.0003), carrier elevation load-bearing by three orders of
+          magnitude at d7. Remaining: DERIVE the 1/3 (Cranmer's item).
+  [x] D1  route_or_abstain now returns `refused` -- the ranking it turned down. 194 tests pass.
+          Vindicated twice over: it is what made both the wrong diagnosis AND the right one visible.
+  [-] D2  REFUTED. Two candidate statistics measured and rejected (capability-text null overlaps;
+          top1-vs-top2 ranks word salad above genuine queries), then the recalibration itself
+          refuted on an unbiased 300-alias population: 0/300 false abstains at the incumbent
+          z_min=0.8, minimum z 0.85. THE THRESHOLD WAS NEVER CHANGED IN CODE.
+  [-] S5  REFUTED as stated. The "71.6% false-abstain" framing does not reproduce on a representative
+          population; the abstains I found were queries with NO REGISTERED ALIAS, which the
+          docstring's kept negative predicted verbatim.
+  [-] "alias coverage" REFUTED this entry: titled entries average 10.29 aliases with one gap.
+
+  [ ] P4  atom function through sim_program_run's drift harness -- unblocked, smallest, largest
+          consequence. NEXT.
+  [ ] P3  Lean 4 tier 0 -> install, then skip_is_safe, then the tie-inclusive int8 bound.
+  [ ] P1  Raviv linear codes beside the resonator.
+  [ ] S2  celled_memory by default, single vector by exception.
+  [ ] S4  exact-bound skipping in cleanup similarity (98-100% of a cleanup's cost).
+  [ ] B1  emit kernels; Slang as one dialect.
+  [ ] C-series graphics application.
+
+THREE ITEMS REFUTED BY MEASUREMENT AND ONE SHIPPED. That ratio is the point: four things I was
+confident enough to write into a backlog, three of which the engine's own data killed the moment the
+population was chosen honestly.
+
+## P4 DONE: THE ATOM FUNCTION SPLITS INTO AN INSTALLABLE HALF AND A PROVABLY UN-INSTALLABLE ONE
+
+Ran the drift harness and got a clean, two-sided answer rather than the single number the backlog
+assumed.
+
+WHAT INSTALLS, AT MACHINE PRECISION. A step program over ATOM-DERIVED state -- permute, then mix
+with a fixed atom -- run 100 iterations installed with state fed back:
+
+    drift: max 1.388e-17 | final 6.939e-18 | mean 1.017e-17
+    VERDICT: DRIFT-FREE. Certified linear install, flat curve, no compounding.
+
+So everything leCore does WITH an atom -- bind, bundle, permute, cleanup-as-projection -- survives
+installation exactly. That is the half the "install leCore" claim actually needs, and it holds.
+
+WHAT DOES NOT INSTALL, AND WHY IT CANNOT. hash_atom is str -> ndarray: FNV-1a integer hashing, then
+PCG, then a Rademacher sign map. It is not a state->state step, so it cannot be a FAC in a linear
+chain -- and the projector would REFUSE it, correctly ("a nonlinear body REFUSES loudly -- the
+core/shell boundary, measured not declared"). Rather than assert that, I measured whether the atom
+is linear in the only numeric handle it has:
+
+    best linear fit of atom on fnv1a(name): max residual 0.0801
+    atom component magnitude:                        0.0442
+    -> THE RESIDUAL IS LARGER THAN THE SIGNAL ITSELF. Not approximately linear; not linear at all.
+
+That is not a defect. IT IS THE POINT. A hash whose output were linear in its input would not be a
+hash -- the near-orthogonality that makes atoms usable (max pairwise cosine 0.078 across 8 names) is
+exactly the property that forbids a linear installation. THE ATOM FUNCTION IS UN-INSTALLABLE FOR THE
+SAME REASON IT WORKS.
+
+SO THE CLAIM SHARPENS RATHER THAN DIES. "Atoms are functions of their names" survives assimilation
+as a SPLIT:
+   * the atom generator stays on the HOST -- it is integer arithmetic, deterministic, and already
+     verified identical across NumPy / JS / GLSL / Chrome (101/101 vs f64). It is cheap; it does not
+     need to be in the weights.
+   * the ALGEBRA OVER atoms installs at 1.4e-17 and iterates 100 steps without drift.
+That is precisely the HOST:APPLY split the compiler already models -- clamps and contacts ride as
+marked host links while the linear core installs certified. The atom generator is another host link,
+and the honest statement is that leCore's vocabulary costs ZERO WEIGHTS and one host call, not that
+it lives in the weights.
+
+BACKLOG:
+  [x] P4  atom function through the drift harness. Answered: algebra installs drift-free (1.4e-17
+          over 100 steps); the generator provably cannot and should not (residual 0.0801 > signal
+          0.0442). Recorded as a SPLIT, not a failure.
+  [ ] P3  Lean 4 -- next.
+
+## P3 DONE: skip_is_safe EXPORTED, WITH TWO NEGATIVE CONTROLS AND AN HONEST EXTERNAL GAP
+
+The bound behind the whole shader arc, stated once so it covers three faculties: a candidate whose
+LOWER BOUND is at least the best-so-far cannot win, so skipping it is safe. Emitted term-mode:
+
+    theorem skip_is_safe : skip_is_safe_2 c :=
+      safe_to_skip_a_loser (worse_than_best_cannot_win (transitivity bound_is_valid test_fired))
+
+Five named rules -- bound_is_valid, test_fired, transitivity, worse_than_best_cannot_win,
+safe_to_skip_a_loser -- so the derivation reads as the argument it is. Artifact persisted at
+proofs/skip_is_safe.lean with proofs/skip_is_safe.rules.json beside it, re-checkable the moment a
+binary exists.
+
+THE DELIVERABLE IS NOT THE THEOREM. The faculty's own docstring says why: "Lean verifies the proof
+FOLLOWS from the rules; it does NOT verify the rules are CONSISTENT -- an inconsistent rule set
+proves anything and typechecks doing it." A rule set that proves everything proves nothing, so the
+work is the controls:
+
+    NEGATIVE CONTROL 1  goal ["cannot_win", ["d"]] -- a DIFFERENT candidate      ok=False, lean=None
+    NEGATIVE CONTROL 2  bound_is_valid REMOVED, same goal                        ok=False, lean=None
+
+Both refuse. The rule set is not vacuous, and the skip is derivable ONLY when the bound is actually
+valid -- which is exactly the precondition the Worley cell test, the cleanup partial-sum test and
+the int8 ladder each establish differently and then share.
+
+THE EXTERNAL GAP, REPORTED NOT PAPERED OVER. check="external" returns
+    {'available': False, 'ok': None, 'note': 'no `lean` binary on PATH; install elan/lean4'}
+and ok=False. It does not fake agreement. Per the de Bruijn criterion the faculty implements -- two
+independent checkers, AGREEMENT as the deliverable -- this proof currently has ONE checker. The
+internal one passed; the second is owed and the artifact is on disk waiting for it.
+
+WHAT THIS BUYS THE BACKLOG: S4 (exact-bound skipping in cleanup similarity, 98-100% of a cleanup's
+cost) now has its safety argument as a machine-readable object rather than a comment. The remaining
+Lean items are the fbm remainder <= 0.45 and the tie-inclusive int8 conservative-superset bound --
+the tie case being the specific thing the sweep found production systems duck.
+
+  [x] P3  skip_is_safe exported, controls pass, artifact persisted. EXTERNAL CHECK OWED (tier 0).
+  [ ] P1  Raviv linear codes -- next.
+
+## P1 AUDIT: THE "F=4 HARD WALL" IS NOT A FACTOR-COUNT WALL -- IT IS TWO VARIABLES AND WE HAD ONE
+
+Measured the shipped resonator before proposing Raviv's linear codes as a replacement, because a
+replacement is only worth building where the incumbent actually fails.
+
+FIRST MEASUREMENT (D=1024, M=24 per codebook, 12 trials):
+    F=2  space        576  accuracy 12/12
+    F=3  space      13824  accuracy  1/12
+    F=4  space     331776  accuracy  0/12
+    F=6  space  191102976  accuracy  0/12
+The collapse is between F=2 and F=3 HERE -- but phasor_factor's own docstring reports 0.967 at F=3
+with M=8 (space 512). Both cannot be a pure factor-count law.
+
+SO I HELD THE SEARCH SPACE CONSTANT AND VARIED F (space ~4096 throughout):
+    F=2 M=64  accuracy 12/12
+    F=3 M=16  accuracy  8/12
+    F=4 M=8   accuracy  8/12
+    F=6 M=4   accuracy  2/12
+
+BOTH VARIABLES ARE REAL AND THEY ARE DIFFERENT. At fixed search space the accuracy is flat from F=3
+to F=4 (8/12 both) and only collapses at F=6 -- so factor count costs something beyond the space it
+generates. And at fixed F, growing M from 8 to 24 took F=3 from 8/12 to 1/12 -- so the space costs
+something too. THE SHORTHAND "FACTORIZATION HARD WALL F=4" COMPRESSES A TWO-VARIABLE SURFACE INTO
+ONE NUMBER, and advise_scale reports it as a single boolean law with margin 1.
+
+WHAT THIS CHANGES FOR P1. Raviv's linear codes (Neural Computation 36(6), 2024) give PROVABLY
+CORRECT recovery -- accuracy independent of BOTH variables, which is precisely the surface that
+degrades here. The case for implementing them is therefore stronger than the backlog stated, and
+sharper: it is not "route around F=4", it is "replace a two-variable accuracy surface with a
+guarantee". And the honest framing for any future claim is that we route around the wall rather
+than break it -- Raviv is a different algorithm, not a better resonator.
+
+AND advise_scale's factorization law NEEDS THE SECOND VARIABLE. It currently takes `factors` and
+reports ok/margin from that alone; at F=3 with M=24 it says the resonator HOLDS while the measured
+accuracy is 1/12. A capacity law that consults one of two variables is a law that will pass you
+straight into the wall -- which is exactly the failure capacity_gate was built to stop.
+
+  [x] P1 audit: incumbent measured, the wall characterised as a two-variable surface, and a real
+      defect found in advise_scale's factorization law (missing M).
+  [ ] P1 build: Raviv linear codes beside the resonator, benchmarked on BOTH axes.
+  [ ] advise_scale factorization law: take codebook size as well as factor count.
+
+## THE FACTORIZATION LAW NOW TAKES BOTH VARIABLES, AND THE GATE ROUTES ON IT
+
+advise_scale's factorization law consulted `factors` alone and reported "resonator holds" at F=3
+while the measured accuracy was 1/12. Fixed, additively -- `codebook` is OPTIONAL, so every existing
+caller keeps the old behaviour byte-for-byte and the law only tightens when given the second
+variable:
+
+    F=3 M=8    ok=True   margin 1.333  resonator holds
+    F=3 M=16   ok=True   margin 1.333  resonator holds
+    F=3 M=24   ok=False  margin 0.296  search space M^F = 24^3 = 13824 exceeds the measured knee
+    no codebook            unchanged   resonator holds        <- old callers unaffected
+
+    capacity_gate(factors=3, codebook=24) -> reroute -> linear-code factorization
+
+THE KNEE IS MEASURED, NOT ASSUMED: ~4096 held 8/12 at both F=3 and F=4; 13824 fell to 1/12. Both
+numbers are in the comment beside the constant so the next person can re-derive rather than trust it.
+
+AND THE GATE ALREADY KNEW THE ANSWER. capacity_gate's escape table has carried
+"factorization -> linear-code factorization: exact algebraic recovery routes AROUND the F=4 dense-
+code wall rather than through it" since it was built -- it simply never fired, because the law it
+consults could not fail. FIXING THE LAW ACTIVATED A ROUTE THAT WAS ALREADY WIRED. That is the
+capacity_gate thesis demonstrated on itself: the escape existed, the measurement existed, and only
+the connection between them was missing.
+
+Verified: 137 tests pass, 4 skipped; skill_lint 0; catalog_gaps 0; REFERENCE.md regenerated.
+
+  [x] advise_scale factorization law takes codebook size; gate routes to linear codes.
+  [ ] P1 build: Raviv linear codes beside the resonator, benchmarked on BOTH axes -- and the law
+      above is now the acceptance test, because it names the exact regime where the resonator loses.
+
+INSTRUMENT ERROR 13, and it is the same one: I wrote alpha=0.9 in a replace anchor when the file
+says alpha=0.90. The body patch asserted; the SIGNATURE patch did not, so it silently no-opped and
+the failure surfaced two steps later as a TypeError. ASSERT EVERY REPLACE, not just the interesting
+one -- a silent no-op on a one-line change is the cheapest possible bug to prevent and the most
+expensive to chase.
+
+## P1 SHIPPED: EXACT FACTORIZATION BY LINEAR CODES -- 12/12 WHERE THE RESONATOR SCORES 0/12
+
+holographic_lincode.py, after Raviv, "Linear Codes for Hyperdimensional Computing" (Neural
+Computation 36(6):1084-1120, 2024). Give each codebook entry a codeword from a linear code, so a
+bound product's PHASE is a linear image of the concatenated index bits; factorization is then a
+least-squares SOLVE, not a search.
+
+HEAD-TO-HEAD, D=1024, 12 trials each, both axes the fixed law now names:
+
+    F   M    space    resonator   linear-code   reso ms   lin ms
+    2  64     4096      12/12        12/12         1.4      0.3
+    3  16     4096       6/12        12/12         2.6      0.2
+    3  24    13824       2/12        12/12         5.4      0.3
+    4   8     4096       4/12        12/12         0.8      0.2
+    4  24   331776       0/12        12/12         8.6      0.3
+    6   4     4096       1/12        12/12         1.1      0.2
+    6   8   262144       0/12        12/12         3.7      0.3
+
+EXACT EVERYWHERE, AND 4-29x FASTER. Residual through the mind at F=4 M=24: 8.88e-16 -- the solve is
+clean, not merely correct. Raviv's own claim was "strictly faster than resonator networks, often by
+an order of magnitude"; measured here at 18x on the hardest cell.
+
+KEPT NEGATIVE, IN THE MODULE, THE FACULTY AND THE CATALOG: THIS IS NOT A BETTER RESONATOR. It needs
+codebooks IT BUILT -- the codewords carry the structure being solved -- and it REFUSES an
+underdetermined system (dim < F*ceil(log2 M)) rather than guessing. The resonator's virtue is that
+it factors codebooks it did not create; this one's is exactness on codebooks it did. Two different
+algorithms for two different situations, and reporting otherwise would be the fabrication.
+
+SECOND KEPT NEGATIVE: the basis rows are ORTHOGONALISED at build. Without it the solve is
+technically valid and numerically miserable at large F, which reads as a factorization failure and
+is not one -- an instance of the session's running lesson in a new place.
+
+Wired: mind.lincode_codebooks / mind.factor_exact. Catalogued, discoverability 5/5 on stranger
+phrasings ("resonator fails at my factor count", "factorize without searching", "too many factors to
+search"). skill_lint 0 (does trimmed 700 -> 526 chars after it tripped the 600 cap, exactly as the
+notes warn it does), catalog_gaps 0, reachability 0 duplicates, catalog_p06 selftest OK at 277
+capabilities, docgen regenerated.
+
+  [x] P1  Raviv linear codes beside the resonator, benchmarked on BOTH axes. The advise_scale law
+          fixed earlier is what named the acceptance regime, and the gate already routed to it.
+  [ ] S2  celled_memory by default -- next.
+
+## S2 MEASURED, AND "CELLED BY DEFAULT" IS THE WRONG SHAPE -- THE GATE ALREADY IS THE DEFAULT
+
+Measured celled_memory across load before changing any default (dim 1024, vocab 4096, integer keys):
+
+   pairs   store ms   recall ms   accuracy   cells
+      50        3.3       68.2      1.000      4
+     200        9.6      278.5      1.000     14
+     800       35.3     1186.6      1.000     54
+    3200      158.5     4652.6      1.000    214
+
+ACCURACY 1.000 AT EVERY LOAD, and it never degrades -- the escape works exactly as claimed. But the
+recall cost is LINEAR IN PAIRS at ~1.41 ms/key, flat across a 64x load range. That is the crossing
+cost the docstring says was measured, and it is what "celled by default" would impose everywhere.
+
+AND THE COMPARISON THAT MATTERS DOES NOT EXIST. I went looking for the load where the single vector
+is safe so I could price the default against it -- and advise_scale says pair-capacity FAILS at
+n=50, vocab=4096, dim=1024 (needs dim >= 3648). AT THE DIMENSIONS THIS ENGINE ACTUALLY RUNS, THE
+SINGLE-VECTOR PATH IS ESSENTIALLY NEVER INSIDE THE LAW for real vocabularies. So "celled by default,
+single vector by exception" is not a policy change -- IT IS ALREADY WHAT THE LAW IMPLIES, and the
+only thing missing was something that consults the law.
+
+THAT THING NOW EXISTS. capacity_gate(n_pairs=..., vocab=..., dim=...) returns reroute ->
+celled_memory precisely in this regime. S2 as written ("flip the default") would hard-code the
+answer the gate computes; the gate is strictly better because it also says WHEN the single vector is
+fine and produces the number that justifies it.
+
+SO S2 IS SUPERSEDED BY S1 RATHER THAN OUTSTANDING. What remains is narrower and real: the faculties
+that ALLOCATE should call the gate, which is the S1 wiring item, not a default flip.
+
+  [x] S2  measured; superseded by capacity_gate. Recorded rather than implemented, because
+          implementing it would have hard-coded a policy the engine can derive.
+  [ ] S1b call capacity_gate from the faculties that allocate (the remaining half of S1).
+  [ ] S4  exact-bound skipping in cleanup similarity -- next, and skip_is_safe already certifies it.
+
+KEPT NEGATIVE: celled recall is ~1.41 ms/key and LINEAR in the number of keys recalled -- there is
+no batching win in the current implementation (3200 keys cost 64x what 50 do). That is a real
+optimisation target and it is NOT a reason to avoid cells; it is a reason to batch the directory
+lookup, which the exact key->cell map makes straightforward.
+
+## S4 REFUTED, AND THE REASON IS A LAW WORTH MORE THAN THE OPTIMISATION WOULD HAVE BEEN
+
+Measured before building. Partial-sum early termination in cleanup similarity: compute the dot
+product over the first fraction p of the dimensions, bound the untouched tail by Cauchy-Schwarz
+(rows are unit-norm, so |tail dot| <= ||q_tail||), and prune any row whose upper bound cannot beat
+the best so far.
+
+   M=1024    full 0.7 ms   best cosine 0.130 | at 25% of D: 0.0% pruned | at 50%: 0.0%
+   M=8192    full 4.9 ms   best cosine 0.115 | at 25% of D: 0.0% pruned | at 50%: 0.0%
+   M=32768   full 29.0 ms  best cosine 0.128 | at 25% of D: 0.0% pruned | at 50%: 0.0%
+
+ZERO ROWS PRUNED AT EVERY SCALE AND EVERY FRACTION. Not a tuning miss -- a structural impossibility,
+confirmed analytically:
+
+   seen 25% of D:  residual bound 0.866  vs  winner margin ~0.031  ->  27.7x too loose
+   seen 50% of D:  residual bound 0.707  vs  winner margin ~0.031  ->  22.6x
+   seen 75% of D:  residual bound 0.500  vs  winner margin ~0.031  ->  16.0x
+   seen 90% of D:  residual bound 0.316  vs  winner margin ~0.031  ->  10.1x
+
+THE LAW: A BOUND MUST BE SMALLER THAN THE GAP IT IS ASKED TO DECIDE. In high-dimensional VSA the
+winner's cosine is O(1/sqrt(D)) -- 0.031 at D=1024 -- while the unseen-signal bound after seeing
+fraction p is sqrt(1-p). There is NO p where it closes: at 90% of the work done the bound is still
+10x the margin. The very property that makes VSA work -- near-orthogonality, so every cosine is tiny
+-- is what forbids partial-sum pruning.
+
+AND THIS EXPLAINS THE ONE THAT WORKS. The int8 precision ladder certifies a conservative superset at
+9.7 ms with recall 1.000 because it bounds QUANTIZATION ERROR, which is small by construction. The
+partial-sum bound bounds UNSEEN SIGNAL, which is large by construction. SAME SHAPE, OPPOSITE FATE --
+and the Worley cell skip worked for the int8 reason, not the partial-sum reason: a box-to-point
+distance is tight relative to the best-so-far, because cells are LOCAL and the field has structure.
+THE SKIP GENERALISES TO GEOMETRY, NOT TO INNER PRODUCTS OVER NEAR-ORTHOGONAL VECTORS.
+
+skip_is_safe (P3) is unaffected and still correct: it proves that IF the bound is valid THEN the
+skip is safe. What S4 establishes is that in this particular application the antecedent -- a bound
+tight enough to fire -- cannot be met. THE THEOREM WAS NEVER THE RISK; THE PRECONDITION WAS.
+
+  [x] S4  REFUTED with the mechanism named. Do not reinvent partial-sum pruning for VSA cleanup.
+          The remaining honest levers for cleanup cost are the ones already shipping: the int8
+          certified ladder (error bound, not signal bound) and GPU offload of the similarity
+          (98-100% of the cost, already catalogued).
+  [ ] S1b call capacity_gate from the faculties that allocate.
+  [ ] B1  emit kernels; Slang as one dialect.
+
+## B1 SHIPPED: SLANG IS A DIALECT, NOT A REPLACEMENT -- AND IT EXPOSED A STALE NEGATIVE TEST
+
+Added `slang` to DIALECTS as a TABLE ENTRY, not a compiler. Slang is an HLSL superset, so the
+C-family decl/sig/loop forms carry over verbatim and every intrinsic name mirrors WGSL exactly --
+one line, the same mirror the glsl column already uses. Same kernel, three ways:
+
+    glsl   float worley_cell(float qx, ...) { float dx = (qx - fx); ... return sqrt(...); }
+    slang  float worley_cell(float qx, ...) { float dx = (qx - fx); ... return sqrt(...); }
+    wgsl   fn worley_cell(qx: f32, ...) -> f32 { let dx = (qx - fx); ... return sqrt(...); }
+
+WHY EMIT INTO IT RATHER THAN AUTHOR IN IT, recorded in the table beside the entry: authoring in
+Slang makes SLANG the source and the Python kernel a copy, which inverts the thesis AND breaks the
+installed-weights path -- you install the Python kernel, not a shader. Emitting keeps Python
+authoritative and buys SPIR-V / HLSL / MSL / CUDA through slangc as an OPT-IN accelerator, the
+numba/sympy class, never required. Slang's headline autodiff is constitutionally irrelevant to us.
+
+AND THE EMITTER SUITE CAUGHT SOMETHING I DID NOT CAUSE. test_an_unknown_dialect_raises used "glsl"
+as its EXAMPLE of an unknown dialect. glsl was later ADDED to DIALECTS -- it is in the shipped zip,
+predating my change -- so the test quietly became an assertion that a REAL dialect is unknown. It
+failed the instant anything selected it, and `-k "emit or dialect or kernel"` was the first run this
+session that did. Repaired to use a name that can never be implemented.
+
+KEPT NEGATIVE, GENERAL: A NEGATIVE TEST WHOSE SUBJECT CAN BE IMPLEMENTED LATER IS A TIME BOMB. "X is
+unknown" is only a stable assertion if X is chosen to stay unknown forever. This one sat green
+because nobody ran it, which is the same failure as a bound nobody consults and a faculty nobody
+calls -- the session's single lesson, now in the test suite.
+
+Verified: 108 passed, 2 skipped on the emitter surface; skill_lint 0; catalog_gaps 0; reachability 0
+duplicates; docgen regenerated. Faculty docstring updated to name glsl and slang (a docstring that
+lists dialects and omits one is the same lie paid for thirteen times already).
+
+  [x] B1  Slang emitted as one more dialect; Python stays authoritative.
+  [ ] S1b call capacity_gate from the faculties that allocate -- the last structural item.
+
+## BRANCH MERGE: 72 NEW FILES, 13 + 10 FACULTIES WIRED, NOTHING OVERWRITTEN
+
+The uploaded branch was NOT a superset -- 1,846 files against 1,936 here, and its versions of
+holographic_catalog_p06, holographic_supermemory, holographic_emit and holographic_catalog PREDATE
+today's work (checked by marker: capacity_gate, "TWO VARIABLES NOT ONE", "slang", the D1 abstain
+evidence -- all present in mine, absent in the branch). A NAIVE COPY WOULD HAVE DELETED THE ENTIRE
+SESSION. Merged instead, additively, with every insertion asserted.
+
+WHAT CAME IN:
+  * 72 new files, of which 12 are faculty modules: llmseam, postcheck, runtimebench, shapeprobe,
+    splitplan, viscera, instrumentcost, matpreview, plate, stagecheck, studiorig, plus the new
+    mixin part holographic_unified_p19_verify.
+  * p19 mixed into UnifiedMind exactly as p18 is -- two asserted edits (import + base list) --
+    bringing 10 faculties: alias_gaps, catalog_without_alias, guarded_call, instrument_costs,
+    paired_benchmark, result_usable, runtime_benchmark, shape_of, signature_of,
+    agent_paraphrase_benchmark.
+  * 13 more faculties whose wiring lived in files the branch also MODIFIED, extracted method by
+    method rather than by overwriting: place_viscera / studio_sky / rig_ratios (p07); llm_report /
+    llm_prefix_advice / llm_tell / llm_feedback / llm_batch (p12); split_plan / render_plate /
+    material_preview / feature_coverage / verify_render_stages (p14 -- the same file that carries
+    today's capacity_gate, lincode_codebooks and factor_exact).
+  * 23 catalog entries (19 in p06, 4 in p02) extracted by BALANCED-PAREN scan and appended before
+    the _PART anchor, so my two entries from today survive. p06 selftest 296 capabilities,
+    p02 selftest 91, no internal duplicates.
+
+TWO INSTRUMENT ERRORS, BOTH THE SAME SHAPE AS THE OTHER FOURTEEN:
+  14. My block splitter cut on "    def " boundaries, so a block followed by a DECORATED member
+      dragged a dangling "@property" to EOF -> IndentationError. Splitting source on a regex that
+      does not know about decorators is splitting on a lie.
+  15. I appended the blocks at END OF FILE assuming the class was last. It is not -- there is
+      module-level code after it, so the methods parsed fine and belonged to NOTHING. hasattr said
+      0/13 wired while the text was visibly present. FIXED BY USING ast's cls.end_lineno to insert
+      inside the class body, which is the only place that knows where a class ends.
+      A METHOD THAT PARSES IS NOT A METHOD THAT IS ATTACHED -- and only the mind can tell you.
+
+VERIFIED: 13/13 branch faculties wired, 10/10 p19 faculties wired, today's three faculties intact;
+skill_lint 0, catalog_gaps 0, reachability 0 duplicates; 552 passed / 2 skipped across the emitter
+and integration suites; capdoc + docgen regenerated.
+
+## THE MERGED BRANCH WAS THE SAME SESSION FROM THE OTHER SIDE -- NO CODE DUPLICATION, ONE GLARING ONE
+
+Audited the merge for functional overlap. `find_capability` on six phrasings returns exactly ONE
+capability each, with the branch's and mine sitting in different slots -- no two faculties answer
+the same question:
+
+    check capacity before allocating      -> Capacity gate (mine)
+    exact factorization by linear codes   -> Exact factorization by linear codes (mine)
+    what does this faculty return         -> What does this actually return? (branch, shapeprobe)
+    split work proportionally across paths-> Split work across contending paths (branch, splitplan)
+    did that call produce anything usable -> Did that call produce anything USABLE? (branch, postcheck)
+
+NO CODE DUPLICATION. But the two sides were unmistakably walking the same road:
+
+  * shapeprobe's own docstring: "what does this faculty ACTUALLY return, and how is it ACTUALLY
+    called ... the most expensive recurring failure on record. SIX INSTRUMENT ERRORS IN ONE SESSION,
+    every one the same class." I logged FIFTEEN of exactly that class today -- depth_probe's
+    'worst_cosine', measure's 'ci' tuple, phasor_factor's bare tuple, register_capability's
+    positional signature, celled_memory's integer keys, the class-end insertion point. The other
+    branch BUILT THE INSTRUMENT FOR THE FAILURE I KEPT COMMITTING.
+  * splitplan implements FreeToken's q* proportional dispatch -- the paper I read this session and
+    filed as "a lever we should consider". The other branch shipped it.
+  * postcheck/result_usable is D1's argument in another costume: a call that returns nothing usable
+    must SAY SO rather than pass silently, exactly as an abstain must carry the ranking it refused.
+
+THE REAL DUPLICATION IS IN THE BACKLOG, NOT THE CODE. Two items are now stale and are struck:
+  [-] "FreeToken q* proportional dispatch as a lever"  -> SHIPPED as split_plan. Do not build.
+  [-] "make the abstain auditable" as a general principle -> postcheck already generalises it
+      beyond retrieval to any call.
+
+AND THE ACTIONABLE CONSEQUENCE, TESTED RATHER THAN ASSERTED. shape_of answers every call I got
+wrong today, in one line each:
+
+    depth_probe       dict{worst_cosine=float, depth=int, dim=int, separable=bool, why=str}
+    measure           dict{mean=float, std=float, ci=tuple(float,float), n=int, scores=ndarray(10,)}
+    route_or_abstain  dict{abstain=bool, z=float, ..., refused=list[3 x tuple(Capability, ...)]}
+    capacity_gate     dict{verdict=str, binding=..., route=..., failing=list, prescription=...}
+
+FIFTEEN INSTRUMENT ERRORS, EACH COSTING A RUN OR A CORRUPTED FILE, AND THE ANSWER IS ONE CALL. The
+rule that replaces "probe the shape, never infer it" is sharper and now enforceable:
+    BEFORE THE FIRST CALL TO AN UNFAMILIAR FACULTY, RUN mind.shape_of(fn, *args).
+It is cheaper than the guess, it is cheaper than the traceback, and it is the same lesson this
+session learned five separate ways without ever building the tool -- while the other branch built
+the tool and wrote the same lesson down.
+
+## THE MERGE WAS INCOMPLETE AND ONLY EXERCISING THE FACULTIES FOUND IT
+
+Wiring a faculty is not the same as it WORKING. p19's ten methods all answered hasattr() -- and
+alias_gaps raised ImportError on its first real call, because it imports from
+holographic_agentbench, which the branch MODIFIED and I deliberately did not overwrite.
+
+FIVE SYMBOLS WERE MISSING, and I found them by resolving the CLOSURE rather than chasing one
+NameError at a time (the same "fix the symptom" failure in a new costume -- the first backfill of
+four symbols immediately raised NameError on build_paraphrase_fixture):
+
+    run_paraphrase_arm, paired_benchmark, alias_gaps, catalog_without_alias   (4 requested)
+    build_paraphrase_fixture, _paraphrase_verdict                              (2 by closure)
+
+All six appended additively to holographic_agentbench; nothing overwritten. alias_gaps now runs:
+
+    {'n_probed': 12, 'n_gaps': 10, 'abstained': 3, 'RANKED_BUT_GATED': 7, 'misrouted': 0, ...}
+
+AND THAT NUMBER IS THE BRANCH ANSWERING MY OWN QUESTION FROM TODAY. I hand-rolled an alias-coverage
+metric, got 50%, discovered it was two populations averaged together, and concluded there was no
+alias problem. The branch's instrument reports RANKED_BUT_GATED separately from ABSTAINED and
+MISROUTED -- which is exactly the distinction my hand-rolled version lacked and the reason the
+"71.6% false abstain" framing kept sliding around. THE METRIC I NEEDED SHIPPED IN THE OTHER BRANCH.
+
+VERIFICATION RULE, EARNED TWICE TODAY: after wiring, CALL IT. hasattr proves attachment, not
+function; a faculty whose dependency was never merged is import-only with extra steps, and only
+running it says so. reachability_audit reports 0 gaps for exactly this shape, because the method
+exists -- the audit checks wiring, not execution.
+
+Verified: alias_gaps / paired_benchmark / catalog_without_alias / agent_paraphrase_benchmark /
+result_usable / guarded_call / runtime_benchmark / instrument_costs / shape_of / signature_of all
+callable and exercised; skill_lint 0, catalog_gaps 0, reachability 0; 16 passed on
+test_agent_benchmark + test_holographic_verify; docgen 758 modules / 269,118 lines.
+
+## BENCHMARKED AGAINST THE PUBLISHED LADDER: OPERATIONAL CAPACITY 1e48 AT ACCURACY 1.000
+
+The field's headline metric is OPERATIONAL CAPACITY -- "the largest search space M_max such that
+the algorithm, limited to k iterations, gives total accuracy >= p" (Kent, Frady, Sommer, Olshausen,
+Neural Computation 32(12), 2020). Measured ours at the standard p >= 0.99 bar, D=1024:
+
+   F   M       search space      accuracy   ms/solve
+   3   24            13824       1.000        0.16
+   4   64         16777216       1.000        0.25
+   4  256       4294967296       1.000        0.42
+   8  256            1e19.3      1.000        1.62
+   16  64            1e28.9      1.000        2.75
+   32  32            1e48.2      1.000        6.15
+   64  16            1e77.1      0.750       13.28   <- the ceiling, and it announces itself
+
+THE PUBLISHED COMPARISON POINTS, for context and NOT as a like-for-like claim:
+  * resonator network: our own measurement puts it at 2/12 at 1.4e4 and 0/12 at 3.3e5 (D=1024).
+  * stochastic in-memory factorizer (Langenegger/Karunaratne et al., Nature Nanotechnology 2023):
+    "at least five orders of magnitude" larger than the resonator -- on memristive hardware.
+  * FactorHD (arXiv 2507.12366): resonator "fails when the problem size reaches 1e6"; the IMC
+    factorizer holds 99% to 1e12.
+  * Raviv (Neural Computation 36(6), 2024): linear codes are "strictly faster than the
+    state-of-the-art resonator networks, often by an order of magnitude" -- we measured 18x on the
+    hardest cell where the resonator still answers at all.
+
+SO THE HONEST STATEMENT: at D=1024 in pure NumPy on a CPU we hold accuracy 1.000 to a search space
+of 1e48, against a published IMC ceiling of 1e12 ON DEDICATED MEMRISTIVE HARDWARE. That is not a
+like-for-like win over their hardware -- IT IS A DIFFERENT ALGORITHM CLASS. Their factorizers SEARCH
+a space and ours SOLVES a system, so "operational capacity" means something different in each
+column: for them it is where search stops converging, for us it is where the linear system stops
+being decidable. Reporting the number without that sentence would be the fabrication.
+
+AND THE CEILING ANNOUNCES ITSELF, which is the property worth more than the number. The residual
+|bit - round(bit)| rises with load and 0.5 is undecidable by construction:
+
+   F=32 M=32   160 equations of 1024 dims   acc 1.00   residual mean 0.074  max 0.245
+   F=48 M=16   192 equations                acc 1.00   residual mean 0.141  max 0.364
+   F=64 M=16   256 equations                acc 0.77   residual mean 0.375  max 0.498
+
+The system is still DETERMINED at F=64 (256 equations in 1024 dims) -- the failure is numerical
+conditioning, not rank. And the caller sees it: factor_exact returns the residual with every answer,
+so a wrong factorization is accompanied by the evidence that it is wrong. A SEARCH THAT FAILS RETURNS
+A CONFIDENT WRONG ANSWER; A SOLVE THAT FAILS RETURNS A RESIDUAL NEAR 0.5.
+
+KEPT NEGATIVE: the ceiling is CONDITIONING, so it moves with D and with the basis orthogonalisation,
+not with F or M alone. Do not quote 1e48 as a constant -- quote it as "at D=1024, with the residual
+printed".
+
+## B2 RUN: THE 21-LANGUAGE HDC BENCHMARK, MEASURED HONESTLY AND SHORT OF THE PUBLISHED NUMBER
+
+Data confirmed reachable and COMPLETE inside the GitHub repo (21,007 test sentences, 21 languages,
+plus training texts, 84 MB). Ran the classic Rahimi/Kanerva task through a deterministic
+hashlib-derived item memory. THE MEASURED SURFACE:
+
+   n=4 (tetragram)      dim  500  0.7703 | 1000 0.8532 | 2000 0.8920
+   n=3 (trigram)        dim 1000  0.9061 | 2000 0.9165 | 4000 0.9224
+   n=5                  dim 2000  0.7636
+
+PUBLISHED TARGETS: 96.7% (ISLPED 2016, trigram hardware) and 97.8% (Joshi/Halseth/Kanerva,
+tetragram). WE ARE AT 0.9224 AND SHORT OF BOTH. Stating that plainly is the point of running it.
+
+THREE THINGS THE MEASUREMENT ACTUALLY ESTABLISHED, none of which was assumed:
+
+1. TRIGRAMS BEAT TETRAGRAMS HERE (0.9165 vs 0.8920 at dim 2000) and n=5 COLLAPSES to 0.7636. The
+   encoding order is a bigger lever than dimension at this scale, and the published tetragram
+   result must therefore depend on something our pipeline does differently -- most likely the
+   training corpus size or the text normalisation, not the hypervector algebra.
+
+2. THE DOMINANT ERROR IS LINGUISTIC, NOT CROSSTALK -- and this is the load-bearing finding. Czech
+   test sentences classify as: cs 498, SK 268, bg 75, sl 53, pl 50. The cs/sk prototype cosine is
+   0.4015 against a 0.1977 mean off-diagonal. Tested whether that is noise by sweeping dimension:
+       dim  500  cs.sk 0.4326 | cs.en 0.2544 | en.fi -0.0040
+       dim 4000  cs.sk 0.3828 | cs.en 0.2632 | en.fi  0.0291
+   cs.sk HOLDS at ~0.40 across an 8x span while en.fi sits at zero. CZECH AND SLOVAK GENUINELY
+   OVERLAP IN TRIGRAM SPACE. More dimension separates NOISE, not SIGNAL, so no amount of D fixes
+   this pair -- and any future session that reaches for dimension here is reaching for the wrong
+   lever.
+
+3. THE RUN IS BIT-REPRODUCIBLE, which is the axis we actually own. Every letter vector is
+   sha256(letter|index|seed), so the prototypes carry a stable hash (n=3 dim=4000:
+   98ee58ae0417286a240bee3f45ab8356). The published MATLAB implementations use rand() and are
+   reproducible only within a session. WE REPORT A NUMBER PLUS A HASH; THEY REPORT A NUMBER.
+
+TWO OOM FAILURES, BOTH MINE, BOTH THE SAME SHAPE IN DIFFERENT COSTUMES:
+   * the vectorised n-gram accumulator allocated (n_grams, dim) -- 7 GB for ONE 175 KB training
+     file at dim 10000. Fixed by chunking, which is EXACT because the bundle is a sum and addition
+     is associative.
+   * then the letter GATHER allocated (text_length, dim) -- 4.6 GB. Fixed by indexing a 27-row
+     table inside the chunk instead of materialising the text as vectors.
+   THE SAME ERROR TWICE IN FIVE MINUTES. Vectorising without bounding the allocation is not an
+   optimisation, it is a deferred crash -- and the OOM killer found it before any measurement did.
+
+STATUS: B2 is RUN and REPORTED SHORT. The gap to 96.7% is real and unexplained; the honest next
+step is the corpus, not the algebra -- the published work trains on the full Wortschatz corpora and
+ours uses whatever the repo ships. DO NOT TUNE DIMENSION FURTHER: finding 2 says it cannot work.
+
+## B2 v2: TWO CORRECTIONS, BOTH MINE -- BAD TEST DATA, AND BENCHMARKING THE SUBSTRATE BY BYPASSING IT
+
+CORRECTION 1 -- THE TEST DATA WAS BAD AND I DID NOT CHECK IT. The repo's training texts run from
+79,309 bytes (Bulgarian) to 1,066,664 (Latvian): A 13.4x IMBALANCE. A prototype is a SUM over
+n-grams, so its norm grows with corpus size, and the classifier was comparing prototypes built from
+wildly unequal evidence. Bulgarian and Estonian -- the two smallest corpora -- were among the
+weakest classes, which I had been reading as a property of the languages.
+
+    balanced to 80,000 bytes each:   n=3 dim 2000  0.9165 -> 0.9275
+                                     n=3 dim 4000  0.9224 -> 0.9366
+
+EVERY DIMENSION SWEEP I RAN WAS PARTLY MEASURING A CORPUS CONFOUND. The Czech/Slovak finding
+SURVIVES (cs still weakest at 0.629, and the cs.sk cosine held across an 8x dimension span) -- that
+one is genuinely linguistic. But the ranking of the other weak classes changed the moment the
+evidence was equalised, which is exactly what a confound does.
+
+CORRECTION 2 -- leCORE IS THE SUBSTRATE AND I WROTE AROUND IT. The first version hand-rolled a
+letter table, a binding rule and a nearest-prototype search in raw NumPy, beside an engine that
+ships all three: encode_hash (deterministic hash atoms, VERIFIED IN CHROME 101/101 vs f64),
+match_prototype, cleanup_batch. BENCHMARKING THE ENGINE BY BYPASSING THE ENGINE MEASURES A SCRIPT.
+v2 calls the mind: the letter alphabet is encode_hash atoms (so it ports unchanged to JS/GLSL/
+Chrome), and classification goes through cleanup_batch -- the same cleanup path every other faculty
+uses. The number reported is now the SUBSTRATE'S number, not a special-cased pipeline's.
+
+AND THE SUBSTRATE'S OWN TOOL CAUGHT THE NEXT ERROR BEFORE IT COST A RUN. cleanup_batch returns
+(indices, scores), not indices -- I would have guessed wrong for the sixteenth time. mind.shape_of
+answered it in one line: "tuple(ndarray(2,) int64, ndarray(2,) float32)". THE TOOL THE OTHER BRANCH
+BUILT FOR EXACTLY THIS FAILURE, USED FOR EXACTLY THIS FAILURE.
+
+STATUS: 0.9366 balanced, against published 96.7% (ISLPED trigram) / 97.8% (tetragram). STILL SHORT,
+and now short for reasons that are narrower and nameable rather than diffuse: the remaining gap is
+concentrated in the Slavic cluster (cs 0.658, sk 0.806, sl 0.842), and the published work trains on
+the full Wortschatz corpora rather than the 80 KB slice we equalise to. THE NEXT LEVER IS MORE
+BALANCED DATA, NOT MORE DIMENSION -- finding 2 of the previous entry rules dimension out for the
+Slavic pair, and balancing has now paid +0.014 where a 2x dimension increase paid +0.009.
+
+KEPT NEGATIVE: never benchmark leCore with a standalone script again. If the encoding does not run
+through the mind's faculties, the result describes the script's arithmetic and not the substrate's,
+and it cannot be reused by anything else in the engine.
+
+## THREE EXPERIMENTS BEFORE IMPLEMENTING ANYTHING -- AND ALL THREE CHANGED THE PLAN
+
+EXPERIMENT 1: IS THE REMAINING GAP CORPUS SIZE? Swept the balanced training budget across all 21:
+    10,000 bytes/lang -> 0.8507
+    20,000            -> 0.9160   (+0.065)
+    40,000            -> 0.9230   (+0.007)
+    79,000            -> 0.9272   (+0.004)
+THE CURVE HAS FLATTENED. Doubling data now buys ~0.004, so reaching 0.967 would need orders of
+magnitude more corpus. CORPUS IS NOT THE REMAINING LEVER -- and I had written in the previous entry
+that "the next lever is more balanced data". MEASURED, AND WRONG. Struck.
+
+EXPERIMENT 2: WHERE IS THE ERROR ACTUALLY CONCENTRATED? Bucketed the 21,000 test sentences by
+length (median 129 chars, p10 53, p90 259):
+    < 60 chars   accuracy 0.7502   (n=2,494)
+    60-120       accuracy 0.9121   (n=6,402)
+    > 120        accuracy 0.9717   (n=12,104)
+THE LONG-SENTENCE BUCKET ALREADY EXCEEDS THE PUBLISHED 96.7%. The aggregate gap is driven ENTIRELY
+by short inputs, where there are simply too few trigrams to bundle -- this is the bundle capacity
+law showing up as a benchmark score. Neither dimension nor corpus can manufacture evidence that is
+not in a 40-character sentence.
+
+EXPERIMENT 3: WHAT IS THE HONEST RESPONSE TO LOW EVIDENCE? Not a better guess -- ABSTENTION, which
+is the discipline the whole engine already runs on. Used the top1-top2 margin as the confidence
+signal and measured the accuracy/coverage curve:
+    coverage 100%   accuracy 0.9272
+    coverage  95%   accuracy 0.9505   (margin >= 0.0089)
+    coverage  90%   accuracy 0.9679   (margin >= 0.0185)   <- clears the published 96.7%
+    coverage  80%   accuracy 0.9904
+    coverage  70%   accuracy 0.9967
+AT 90% COVERAGE WE CLEAR THE ISLPED NUMBER; AT 80% WE ARE AT 0.9904. That is a DIFFERENT CLAIM from
+the published one and must be reported as such -- they answer every sentence, we would answer 90%
+of them and say so on the rest. It is not a like-for-like win. IT IS THE HONEST SHAPE OF THE RESULT,
+and it is the shape leCore is built for: the margin is already there, nobody was reading it.
+
+NOTE THE SYMMETRY WITH TODAY'S OTHER FINDING. Earlier I measured route_or_abstain refusing queries
+whose correct answer sat at rank 1, and concluded the gate was mis-calibrated -- then the unbiased
+300-alias population showed the gate was right and my probe set was adversarial. HERE THE OPPOSITE:
+the classifier answers everything and its margin says it should not. SAME INSTRUMENT, OPPOSITE
+DIRECTION, AND ONLY MEASUREMENT TELLS THEM APART.
+
+## EXPERIMENT 4: THE CERTIFIED LADDER'S RECALL HOLDS, ITS SPEEDUP DOES NOT AT LOW D
+
+    SIFT-like  N=50000 D=128  recall@10 1.0000 | int8 4.41 ms | exact 4.04 ms | 0.92x
+    GloVe-like N=50000 D=100  recall@10 1.0000 | int8 4.03 ms | exact 4.09 ms | 1.02x
+
+RECALL IS EXACTLY 1.000, as the certificate promises -- the conservative candidate set provably
+contains every true top-k including ties, and it does. BUT INT8 IS NOT FASTER THAN EXACT HERE. The
+catalog's headline (100k x 768: 1.000 @ 9.7 ms vs FAISS Flat 27.1) is at 768 DIMENSIONS with the
+numba kernel; the sandbox has neither. At D=100-128 with pure NumPy there is nothing to save.
+
+SO THE B1 PLAN CHANGES SHAPE. Posting a certified recall-1.000 point on ann-benchmarks is still
+right, but the honest framing is EXACTNESS AT PARITY COST, not exactness at a speedup -- and the
+catalog entry should say which regime its 9.7 ms belongs to. A BENCHMARK QUOTED OUTSIDE ITS REGIME
+IS THE SAME FAILURE AS A BOUND QUOTED OUTSIDE ITS PRECONDITION, which is the lesson S4 taught this
+morning in the opposite direction.
+
+AND shape_of EARNED ITS KEEP AGAIN, TWICE. Index has no .query (it is .nearest / .nearest_batch),
+and nearest_batch returns list[per-query list[(id, score)]] -- shape_of said exactly that, I then
+wrote code that ignored it and got 'unhashable type: list'. THE PROBE IS ONLY WORTH THE READING.
+
+## E4 WAS RUN ON DATA ITS OWN HARNESS WOULD HAVE REFUSED
+
+tools/benchmarks_faiss.py has been in this tree since 2026-08-17 -- it PREDATES this whole session
+and arrived with neither upload. Its header: "An independent researcher benchmarked this project and
+reached different conclusions. The correct response is not a rebuttal, it is a HARNESS both sides
+can run: same data, same queries, same ground truth, every methodological choice printed where it
+cannot hide."
+
+AND ITS DATASET RULE NAMES THE EXACT ERROR I MADE AN HOUR EARLIER: "Random Gaussian vectors are
+nearly orthogonal; nearest-neighbour structure is then so well-separated that every engine scores
+~1.0 recall and THE BENCHMARK MEASURES NOTHING. This harness refuses them." The gate is mean
+corpus-NN cosine >= 0.4.
+
+APPLIED THE GATE TO MY OWN E4 DATA:
+    E4 "SIFT-like"  (Gaussian 128d)   corpus-NN 0.363  -> REFUSED
+    E4 "GloVe-like" (Gaussian 100d)   corpus-NN 0.408  -> barely accepted
+    on-manifold offspring corpus      corpus-NN 0.843  -> ACCEPTED
+ONE OF MY TWO E4 ROWS WOULD HAVE BEEN THROWN OUT BY THE PROJECT'S OWN INSTRUMENT, and the other
+scraped the line. The recall@10 = 1.0000 I reported was, for that row, exactly the "measures
+nothing" case the harness exists to prevent.
+
+RE-RAN ON DATA THE HARNESS WOULD ACCEPT (near-duplicate rich, corpus-NN 0.843):
+    N=50000 D=128   recall@10 1.0000 | int8 5.36 ms | exact 4.08 ms | 0.76x
+    N=50000 D=768   recall@10 1.0000 | int8 5.63 ms | exact 5.98 ms | 1.06x
+RECALL IS STILL EXACTLY 1.000 -- the certificate holds on hard data, which is the claim that
+matters and is now honestly earned. THE SPEEDUP STILL IS NOT THERE: 0.76x at 128 dims and 1.06x at
+768. The catalog's 9.7 ms headline needs the NUMBA kernel, which is opt-in and absent here; without
+it the int8 route is an EXACTNESS feature at parity cost, not a performance one.
+
+THE HARNESS CANNOT FULLY RUN: it needs /home/claude/realdata/wiki_vectors.npy (35,934 x 768 real
+sentence embeddings) which the container no longer has. That is a REACHABILITY gap, not a code gap,
+and it is the honest blocker on any FAISS-comparable claim.
+
+SEVENTEENTH INSTANCE OF THE SAME FAILURE. I hand-rolled a comparison against an INTERNAL baseline
+while a neutral harness built for exactly this dispute -- with FAISS Flat, IVFFlat and HNSW columns,
+float64 ground truth computed by the harness rather than by any contestant, and leCore paying its
+FULL ingestion path -- sat unread in tools/. RULE 0 IS NOT ONLY ABOUT FACULTIES. IT IS ABOUT
+INSTRUMENTS.
+
+## BOTH SIDES OF leCORE: THE ENGINE GENERATED THE BENCHMARK CORPUS IT IS THEN BENCHMARKED ON
+
+The FAISS harness was blocked on a missing file -- /home/claude/realdata/wiki_vectors.npy, 35,934
+real sentence embeddings the container lost. The allowlist forbids downloading replacements. But we
+HAD 21,000 real sentences in 21 languages sitting in the langid corpus, and leCore HAS a
+deterministic text encoder, so the engine BUILT ITS OWN BENCHMARK DATA:
+
+    21,000 real sentences -> encode_hash letter atoms -> trigram bundling -> (21000, 768) in 20s
+    corpus-NN cosine 0.450 -> ACCEPTED by the harness's own >= 0.4 hardness gate
+    reported hardness top1 = 0.789 at N=21000
+
+That is leCore on BOTH SIDES of the instrument: it generates the corpus and it is measured on it,
+and the corpus passes a gate written to refuse friendly data. Deterministic, so anyone can
+regenerate the identical file from the same public repo.
+
+INSTALLED FAISS (pip --break-system-packages, 1.15.0) AND RAN THE NEUTRAL HARNESS. N=21000, d=768,
+100 held-out real queries, float64 ground truth computed BY THE HARNESS, leCore paying its FULL
+ingestion path while FAISS is handed vectors directly:
+
+    engine            build s     query ms   recall@10
+    leCore auto          0.51        2.616      1.000
+    leCore fast          0.24        2.600      1.000
+    leCore exact         0.22        4.974      1.000
+    leCore sphere        1.22       12.154      1.000
+    HoloForest           7.48        3.398      0.422
+    FAISS Flat           0.04        2.371      1.000
+    FAISS IVF            1.88        0.464      0.923
+    FAISS HNSW           3.89        0.247      0.932
+
+READ IT HONESTLY, BOTH WAYS.
+  * WE ARE COMPETITIVE WITH FAISS FLAT ON ITS OWN GROUND: 2.616 ms vs 2.371 ms at recall 1.000,
+    while paying the full content-addressed ingestion path FAISS does not pay. That is a 10% gap on
+    exact search against the reference C++ implementation, from NumPy.
+  * WE ARE NOT COMPETITIVE WITH THE APPROXIMATE ENGINES ON SPEED: HNSW is 0.247 ms, 10.6x faster
+    than leCore auto -- AND IT RETURNS 0.932 RECALL. That is the whole trade, stated plainly: they
+    are an order of magnitude faster and wrong 7% of the time; we are exact.
+  * HOLOFOREST IS THE LOSER IN THIS TABLE AT 0.422 RECALL AND SLOWER THAN EXACT. On this corpus it
+    is strictly dominated. Kept loud -- it is our own component and it is the worst row here.
+
+SO THE B1 CLAIM SHARPENS TO SOMETHING DEFENSIBLE: at 768 dims on hard real data we deliver
+CERTIFIED recall 1.000 within 10% of FAISS Flat's wall-clock, in pure NumPy, having also paid
+ingestion. We do NOT claim to beat HNSW; we claim the axis HNSW cannot occupy.
+
+AND THE EARLIER E4 NUMBERS ARE SUPERSEDED. My Gaussian rows were refused by this harness's gate;
+these are the numbers that count, because the methodology is printed and the ground truth is the
+harness's rather than any contestant's.
+
+## HOW TO BEAT THE BENCHMARK: IT IS NOT numba, NOT int8, AND NOT THE LANGUAGE -- IT IS THE BUDGET
+
+Attached to both sides: used leCore's own instruments to find leCore's own overhead.
+
+STEP 1 -- INSTALLED numba (the constitution's opt-in accelerator) so the certified int8 route would
+EXIST. It activated and recall stayed 1.0000 -- an accelerator that changes an answer is not an
+accelerator -- but IT DID NOT MOVE THE HARNESS: leCore auto 2.659 ms with numba vs 2.616 without,
+against FAISS Flat 2.280. THE int8 ROUTE IS NOT THE LEVER HERE. Kept negative.
+
+STEP 2 -- FOUND THE FLOOR. FAISS Flat is a BLAS GEMM and NumPy calls the SAME BLAS, so the floor
+tells us whether the gap is language or overhead:
+    raw NumPy, ONE QUERY AT A TIME   2.540 ms/query   <- essentially FAISS Flat's 2.280
+    raw NumPy, 100 QUERIES BATCHED   0.391 ms/query   <- 6.5x faster, SAME BLAS, SAME ANSWER
+Verified index-for-index identity between the looped and batched results: TRUE. The batching is
+exact, not approximate.
+
+STEP 3 -- RULE 0 BEFORE BUILDING, and it paid: nearest_batch ALREADY BATCHES, and its docstring
+already says why -- "FAISS-flat's entire win is batching -- one (N,D)x(D,Q) BLAS call instead of Q
+separate scans -- and leCore already proved the same move in cleanup_batch." So the 6x gap is NOT a
+missing batch. Decomposed it:
+    GEMM+topk float64      0.638 ms/query
+    GEMM+topk float32      0.395 ms/query      <- 1.6x, purely bytes moved
+    tuple building          0.084 ms/query
+nearest_batch casts to FLOAT64 (np.asarray(queries, float)) while FAISS Flat runs FLOAT32. ON A
+MEMORY-BOUND GEMM THAT IS 2x THE BYTES, AND IT IS THE SINGLE LARGEST REMAINING TERM.
+
+SO THE HONEST WAY TO BEAT THE BENCHMARK IS A PRECISION BUDGET, NOT AN ALGORITHM: offer an exact
+float32 scan for corpora whose values are float32 anyway -- which these embeddings are, since they
+were SAVED as float32 and upcast on load. That is not an approximation of the stored data; it is
+declining to invent 29 bits of mantissa the corpus never had.
+
+WHAT I HAVE NOT DONE, AND WILL NOT PRETEND: I have not shipped that path. The measurement says
+0.395 vs 0.638 ms on a bare GEMM, which would put an f32 exact route BELOW FAISS Flat's 2.280 --
+but a bare GEMM is not nearest_batch, the tie contract and the ingestion path still have to be
+paid, and the f64 contract may be load-bearing somewhere I have not audited. THE NUMBER TO BEAT IS
+2.280 ms AT RECALL 1.000, THE FLOOR IS ~0.4 ms, AND THE GAP IS NOW LOCATED RATHER THAN GUESSED.
+
+## BEATING THE BENCHMARK WITHOUT CHEATING: A 16.9x EXACT FIX, AND WHY THE HARNESS DOES NOT SHOW IT
+
+RULES I HELD MYSELF TO: same precision as the ground truth (float64 -- an f32 scan is a different
+contract, not a faster one), and the answer must stay index-for-index identical. That rules the
+precision budget OUT as a legitimate win here, so the only honest target is leCore's OWN overhead.
+
+PROFILED IT AND FOUND OURS. tiled_topk's inner loop ran a full np.lexsort over ALL (k+tile)=4106
+candidates PER QUERY PER TILE -- 6 tiles x 100 queries = 600 lexsorts of 4106 elements, O(n log n)
+on two keys where the answer needs O(n). Replaced with argpartition-then-tie-rule:
+
+    current lexsort-all     53.93 ms per tile-batch
+    partition+lexsort-k      3.20 ms per tile-batch     -> 16.9x, BIT-IDENTICAL
+
+WHY IT IS STILL EXACT, and the argument is the load-bearing part: argpartition finds the k largest
+BY VALUE; thr is the k-th largest value; EVERY candidate at or above thr is then re-selected under
+the SAME lexsort tie rule. Taking all boundary ties BEFORE applying the rule is exactly what the
+old k+1-shortlist bug got wrong, so it is done explicitly and the test plants ties that straddle
+tile boundaries. tiled_topk's own selftest passes: "bit-identical argmax incl. cross-tile ties to
+lowest index".
+
+END TO END: nearest_batch fell from 2.4-2.6 ms to 1.829 ms/query, and still matches a brute-force
+float64 ground truth index-for-index on 20 queries. THAT IS BELOW FAISS FLAT'S 2.28-2.40 ms, at
+recall 1.000, in NumPy, at identical precision.
+
+AND THE HARNESS DOES NOT SHOW IT -- FOR A REASON WORTH MORE THAN THE SPEEDUP. Its leCore columns
+call idx.nearest(q) inside `for q in queries`, ONE QUERY AT A TIME, while FAISS is handed the whole
+batch. tiled_topk's cost is amortised across the batch, so a per-query loop cannot see the fix. The
+harness's own header promises "every methodological choice printed where it cannot hide" -- and this
+one IS printed, in the source, and I had not read it.
+
+SO THE HONEST SCOREBOARD IS TWO ROWS, NOT ONE:
+    per-query API   leCore 2.61 ms   vs FAISS Flat 2.40 ms   -- FAISS ahead by 9%
+    batched API     leCore 1.83 ms   vs FAISS Flat 2.40 ms   -- leCore ahead by 24%
+Both at recall 1.000. Neither number is wrong; they answer different questions, and quoting only
+the second would be the cheat. THE FIX IS REAL AND SHIPPED; THE CLAIM IT SUPPORTS IS "batched exact
+search in NumPy beats FAISS Flat's batched-equivalent workload", and proving that properly needs a
+harness row that batches BOTH sides. That row does not exist yet and I am not going to write it
+into the results table by hand.

@@ -563,7 +563,7 @@ recall. The tensor route buys fidelity and exact structured-key capacity with st
 on the tradeoff, not a free improvement over the engine's bind.
 
 **Then a parallel line came home.** A separate investigation — Path D, *computing and storing inside the
-holographic space* — merged in as its own bundle (under `path_d/`, with the frontier-program and
+holographic space* — merged in as its own bundle (under `research/path_d/`, with the frontier-program and
 dataset-benchmark docs), and its two reusable modules were wired into the mind as faculties. The arc is the
 engine's own lesson one rung up: a single vector holds only ~0.1×D items faithfully, that budget is conserved,
 and you scale not by encoding harder but by *federating* — more vectors, coordinated by a thin layer.

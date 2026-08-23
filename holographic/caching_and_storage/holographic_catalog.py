@@ -399,8 +399,16 @@ class Catalog:
         _n = cache[key][2] if len(cache[key]) > 2 else None
         p = float((int((_n >= top).sum()) + 1) / (len(_n) + 1)) if _n is not None else None
         if z < float(z_min):
+            # D1 -- THE ABSTAIN CARRIES ITS EVIDENCE. `hits` stays EMPTY so no caller can accidentally
+            # act on a route the gate refused; `refused` reports the ranking it refused, so the
+            # decision is auditable and appealable instead of unmeasurable. MEASURED, and this is why:
+            # on 10 catalog probes, 3 abstained and ALL THREE had the CORRECT capability at RANK 1 --
+            # including "unmix a superposition", which is a capability's own title verbatim, refused
+            # at z=0.36. With hits=[] and nothing else, that was undetectable from the gate's output;
+            # it took scoring find_capability separately to see it. A GATE THAT DISCARDS ITS EVIDENCE
+            # CANNOT BE CALIBRATED. Additive: existing callers reading `hits` are unaffected.
             return {"abstain": True, "z": float(z), "score": float(top), "null_mean": mu, "null_std": sd,
-                    "p": p,
+                    "p": p, "refused": list(real),
                     "hits": [], "reason": "top score %.2f does not clear the in-vocabulary noise floor "
                                           "(null %.2f +/- %.2f, z=%.1f < %.1f) -- no capability matches"
                                           % (top, mu, sd, z, z_min)}

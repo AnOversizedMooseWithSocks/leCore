@@ -86,7 +86,10 @@ def pic_transition(dim, vocab):
     and lands BELOW the matched filter -- the load gate in recall() enforces that this
     number is respected rather than remembered."""
     delta = dim / float(vocab) ** 2
-    rho = 1.0 / (2.0 * math.log(1.0 / max(delta, 1e-12)))
+    # delta == 1.0 makes log(1/delta) exactly 0 -> divide by zero. Reachable whenever the
+    # transition sits at the boundary; unhit until capacity_gate started consulting this law,
+    # which is the whole point of consulting it. Clamp BELOW 1 so the log stays positive.
+    rho = 1.0 / (2.0 * math.log(1.0 / min(max(delta, 1e-12), 1.0 - 1e-12)))
     return max(1, int(PIC_SAFETY * rho * dim))
 
 
@@ -344,7 +347,7 @@ class BigPairMemory:
 
 
 def advise_scale(n_pairs=None, vocab=None, dim=None, bundle_k=None, depth=None,
-                 factors=None, alpha=0.90, decoder="one-shot", fix=False):
+                 factors=None, alpha=0.90, decoder="one-shot", fix=False, codebook=None):
     """The walls, consulted BEFORE they are hit. Every measured capacity/depth law in
     one checkpoint: pass what you know about the task, get every law's margin, the
     BINDING constraint, and a concrete prescription -- grow to the exact dim the law
@@ -391,13 +394,34 @@ def advise_scale(n_pairs=None, vocab=None, dim=None, bundle_k=None, depth=None,
         if fix and not ok:
             spec["dim"] = max(spec["dim"] or 0, int(np.ceil(bundle_k / 0.13 / 64) * 64))
     if factors is not None:
+        # TWO VARIABLES, NOT ONE. "F=4" compressed a surface into a number, and the compression
+        # passed callers straight into the wall: MEASURED with phasor_factor at D=1024, 12 trials,
+        # the accuracy at F=3 falls 8/12 -> 1/12 as the codebook grows M=16 -> 24, while the law
+        # said "resonator holds" throughout. And at a FIXED search space ~4096 accuracy is flat
+        # across F=3 and F=4 (8/12 both) and only collapses at F=6 -- so factor count costs
+        # something BEYOND the space it generates. Both variables are real and they are different.
+        # codebook stays OPTIONAL: existing callers keep the old behaviour exactly, and the law
+        # only tightens for a caller that supplies the second variable.
         ok = factors <= 4
-        laws.append({"law": "factorization hard wall F=4", "ok": ok,
-                     "margin": 4.0 / factors,
-                     "prescription": "resonator holds" if ok else
-                     "F=%d exceeds the measured wall: split into ceil(F/4)=%d factor "
-                     "groups and resolve hierarchically (tiling lever)"
-                     % (factors, int(np.ceil(factors / 4)))})
+        margin = 4.0 / factors
+        why = "resonator holds" if ok else (
+            "F=%d exceeds the measured wall: split into ceil(F/4)=%d factor "
+            "groups and resolve hierarchically (tiling lever)"
+            % (factors, int(np.ceil(factors / 4))))
+        if codebook is not None:
+            space = float(codebook) ** int(factors)
+            # measured knee: ~4096 search space held 8/12 at F=3-4; 13824 fell to 1/12.
+            space_ok = space <= 4096.0
+            if not space_ok:
+                ok = False
+                margin = min(margin, 4096.0 / space)
+                why = ("search space M^F = %d^%d = %.0f exceeds the measured resonator knee "
+                       "(~4096 held 8/12; 13824 fell to 1/12) -- shrink the codebook, split the "
+                       "factor groups, or use exact algebraic recovery instead of search"
+                       % (int(codebook), int(factors), space))
+        laws.append({"law": "factorization hard wall F=4"
+                            + ("" if codebook is None else " x codebook M"),
+                     "ok": ok, "margin": margin, "prescription": why})
     if depth is not None:
         # MEASURED (see depth_probe): deepest-leaf separability collapses by d5-7 and
         # is DIM-INDEPENDENT (256 vs 1024 identical) -- growing dim cannot recover a
