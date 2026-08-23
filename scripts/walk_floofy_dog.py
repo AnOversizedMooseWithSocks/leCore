@@ -252,7 +252,8 @@ def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
         body_bob = -6.0 * sy * bob_amount
         body_sway = 1.5 * sx * np.sin(8.0 * np.pi * phase + 0.35)
         shift_x = base_x + body_sway
-        travel = width * phase
+        # He faces left, so the world must move right for forward travel.
+        travel = -width * phase
 
         frame = _meadow_base(width, height, horizon, phase, travel=travel)
         frame.alpha_composite(_walking_shadow(width, height, bob_amount))
@@ -265,7 +266,7 @@ def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
                 continue
             gait = leg["sign"] * stride_wave
             lift = 32.0 * sy * max(0.0, leg["sign"] * step_wave)
-            target = (leg["paw"][0] + 30.0 * sx * gait, leg["paw"][1] - lift)
+            target = (leg["paw"][0] - 30.0 * sx * gait, leg["paw"][1] - lift)
             animated = _articulate_leg(leg, target)
             dog_layer.alpha_composite(_translate(animated, shift_x, body_bob))
 
@@ -278,7 +279,7 @@ def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
                 continue
             gait = leg["sign"] * stride_wave
             lift = 40.0 * sy * max(0.0, leg["sign"] * step_wave)
-            target = (leg["paw"][0] + 38.0 * sx * gait, leg["paw"][1] - lift)
+            target = (leg["paw"][0] - 38.0 * sx * gait, leg["paw"][1] - lift)
             animated = _articulate_leg(leg, target)
             dog_layer.alpha_composite(_translate(animated, shift_x, body_bob))
 
