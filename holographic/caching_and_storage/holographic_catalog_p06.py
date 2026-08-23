@@ -3141,6 +3141,20 @@ def register_p06(c):
 
 
 
+
+    c.register_capability(
+        "Harness integrations for openzoo (integrations/ folder)",
+        "Repo folder integrations/: per-app plugins/configs surfacing openzoo.fun (leCore-backed "
+        "pay-per-call inference) in 10 harnesses -- OpenWebUI Pipe, LibreChat, Continue, aider, "
+        "SillyTavern, AnythingLLM, Hermes, Cursor, Cline, GrokCLI. Import-only BY DESIGN: they "
+        "run in the host app and talk HTTP to localhost:8402/v1, never import lecore (declared "
+        "negative). Surfaces: OpenAI chat proxy + MCP (zoo_ask/zoo_models/zoo_wallet).",
+        example="import pathlib; print(sorted(p.name for p in pathlib.Path('integrations').iterdir()))",
+        native=False, aliases=("openzoo integration", "OpenWebUI plugin", "route chats to openzoo",
+                               "harness integration", "connect a chat app to the zoo",
+                               "LibreChat endpoint", "Cursor base url override", "zoo_ask MCP"))
+
+
 _PART = "holographic_catalog_p06"
 
 
