@@ -58,6 +58,12 @@ def split_character(source: np.ndarray, background: np.ndarray):
     height, width = source.shape[:2]
     difference = np.max(np.abs(source - background), axis=2)
     dog_alpha = np.clip((difference - 0.012) / 0.070, 0.0, 1.0)
+    # The source is already composited over the studio plate. Recover an
+    # approximate foreground colour before placing it over another world;
+    # otherwise soft fur edges carry the pale studio colour as a bright halo.
+    safe_alpha = np.maximum(dog_alpha[..., None], 0.12)
+    correction = np.minimum((1.0 - dog_alpha[..., None]) / safe_alpha, 3.0)
+    dog_rgb = np.clip(source + (source - background) * correction, 0.0, 1.0)
 
     sx, sy = width / 768.0, height / 768.0
     polygon = [
@@ -97,7 +103,7 @@ def split_character(source: np.ndarray, background: np.ndarray):
     ear_region = Image.new("L", (width, height), 0)
     ImageDraw.Draw(ear_region).polygon(ear_polygon, fill=255)
     region = np.asarray(ear_region, float) / 255.0
-    red, green, blue = source[..., 0], source[..., 1], source[..., 2]
+    red, green, blue = dog_rgb[..., 0], dog_rgb[..., 1], dog_rgb[..., 2]
     ear_colour = (
         (red > 0.18)
         & (red < 0.76)
@@ -114,12 +120,12 @@ def split_character(source: np.ndarray, background: np.ndarray):
 
     fx0, fx1 = int(260 * sx), int(320 * sx)
     fy0, fy1 = int(250 * sy), int(330 * sy)
-    fur_fill = np.median(source[fy0:fy1, fx0:fx1].reshape(-1, 3), axis=0)
-    body_rgb = source * (1.0 - ear_partition[..., None]) + fur_fill[None, None, :] * ear_partition[..., None]
+    fur_fill = np.median(dog_rgb[fy0:fy1, fx0:fx1].reshape(-1, 3), axis=0)
+    body_rgb = dog_rgb * (1.0 - ear_partition[..., None]) + fur_fill[None, None, :] * ear_partition[..., None]
     return (
         _rgba_layer(body_rgb, body_alpha),
-        _rgba_layer(source, tail_alpha),
-        _rgba_layer(source, ear_alpha),
+        _rgba_layer(dog_rgb, tail_alpha),
+        _rgba_layer(dog_rgb, ear_alpha),
         dog_alpha,
     )
 

@@ -75,6 +75,14 @@ def _draw_cloud(layer: Image.Image, x: float, y: float, scale: float, opacity: i
         (63, 4, 58, 28),
     ]
     for px, py, pw, ph in puffs:
+        shadow_box = (
+            x + (px - pw / 2) * scale,
+            y + (py - ph / 2 + 8) * scale,
+            x + (px + pw / 2) * scale,
+            y + (py + ph / 2 + 8) * scale,
+        )
+        draw.ellipse(shadow_box, fill=(126, 153, 170, int(opacity * 0.42)))
+    for px, py, pw, ph in puffs:
         box = (
             x + (px - pw / 2) * scale,
             y + (py - ph / 2) * scale,
@@ -82,6 +90,18 @@ def _draw_cloud(layer: Image.Image, x: float, y: float, scale: float, opacity: i
             y + (py + ph / 2) * scale,
         )
         draw.ellipse(box, fill=(255, 249, 228, opacity))
+
+
+def _draw_pine(draw: ImageDraw.ImageDraw, x: float, ground: float, scale: float, colour: tuple[int, int, int]) -> None:
+    trunk = _rgb("wood_oak", 0.60)
+    draw.rectangle((x - 2.5 * scale, ground - 45 * scale, x + 2.5 * scale, ground), fill=trunk + (220,))
+    for level, width_scale in [(0, 1.0), (18, 0.82), (34, 0.61)]:
+        base = ground - (18 + level) * scale
+        half = 25 * scale * width_scale
+        draw.polygon(
+            [(x, base - 44 * scale * width_scale), (x - half, base), (x + half, base)],
+            fill=colour + (235,),
+        )
 
 
 def _draw_tree(draw: ImageDraw.ImageDraw, x: float, ground: float, scale: float, sway: float) -> None:
@@ -98,6 +118,9 @@ def _draw_tree(draw: ImageDraw.ImageDraw, x: float, ground: float, scale: float,
         ],
         fill=trunk + (255,),
     )
+    branch = tuple(int(v * 0.88) for v in trunk)
+    draw.line((x, ground - 84 * scale, x - 34 * scale, ground - 126 * scale), fill=branch + (230,), width=max(2, int(7 * scale)))
+    draw.line((x, ground - 98 * scale, x + 38 * scale, ground - 137 * scale), fill=branch + (230,), width=max(2, int(6 * scale)))
     clusters = [
         (-46, -128, 58, dark),
         (-12, -159, 73, mid),
@@ -110,10 +133,39 @@ def _draw_tree(draw: ImageDraw.ImageDraw, x: float, ground: float, scale: float,
         ox = (cx + sway * (0.8 + 0.003 * abs(cy))) * scale
         r = radius * scale
         draw.ellipse((x + ox - r, ground + cy * scale - r, x + ox + r, ground + cy * scale + r), fill=colour + (255,))
+    for cx, cy, radius in [(-30, -172, 14), (18, -164, 12), (43, -126, 10), (-48, -112, 9)]:
+        ox = (cx + sway) * scale
+        r = radius * scale
+        draw.ellipse(
+            (x + ox - r, ground + cy * scale - r, x + ox + r, ground + cy * scale + r),
+            fill=(91, 151, 57, 125),
+        )
+
+
+def _pollen_layer(width: int, height: int, phase: float) -> Image.Image:
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer, "RGBA")
+    rng = np.random.default_rng(715)
+    for index, (x, y, size) in enumerate(
+        zip(rng.integers(30, width - 30, 24), rng.integers(330, height - 70, 24), rng.uniform(1.0, 2.8, 24))
+    ):
+        px = x + 11.0 * np.sin(2.0 * np.pi * phase + index * 0.91)
+        py = y + 6.0 * np.sin(2.0 * np.pi * phase + index * 0.47)
+        alpha = 70 + int(45 * (0.5 + 0.5 * np.sin(index * 1.7)))
+        draw.ellipse((px - size, py - size, px + size, py + size), fill=(255, 224, 128, alpha))
+    return layer.filter(ImageFilter.GaussianBlur(radius=0.7))
 
 
 def _meadow_base(width: int, height: int, horizon: int, phase: float, travel: float = 0.0) -> Image.Image:
     world = _sky_plate(width, height, horizon).copy()
+
+    sun_glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    sg = ImageDraw.Draw(sun_glow, "RGBA")
+    sun_x, sun_y = 112, 112
+    sg.ellipse((sun_x - 54, sun_y - 54, sun_x + 54, sun_y + 54), fill=(255, 204, 105, 92))
+    sun_glow = sun_glow.filter(ImageFilter.GaussianBlur(radius=24.0))
+    world.alpha_composite(sun_glow)
+    ImageDraw.Draw(world, "RGBA").ellipse((sun_x - 18, sun_y - 18, sun_x + 18, sun_y + 18), fill=(255, 231, 154, 218))
 
     # Puffy foreground clouds add a second, hand-shaped altitude layer over the parametric sky.
     cloud_layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -130,6 +182,16 @@ def _meadow_base(width: int, height: int, horizon: int, phase: float, travel: fl
     near = tuple(int(v * 0.86) for v in _rgb("grass", 0.98))
     near_points = _hill_points(width, 438, 47, 2.1, scroll=0.75 * travel, cycles=4.0) + [(width + 20, height), (-20, height)]
     draw.polygon(near_points, fill=near + (255,))
+
+    # A small repeating pine line adds scale between the hills and the large foreground trees.
+    pine_colour = tuple(int(v * 0.72) for v in _rgb("moss", 0.95))
+    forest_period = width / 2.0
+    forest_scroll = 0.5 * travel
+    for repeat in range(-2, 4):
+        for index, base in enumerate((30, 92, 158, 231, 302, 354)):
+            x = base + repeat * forest_period - forest_scroll
+            scale = 0.48 + 0.07 * ((index * 3) % 4)
+            _draw_pine(draw, x, horizon + 16, scale, pine_colour)
 
     # The foreground is a vertical mix of the named grass and moss materials.
     grass_top = np.asarray(_rgb("grass", 1.03), float)
@@ -172,6 +234,24 @@ def _meadow_base(width: int, height: int, horizon: int, phase: float, travel: fl
         tip_x = int(x + wind * h * (0.10 + 0.09 * tint))
         draw.line((int(x), int(y), tip_x, int(y - h)), fill=colour, width=1 + int(y > 650))
 
+    texture_rng = np.random.default_rng(827)
+    for x, y, radius, tint in zip(
+        texture_rng.integers(0, width, 90),
+        texture_rng.integers(505, height, 90),
+        texture_rng.uniform(0.8, 2.5, 90),
+        texture_rng.random(90),
+    ):
+        x = (float(x) - travel) % width
+        colour = (62 + int(26 * tint), 103 + int(30 * tint), 37 + int(16 * tint), 72)
+        draw.ellipse((x - radius, y - radius * 0.55, x + radius, y + radius * 0.55), fill=colour)
+
+    rocks = [(145, 646, 9, 5), (602, 621, 7, 4), (714, 731, 11, 6), (46, 538, 6, 4), (535, 747, 8, 5)]
+    rock_colour = _rgb("rock", 1.18)
+    for x, y, rx, ry in rocks:
+        x = (float(x) - travel) % width
+        draw.ellipse((x - rx, y - ry, x + rx, y + ry), fill=rock_colour + (165,))
+        draw.arc((x - rx, y - ry, x + rx, y + ry), 205, 338, fill=(191, 188, 160, 145), width=1)
+
     flowers = [(83, 590, (255, 214, 62)), (691, 607, (245, 116, 126)), (117, 683, (190, 148, 240)),
                (639, 702, (255, 235, 115)), (52, 724, (245, 150, 186)), (726, 669, (235, 225, 255))]
     for i, (x, y, colour) in enumerate(flowers):
@@ -183,6 +263,7 @@ def _meadow_base(width: int, height: int, horizon: int, phase: float, travel: fl
             px, py = cx + 5.2 * np.cos(angle), cy + 5.2 * np.sin(angle)
             draw.ellipse((px - 3.2, py - 3.2, px + 3.2, py + 3.2), fill=colour + (235,))
         draw.ellipse((cx - 2.5, cy - 2.5, cx + 2.5, cy + 2.5), fill=(240, 174, 43, 255))
+    world.alpha_composite(_pollen_layer(width, height, phase))
     return world
 
 

@@ -249,6 +249,19 @@ def _footstep_dust(
     return layer.filter(ImageFilter.GaussianBlur(radius=max(1.0, 2.6 * sx)))
 
 
+def _meadow_light(layer: Image.Image) -> Image.Image:
+    """Give the extracted character the meadow's warm top light and cool ground fill."""
+    rgba = np.asarray(layer, float) / 255.0
+    height = rgba.shape[0]
+    y = np.linspace(0.0, 1.0, height)[:, None, None]
+    rgb = rgba[..., :3]
+    cool = 0.038 * y
+    rgb = rgb * (1.0 - cool) + np.array([0.10, 0.18, 0.08])[None, None, :] * cool
+    warm = 0.060 * (1.0 - y)
+    rgb = rgb * (1.0 - warm) + np.array([1.0, 0.72, 0.32])[None, None, :] * warm
+    return _rgba_layer(np.clip(rgb, 0.0, 1.0), rgba[..., 3])
+
+
 def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
     source_pil = Image.open(source_path).convert("RGB")
     source = np.asarray(source_pil, float) / 255.0
@@ -326,6 +339,7 @@ def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
             dog_layer.alpha_composite(eyelid)
 
         # A tiny whole-body roll joins the separate limb motion into one soft, weighty step.
+        dog_layer = _meadow_light(dog_layer)
         body_roll = 0.65 * np.sin(8.0 * np.pi * phase + 0.18)
         dog_layer = dog_layer.rotate(
             float(body_roll),
