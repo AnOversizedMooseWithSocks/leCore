@@ -106,11 +106,16 @@ def split_walking_layers(body: Image.Image):
         feather = max(7.0 * sy, 1.0)
         upper_weight = np.clip((knee[1] + feather - yy) / (2.0 * feather), 0.0, 1.0)
         lower_weight = 1.0 - upper_weight
+        # Keep the paw as its own rigid link. Rotating it with the shin made
+        # planted feet rock and made swing feet point backwards.
+        paw_feather = max(10.0 * sy, 1.0)
+        paw_weight = np.clip((yy - (paw[1] - 30.0 * sy)) / paw_feather, 0.0, 1.0)
         legs.append(
             {
                 "name": name,
                 "upper": _rgba_layer(rgba[..., :3], mask * upper_weight),
-                "lower": _rgba_layer(rgba[..., :3], mask * lower_weight),
+                "lower": _rgba_layer(rgba[..., :3], mask * lower_weight * (1.0 - 0.92 * paw_weight)),
+                "paw_layer": _rgba_layer(rgba[..., :3], mask * paw_weight),
                 "hip": hip,
                 "knee": knee,
                 "paw": paw,
@@ -138,8 +143,8 @@ def _angle_delta(target: float, source: float) -> float:
     return float(np.arctan2(np.sin(target - source), np.cos(target - source)))
 
 
-def _articulate_leg(leg: dict, target: tuple[float, float]) -> Image.Image:
-    """Use two-link inverse kinematics so the knee bends and the paw reaches its target."""
+def _articulate_leg(leg: dict, target: tuple[float, float], paw_pitch: float = 0.0) -> Image.Image:
+    """Use two-link IK, then keep the paw level as its own third link."""
     hip = np.asarray(leg["hip"], float)
     knee = np.asarray(leg["knee"], float)
     paw = np.asarray(leg["paw"], float)
@@ -178,9 +183,16 @@ def _articulate_leg(leg: dict, target: tuple[float, float]) -> Image.Image:
         center=tuple(knee),
     )
     lower = _translate(lower, new_knee[0] - knee[0], new_knee[1] - knee[1])
+    paw_layer = leg["paw_layer"].rotate(
+        float(paw_pitch),
+        resample=Image.Resampling.BICUBIC,
+        center=tuple(paw),
+    )
+    paw_layer = _translate(paw_layer, target_point[0] - paw[0], target_point[1] - paw[1])
     result = Image.new("RGBA", upper.size, (0, 0, 0, 0))
     result.alpha_composite(upper)
     result.alpha_composite(lower)
+    result.alpha_composite(paw_layer)
     rgba = np.asarray(result, float) / 255.0
     clean_alpha = _components_near(
         rgba[..., 3],
@@ -216,6 +228,17 @@ def _paw_target(leg: dict, phase: float, sx: float, sy: float) -> tuple[float, f
         x_offset = 0.5 * stride - stride * smooth
         y_offset = -lift * np.sin(np.pi * amount)
     return leg["paw"][0] + x_offset, leg["paw"][1] + y_offset
+
+
+def _paw_pitch(leg: dict, phase: float) -> float:
+    """Flat on the ground, then a small toe-up curl during recovery."""
+    cycle = (phase * 4.0 + float(leg["cycle_offset"])) % 1.0
+    stance_fraction = 0.68
+    if cycle < stance_fraction:
+        amount = cycle / stance_fraction
+        return float(1.4 * np.sin(2.0 * np.pi * amount))
+    amount = (cycle - stance_fraction) / (1.0 - stance_fraction)
+    return float(-11.0 * np.sin(np.pi * amount))
 
 
 def _footstep_dust(
@@ -299,7 +322,10 @@ def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
             if leg["depth"] != "far":
                 continue
             target = _paw_target(leg, phase, sx, sy)
-            animated = _articulate_leg(leg, target)
+            # The torso bobs and sways around a planted foot. Cancel that
+            # whole-body motion at the IK target so stance paws do not slide.
+            target = (target[0] - body_sway, target[1] - body_bob)
+            animated = _articulate_leg(leg, target, _paw_pitch(leg, phase))
             dog_layer.alpha_composite(_translate(animated, shift_x, body_bob))
 
         wag = 2.5 * np.sin(8.0 * np.pi * phase + 0.45)
@@ -310,7 +336,8 @@ def make_walk_frames(source_path: Path, frames: int = 64) -> list[Image.Image]:
             if leg["depth"] != "near":
                 continue
             target = _paw_target(leg, phase, sx, sy)
-            animated = _articulate_leg(leg, target)
+            target = (target[0] - body_sway, target[1] - body_bob)
+            animated = _articulate_leg(leg, target, _paw_pitch(leg, phase))
             dog_layer.alpha_composite(_translate(animated, shift_x, body_bob))
 
         dog_layer.alpha_composite(_translate(torso_cover, shift_x, body_bob))

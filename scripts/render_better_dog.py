@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 
 from holographic.io_and_interop.holographic_coerce import as_camera
 from holographic.mesh_and_geometry.holographic_creaturetree import bone_capsule
-from holographic.mesh_and_geometry.holographic_groom import Strand, groom
+from holographic.mesh_and_geometry.holographic_groom import Strand, clump as clump_strands, groom
 from holographic.mesh_and_geometry.holographic_hairshade import render_hair
 from holographic.mesh_and_geometry.holographic_mesh import Mesh
 from holographic.mesh_and_geometry.holographic_meshbridge import sample_field, marching_tetrahedra_vec
@@ -147,9 +147,14 @@ def dark_features_sdf() -> SDF:
     """Eyes and nose, kept separate so leCore can shade them dark."""
     return _blend(
         [
-            _at(sphere(0.048), (-0.175, 0.335, 1.72)),
-            _at(sphere(0.058), (0.175, 0.335, 1.72)),
-            _at(ellipsoid(0.088, 0.068, 0.064), (0.0, 0.145, 2.075)),
+            _at(ellipsoid(0.046, 0.052, 0.048), (-0.175, 0.335, 1.72)),
+            _at(ellipsoid(0.063, 0.057, 0.052), (0.175, 0.335, 1.72)),
+            _at(ellipsoid(0.096, 0.070, 0.068), (0.0, 0.145, 2.075)),
+            # Three small whisker follicles on the camera-facing cheek keep
+            # the long cream muzzle from reading as a blank cone.
+            _at(sphere(0.010), (0.151, 0.105, 1.985)),
+            _at(sphere(0.009), (0.158, 0.084, 2.020)),
+            _at(sphere(0.008), (0.153, 0.130, 2.028)),
         ],
         0.008,
     )
@@ -160,6 +165,11 @@ def eye_highlights_sdf() -> SDF:
     return _at(sphere(0.016), (-0.141, 0.357, 1.748)).union(
         _at(sphere(0.019), (0.236, 0.351, 1.744))
     )
+
+
+def nose_highlight_sdf() -> SDF:
+    """A soft warm glint gives the nose volume without turning it plastic."""
+    return _at(ellipsoid(0.022, 0.014, 0.017), (0.056, 0.190, 2.112))
 
 
 def mouth_sdf() -> SDF:
@@ -203,12 +213,10 @@ def body_colours(vertices) -> np.ndarray:
         * np.clip((0.28 - v[:, 1]) / 0.24, 0.0, 1.0)
     )[:, None]
     socks = np.clip((-v[:, 1] - 0.57) / 0.26, 0.0, 1.0)[:, None]
-    chest = (
-        np.exp(-((v[:, 2] - 1.22) / 0.23) ** 2)
-        * np.clip((0.18 - v[:, 1]) / 0.35, 0.0, 1.0)
-        * np.clip((v[:, 0] + 0.04) / 0.28, 0.0, 1.0)
-    )[:, None]
-    marking = np.clip(0.60 * muzzle + 0.50 * socks + 0.42 * chest, 0.0, 0.72)
+    # Keep markings attached to readable regions. The old partial chest mask
+    # broke into isolated cream flecks in the three-quarter view and looked
+    # like holes in the coat.
+    marking = np.clip(0.60 * muzzle + 0.50 * socks, 0.0, 0.72)
     colour = colour * (1.0 - marking) + cream * marking
 
     # Fine deterministic variation follows the procedural geometry through
@@ -235,18 +243,18 @@ def merge_coloured(items: list[tuple[Mesh, object]]) -> tuple[Mesh, np.ndarray]:
 
 
 def fluffy_groom(body_node: SDF, n_strands: int = 100_000):
-    """Dense leCore fur expanded from surface-authored guide strands."""
+    """A clumped undercoat with longer feathering where a retriever carries it."""
     target_count = max(1, int(n_strands))
     guide_count = min(14_000, target_count)
     guides = groom(
         body_node.eval,
         n_strands=guide_count,
         bounds=BODY_BOUNDS,
-        length=0.022,
+        length=0.028,
         n_pts=4,
         curl=0.0,
         lean=0.02,
-        width=0.008,
+        width=0.005,
         seed=19,
         length_jitter=0.32,
     )
@@ -254,17 +262,31 @@ def fluffy_groom(body_node: SDF, n_strands: int = 100_000):
     for strand in guides:
         root = strand.root
         # Leave the muzzle and cream socks clean. Fur elsewhere follows the
-        # analytic surface, with localized art-directed length variation.
-        if root[2] > 1.78 or root[1] < -0.57:
+        # analytic surface, with localized art-directed feathering.
+        if root[2] > 1.75 or root[1] < -0.76:
             continue
         chest = np.exp(-((root[2] - 1.24) / 0.25) ** 2) * np.clip((0.18 - root[1]) / 0.55, 0.0, 1.0)
         tail = np.clip((-root[2] - 0.02) / 0.38, 0.0, 1.0)
         shoulder = np.exp(-((root[2] - 1.48) / 0.25) ** 2) * np.clip((root[1] + 0.10) / 0.55, 0.0, 1.0)
-        length_scale = 1.0 + 1.55 * chest + 2.30 * tail + 0.42 * shoulder
+        haunch = np.exp(-((root[2] - 0.23) / 0.30) ** 2) * np.clip((0.14 - root[1]) / 0.62, 0.0, 1.0)
+        belly = np.exp(-((root[2] - 0.72) / 0.50) ** 2) * np.clip((0.00 - root[1]) / 0.55, 0.0, 1.0)
+        sock_taper = 0.42 + 0.58 * np.clip((root[1] + 0.76) / 0.19, 0.0, 1.0)
+        length_scale = (0.90 + 1.85 * chest + 2.75 * tail + 0.62 * shoulder + 0.82 * haunch + 0.55 * belly) * sock_taper
         strand.points = root[None, :] + (strand.points - root[None, :]) * length_scale
+
+        # Long coat falls with gravity and streams gently toward the tail.
+        # The root remains pinned; only the free length receives the comb.
+        t = np.linspace(0.0, 1.0, len(strand.points))[:, None] ** 1.6
+        fall = (0.020 * chest + 0.014 * belly + 0.010 * haunch)
+        sweep = 0.010 * shoulder + 0.013 * belly
+        strand.points += t * np.array([0.0, -fall, -sweep])
         kept.append(strand)
     if not kept:
         return []
+    # A uniform porcupine shell is dense but not fluffy. Gather the guides
+    # into small tufts first, then fan each tuft into the final dense coat.
+    tuft_count = min(280, max(24, len(kept) // 24))
+    kept = clump_strands(kept, n_clumps=tuft_count, tightness=0.30, seed=37)
     if target_count <= len(kept):
         return kept[:target_count]
 
@@ -281,7 +303,7 @@ def fluffy_groom(body_node: SDF, n_strands: int = 100_000):
         tangent_a /= np.linalg.norm(tangent_a) + 1e-12
         tangent_b = np.cross(normal, tangent_a)
         angle = 2.0 * np.pi * rng.random()
-        radius = 0.014 * np.sqrt(rng.random())
+        radius = 0.010 * np.sqrt(rng.random())
         offset = radius * (np.cos(angle) * tangent_a + np.sin(angle) * tangent_b)
         length_variation = 0.84 + 0.32 * rng.random()
         root = guide.root + offset
@@ -292,6 +314,60 @@ def fluffy_groom(body_node: SDF, n_strands: int = 100_000):
                 root_normal=normal,
                 width=guide.width,
                 attrs={**guide.attrs, "dense_clone": True},
+            )
+        )
+    return dense
+
+
+def ear_fringe_groom(n_strands: int) -> list[Strand]:
+    """Fine darker feathering around the floppy ear silhouette."""
+    target_count = max(0, int(n_strands))
+    if target_count == 0:
+        return []
+    guides = groom(
+        ears_sdf().eval,
+        n_strands=min(2_600, target_count),
+        bounds=((-0.42, -0.03, 1.34), (0.42, 0.50, 1.68)),
+        length=0.018,
+        n_pts=4,
+        curl=0.0,
+        lean=0.025,
+        width=0.004,
+        seed=83,
+        length_jitter=0.38,
+    )
+    for strand in guides:
+        root = strand.root
+        tip_weight = np.clip((0.34 - root[1]) / 0.26, 0.0, 1.0)
+        outer_weight = np.clip((abs(root[0]) - 0.20) / 0.16, 0.0, 1.0)
+        scale = 0.86 + 1.55 * tip_weight + 0.55 * outer_weight
+        strand.points = root[None, :] + (strand.points - root[None, :]) * scale
+        t = np.linspace(0.0, 1.0, len(strand.points))[:, None] ** 1.5
+        strand.points += t * np.array([np.sign(root[0]) * 0.006 * outer_weight, -0.018 * tip_weight, 0.0])
+    guides = clump_strands(
+        guides,
+        n_clumps=min(90, max(12, len(guides) // 18)),
+        tightness=0.34,
+        seed=91,
+    )
+    if target_count <= len(guides):
+        return guides[:target_count]
+    rng = np.random.default_rng(97)
+    dense = list(guides)
+    while len(dense) < target_count:
+        guide = guides[(len(dense) - len(guides)) % len(guides)]
+        normal = np.asarray(guide.root_normal, float)
+        axis = np.array([1.0, 0.0, 0.0]) if abs(normal[0]) < 0.85 else np.array([0.0, 1.0, 0.0])
+        tangent = axis - normal * float(np.dot(axis, normal))
+        tangent /= np.linalg.norm(tangent) + 1e-12
+        offset = tangent * rng.uniform(-0.0045, 0.0045)
+        root = guide.root + offset
+        dense.append(
+            Strand(
+                root[None, :] + (guide.points - guide.root[None, :]) * rng.uniform(0.88, 1.12),
+                root_normal=normal,
+                width=guide.width,
+                attrs={**guide.attrs, "ear_fringe": True},
             )
         )
     return dense
@@ -326,6 +402,11 @@ def render_dog_mesh(
         ((-0.23, 0.32, 1.68), (0.23, 0.39, 1.78)),
         max(26, int(resolution * 0.34)),
     )
+    nose_highlight = mesh_sdf(
+        nose_highlight_sdf(),
+        ((0.02, 0.16, 2.08), (0.09, 0.22, 2.14)),
+        max(24, int(resolution * 0.32)),
+    )
     mouth = mesh_sdf(
         mouth_sdf(),
         ((0.08, -0.01, 1.86), (0.17, 0.12, 2.05)),
@@ -349,6 +430,7 @@ def render_dog_mesh(
         (tag, (0.92, 0.62, 0.16)),
         (dark, (0.045, 0.030, 0.022)),
         (highlights, (0.96, 0.93, 0.82)),
+        (nose_highlight, (0.34, 0.25, 0.17)),
         (mouth, (0.20, 0.065, 0.050)),
     ]
     mesh, colours = merge_coloured(parts)
@@ -426,7 +508,11 @@ def render_dog_mesh(
 
     # leCore's strand renderer adds a true fiber-shaded fur layer. Keep the
     # coat lively while protecting the high-contrast face and accessories.
-    strands = fluffy_groom(body_node, n_strands=fur_strands)
+    total_strands = max(1, int(fur_strands))
+    ear_strand_count = min(total_strands - 1, min(12_000, max(1_600, int(total_strands * 0.12))))
+    body_strand_count = total_strands - ear_strand_count
+    strands = fluffy_groom(body_node, n_strands=body_strand_count)
+    strands.extend(ear_fringe_groom(ear_strand_count))
     hair_image, hair_alpha = render_hair(
         strands,
         camera,
@@ -434,10 +520,12 @@ def render_dog_mesh(
         width=render_width,
         height=render_height,
         shader="kajiya",
-        hair_color=(0.76, 0.49, 0.27),
+        hair_color=(0.73, 0.43, 0.20),
         background=(0.0, 0.0, 0.0),
         smooth_levels=0,
         roughness=0.72,
+        specular_tint=0.72,
+        specular_strength=0.32,
         return_alpha=True,
     )
     object_pixels = matte[..., 0]
@@ -446,7 +534,7 @@ def render_dog_mesh(
     # The groom is a coat, not a translucent effect. Convolve premultiplied
     # fiber color into an undercoat, drive dense body regions to opaque, then
     # lay the sharp individual hairs on top at full coverage.
-    fur_palette = np.array([0.72, 0.43, 0.21])[None, None, :]
+    fur_palette = np.array([0.70, 0.40, 0.18])[None, None, :]
     fiber_light = np.clip(hair_image.mean(axis=2) / 0.62, 0.0, 1.0)
     fiber_shade = 0.78 + 0.34 * fiber_light
     toned_hair = np.clip(fur_palette * fiber_shade[..., None], 0.0, 1.0)
@@ -454,10 +542,14 @@ def render_dog_mesh(
     blurred_premul = _fft_blur(toned_hair * hair_alpha[..., None], sigma=1.50)
     blurred_hair = blurred_premul / np.maximum(blurred_alpha, 1e-6)
     surface_light = np.clip(image.mean(axis=2) / 0.56, 0.72, 1.18)[..., None]
-    lit_undercoat = np.clip(fur_palette * surface_light, 0.0, 1.0)
+    # Carry the analytic coat markings and the mesh lighting into the fibers.
+    # A global orange hair colour alone erased the chest, saddle, and leg
+    # volume even though the underlying surface had already solved them.
+    surface_coat = np.clip(0.62 * image + 0.38 * fur_palette * surface_light, 0.0, 1.0)
+    lit_undercoat = np.where(object_pixels[..., None], surface_coat, fur_palette * surface_light)
     blurred_hair = np.where(
         object_pixels[..., None],
-        0.58 * blurred_hair + 0.42 * lit_undercoat,
+        0.44 * blurred_hair + 0.56 * lit_undercoat,
         blurred_hair,
     )
     local_density = blurred_alpha[..., 0]
@@ -466,13 +558,19 @@ def render_dog_mesh(
         np.clip(local_density * 5.0, 0.0, 1.0),
         np.clip(local_density * 2.4, 0.0, 1.0),
     )
-    dense_undercoat = object_pixels & (local_density > 0.035)
-    coat_coverage = np.where(dense_undercoat, np.maximum(coat_coverage, 0.96), coat_coverage)
+    dense_undercoat = object_pixels & (local_density > 0.040)
+    coat_coverage = np.where(dense_undercoat, np.maximum(coat_coverage, 0.84), coat_coverage)
     coat_coverage = np.where(protected, 0.0, coat_coverage)[..., None]
     image = image * (1.0 - coat_coverage) + blurred_hair * coat_coverage
 
-    sharp_coverage = (hair_alpha > 0.0) & (~protected)
-    image = np.where(sharp_coverage[..., None], toned_hair, image)
+    # Guard hairs keep their fiber highlights, but no longer replace the
+    # shaded body with one flat orange pixel. Interior fibers inherit much of
+    # the surface lighting; silhouette fibers stay strong and crisp.
+    sharp_mask = (hair_alpha > 0.0) & (~protected)
+    interior_hair = np.clip(0.28 * toned_hair + 0.72 * lit_undercoat, 0.0, 1.0)
+    guard_colour = np.where(object_pixels[..., None], interior_hair, toned_hair)
+    guard_alpha = np.where(object_pixels, 0.54, 0.90) * sharp_mask
+    image = image * (1.0 - guard_alpha[..., None]) + guard_colour * guard_alpha[..., None]
 
     if render_width != int(width) or render_height != int(height):
         image = resample(image, scale=float(width) / float(render_width))
@@ -486,7 +584,7 @@ def render_dog_mesh(
         "fur_strands": len(strands),
         "body_resolution": int(resolution),
         "body_sdf_nodes": body_node.cost()["nodes"],
-        "engine": "leCore analytic SDF -> opaque groomed Kajiya-Kay fur coat -> SSAA studio composite",
+        "engine": "leCore analytic SDF -> clumped undercoat + regional feathering -> opaque fiber-shaded coat -> SSAA studio composite",
     }
 
 
