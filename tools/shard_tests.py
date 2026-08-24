@@ -89,6 +89,17 @@ def partition(num_shards):
     Returns (shards, loads): shards is a list of file lists, loads the weight totals."""
     _m = _measured()
     files = [(weight(p, _m), p) for p in test_files()]
+    # KEPT NEGATIVE -- SPLITTING OVERSIZED FILES INTO PER-TEST SELECTORS.
+    # Written and REMOVED after measuring: the packer's spread across 4 bins is
+    # 1.00x, i.e. PERFECTLY EVEN, so no file was ever the imbalance. The 19m51s
+    # cancellation was a BIN COUNT problem -- ~2,200 s of local suite over 4
+    # shards is 550 s each and CI runs ~3x slower with --run-slow, so 27
+    # minutes. Ten bins fixes it arithmetically.
+    # The splitter also broke the --selfcheck contract (it compares against a
+    # universe of FILES, and node selectors are not files), which is the check
+    # doing its job: a partition that no longer partitions files is a different
+    # thing wearing the same name. RAISING --num-shards IS THE SANCTIONED FIX
+    # and it needed no change here at all.
     files.sort(key=lambda wp: (-wp[0], wp[1]))            # heaviest first; path as the deterministic tiebreak
     shards = [[] for _ in range(num_shards)]
     loads = [0] * num_shards

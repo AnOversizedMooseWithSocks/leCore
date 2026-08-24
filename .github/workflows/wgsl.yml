@@ -40,6 +40,13 @@ on:
     - cron: "0 7 * * 1"        # 07:00 UTC Monday -- an hour after the main full-suite run
   workflow_dispatch:
 
+# ONE LIVE RUN PER REF, same reasoning as ci.yml: superseded pushes should not
+# keep running. docs.yml in particular COMMITS BACK, so two concurrent runs can
+# race each other to push the same regenerated files.
+concurrency:
+  group: wgsl-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   wgsl:
     runs-on: ubuntu-latest
@@ -85,7 +92,16 @@ jobs:
           assert info.get('available'), 'no compute adapter -- this lane would silently check nothing'
           "
 
-      - name: Run the WGSL correctness tests
+      # NOT A DUPLICATE OF THE MAIN MATRIX, AND THE DISTINCTION IS THE POINT.
+      # ci.yml's shards also collect these two files -- but with no compute
+      # adapter installed, so every WGSL test SKIPS there and the lane proves
+      # nothing. This job installs an adapter first, asserts one is present, and
+      # then asserts the tests were not all skipped.
+      # SAME FILES, DIFFERENT CLAIM: the matrix says "these do not crash without
+      # a GPU", this says "these are CORRECT with one". Removing either would
+      # lose a real check; what would be wasteful is running the SAME claim
+      # twice, which is not what happens here.
+      - name: Run the WGSL correctness tests (with a real adapter -- the matrix skips them)
         run: python -m pytest tests/test_wgsl_runtime.py tests/test_gpu_report.py -q
 
       - name: Verify the tests were not all skipped

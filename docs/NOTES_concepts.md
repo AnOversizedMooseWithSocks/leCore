@@ -70596,3 +70596,174 @@ A SINGLE-FILE FAILURE, which is the shape of every failure Moose has sent.
 Sharding covers each file exactly once and costs about forty minutes.
 SAMPLING ANSWERS "IS THE TREE BROADLY OK"; SHARDING ANSWERS "WILL CI PASS", AND
 ONLY THE SECOND ONE WAS EVER THE QUESTION.
+
+## THE 20-MINUTE TIMEOUT: it was a BIN COUNT, and the packer was never at fault
+
+`full-suite (1)` ran 19m51s and was CANCELLED at 91%. The instinct is "the
+packer put too much in one bin", and the measurement says otherwise: SPREAD
+ACROSS THE FOUR BINS IS 1.00x -- perfectly even. There simply were not enough
+bins. ~2,200 s of local suite over 4 shards is 550 s each, and CI's runners run
+~3x slower with --run-slow selected, which is 27 minutes.
+
+FIXED BY ARITHMETIC: matrix of 10, heaviest shard ~12.3 min against a 20 min
+budget. Verified by running a real 10-way shard: 684 passed in 2m31s local.
+Self-check green at BOTH counts (the fast `pytest` job still uses 4).
+
+AND A LATENT BUG THE CHANGE EXPOSED: the matrix length and --num-shards are
+declared in DIFFERENT PLACES. Raising the matrix to 10 while the invocation
+still said `--num-shards 4` asks for slices 0..9 of a FOUR-way partition --
+shards 4..9 come back EMPTY and 60% OF THE SUITE SILENTLY DOES NOT RUN, with
+ten green jobs to show for it. The --selfcheck step is what catches this,
+because it partitions with the same number and asserts exact cover. Both places
+now say 10, and the comment says why they must agree.
+
+KEPT NEGATIVE -- SPLITTING OVERSIZED FILES INTO PER-TEST SELECTORS. I wrote it
+first, on the theory that test_integration.py (245 s, the single heaviest thing
+in the tree) was indivisible and dominating. It was the wrong theory: at 1.00x
+spread nothing was dominating, and my own estimate that "more shards makes it
+worse" came from an estimator that counted only MEASURED seconds and therefore
+saw the one measured heavy file as the whole load. The splitter also broke
+--selfcheck, which compares against a universe of FILES -- node selectors are
+not files. THAT IS THE CHECK DOING ITS JOB: a partition that no longer
+partitions files is a different thing wearing the same name. Removed.
+
+WHAT DID SURVIVE: tools/measure_durations.py, which records REAL per-file wall
+time by summing pytest's --durations output. The sharder already blended
+measured seconds when available and the file held TEN entries out of 672 --
+missing test_integration.py, the one file most able to blow a budget. Now 51
+entries, 729 s recorded. THE BLEND DEGRADES TO THE PROXY FOR ANYTHING
+UNMEASURED, so a partial file is strictly better than none, and the packer put
+test_integration.py alone in shard 0 without being told to.
+
+## CI ORDERING AND DUPLICATE RUNS: audited every workflow
+
+Moose asked that tests run AFTER the docs/semantic checks, and that a commit not
+run its tests more than once.
+
+ORDERING WAS WRONG AND IT WAS COSTING THE WHOLE MATRIX. `pytest` and `gates`
+ran in PARALLEL with no dependency, so a stale REFERENCE.md burned four shard
+jobs before anyone read the one-line failure telling them to run regen_docs --
+and the same commit burned it again on the next push. pytest now `needs: [gates]`.
+THE CHEAP CHECK THAT FAILS OFTEN GOES FIRST: ~1 minute of added latency on a
+green run, the entire matrix saved on a red one.
+AND IT MATTERS MORE ON THE FULL RUN: full-suite is TEN jobs at up to 20 minutes
+and had NO gate at all -- a release tag with stale docs would spend ~2 hours of
+runner time before reporting a drift failure that takes one second to detect.
+`gates` does not run on tags or schedules, so the four cheap checks run INLINE
+there as a step rather than via a cross-trigger.
+
+DUPLICATE RUNS PER COMMIT: mostly already correct, and one real finding.
+  ci.yml's push is limited to main/master while pull_request is unrestricted,
+    so a feature branch runs ONCE (as a PR) and main runs once. Correct already.
+  docs.yml COMMITS BACK on any branch -- the classic self-trigger loop -- and is
+    already guarded with [skip ci] in the commit message. Correct already.
+  wgsl.yml RUNS THE SAME TWO TEST FILES the main matrix collects (shard 5).
+    Looked like the duplicate and IS NOT: with no compute adapter the matrix
+    SKIPS every WGSL test, while this job installs an adapter, asserts one is
+    present, and asserts the tests were not all skipped. SAME FILES, DIFFERENT
+    CLAIM -- the matrix says "these do not crash without a GPU", wgsl.yml says
+    "these are CORRECT with one". Documented in the step name so the next reader
+    does not delete one as redundant.
+
+WHAT WAS ACTUALLY MISSING: CONCURRENCY. No workflow had a concurrency group, so
+pushing three times in five minutes left three full matrices running the same
+suite on commits already superseded -- burning minutes to test code nobody will
+ship and queueing the useful run behind dead ones. Added to ci, docs, wgsl and
+semantic-coverage, keyed on PR number or ref. docs.yml needed it most: two
+concurrent runs RACE EACH OTHER to push the same regenerated files.
+package.yml deliberately has none -- cancelling a publish mid-flight is worse
+than letting a superseded one finish.
+
+AND A STALE LABEL FIXED: the full-suite step still read "Run shard N of 4"
+after the matrix went to 10. A log that misreports its own partition is how the
+next person mis-reads a failure.
+
+## integrations/ folder: openzoo harness integrations + audit sweep (session)
+Built integrations/ (10 harnesses: OpenWebUI pipe function, LibreChat yaml, Continue yaml,
+aider env, SillyTavern/AnythingLLM/Cursor/Cline README-only, Hermes yaml, GrokCLI json).
+Registered pointer capability "Harness integrations for openzoo" in catalog p06 (import-only
+declared negative: integrations never import lecore; HTTP to localhost:8402/v1 only). Battery 5/5.
+BUGS FOUND & FIXED in sweep:
+- openzoo model ids are provider-prefixed AND contain dots (nvidia/nemotron-3.5-lightning);
+  original placeholder deepseek-v4-flash would 404 everywhere. Fixed in 10 files.
+- OpenWebUI pipe _strip_owui_prefix split on first "." -- mangled bare dotted ids to
+  "5-lightning". Fixed with dot-before-slash + digitless-head guards; pinned in selftest
+  as a kept negative.
+- Pipe forwarded OpenWebUI bookkeeping keys (chat_id/metadata/...) upstream; now allowlisted
+  to OpenAI chat fields. Round-trip tested against a mock server (models fetch, non-stream +
+  receipt, SSE stream, 402 guidance) -- all pass.
+- Literal "{a,b}" junk dirs from failed brace expansion caught BY RUNNING the catalog example.
+KEPT NEGATIVE: no client-side corpus spill in any integration -- spill is server-side at the
+zoo so all harnesses benefit and nothing double-bills. NOT LIVE-VERIFIED: a settled paid call
+(no funded wallet in this environment); receipt-in-usage shape unconfirmed -- pipe degrades
+gracefully either way.
+
+## MERGE 3: the integrations/ folder
+
+Small, clean branch: 17 files under integrations/ (per-app plugins and configs
+that surface openzoo in OpenWebUI, LibreChat, Continue, aider, SillyTavern,
+AnythingLLM, Hermes, Cursor, Cline, GrokCLI) plus an 11-line pointer capability
+in catalog p06. Nothing of mine removed; the four workflow files, shard_tests
+and test_durations differ only as the PRE-EDIT forms of yesterday's CI work.
+
+VERIFIED THEIR OWN CENTRAL CLAIM rather than taking it: the integrations are
+IMPORT-ONLY BY DESIGN and never touch lecore. Checked by AST -- openzoo_pipe
+imports json, pydantic and requests, and nothing else; grep finds no
+`import lecore` or `from holographic` anywhere in the folder. They run inside the
+HOST app and talk HTTP to localhost:8402/v1, which is why the declared negative
+is correct rather than a gap.
+
+AND EXERCISED THE BUG THEY PINNED, because a kept negative that nobody re-runs
+is a comment. openzoo model ids are provider-prefixed AND contain dots
+(nvidia/nemotron-3.5-lightning), so the naive split(".", 1) yields
+"5-lightning" -- a 404 on every model. Their fix, run here:
+    openzoo.deepseek-v4                   -> deepseek-v4
+    nvidia/nemotron-3.5-lightning         -> nvidia/nemotron-3.5-lightning
+    openzoo.nvidia/nemotron-3.5-lightning -> nvidia/nemotron-3.5-lightning
+Correct on all four cases. Pointer capability discoverable 4/4.
+
+TWO MERGE DECISIONS WORTH THE LINE:
+  THE ROOT NOTES_concepts.md STUB (1.4 KB) was folded into
+  docs/NOTES_concepts.md rather than kept. TWO FILES WITH ONE NAME IS THE SHAPE
+  THAT MAKES THE NEXT READER APPEND TO THE WRONG ONE, and this repo already has
+  the 5 MB one at docs/.
+  test_durations.json MERGED BY MAX, not mine-wins. The two branches disagreed
+  6x on one file (market: 7.0 s here, 45.0 s there -- different shard, different
+  parallelism, different deselects). UNDER-ESTIMATING IS WHAT BLOWS A 20-MINUTE
+  BUDGET; over-estimating only packs conservatively. measure_durations.py's
+  --merge now takes the max and says why. Shard spread improved 13% -> 10%.
+
+## TWO CI FAILURES, BOTH MINE, BOTH "THE CHECK WAS RIGHT"
+
+1. A COMMENT BROKE A LINT. test_ci_gates_run_once_and_every_shard_is_covered
+greps a job body for `--num-shards N` and compares the SET it finds against the
+matrix length. Both real invocations in full-suite say 10 -- but my explanatory
+comment contained the worked example "A matrix of 10 with --num-shards 4", and
+the grep found {4, 10}.
+A LINTER THAT READS TEXT CANNOT TELL DOCUMENTATION FROM CONFIGURATION. The
+comment now states the failure mode without spelling a second number, and says
+why. The test was right: prose that looks like config IS config to anything that
+greps, and the alternative -- teaching the linter to strip comments -- makes it
+weaker at catching a real stray flag inside a heredoc or a shell string.
+
+2. THE NO-TOOL ARM LEAKED A REAL REQUEST, and the router was correct to answer.
+declare_explain answered 1 of 60 "nonsense" queries. The query was the single
+word "dictionary" -- and leCore SHIPS a vendored dictionary, so that is a real
+request with a real capability behind it.
+THE CAUSE WAS A UNITS MISMATCH BETWEEN THE TWO ARMS. has_tool filtered aliases
+at `len(str(a).split()) >= 4` (RAW WORDS) while the no-tool salad drew
+`len(_tokens(a))` tokens (CONTENT WORDS, stopwords dropped). An alias like "get
+the dictionary out" passes the raw filter at four words and tokenizes to ONE --
+so its salad partner was a SINGLE TERM drawn from the catalog's own vocabulary,
+which is overwhelmingly likely to name something real.
+FIXED IN THE FILTER, NOT THE LENGTH. My first attempt floored the salad at four
+tokens and broke test_the_no_tool_arm_is_not_an_easier_arm, which insists the
+arms match on token count -- correctly, because a systematically longer no-tool
+arm lets the ladder refuse on LENGTH rather than on tool presence. Filtering
+has_tool in CONTENT TOKENS fixes the leak and keeps parity.
+VERIFIED ACROSS FIVE SEEDS rather than the committed one: 0/60 false actions at
+seeds 0/1/2/3/7, shortest salad 4 tokens everywhere. A fixture fix that only
+works on its own seed is a fixture that will leak again.
+SAME LESSON AS THE AGENT BENCHMARK, THIRD COSTUME: TESTING ABSTENTION REQUIRES A
+QUESTION WITH NO GOOD ANSWER, and any rule that can accidentally emit a
+meaningful query will eventually emit one.
