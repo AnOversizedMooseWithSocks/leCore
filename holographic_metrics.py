@@ -323,7 +323,7 @@ def collect_ablations(full: bool = False) -> dict[str, Any]:
     metrics: list[dict[str, Any]] = []
     findings: list[str] = []
     try:
-        from holographic_ablate import (
+        from holographic.misc.holographic_ablate import (
             ablation_table,
             fdr_verdicts,
             key_value_noisy,
@@ -482,7 +482,9 @@ def _parse_runner_json(output: str) -> dict[str, Any] | None:
 
 def _c_mode_env(mode: str, c_lib: Path | None, module: str, function: str) -> dict[str, str]:
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(ROOT), str(ROOT / "tests"), env.get("PYTHONPATH", "")]
+    )
     env.setdefault("MPLBACKEND", "Agg")
     env["HOLOSTUFF_METRIC_TEST_MODULE"] = module
     env["HOLOSTUFF_METRIC_TEST_FUNCTION"] = function

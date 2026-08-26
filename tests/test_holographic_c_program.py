@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 
 import holographic_c
-from holographic_ai import bind, bundle, cosine
-from holographic_machine import HoloMachine
+from holographic.agents_and_reasoning.holographic_ai import bind, bundle, cosine
+from holographic.agents_and_reasoning.holographic_machine import HoloMachine
 
 
 pytestmark = pytest.mark.skipif(

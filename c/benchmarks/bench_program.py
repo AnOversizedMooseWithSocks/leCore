@@ -17,8 +17,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from holographic_ai import cosine  # noqa: E402
-from holographic_machine import HoloMachine  # noqa: E402
+from holographic.agents_and_reasoning.holographic_ai import cosine  # noqa: E402
+from holographic.agents_and_reasoning.holographic_machine import HoloMachine  # noqa: E402
 
 
 def _split_ints(value: str) -> list[int]:

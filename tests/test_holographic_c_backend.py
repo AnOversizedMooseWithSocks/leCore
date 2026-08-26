@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 import holographic_c
-from holographic_ai import cosine, random_vector, unitary_vector
+from holographic.agents_and_reasoning.holographic_ai import cosine, random_vector, unitary_vector
 
 
 pytestmark = pytest.mark.skipif(
@@ -73,16 +73,30 @@ def test_c_memory_recalls_unitary_key_value_pair():
     assert np.linalg.norm(mem.trace) > 0.0
 
 
+def test_c_memory_keeps_mutable_trace_semantics():
+    rng = np.random.default_rng(18)
+    key = unitary_vector(512, rng)
+    value = random_vector(512, rng)
+    mem = holographic_c.HolographicMemory(512)
+    mem.learn(key, value)
+
+    exposed_trace = mem.trace
+    exposed_trace[:] = 0.0
+
+    assert np.linalg.norm(mem.recall(key)) == 0.0
+
+
 def test_holographic_ai_can_install_c_backend_by_env():
     env = os.environ.copy()
     env["HOLOSTUFF_USE_C"] = "1"
     env["HOLOSTUFF_C_STRICT"] = "1"
     subprocess.check_call(
         [
-            sys.executable,
-            "-c",
-            (
-                "import holographic_ai, holographic_c; "
+                sys.executable,
+                "-c",
+                (
+                    "from holographic.agents_and_reasoning import holographic_ai; "
+                    "import holographic_c; "
                 "assert holographic_ai.HolographicMemory is holographic_c.HolographicMemory; "
                 "assert holographic_ai.bind is holographic_c.bind; "
                 "assert holographic_ai.bind_fixed is holographic_c.bind_fixed; "

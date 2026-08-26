@@ -22,7 +22,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from holographic_ai import HolographicMemory, random_vector, unitary_vector  # noqa: E402
+from holographic.agents_and_reasoning.holographic_ai import (  # noqa: E402
+    HolographicMemory,
+    random_vector,
+    unitary_vector,
+)
 
 
 def python_run(dim: int, pairs: int, actions_n: int, queries: int) -> dict[str, float | int | str]:

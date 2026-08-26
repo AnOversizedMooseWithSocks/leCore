@@ -19,7 +19,10 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from holographic_ai import bind_fixed as numpy_bind_fixed, random_vector  # noqa: E402
+from holographic.agents_and_reasoning.holographic_ai import (  # noqa: E402
+    bind_fixed as numpy_bind_fixed,
+    random_vector,
+)
 import holographic_c  # noqa: E402
 
 

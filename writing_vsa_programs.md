@@ -336,5 +336,5 @@ acc, trace = vm.run_c_basic(program_vec, # optional C runner for LOAD/BIND/BUNDL
                     max_steps=len(program))
 ```
 
-`HoloMachine` lives in `holographic_machine.py`. It is intentionally *adjacent* to the mind, not a faculty
+`HoloMachine` lives in `holographic/agents_and_reasoning/holographic_machine.py`. It is intentionally *adjacent* to the mind, not a faculty
 of it — the mind exposes primitives; `HoloMachine` is how you compose your own program out of them.

@@ -40,7 +40,7 @@ setup(
     long_description_content_type="text/markdown",
     author="AnOversizedMooseWithSocks",
     url="https://github.com/AnOversizedMooseWithSocks/leCore",
-    py_modules=["lecore", "holographic_service"],   # <- top-level: the import-lecore shim + the standalone HTTP service (from holographic_service import serve)
+    py_modules=["lecore", "holographic_service", "holographic_c"],
     packages=engine_packages + ["lecore_data"],   # <- the real holographic/ package tree + the runtime data package
     # The runtime data (the WordNet dictionary, material property JSON) ships as the small `lecore_data` PACKAGE, so
     # it is carried into the wheel and resolves the same from a clone or an install (see lecore_data/__init__.py).

@@ -152,6 +152,8 @@ class VectorFunctionEncoder:
     def _axis_spectra(self, axis, values):
         ax = self.axes[axis]
         values = np.asarray(values, float).ravel()
+        if values.size:
+            ax._check_range(float(values[0]))
         warp_x = getattr(ax, "_warp_x", None)
         if warp_x is not None:
             values = np.interp(values, warp_x, ax._warp_u)

@@ -16,9 +16,9 @@ hardware-optimized VSA substrate
     -> optional capacity partitioning
 ```
 
-In current `holostuff` terms, that means extracting the stable core of
-`holographic_ai.py`, `holographic_core.py`, and the trace/memory pieces used by
-`holographic_unified.py` into a small C library. It does not mean rewriting
+In current leCore terms, that means extracting the stable core of
+`holographic/agents_and_reasoning/holographic_ai.py` and the trace/memory pieces
+used by the unified facade into a small C library. It does not mean rewriting
 `app.py`, `unified_app.py`, every experiment, or the high-level Python research
 surface.
 
@@ -98,7 +98,7 @@ Scalar builds leave `bind_fixed` on NumPy's batched real FFT unless
 `HOLOSTUFF_C_BIND_FIXED_ALLOW_SCALAR=1` is set:
 
 ```sh
-HOLOSTUFF_USE_C=1 python benchmark_holographic.py
+HOLOSTUFF_USE_C=1 python benchmarks/benchmark_holographic.py
 make benchmark-c
 make experiments-c
 ```
@@ -111,7 +111,7 @@ holographic_c.install(strict=True)
 ```
 
 Set `HOLOSTUFF_C_STRICT=1` to fail loudly if the shared C library is missing.
-Without the environment switch, `holographic_ai.py` stays NumPy-only.
+Without the environment switch, the packaged holographic AI module stays NumPy-only.
 
 `HoloMachine.run_c_basic(...)` exposes the C stored-program path for straight
 VSA programs whose instructions stay inside the core algebra. Host-bound VM
@@ -246,7 +246,7 @@ Rewrite these primitives first:
 - cleanup/top-k over an aligned matrix of candidate vectors
 
 This is the direct replacement for the architectural center of
-`holographic_ai.py`. It should be boring, tight C: fixed dimensions chosen at
+the packaged holographic AI module. It should be boring, tight C: fixed dimensions chosen at
 init, aligned buffers, explicit workspaces, no heap allocation in the hot path.
 
 ### 2. Holographic Trace Memory

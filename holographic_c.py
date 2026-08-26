@@ -286,7 +286,7 @@ def install(target_globals: dict | None = None, *, strict: bool = False) -> bool
             raise RuntimeError("C holographic shared library is not built")
         return False
     if target_globals is None:
-        import holographic_ai
+        from holographic.agents_and_reasoning import holographic_ai
 
         target_globals = holographic_ai.__dict__
     target_globals["bind"] = bind
@@ -475,15 +475,22 @@ class HolographicMemory:
             if self._engine:
                 self._c_trace = self._backend.lib.holo_trace_create(self._engine)
 
+    def _release_c(self) -> None:
+        backend = self._backend
+        if backend:
+            with backend.lock:
+                if self._c_trace:
+                    backend.lib.holo_trace_destroy(self._c_trace)
+                if self._engine:
+                    backend.lib.holo_engine_destroy(self._engine)
+        self._c_trace = None
+        self._engine = None
+        self._backend = None
+
     def close(self) -> None:
         if self._closed:
             return
-        if self._backend and self._c_trace:
-            self._backend.lib.holo_trace_destroy(self._c_trace)
-        if self._backend and self._engine:
-            self._backend.lib.holo_engine_destroy(self._engine)
-        self._c_trace = None
-        self._engine = None
+        self._release_c()
         self._closed = True
 
     def __del__(self):
@@ -500,6 +507,12 @@ class HolographicMemory:
                     self._backend.lib.holo_trace_copy(self._c_trace, _ptr(self._trace))
                 )
             self._trace_dirty = False
+        # The NumPy implementation exposes ``trace`` as a mutable array. Once
+        # callers receive that array, later in-place writes cannot be observed
+        # by the C object. Materialize once and keep this memory on the NumPy
+        # path from here on so the public mutation semantics stay exact.
+        if self._backend:
+            self._release_c()
         return self._trace
 
     @trace.setter

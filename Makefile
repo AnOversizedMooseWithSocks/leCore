@@ -22,8 +22,8 @@ help:
 	  '  make c-ci-evidence  compile CI evidence that scalar C trace beats NumPy' \
 	  '  make deps           install base + experiment Python dependencies' \
 	  '  make test           build C kernel, then run pytest' \
-	  '  make benchmark      run benchmark_holographic.py with NumPy core' \
-	  '  make benchmark-c    run benchmark_holographic.py with C core' \
+	  '  make benchmark      run the NumPy benchmark suite' \
+	  '  make benchmark-c    run the benchmark suite with the C core' \
 	  '  make metrics        write central JSON/Markdown metrics evidence' \
 	  '  make metrics-c-tests run selected tests with NumPy and C-kernel modes, then write metrics evidence' \
 	  '  make metrics-path-d regenerate core Path D caches, then write metrics evidence' \
@@ -60,22 +60,22 @@ test-py:
 	$(PYTEST)
 
 benchmark: check-experiment-deps
-	$(PYTHON) benchmark_holographic.py
+	$(PYTHON) benchmarks/benchmark_holographic.py
 
 benchmark-c: c check-experiment-deps
-	$(C_ENV) $(PYTHON) benchmark_holographic.py
+	$(C_ENV) $(PYTHON) benchmarks/benchmark_holographic.py
 
 ablations:
-	$(PYTHON) holographic_ablate.py
+	$(PYTHON) holographic/misc/holographic_ablate.py
 
 ablations-c: c
-	$(C_ENV) $(PYTHON) holographic_ablate.py
+	$(C_ENV) $(PYTHON) holographic/misc/holographic_ablate.py
 
 stress:
-	$(PYTHON) stress_holographic.py
+	$(PYTHON) tools/stress_holographic.py
 
 stress-c: c
-	$(C_ENV) $(PYTHON) stress_holographic.py
+	$(C_ENV) $(PYTHON) tools/stress_holographic.py
 
 metrics:
 	$(PYTHON) holographic_metrics.py --output-dir metrics
@@ -94,7 +94,7 @@ experiments: benchmark ablations stress
 experiments-c: c benchmark-c ablations-c stress-c c-bench
 
 demos:
-	$(PYTHON) tour.py
+	$(PYTHON) tools/tour.py
 
 clean:
 	$(C_MAKE) clean
