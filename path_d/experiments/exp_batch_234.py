@@ -8,8 +8,8 @@ A4  sequence memory: recover a length-T symbol sequence; recoverable length vs f
 """
 import sys, os, numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "repo"))
-from holographic_core import unitary_vector, random_vector, bundle
-from holographic_ai import bind_batch, bind_fixed
+from holographic.misc.holographic_core import unitary_vector, random_vector, bundle
+from holographic.agents_and_reasoning.holographic_ai import bind_batch, bind_fixed
 rng = np.random.default_rng(7)
 D = 1024
 def inv_stack(A): return np.concatenate([A[:, :1], A[:, :0:-1]], axis=1)

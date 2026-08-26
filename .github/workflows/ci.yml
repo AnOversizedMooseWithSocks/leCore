@@ -1,26 +1,71 @@
 # Continuous integration for the Holographic VSA engine.
 #
-# Runs the full pytest suite on every push and every pull request. The job only
-# goes green if every test passes -- a single failing test makes pytest exit
-# non-zero, which fails the job. To make that gate actually BLOCK a merge (not
-# just show a red X), mark this check as required once:
-#   GitHub repo -> Settings -> Branches -> Branch protection rule for `main`
-#   -> "Require status checks to pass before merging" -> select "pytest".
+# On a push or a pull request it runs only the tests AFFECTED by the changed files (see the "Run the test suite"
+# step). A docs- or config-only change runs no tests at all. As a safety net, the WHOLE suite -- slow tests
+# included, watchdog lifted -- runs weekly (schedule), on demand (the "Run workflow" button), and on a version
+# tag, as a MATRIX of 4 shard jobs (see `full-suite` at the bottom): timeout-minutes is per JOB, so sharding is
+# what lets the true full run fit GitHub's budget at all. The job only goes green if every test that ran passes.
 #
-# A handful of tests exercise the optional NLTK corpora (language ID, corpus-scale
-# routing). Those skip themselves automatically when the data isn't installed, so
-# they don't turn a clean runner red -- every other test must pass.
+# To make that gate actually BLOCK a merge (not just show a red X), mark this check as required once:
+#   GitHub repo -> Settings -> Branches -> Branch protection rule for `main`
+#   -> "Require status checks to pass before merging" -> select "tests".
+#
+# A handful of tests exercise the optional NLTK corpora (language ID, corpus-scale routing). Those skip themselves
+# automatically when the data isn't installed, so they don't turn a clean runner red -- every other test must pass.
 
 name: tests
 
-# Direct pushes to any branch, plus all PRs. Branch pushes let fork/feature
-# branches produce CI evidence even while an upstream PR waits for approval.
+# Pushes to the default branch (both common names) and all PRs run AFFECTED tests. The schedule + manual button +
+# version tags run the FULL suite as the safety net. If your default branch has another name, add it to the push list.
 on:
   push:
+    branches: [main, master]
+    tags:     [ "v*" ]
   pull_request:
+  schedule:
+    - cron: "0 6 * * 1"        # 06:00 UTC every Monday -- a weekly FULL-suite run, the safety net
+  workflow_dispatch:            # a "Run workflow" button in the Actions tab -> full suite on demand
+
+# ONE LIVE RUN PER REF. Without this, pushing three times in five minutes leaves
+# THREE full matrices running the same suite on commits that are already
+# superseded -- burning runner minutes to test code nobody will ship, and
+# putting the useful run behind a queue of dead ones.
+# The full-suite/tag runs are EXCLUDED from cancellation by keying on run_id for
+# them: a weekly safety-net run or a release build must finish, and there is no
+# "superseding" push for a schedule anyway.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}
 
 jobs:
+  # GATES FIRST, THEN TESTS. `gates` (docs drift, apiquickref, skill_lint,
+  # catalog_gaps, reachability, usage audit) takes about a minute; the pytest
+  # matrix takes four jobs x up to 20. Running them in PARALLEL meant a stale
+  # REFERENCE.md burned the whole test matrix before anyone read the one-line
+  # failure that would have told them to run regen_docs -- and the same commit
+  # would burn it again on the next push.
+  # THE CHEAP CHECK THAT FAILS OFTEN GOES FIRST. That is the whole ordering
+  # rule; it costs ~1 minute of added latency on a green run and saves the
+  # entire matrix on a red one.
   pytest:
+    # SHARDED, because the unscoped path is the whole suite in one 20-minute box and it started timing out.
+    # `timeout-minutes` is PER JOB, so four shard jobs give the fast path 4x the budget -- the same reasoning
+    # (and the same tool) already applied to `full-suite` below, whose comment calls --num-shards "the whole
+    # tuning knob". SCOPED runs are NOT split: when select_tests returns a real list it is small, so shard 0
+    # runs it whole and the other three exit immediately -- sharding a 14-file selection would cost more in
+    # runner startup than it saves. Branch protection keeps working via the `pytest-gate` job below, which is
+    # what a required check should point at now.
+    strategy:
+      fail-fast: false            # one slow shard failing must not cancel the others -- we want the full picture
+      matrix:
+        shard: [0, 1, 2, 3]
+    # This job now handles ONLY the per-change path (a push or a PR): affected-test selection + the gates below.
+    # The FULL suite (schedule / manual / version tag) moved to the sharded `full-suite` matrix job at the bottom --
+    # GitHub's timeout-minutes budget is PER JOB, so one 20-minute job could never hold the true full run
+    # (slow tests selected, watchdog lifted), but four parallel shard jobs give it 4x the budget. Branch protection
+    # is unaffected: pushes and PRs still produce this same "pytest" check.
+    needs: [gates]                 # cheap checks first -- see the comment above
+    if: (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -28,10 +73,25 @@ jobs:
     # a couple of modules import pyplot at load time and would otherwise complain.
     env:
       MPLBACKEND: Agg
+      # The engine is DETERMINISTIC BY DESIGN (PYTHONHASHSEED=0, hashlib not hash(), seeded RNG). Multi-threaded BLAS
+      # breaks that: it sums float dot-products in a different ORDER per run, which flips knife-edge results (a cosine
+      # that rounds to 1.0000000000000002 instead of 1.0; a borderline z-score). So pin numpy to ONE thread and fix
+      # the hash seed -- this restores the deterministic reference the tests assume. With `-n auto` it's also FASTER:
+      # each xdist worker gets its own core with a single BLAS thread, instead of 4 workers x N BLAS threads fighting
+      # over the cores (oversubscription). If a test only fails in CI and passes locally, this is usually why.
+      PYTHONHASHSEED: "0"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
 
     steps:
       - name: Check out the code
         uses: actions/checkout@v4
+        with:
+          # Full history so a pull_request can diff against its base branch's merge-base (origin/base...HEAD) to find
+          # exactly the files this PR changed. Cheap for this repo; needed by the affected-tests selection below.
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -45,11 +105,99 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run the test suite
-        run: pytest -q --durations=10
+        # Two speed levers work together here:
+        #   1. -n auto spreads tests across ALL the runner's cores. The suite is deterministic and each test is
+        #      independent (own tmp_path / in-memory stores), so it parallelises cleanly.
+        #   2. On a push OR a pull request we run only the tests AFFECTED by the changed files. tools/select_tests.py
+        #      builds a static import graph and picks every test whose imports (transitively) reach a changed module;
+        #      a test that can't reach any changed file doesn't run, and a docs/config-only change runs nothing.
+        # The FULL suite runs on the schedule, the manual button, and version tags -- that's the safety net for
+        # anything the static graph can't see. It also fails safe: if a change can't be scoped (a data file, a
+        # brand-new module) select_tests prints "ALL" and we run everything.
+        run: |
+          set -e
+          EVENT="${{ github.event_name }}"
+
+          # The FULL suite (slow tests selected, watchdog lifted) lives in the sharded `full-suite` job now -- it
+          # cannot fit one job's 20-minute budget. This job's fallback for an unscopable change is the FAST suite
+          # (the default `-m 'not slow'` from pyproject.toml): complete coverage of the fast tests, and the weekly
+          # sharded run remains the safety net for the slow ones.
+          # THE UNSCOPED PATH IS SHARDED. Same deterministic bin-packing the full suite uses, so shard i is the
+          # same set on every run and the four shards exactly cover the suite (--selfcheck asserts it).
+          run_fast () {
+            echo "== FAST suite ($1) -- shard ${{ matrix.shard }} of 4 =="
+            FILES=$(python tools/shard_tests.py --shard ${{ matrix.shard }} --num-shards 4)
+            if [ -z "$FILES" ]; then echo "shard is empty"; return 0; fi
+            pytest -q -n auto --durations=15 $FILES
+          }
+
+          # --- work out what changed, then run only the affected tests ---
+          if [ "$EVENT" = "pull_request" ]; then
+            # everything this PR adds on top of its base branch
+            CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          else
+            # a push: diff everything between the previous tip and now (covers multi-commit pushes). If there's no
+            # previous tip (a brand-new branch), we can't scope it -> run the fast suite to be safe.
+            BEFORE="${{ github.event.before }}"
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] || ! git rev-parse "$BEFORE" >/dev/null 2>&1; then
+              run_fast "new branch / no previous commit"; exit 0
+            fi
+            CHANGED=$(git diff --name-only "$BEFORE" HEAD)
+          fi
+
+          echo "Changed files:"; echo "$CHANGED"
+          SELECTED=$(python tools/select_tests.py $CHANGED)
+          if [ "$SELECTED" = "ALL" ]; then
+            run_fast "change couldn't be scoped"
+          elif [ -z "$SELECTED" ]; then
+            echo "== no tests affected by these changes (docs/config only) -- nothing to run =="
+          else
+            if [ "${{ matrix.shard }}" != "0" ]; then
+              echo "== scoped selection runs whole on shard 0; nothing for shard ${{ matrix.shard }} =="
+              exit 0
+            fi
+            echo "== running only the affected tests =="; echo "$SELECTED"
+            pytest -q -n auto --durations=15 $SELECTED
+          fi
 
       # Keep API_QUICKREF.md current on its own: regenerate it and fail if the committed copy is stale.
       # This is a drift check (no write-back needed) -- if it fails, run `python apiquickref.py` locally and
       # commit the result. The generator only reads source with `ast`, so this step is fast and side-effect-free.
+
+  gates:
+    # THE LINT/AUDIT/DOC-DRIFT GATES, ONCE. They used to live inside the `pytest` job -- which is now a 4-way
+    # shard matrix, so leaving them there would run every gate FOUR TIMES per push for identical results.
+    # They are seconds each and share nothing with the test run, so they belong in their own unsharded job:
+    # cheaper, and a gate failure is now reported separately from a test failure instead of being buried in
+    # whichever shard happened to reach it first.
+    if: (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MPLBACKEND: Agg
+      PYTHONHASHSEED: "0"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+        with:
+          # Full history so a pull_request can diff against its base branch's merge-base (origin/base...HEAD) to find
+          # exactly the files this PR changed. Cheap for this repo; needed by the affected-tests selection below.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # the version the suite is developed against
+          cache: pip               # reuse the pip wheel cache between runs
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Check API_QUICKREF.md is up to date
         run: |
           python apiquickref.py
@@ -57,6 +205,85 @@ jobs:
             echo "API_QUICKREF.md is out of date -- run 'python apiquickref.py' and commit the result.";
             exit 1;
           }
+
+      # DISCOVERABILITY GATE. Every capability family a user would ask for must have a curated catalog home, so the
+      # engine can surface it from a plain-English query (mind.find_capability / mind.suggest). This fails if any
+      # probe query in tools/catalog_gaps.py has no curated home -- i.e. something is built but effectively hidden.
+      # Fix by registering a home in holographic_catalog.py (see the existing ones for the shape).
+      # IMPORT GATE. After a module moves, an import can name a location that no longer exists and still pass by
+      # accident (stale file on disk, or the repo root happening to be on sys.path) until it doesn't. This
+      # resolves EVERY import in the repo against what's actually there, with ast -- no imports executed.
+      - name: Gate -- no broken imports
+        run: python tools/audit_imports.py
+
+      # WIRING GATE (T-5). A module can exist, work, have tests -- and be reachable by nothing ('compose' and
+      # 'diffusion' were). That never fails a test, so it persists. This fails CI when a NEW module has no
+      # caller, honouring KEPT NEGATIVE / KEPT NO-OP annotations and the recorded KNOWN_DARK debt.
+      - name: Gate -- no new dark modules
+        run: python tools/wiring_report.py --check
+
+      - name: Gate -- no discoverability gaps
+        run: python tools/catalog_gaps.py
+
+      # INVOCATION GATE. Every public UnifiedMind faculty must carry a docstring an agent can act on (skill cards are
+      # built from the first line), and every "how to call it" example in a catalog home must actually resolve --
+      # both module imports and mind.method() references. This fails on a missing/thin docstring or a broken example,
+      # so a capability can never be discoverable-but-uncallable. Fix by writing the one-line docstring / correcting
+      # the example the linter names.
+      - name: Gate -- no invocation gaps
+        run: python tools/skill_lint.py
+
+      # TAG-TRUTH GATE (C6). skill_lint asks "can an agent CALL this?"; this asks "is what the tag CLAIMS true?".
+      # A downstream node pack shipped a broken Auto Route because a tag lied: consumes/produces are read as a
+      # cross product, so a POLYMORPHIC capability (denoise_tensor: image|field -> the SAME kind) silently
+      # published image->field and field->image edges it cannot perform, and suggest_pipeline("image","mesh")
+      # escaped through the fake hop into a tensor denoiser + an Aharonov-Bohm ring. A wrong tag does not merely
+      # fail to help -- it actively misleads, and unlike a missing tag it looks correct. Fails on a tagged
+      # capability whose method is not callable, or an unflagged polymorphic tag. Untagged converters are
+      # REPORTED, not failed: that list is the drive queue (S7), not a regression.
+      - name: Gate -- io tags do not lie
+        run: python tools/tag_lint.py
+
+      # STRUCTURE GATE. Organization is a discoverability property for humans, so it gets the same treatment as
+      # wiring: measured, budgeted at the current state, and failed only on REGRESSION past the budget (misc/ may
+      # not grow past 149 -- new modules land in a real family; no new 2,000+ line giants beyond the recorded 3;
+      # unified.py's section markers may not shrink below 27). Cohesion is REPORTED, never gated -- token metrics
+      # false-alarm on cohesive toolkits (vision, dictionary). Fix by moving the new module to a real family or,
+      # if the budget itself should change, editing the budget in tools/structure_audit.py in the same PR.
+      - name: Gate -- no structural regression (organization budgets)
+        run: python tools/structure_audit.py
+
+      # Keep CAPABILITIES.md (the plain-language "what can it do + how to start" menu) AND capabilities.json
+      # (its machine-readable sibling that apps ingest) current. Same drift-check pattern as API_QUICKREF.md:
+      # regenerate from the live catalog and fail if either committed copy is stale. capdoc.py writes no timestamp
+      # and sorts keys, so this only trips on a real change. Fix: `python capdoc.py` and commit both files.
+      # Gating the JSON matters especially: a consuming app reads capabilities.json, so a stale copy would feed it
+      # capabilities the engine no longer has (or hide new ones) -- this gate makes that impossible to merge.
+      - name: Check CAPABILITIES.md and capabilities.json are up to date
+        run: |
+          python capdoc.py
+          git diff --exit-code CAPABILITIES.md capabilities.json || {
+            echo "CAPABILITIES.md / capabilities.json are out of date -- run 'python capdoc.py' and commit the result.";
+            exit 1;
+          }
+
+      # ENDPOINT + FLAG GATE. SERVICE.md is mostly hand-written prose (kept), but its endpoint table must list exactly
+      # the routes the service registers, and its Launch section must mention every user-facing CLI flag the argparse
+      # defines. This checks both against the live code and fails if a route or flag was added/renamed/removed without
+      # updating the doc. It does NOT rewrite the prose; on failure it names the offender, and `python servicedoc.py
+      # --print` gives a fresh endpoint table to paste.
+      - name: Gate -- SERVICE.md documents every endpoint and flag
+        run: python servicedoc.py
+
+  # ---------------------------------------------------------------------------------------------------------
+  # The TRUE full suite: every test, slow ones included, watchdog lifted (--run-slow). One job's 20-minute
+  # budget can't hold it -- timeout-minutes is PER JOB, so a matrix of 4 shard jobs runs 1/4 of the suite each,
+  # in parallel, with 4x the total budget. tools/shard_tests.py partitions the test files DETERMINISTICALLY
+  # (sorted, integer weights, greedy largest-first; slow-marked tests weighted ~20x since they dominate wall
+  # time), so shard i is the same set on every run and the shards exactly cover the suite (--selfcheck asserts
+  # cover/disjoint/determinism). If a shard ever nears the budget again, raise --num-shards here and in the
+  # matrix -- that is the whole tuning knob.
+  # ---------------------------------------------------------------------------------------------------------
 
   c-kernel-evidence:
     runs-on: ubuntu-latest
@@ -81,8 +308,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Compile, test, and benchmark the C kernel
-        run: |
-          python c/benchmarks/ci_evidence.py --output-dir c/build/ci-evidence
+        run: python c/benchmarks/ci_evidence.py --output-dir c/build/ci-evidence
 
       - name: Publish C kernel evidence summary
         if: always()
@@ -97,3 +323,92 @@ jobs:
         with:
           name: c-kernel-evidence
           path: c/build/ci-evidence/
+
+  pytest-gate:
+    # ONE STABLE CHECK NAME for branch protection. A matrix job reports as "pytest (0)".."pytest (3)", so a
+    # required check pinned to "pytest" would no longer match anything. This job depends on every shard and
+    # on the gates, and fails if any of them did -- point branch protection at `pytest-gate`.
+    if: always() && ((github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request')
+    needs: [pytest, gates]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any shard or gate failed
+        run: |
+          echo "pytest shards: ${{ needs.pytest.result }}"
+          echo "gates:         ${{ needs.gates.result }}"
+          if [ "${{ needs.pytest.result }}" != "success" ] || [ "${{ needs.gates.result }}" != "success" ]; then
+            echo "::error::a test shard or a gate failed"; exit 1
+          fi
+
+  full-suite:
+    # GATES FIRST HERE TOO, and it matters MORE: this is ten jobs at up to 20
+    # minutes each. A release tag with stale generated docs would spend ~2 hours
+    # of runner time before reporting a drift failure that takes one second to
+    # detect. `gates` does not run on tags or schedules, so this needs the
+    # always()-guarded aggregator's inputs rather than gates directly -- run the
+    # cheap checks inline instead, which is one step and no cross-trigger.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false          # one slow shard failing shouldn't cancel the others -- we want the full picture
+      matrix:
+        # TEN, NOT FOUR. `full-suite (1)` ran 19m51s and was CANCELLED at 91%
+        # against the 20-minute budget. The packer was NOT at fault -- measured
+        # spread across the four bins is 1.00x, perfectly even -- there simply
+        # were not enough bins: ~2,200 s of local suite over 4 shards is 550 s
+        # each, and CI's runners are ~3x slower with --run-slow, which is 27
+        # minutes. Ten shards puts the heaviest at ~11 minutes, a bit over half
+        # the budget, which is the headroom a suite that keeps growing needs.
+        # RAISING THE SHARD COUNT IS THE SANCTIONED FIX (shard_tests.py's own
+        # docstring says so); the packer stays untouched.
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    env:
+      MPLBACKEND: Agg
+      # Same determinism pins as the per-change job (see the comment there): one BLAS thread, fixed hash seed.
+      PYTHONHASHSEED: "0"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Gates first (docs drift + audits) -- one second here saves ten shard-jobs
+        run: |
+          python tools/regen_docs.py --check
+          python tools/skill_lint.py
+          python tools/catalog_gaps.py
+          python tools/usage_audit.py
+
+      - name: Sanity-check the partition (exact cover, disjoint, deterministic)
+        run: python tools/shard_tests.py --selfcheck --num-shards 10
+
+      - name: Run shard ${{ matrix.shard }} of 10 (slow tests included, watchdog lifted)
+        run: |
+          # MUST MATCH THE MATRIX LENGTH ABOVE. A matrix of ten with a smaller shard count asks
+          # for slices 0..9 of a narrower partition: the high shards come back EMPTY and most of
+          # the suite is silently not run, with ten green jobs to show for it. The self-check
+          # step above catches that -- it partitions with the same number and asserts exact
+          # cover.
+          # AND THE NUMBER IS NOT SPELLED OUT IN THIS COMMENT ON PURPOSE:
+          # test_ci_gates_run_once_and_every_shard_is_covered greps the job body for
+          # `--num-shards N` and compares the SET it finds against the matrix length. A worked
+          # example in prose reads as a second, contradicting invocation -- which is exactly
+          # what it did, and the test was right to fail. A LINTER THAT READS TEXT CANNOT TELL
+          # DOCUMENTATION FROM CONFIGURATION, so configuration is the only thing that carries
+          # numbers here.
+          SELECTED=$(python tools/shard_tests.py --shard ${{ matrix.shard }} --num-shards 10)
+          pytest -q -n auto --run-slow --durations=15 $SELECTED

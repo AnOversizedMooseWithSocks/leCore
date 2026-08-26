@@ -16,9 +16,9 @@ where broadcast's value-cleanup vote drowns.
 import sys, os, time, functools
 import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "repo"))
-import holographic_ai, holographic_array
-from holographic_array import HoloArray
-from holographic_core import bind, unbind, bundle
+import holographic.agents_and_reasoning.holographic_ai as holographic_ai, holographic.misc.holographic_array as holographic_array
+from holographic.misc.holographic_array import HoloArray
+from holographic.misc.holographic_core import bind, unbind, bundle
 D = 1024
 
 _orig = holographic_ai.derived_atom

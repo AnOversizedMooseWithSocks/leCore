@@ -32,19 +32,19 @@ from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 from flask import Flask, request, jsonify, render_template_string
 
-from holographic_archive import HolographicArchive, _gallery, box_resize
-from holographic_image import HolographicImage, _demo_image, _psnr, _lloyd_max
-from holographic_creature import GridWorld, CreatureEncoder, HolographicMind, _train
-from holographic_slime import solve_maze
-from holographic_pack import benchmark as pack_benchmark, _suite as pack_suite
-from image_vault import ImageVault
-import holographic_vision as hvz
-import holographic_scene as scn
-import holographic_tree as htree
-import holographic_uri as huri
+from holographic.misc.holographic_archive import HolographicArchive, _gallery, box_resize
+from holographic.io_and_interop.holographic_image import HolographicImage, _demo_image, _psnr, _lloyd_max
+from holographic.misc.holographic_creature import GridWorld, CreatureEncoder, HolographicMind, _train
+from holographic.simulation_and_physics.holographic_slime import solve_maze
+from holographic.misc.holographic_pack import benchmark as pack_benchmark, _suite as pack_suite
+from tools.image_vault import ImageVault
+import holographic.misc.holographic_vision as hvz
+import holographic.scene_and_pipeline.holographic_scene as scn
+import holographic.misc.holographic_tree as htree
+import holographic.io_and_interop.holographic_uri as huri
 from collections import defaultdict
-from holographic_unified import UnifiedMind
-from holographic_text import STOPWORDS
+from holographic.misc.holographic_unified import UnifiedMind
+from holographic.misc.holographic_text import STOPWORDS
 
 S = 128
 app = Flask(__name__)
@@ -69,7 +69,7 @@ for _im, _tg in zip(GALLERY, GALLERY_TAGS):
 # Graceful: if the asset is missing the app still runs (synthetic fallbacks).
 SPRITES = {}
 try:
-    import pack_sprites as _ps
+    import tools.pack_sprites as _ps
     _HSP = os.path.join(os.path.dirname(__file__), "features", "sprites.hsp")
     if os.path.exists(_HSP):
         with open(_HSP, "rb") as _f:
@@ -389,7 +389,7 @@ def _vision_fractal():
     invariant (high D), synthetic shapes are smooth (D near 1). A measurable
     natural-vs-synthetic signal, and a texture descriptor the shape work lacked."""
     import glob as _glob
-    from holographic_fractal import image_fractal_dimension
+    from holographic.misc.holographic_fractal import image_fractal_dimension
     rows = []
     # synthetic references
     N = 96
@@ -656,7 +656,7 @@ def api_fountain():
     long as enough distinct droplets arrive. Encode a real blob, simulate a lossy
     channel at the requested loss rate, and report exact-recovery vs survivors,
     plus the recovery curve (the cliff at the information floor)."""
-    from holographic_fountain import Fountain, recovery_curve
+    from holographic.agents_and_reasoning.holographic_fountain import Fountain, recovery_curve
     loss = float(request.form.get("loss", 30)) / 100.0
     # a real, structured blob to protect
     import pickle
@@ -895,7 +895,7 @@ def _rollout(make_world, encoder, mind, steps=80, mem=0, eps=0.05, corridor=Fals
             # so at play time the reflex walks forced cells and hands the brain
             # the next real choice -- every walked cell still gets a frame, so
             # the animation shows the whole route
-            from holographic_creature import _forced_dir
+            from holographic.misc.holographic_creature import _forced_dir
             while not done:
                 fwd = _forced_dir(senses, last)
                 if fwd is None:
@@ -991,7 +991,7 @@ def _build_creature(mode):
         # measured 95-99%). So the left pane shows the BRAIN that learned the
         # maze, and the right pane keeps the slime-mold colony computing the
         # shortest tube -- learning vs morphological computation, same engine.
-        from holographic_creature import learn_maze, capture_route
+        from holographic.misc.holographic_creature import learn_maze, capture_route
         with contextlib.redirect_stdout(io.StringIO()):
             enc2, mind, rate = learn_maze(lambda: _make_world(mode, cfg["layout"]),
                                           dim=256, episodes=cfg["episodes"],
@@ -1005,7 +1005,7 @@ def _build_creature(mode):
                 routes = capture_route(lambda: _make_world(mode, cfg["layout"]),
                                        enc2, mind, mem=cfg["mem"], trials=8)
                 if len(routes) >= 3:
-                    from holographic_unified import UnifiedMind
+                    from holographic.misc.holographic_unified import UnifiedMind
                     um = UnifiedMind(dim=1024, seed=0)
                     um.learn_sequences([(r, "route") for r in routes])
                     verdicts = um.discover_sequential()
@@ -1144,7 +1144,12 @@ def api_tour():
 
 @app.route("/api/tests", methods=["POST"])
 def api_tests():
-    files = sorted(os.path.basename(p) for p in glob.glob(os.path.join(os.path.dirname(__file__), "test_*.py")))
+    # tests live in the tests/ package (they were moved there in the reorg); glob there, not next to app.py.
+    _here = os.path.dirname(os.path.abspath(__file__))
+    _tests_dir = os.path.join(_here, "tests")
+    if not os.path.isdir(_tests_dir):
+        _tests_dir = _here                                    # fall back to a flat layout if tests/ isn't present
+    files = sorted(glob.glob(os.path.join(_tests_dir, "test_*.py")))
     try:
         out = subprocess.run([sys.executable, "-m", "pytest", *files, "-v", "--tb=line", "-p", "no:cacheprovider"],
                              capture_output=True, text=True, timeout=600).stdout
@@ -1303,7 +1308,7 @@ _COMPARE = {"mind": None, "recs": {}, "rgbs": {}}
 
 def _sprite_record(name, rgba):
     import re as _re
-    from holographic_scene import auto_tags
+    from holographic.scene_and_pipeline.holographic_scene import auto_tags
     rgb = rgba[..., :3].astype(float) / 255.0 if rgba.dtype == np.uint8 else rgba[..., :3]
     mask = (rgba[..., 3] > 0) if rgba.shape[-1] == 4 else None
     t = auto_tags(rgb, mask=mask)
@@ -1315,7 +1320,7 @@ def _sprite_record(name, rgba):
 
 def _compare_mind():
     if _COMPARE["mind"] is None:
-        from holographic_unified import UnifiedMind
+        from holographic.misc.holographic_unified import UnifiedMind
         # dim 2048 is the MEASURED configuration for the library (see->say 96%);
         # at 1024 image classify starts confusing recoloured sibling variants
         # (measured here first: amg1 matched amg2 and reported the wrong colour)
@@ -1354,7 +1359,7 @@ _PLAN_BAGS = {
 def _plan_mind():
     if "mind" not in _PLAN_STATE:
         import numpy as _np
-        from holographic_unified import UnifiedMind
+        from holographic.misc.holographic_unified import UnifiedMind
         rng = _np.random.default_rng(0)
         examples = []
         for name, canon in _PLAN_PROCS.items():

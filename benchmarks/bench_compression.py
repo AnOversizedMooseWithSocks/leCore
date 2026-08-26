@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import zlib
 import lzma
-from holographic_ratedistortion import geometry_preserving_code, reconstruct, pack_code
+from holographic.misc.holographic_ratedistortion import geometry_preserving_code, reconstruct, pack_code
 
 
 def _unit_rows(A):

@@ -5,7 +5,7 @@ _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)
 
 import numpy as np, matplotlib
 matplotlib.use("Agg"); import matplotlib.pyplot as plt
-from holographic_creature import GridWorld, CreatureEncoder, HolographicMind, _train
+from holographic.misc.holographic_creature import GridWorld, CreatureEncoder, HolographicMind, _train
 import io, contextlib
 
 def rollout(seed, encoder, mind=None, steps=60):

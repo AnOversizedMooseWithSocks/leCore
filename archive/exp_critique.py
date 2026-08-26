@@ -6,7 +6,7 @@ _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)
 import numpy as np, matplotlib
 matplotlib.use("Agg"); import matplotlib.pyplot as plt
 from sklearn.datasets import load_sample_images
-from holographic_image import HolographicPlate
+from holographic.io_and_interop.holographic_image import HolographicPlate
 
 N=40; npix=N*N
 def corr(a,b): return float(np.corrcoef(a.ravel(),b.ravel())[0,1])

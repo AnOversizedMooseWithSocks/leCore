@@ -2,6 +2,7 @@ flask
 numpy
 pillow
 pytest
+pytest-xdist
 matplotlib
 nltk
 

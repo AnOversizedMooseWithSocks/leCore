@@ -1,0 +1,18 @@
+WordNet 3.0 License
+===================
+The dictionary data in dictionary.json.gz is derived from Princeton WordNet 3.0,
+obtained via the NLTK data distribution, and is redistributed under the WordNet License.
+
+WordNet Release 3.0 Copyright 2006 by Princeton University. All rights reserved.
+
+Permission to use, copy, modify and distribute this software and database and its
+documentation for any purpose and without fee or royalty is hereby granted, provided
+that you agree to comply with the following copyright notice and statements, including
+the disclaimer, and that the same appear on ALL copies of the software, database and
+documentation, including modifications that you make for internal use or for distribution.
+
+WordNet 3.0 is provided "AS IS" without warranty of any kind. See the full WordNet
+license at https://wordnet.princeton.edu/license-and-commercial-use for details.
+
+Princeton University is not obligated to provide maintenance, support, updates,
+enhancements, or modifications.

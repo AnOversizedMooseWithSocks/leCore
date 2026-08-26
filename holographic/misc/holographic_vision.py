@@ -1,0 +1,912 @@
+"""
+holographic_vision.py -- seeing with arithmetic.
+
+The whole premise of this file is the one in the title of the conversation that
+spawned it: an image is just numbers.  A picture is an H x W x 3 grid of bytes,
+and every classical "computer vision" idea -- colour, edges, corners, lines,
+circles, shape, and even unsupervised *classification* -- falls out of plain
+arithmetic on that grid.  No OpenCV, no scikit-image, no learned weights from a
+2 GB checkpoint.  Just numpy, written so you can read every step.
+
+The module is organised as a pipeline, bottom to top:
+
+    colour        rgb_to_hsv / hsv_to_rgb / hue_histogram / dominant_colours
+    gradients     to_gray / sobel / gradient / edges
+    descriptors   orientation_histogram / harris / corners
+    shapes        hough_lines / hough_circles / shape_stats / classify_shape
+    patterns      describe  (one feature vector per image)
+    emergence     kmeans / emergent_classes / cluster_purity
+    holographic   vsa_encode / vsa_prototypes / vsa_classify
+                  (encode a descriptor as a weighted superposition of random
+                   basis vectors, bundle members into a class prototype, and
+                   classify new images by cleanup -- i.e. cosine to the nearest
+                   prototype.  This is the bridge back to the rest of leOS.)
+
+Everything works in float64 internally to dodge the uint8 / NEP-50 overflow
+traps, and every nontrivial claim in the docstrings is checked in the test
+suite and the __main__ demo below.
+"""
+
+import numpy as np
+
+
+# ======================================================================
+# colour  --  RGB is one basis for colour; HSV is a more perceptual one.
+# ======================================================================
+
+def _as_float(rgb):
+    """Accept uint8 [0..255] or float [0..1] (RGB or RGBA) and return float
+    RGB in [0, 1]."""
+    a = np.asarray(rgb)
+    if a.dtype == np.uint8:
+        a = a.astype(np.float64) / 255.0
+    else:
+        a = a.astype(np.float64)
+    return a[..., :3]
+
+
+def rgb_to_hsv(rgb):
+    """Vectorised RGB->HSV.  Returns H in [0, 360), S and V in [0, 1].
+
+    HSV separates *what* colour (hue) from *how vivid* (saturation) and *how
+    bright* (value).  That separation is exactly what makes "find everything
+    reddish regardless of lighting" a one-liner later on.
+    """
+    r, g, b = _as_float(rgb)[..., 0], _as_float(rgb)[..., 1], _as_float(rgb)[..., 2]
+    mx = np.maximum(np.maximum(r, g), b)
+    mn = np.minimum(np.minimum(r, g), b)
+    df = mx - mn
+    # Value is just the brightest channel; saturation is the spread / value.
+    v = mx
+    s = np.where(mx <= 0, 0.0, df / np.where(mx <= 0, 1.0, mx))
+    # Hue: which channel is on top, and by how much, sets the angle on the wheel.
+    safe = np.where(df <= 0, 1.0, df)                 # avoid 0/0; masked out below
+    h = np.zeros_like(r)
+    h = np.where(mx == r, ((g - b) / safe) % 6.0, h)
+    h = np.where(mx == g, ((b - r) / safe) + 2.0, h)
+    h = np.where(mx == b, ((r - g) / safe) + 4.0, h)
+    h = (h * 60.0) % 360.0
+    h = np.where(df <= 0, 0.0, h)                      # greys have no hue
+    return np.stack([h, s, v], axis=-1)
+
+
+def hsv_to_rgb(hsv):
+    """Inverse of rgb_to_hsv, used mainly to prove the forward transform is
+    faithful (round-trip error ~1e-12 in the tests)."""
+    h = np.asarray(hsv, float)[..., 0] / 60.0
+    s = np.asarray(hsv, float)[..., 1]
+    v = np.asarray(hsv, float)[..., 2]
+    i = np.floor(h).astype(int) % 6
+    f = h - np.floor(h)
+    p, q, t = v * (1 - s), v * (1 - s * f), v * (1 - s * (1 - f))
+    r = np.choose(i, [v, q, p, p, t, v])
+    g = np.choose(i, [t, v, v, q, p, p])
+    b = np.choose(i, [p, p, t, v, v, q])
+    return np.clip(np.stack([r, g, b], -1), 0, 1)
+
+
+def hue_histogram(rgb, bins=12, sat_min=0.20, val_min=0.20):
+    """A normalised histogram of hue over the *colourful* pixels (greys and
+    near-black/near-white pixels carry no reliable hue, so we drop them).  This
+    is a compact, lighting-tolerant colour fingerprint."""
+    hsv = rgb_to_hsv(rgb)
+    h, s, v = hsv[..., 0].ravel(), hsv[..., 1].ravel(), hsv[..., 2].ravel()
+    keep = (s >= sat_min) & (v >= val_min)
+    if not np.any(keep):
+        return np.zeros(bins)
+    hist, _ = np.histogram(h[keep], bins=bins, range=(0, 360))
+    total = hist.sum()
+    return hist / total if total else hist.astype(float)
+
+
+def dominant_colours(rgb, k=4, seed=0, sample=2000, as_float=False):
+    """The k most common colours, by clustering the pixels (k-means in RGB).
+    Returns (centres[k,3], weights[k]) sorted most-common first.
+
+    `as_float`: WHY it exists -- the centres are computed in float [0,1] and the
+    rest of the image ecosystem (every other door consumes/produces float 0-1)
+    speaks that language, but this function has always quantised to uint8 0-255 on
+    the way out. Flipping that default would break existing callers (the never-
+    flip rule), so as_float stays OFF by default and float 0-1 is opt-in. Pass
+    as_float=True to get the palette in the ecosystem's native range with no
+    round-trip conversion (this is the recommended value for image pipelines)."""
+    px = _as_float(rgb).reshape(-1, 3)
+    rng = np.random.default_rng(seed)
+    if len(px) > sample:                               # subsample big images
+        px = px[rng.choice(len(px), sample, replace=False)]
+    labels, centres = kmeans(px, k, seed=seed, iters=25)
+    counts = np.bincount(labels, minlength=k).astype(float)
+    order = np.argsort(-counts)
+    w = counts[order] / counts.sum()
+    pal = np.clip(centres[order], 0.0, 1.0)                    # centres already in [0,1]
+    if not as_float:                                          # legacy default: quantise to uint8 0-255
+        pal = np.clip(pal * 255, 0, 255).astype(np.uint8)
+    return (pal, w)
+
+
+# ======================================================================
+# gradients  --  edges are just *where the numbers change fast*.
+# ======================================================================
+
+def to_gray(rgb):
+    """Perceptual luma (Rec. 601 weights).  Returns float [H,W] in [0,1]."""
+    a = _as_float(rgb)
+    return a[..., 0] * 0.299 + a[..., 1] * 0.587 + a[..., 2] * 0.114
+
+
+def _conv3(a, k):
+    """Convolve a 2-D array with a 3x3 kernel, edge-padded.  Written as nine
+    shifted, weighted adds so there is nothing hidden."""
+    p = np.pad(a, 1, mode="edge")
+    out = np.zeros_like(a, dtype=np.float64)
+    for i in range(3):
+        for j in range(3):
+            if k[i, j]:
+                out += k[i, j] * p[i:i + a.shape[0], j:j + a.shape[1]]
+    return out
+
+
+_SOBEL_X = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], float)
+_SOBEL_Y = _SOBEL_X.T
+
+
+def sobel(gray):
+    """Horizontal and vertical Sobel derivatives (gx, gy)."""
+    return _conv3(gray, _SOBEL_X), _conv3(gray, _SOBEL_Y)
+
+
+def gradient(gray):
+    """Returns (magnitude, orientation_deg).  Magnitude says *how strong* an
+    edge is; orientation says *which way it points* (0..360)."""
+    gx, gy = sobel(gray)
+    mag = np.hypot(gx, gy)
+    ori = np.rad2deg(np.arctan2(gy, gx)) % 360.0
+    return mag, ori
+
+
+def edges(gray, quantile=0.85):
+    """Boolean edge map: keep pixels whose gradient magnitude is in the top
+    (1 - quantile) fraction.  Relative thresholding means it adapts to the
+    image instead of needing a hand-tuned constant."""
+    mag, _ = gradient(gray)
+    thr = np.quantile(mag, quantile)
+    return mag > max(thr, 1e-9)
+
+
+# ======================================================================
+# descriptors  --  summarise the patterns in an image as a short vector.
+# ======================================================================
+
+def orientation_histogram(gray, bins=9):
+    """HOG-lite: a magnitude-weighted histogram of *unsigned* edge orientation
+    (0..180).  Edges going the same way pile into the same bin, so this captures
+    texture/structure direction independent of contrast sign."""
+    gx, gy = sobel(gray)
+    mag = np.hypot(gx, gy).ravel()
+    ang = (np.rad2deg(np.arctan2(gy, gx)) % 180.0).ravel()
+    hist, _ = np.histogram(ang, bins=bins, range=(0, 180), weights=mag)
+    total = hist.sum()
+    return hist / total if total else hist
+
+
+def harris(gray, k=0.04, win=3):
+    """Harris corner response R.  Corners are points where the image changes in
+    *two* directions at once, which the structure tensor (gradient outer
+    products, locally averaged) detects."""
+    gx, gy = sobel(gray)
+    box = np.ones((win, win)) / (win * win)
+    Sxx = _conv3(gx * gx, box) if win == 3 else gx * gx
+    Syy = _conv3(gy * gy, box) if win == 3 else gy * gy
+    Sxy = _conv3(gx * gy, box) if win == 3 else gx * gy
+    det = Sxx * Syy - Sxy * Sxy
+    trace = Sxx + Syy
+    return det - k * trace * trace
+
+
+def corners(gray, n=12, rel=0.05, min_dist=4):
+    """Top-n Harris corners as (x, y), greedily spaced at least min_dist apart."""
+    R = harris(gray)
+    thr = rel * R.max()
+    ys, xs = np.nonzero(R > thr)
+    if len(xs) == 0:
+        return []
+    order = np.argsort(-R[ys, xs])
+    picked = []
+    for idx in order:
+        x, y = int(xs[idx]), int(ys[idx])
+        if all((x - px) ** 2 + (y - py) ** 2 >= min_dist * min_dist for px, py in picked):
+            picked.append((x, y))
+        if len(picked) >= n:
+            break
+    return picked
+
+
+# ======================================================================
+# shapes  --  lines and circles by voting; shape class by geometry.
+# ======================================================================
+
+def hough_lines(edge_mask, ntheta=180, top=5, nms=10):
+    """Classic Hough line transform.  Every edge pixel votes for all the lines
+    that could pass through it (one per angle); real lines collect many votes.
+    Returns up to `top` lines as (rho, theta_deg, votes)."""
+    ys, xs = np.nonzero(edge_mask)
+    if len(xs) == 0:
+        return []
+    H, W = edge_mask.shape
+    thetas = np.deg2rad(np.arange(ntheta))
+    cos, sin = np.cos(thetas), np.sin(thetas)
+    diag = int(np.ceil(np.hypot(H, W)))
+    rho = xs[:, None] * cos[None, :] + ys[:, None] * sin[None, :]   # (P, ntheta)
+    rho_idx = np.round(rho).astype(int) + diag                       # shift to >= 0
+    nrho = 2 * diag + 1
+    acc = np.zeros((nrho, ntheta), dtype=np.int32)
+    np.add.at(acc, (rho_idx, np.broadcast_to(np.arange(ntheta), rho_idx.shape)), 1)
+    # Greedy peak picking with a little non-maximum suppression.
+    out = []
+    work = acc.copy()
+    for _ in range(top):
+        r, t = np.unravel_index(np.argmax(work), work.shape)
+        if work[r, t] == 0:
+            break
+        out.append((int(r - diag), float(t), int(acc[r, t])))
+        work[max(0, r - nms):r + nms + 1, max(0, t - nms):t + nms + 1] = 0
+    return out
+
+
+def hough_circles(gray, radii, top=5, quantile=0.88, nms=6):
+    """Gradient-guided Hough circle transform.  An edge pixel's gradient points
+    toward (or away from) a circle's centre, so each edge pixel votes for two
+    candidate centres per radius -- far cheaper than the brute-force version.
+    Returns up to `top` circles as (cx, cy, r, votes)."""
+    H, W = gray.shape
+    mag, _ = gradient(gray)
+    gx, gy = sobel(gray)
+    thr = np.quantile(mag, quantile)
+    ys, xs = np.nonzero(mag > max(thr, 1e-9))
+    if len(xs) == 0:
+        return []
+    nx = gx[ys, xs] / (mag[ys, xs] + 1e-9)             # unit gradient direction
+    ny = gy[ys, xs] / (mag[ys, xs] + 1e-9)
+    best = []
+    for r in radii:
+        acc = np.zeros((H, W), dtype=np.int32)
+        for sign in (+1, -1):                          # centre is r along +/- grad
+            cx = np.round(xs + sign * r * nx).astype(int)
+            cy = np.round(ys + sign * r * ny).astype(int)
+            ok = (cx >= 0) & (cx < W) & (cy >= 0) & (cy < H)
+            np.add.at(acc, (cy[ok], cx[ok]), 1)
+        cy, cx = np.unravel_index(np.argmax(acc), acc.shape)
+        best.append((int(cx), int(cy), int(r), int(acc[cy, cx])))
+    best.sort(key=lambda c: -c[3])
+    # suppress near-duplicate centres
+    out = []
+    for c in best:
+        if all((c[0] - o[0]) ** 2 + (c[1] - o[1]) ** 2 >= nms * nms for o in out):
+            out.append(c)
+        if len(out) >= top:
+            break
+    return out
+
+
+def shape_stats(mask):
+    """Geometric summary of a single filled blob (boolean mask):
+      area        pixels inside
+      perimeter   boundary pixels (have a background 4-neighbour)
+      circularity 4*pi*area / perimeter^2  (1.0 for a perfect disk, less for
+                  anything with corners or elongation)
+      extent      area / bounding-box area  (1.0 fills its box -> rectangle-ish)
+      aspect      long side / short side of the bounding box
+    """
+    m = np.asarray(mask, bool)
+    area = int(m.sum())
+    if area == 0:
+        return dict(area=0, perimeter=0, circularity=0.0, extent=0.0, aspect=1.0)
+    p = np.pad(m, 1)
+    boundary = m & ~(p[:-2, 1:-1] & p[2:, 1:-1] & p[1:-1, :-2] & p[1:-1, 2:])
+    perim = int(boundary.sum())
+    ys, xs = np.nonzero(m)
+    bh, bw = ys.max() - ys.min() + 1, xs.max() - xs.min() + 1
+    circ = float(4 * np.pi * area / (perim * perim)) if perim else 0.0
+    return dict(area=area, perimeter=perim, circularity=min(circ, 1.0),
+                extent=area / float(bh * bw), aspect=max(bh, bw) / float(min(bh, bw)))
+
+
+def classify_shape(mask):
+    """A small, honest, *rule-based* shape labeller built on shape_stats.  It is
+    not learned and not magic -- it just encodes the obvious geometry:
+        very elongated      -> 'line'
+        nearly round        -> 'circle'
+        fills its box       -> 'rectangle'
+        otherwise           -> 'triangle'
+    Good enough to recover clean shapes; deliberately simple."""
+    st = shape_stats(mask)
+    if st["area"] == 0:
+        return "empty"
+    if st["aspect"] >= 4.0 or st["extent"] <= 0.32:
+        return "line"
+    if st["extent"] >= 0.85:                # fills its bounding box -> rectangle
+        return "rectangle"
+    if st["circularity"] >= 0.88:           # round and compact -> circle
+        return "circle"
+    return "triangle"
+
+
+def tighten_selection(alpha, bbox=None, threshold=0.0):
+    """Shrink a rectangular raster selection to the NON-TRANSPARENT content inside it -- the "auto-shrink to opaque
+    pixels" that Photoshop/GIMP do, so a later rotate/scale pivots about the DRAWING's centre, not the loose
+    marquee's centre.
+
+    WHY THIS EXISTS: a user rubber-bands a big rectangle over a small drawing on an otherwise-transparent layer.
+    The selection bbox is the rectangle, whose centre sits in empty space -- so rotating "about the selection
+    centre" spins the drawing around a point outside it. Tightening the bbox to the opaque pixels first puts the
+    pivot where the content actually is.
+
+    alpha:     (H,W) alpha/coverage in [0,1] or [0,255], OR an (H,W,4) RGBA image (its alpha channel is used), OR an
+               (H,W) boolean mask. Anything > `threshold` counts as content.
+    bbox:      optional (r0,c0,r1,c1) INCLUSIVE marquee to search within (the rectangle the user dragged). None =
+               the whole image. Coordinates are clamped to the image; r1/c1 are inclusive to match segment_image's
+               region bbox convention.
+    threshold: alpha strictly above this is "content". Default 0.0 (any non-zero coverage). Use e.g. 0.5 to ignore
+               near-transparent anti-aliased fringe.
+
+    Returns a dict:
+      empty:   True if the marquee contains NO content above threshold (then bbox/centre are None and the caller
+               should keep the original selection rather than collapse it -- an empty tighten is a real answer, not
+               an error).
+      bbox:    (r0,c0,r1,c1) inclusive, the tight box of content pixels (in FULL-image coordinates).
+      centre:  (row, col) float centre of that tight bbox -- the pivot a rotate/scale should turn about.
+      area:    number of content pixels inside the marquee.
+
+    Deterministic, numpy-only. Non-destructive: reads the alpha, returns numbers -- it does not modify the image or
+    the selection; the caller replaces its marquee with `bbox`.
+
+    KEPT NEGATIVE: this returns the AXIS-ALIGNED tight box, not a per-pixel mask or a rotated minimal box. A rotate
+    wants a pivot POINT, and the bbox centre is that point; carrying the full mask here would just duplicate what
+    segment_image already returns. If a caller needs the exact opaque mask, threshold the alpha directly.
+    KEPT NEGATIVE: centre is the BBOX centre, not the alpha-weighted centroid. For a symmetric drawing they
+    coincide; for an L-shape they differ, and the bbox centre is what matches "rotate about the selection box",
+    which is the behaviour being fixed. `centroid` is available from shape_stats if a mass-centre is wanted."""
+    a = np.asarray(alpha)
+    if a.ndim == 3:                     # RGBA (or RGB with no alpha -> treat as fully opaque)
+        a = a[:, :, 3] if a.shape[2] >= 4 else np.ones(a.shape[:2], dtype=a.dtype)
+    if a.dtype == bool:
+        cov = a
+    else:
+        af = a.astype(np.float64)
+        # normalise 0..255 to 0..1 so `threshold` means the same thing regardless of input dtype
+        if af.max() > 1.0:
+            af = af / 255.0
+        cov = af > threshold
+    H, W = cov.shape
+
+    if bbox is not None:
+        r0, c0, r1, c1 = bbox
+        # clamp the marquee to the image; r1/c1 inclusive
+        r0 = max(0, int(r0)); c0 = max(0, int(c0))
+        r1 = min(H - 1, int(r1)); c1 = min(W - 1, int(c1))
+        if r1 < r0 or c1 < c0:
+            return {"empty": True, "bbox": None, "centre": None, "area": 0}
+        window = cov[r0:r1 + 1, c0:c1 + 1]
+        off_r, off_c = r0, c0
+    else:
+        window = cov
+        off_r, off_c = 0, 0
+
+    ys, xs = np.nonzero(window)
+    if ys.size == 0:                    # nothing opaque in the marquee -- keep the original selection
+        return {"empty": True, "bbox": None, "centre": None, "area": 0}
+
+    tr0 = int(ys.min()) + off_r; tr1 = int(ys.max()) + off_r
+    tc0 = int(xs.min()) + off_c; tc1 = int(xs.max()) + off_c
+    centre = ((tr0 + tr1) / 2.0, (tc0 + tc1) / 2.0)
+    return {"empty": False, "bbox": (tr0, tc0, tr1, tc1), "centre": centre, "area": int(ys.size)}
+
+
+def _connected_components(mask):
+    """Label the 4-connected components of a boolean mask by vectorised label propagation (each masked pixel repeatedly
+    takes the min label among itself and its 4 mask-neighbours until stable; background is a barrier). Returns
+    (labels, n) with labels 1..n (0 = background). numpy + stdlib only -- no scipy. WHY vectorised: a Python per-pixel
+    union-find is too slow even at preview resolution; min-propagation converges in ~diameter sweeps of cheap array ops."""
+    m = np.asarray(mask, bool)
+    H, W = m.shape
+    if not m.any():
+        return np.zeros((H, W), int), 0
+    lab = np.zeros((H, W), int)
+    lab[m] = np.arange(1, int(m.sum()) + 1)                   # every masked pixel starts as its own label
+    big = H * W + 2
+    for _ in range(H + W + 2):                                # enough sweeps for a label to flow across a compact region
+        cur = np.where(m, lab, big)                          # background = big so it never wins a min (acts as a wall)
+        up = np.full_like(cur, big); up[1:, :] = cur[:-1, :]
+        dn = np.full_like(cur, big); dn[:-1, :] = cur[1:, :]
+        lf = np.full_like(cur, big); lf[:, 1:] = cur[:, :-1]
+        rt = np.full_like(cur, big); rt[:, :-1] = cur[:, 1:]
+        nb = np.minimum(np.minimum(up, dn), np.minimum(lf, rt))
+        new = np.where(m, np.minimum(cur, nb), 0)
+        if np.array_equal(new, lab):
+            break
+        lab = new
+    uniq = np.unique(lab[m])                                  # compact the surviving labels to 1..n (deterministic order)
+    out = np.zeros((H, W), int)
+    for i, v in enumerate(uniq, start=1):
+        out[lab == v] = i
+    return out, len(uniq)
+
+
+def _region_record(rid, mask, rgb):
+    """Build one region's summary dict from its boolean mask + the source image. Reuses shape_stats/classify_shape."""
+    m = np.asarray(mask, bool)
+    ys, xs = np.nonzero(m)
+    st = shape_stats(m)
+    mean_col = tuple(float(c) for c in rgb[m].mean(axis=0)) if m.any() else (0.0, 0.0, 0.0)
+    return {"id": int(rid), "mask": m, "area": int(m.sum()), "fraction": float(m.mean()),
+            "bbox": (int(ys.min()), int(xs.min()), int(ys.max()), int(xs.max())),
+            "centroid": (float(ys.mean()), float(xs.mean())), "mean_color": mean_col,
+            "shape": classify_shape(m), "circularity": st["circularity"], "extent": st["extent"], "aspect": st["aspect"]}
+
+
+def _downsample_rgb_area(rgb, max_dim):
+    """Box-average downsample an image so its LONGEST side is <= max_dim, preserving aspect. Returns the same rank
+    as the input (H,W) or (H,W,C). WHY box-average and not nearest: segmentation clusters pixels by colour, and a
+    nearest downsample ALIASES thin features into whichever pixel it happened to land on, corrupting the clusters;
+    an area (box) average is the honest low-pass -- each output cell is the mean of the input pixels that fall in it.
+    Pure index-binning (np.add.at), so it is deterministic and numpy-only, and handles arbitrary (non-integer) ratios.
+    A no-op (returns the input) when the image already fits."""
+    a = np.asarray(rgb, float)
+    H, W = a.shape[:2]
+    if max(H, W) <= int(max_dim):
+        return a
+    scale = float(max_dim) / float(max(H, W))
+    nh = max(1, int(round(H * scale)))
+    nw = max(1, int(round(W * scale)))
+    flat = a.reshape(H, W, -1)                                   # unify (H,W) and (H,W,C) as (H,W,c)
+    C = flat.shape[2]
+    # each input pixel (iy,ix) falls into output cell (iy*nh//H, ix*nw//W); accumulate sums + counts, then divide.
+    iy = (np.arange(H) * nh) // H
+    ix = (np.arange(W) * nw) // W
+    iy2 = np.repeat(iy, W)
+    ix2 = np.tile(ix, H)
+    out = np.zeros((nh, nw, C), float)
+    cnt = np.zeros((nh, nw), float)
+    np.add.at(out, (iy2, ix2), flat.reshape(-1, C))
+    np.add.at(cnt, (iy2, ix2), 1.0)
+    out /= np.maximum(cnt[..., None], 1.0)                       # empty cells (impossible here) stay 0, not NaN
+    return out if a.ndim == 3 else out[..., 0]
+
+
+def _upsample_mask_nn(mask, H, W):
+    """Nearest-neighbour upsample a (h,w) boolean/label mask to (H,W). NEAREST is mandatory for a LABEL mask -- any
+    interpolation would invent in-between values that are not valid labels. Each output pixel maps to the input pixel
+    at floor(out*in/OUT), so it is deterministic and reversible with _downsample's binning. Pure fancy-indexing."""
+    a = np.asarray(mask)
+    h, w = a.shape[:2]
+    ry = (np.arange(H) * h) // H
+    rx = (np.arange(W) * w) // W
+    return a[ry][:, rx]
+
+
+def segment_image(rgb, k=5, seed=0, spatial_weight=0.35, split_components=True, min_fraction=0.006, max_dim=None):
+    """Demux a photo into per-object REGIONS by colour (+ weak spatial coherence) -- the segmentation FRONT END of the
+    photo->3D pipeline. k-means clusters pixels in (r,g,b,x,y) space (spatial_weight scales the normalised xy, so
+    spatially-separated things of the same colour can split); with split_components each colour cluster is further cut
+    into 4-connected pieces so two separate same-colour objects become distinct regions; regions below min_fraction of
+    the image are merged into the surviving region whose mean colour is nearest. Returns a list of region dicts, largest
+    first:
+      id, mask (H,W bool), area, fraction, bbox (r0,c0,r1,c1), centroid (r,c), mean_color (r,g,b in 0..1),
+      shape ('circle'/'rectangle'/'line'/'triangle'), circularity, extent, aspect.
+    Deterministic (seeded k-means). numpy + stdlib only -- no scipy/sklearn. HONEST: this splits on APPEARANCE, not
+    semantics -- a two-tone object becomes two regions and a hard shadow can split a floor; the per-region shape/stats
+    are a COARSE guess that the primitive-fit stage refines. Pass a downscaled image (~<=200 px) -- segmentation does
+    not need full resolution and the connected-components sweep scales with the longer side. Or just set max_dim: when
+    given, the input is box-downsampled to that longest side internally, segmented, and the region masks are
+    nearest-upsampled back to full size (with all stats recomputed on the original image) -- the quality/latency trade
+    without every caller re-implementing it. max_dim=None (default) runs at full resolution, byte-identical to before."""
+    rgb = np.asarray(rgb, float)
+    if rgb.max() > 1.5:
+        rgb = rgb / 255.0
+    H, W = rgb.shape[:2]
+
+    # max_dim: bound the resolution the (pixel-bound) k-means + connected-components sweep runs at, then upsample the
+    # region masks back to full size. WHY it belongs here and not in every caller: the cost scales with pixel count,
+    # so interactive callers all independently learn to shrink the input and scale masks back up (leStudio bounded to
+    # 224 px in two places). The quality/latency trade lives next to the algorithm now. The masks come back FULL-SIZE
+    # and every per-region stat is RECOMPUTED from the upsampled mask + the ORIGINAL image via _region_record, so
+    # area/bbox/centroid are in original pixels and mean_color is the true mean over the full-res region (not the
+    # blurred thumbnail). Default max_dim=None is byte-identical to the historic full-resolution behaviour.
+    if max_dim is not None and max(H, W) > int(max_dim):
+        small = _downsample_rgb_area(rgb, int(max_dim))
+        regions_small = segment_image(small, k=k, seed=seed, spatial_weight=spatial_weight,
+                                      split_components=split_components, min_fraction=min_fraction, max_dim=None)
+        # upsample each mask to full res and rebuild its record on the ORIGINAL image (exact, consistent stats).
+        # nearest upsampling scales every area by the same factor, so the largest-first order is preserved.
+        return [_region_record(r["id"], _upsample_mask_nn(r["mask"], H, W), rgb) for r in regions_small]
+
+    ys, xs = np.mgrid[0:H, 0:W]
+    xy = np.stack([ys / max(H - 1, 1), xs / max(W - 1, 1)], axis=-1) * float(spatial_weight)
+    feats = np.concatenate([rgb.reshape(-1, 3), xy.reshape(-1, 2)], axis=1)
+    labels, _centres = kmeans(feats, int(k), seed=int(seed))
+    lab_img = labels.reshape(H, W)
+
+    raw = []                                                 # (mask, ) for each colour cluster, optionally CCL-split
+    for c in range(int(k)):
+        cluster = (lab_img == c)
+        if not cluster.any():
+            continue
+        if split_components:
+            cc, n = _connected_components(cluster)
+            for comp in range(1, n + 1):
+                raw.append(cc == comp)
+        else:
+            raw.append(cluster)
+
+    regions = [_region_record(i, m, rgb) for i, m in enumerate(raw)]
+    regions.sort(key=lambda r: -r["area"])
+    survivors = [r for r in regions if r["fraction"] >= float(min_fraction)]
+    smalls = [r for r in regions if r["fraction"] < float(min_fraction)]
+    if not survivors and regions:                            # everything tiny -> keep the single largest
+        survivors = [regions[0]]; smalls = regions[1:]
+    # merge each small region into the nearest-colour survivor (colour L2), then recompute that survivor's stats
+    for s in smalls:
+        sc = np.asarray(s["mean_color"], float)
+        j = min(range(len(survivors)), key=lambda t: float(np.sum((np.asarray(survivors[t]["mean_color"]) - sc) ** 2)))
+        survivors[j] = _region_record(survivors[j]["id"], survivors[j]["mask"] | s["mask"], rgb)
+    survivors.sort(key=lambda r: -r["area"])
+    for i, r in enumerate(survivors):                        # renumber ids largest-first, stable
+        r["id"] = i
+    return survivors
+
+
+# ======================================================================
+# patterns  --  one descriptor vector per image (the input to clustering).
+# ======================================================================
+
+def describe(rgb):
+    """Turn an image into a single fixed-length feature vector by stacking the
+    cheap descriptors above:
+        12 hue-histogram bins      (colour)
+         2 mean saturation/value   (colourfulness/brightness)
+         1 edge density            (how busy)
+         9 orientation bins        (structure direction)
+    -> a 24-D vector, L2-normalised.  Similar-looking images land near each
+    other; that is the whole basis for the clustering and classification below.
+    """
+    rgb = np.asarray(rgb)
+    g = to_gray(rgb)
+    hsv = rgb_to_hsv(rgb)
+    feats = np.concatenate([
+        hue_histogram(rgb, bins=12),
+        [hsv[..., 1].mean(), hsv[..., 2].mean()],
+        [edges(g).mean()],
+        orientation_histogram(g, bins=9),
+    ]).astype(np.float64)
+    n = np.linalg.norm(feats)
+    return feats / n if n else feats
+
+
+# ======================================================================
+# emergence  --  let categories fall out of the data, unsupervised.
+# ======================================================================
+
+def _kmeanspp_init(X, k, rng):
+    """k-means++ seeding: spread the initial centres out so a run does not
+    collapse.  First centre is random; each next is chosen with probability
+    proportional to its squared distance from the nearest centre so far."""
+    centres = [X[rng.integers(len(X))]]
+    for _ in range(1, k):
+        d2 = np.min(((X[:, None, :] - np.array(centres)[None, :, :]) ** 2).sum(-1), axis=1)
+        s = d2.sum()
+        probs = d2 / s if s > 0 else np.full(len(X), 1.0 / len(X))
+        centres.append(X[rng.choice(len(X), p=probs)])
+    return np.array(centres)
+
+
+def _one_kmeans(X, k, rng, iters):
+    centres = _kmeanspp_init(X, k, rng)
+    labels = np.zeros(len(X), int)
+    for step in range(iters):
+        d = ((X[:, None, :] - centres[None, :, :]) ** 2).sum(-1)
+        new = d.argmin(1)
+        if step > 0 and np.array_equal(new, labels):
+            break
+        labels = new
+        for c in range(k):
+            members = X[labels == c]
+            centres[c] = members.mean(0) if len(members) else X[d.min(1).argmax()]
+    inertia = ((X - centres[labels]) ** 2).sum()
+    return labels, centres, inertia
+
+
+def kmeans(X, k, seed=0, iters=50, n_init=5):
+    """Lloyd's k-means with k-means++ seeding and a few random restarts; the run
+    with the lowest within-cluster spread (inertia) wins.  Restarts are what make
+    'emergent' clustering reproducible instead of init-luck.  Returns (labels,
+    centres)."""
+    X = np.asarray(X, float)
+    rng = np.random.default_rng(seed)
+    best = None
+    for _ in range(n_init):
+        labels, centres, inertia = _one_kmeans(X, k, rng, iters)
+        if best is None or inertia < best[2]:
+            best = (labels, centres, inertia)
+    return best[0], best[1]
+
+
+def emergent_classes(images, k, seed=0, standardize=False):
+    """Describe every image, then cluster the descriptors.  No labels go in;
+    the groups that come out are 'emergent classes'.  Returns (labels,
+    descriptors).
+
+    `standardize` z-scores each feature dimension and drops constant ones before
+    clustering.  This is *not* a universal win: it helps when the discriminating
+    signal lives in low-variance dimensions (e.g. clustering same-coloured shapes
+    by structure), but it can hurt when a high-variance feature like colour is
+    exactly the signal you want (e.g. clustering sprites by character).  Left off
+    by default; flip it on when the data calls for it.
+    """
+    X = np.stack([describe(im) for im in images])
+    M = X
+    if standardize:
+        mu, sd = X.mean(0), X.std(0)
+        keep = sd > 1e-9
+        M = (X[:, keep] - mu[keep]) / sd[keep]
+    labels, _ = kmeans(M, k, seed=seed)
+    return labels, X
+
+
+def cluster_purity(labels, truth):
+    """Fraction of points that agree with the majority true label of their
+    cluster.  1.0 means the unsupervised clusters perfectly match the real
+    categories.  This is how we keep ourselves honest about 'emergence'."""
+    labels, truth = np.asarray(labels), np.asarray(truth)
+    correct = 0
+    for c in np.unique(labels):
+        members = truth[labels == c]
+        if len(members):
+            vals, counts = np.unique(members, return_counts=True)
+            correct += counts.max()
+    return correct / len(labels)
+
+
+# ======================================================================
+# holographic  --  encode descriptors as hypervectors and classify by cleanup.
+# ======================================================================
+
+def _basis(n_features, dim, seed):
+    """One random unit hypervector per feature dimension."""
+    rng = np.random.default_rng(seed)
+    from holographic.agents_and_reasoning.holographic_ai import random_vector
+    return np.stack([random_vector(dim, rng) for _ in range(n_features)])
+
+
+def vsa_encode(descriptors, dim=2048, seed=0):
+    """Encode each descriptor as a *weighted superposition* of the basis
+    hypervectors: hv = normalise( sum_i  d[i] * B[i] ).  This is exactly the
+    bundle operation from holographic_ai, with the feature values as weights --
+    so two similar descriptors produce two similar hypervectors."""
+    X = np.atleast_2d(np.asarray(descriptors, float))
+    B = _basis(X.shape[1], dim, seed)
+    hv = X @ B                                          # weighted bundle
+    norms = np.linalg.norm(hv, axis=1, keepdims=True)
+    return hv / np.where(norms == 0, 1, norms)
+
+
+def vsa_prototypes(descriptors, labels, dim=2048, seed=0):
+    """Bundle the member hypervectors of each class into one prototype vector
+    (the VSA way to form a concept from examples).  Returns
+    {label: prototype_hv} plus the encoder settings so new images use the same
+    basis."""
+    hv = vsa_encode(descriptors, dim=dim, seed=seed)
+    protos = {}
+    for c in np.unique(labels):
+        from holographic.agents_and_reasoning.holographic_ai import bundle
+        protos[int(c)] = bundle(hv[np.asarray(labels) == c])
+    return protos, dict(dim=dim, seed=seed)
+
+
+def vsa_classify(descriptor, protos, enc):
+    """Classify one descriptor by cleanup: encode it, then return the label of
+    the nearest prototype by cosine similarity."""
+    from holographic.agents_and_reasoning.holographic_ai import cosine
+    hv = vsa_encode(descriptor, dim=enc["dim"], seed=enc["seed"])[0]
+    best, lab = -2.0, None
+    for c, p in protos.items():
+        s = cosine(hv, p)
+        if s > best:
+            best, lab = s, c
+    return lab, best
+
+
+# ======================================================================
+# drawing helpers  --  synthetic shapes, used by tests, demo and the UI.
+# ======================================================================
+
+def make_shape(kind, S=64, seed=0, bg=(14, 22, 38), fg=(45, 212, 191)):
+    """Draw one clean filled shape on a dark background.  Returns
+    (rgb_uint8[S,S,3], mask_bool[S,S]).  Pure numpy, no PIL."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:S, 0:S].astype(float)
+    cx, cy = S / 2 + rng.uniform(-4, 4), S / 2 + rng.uniform(-4, 4)
+    if kind == "circle":
+        r = S * rng.uniform(0.28, 0.38)
+        mask = (xx - cx) ** 2 + (yy - cy) ** 2 <= r * r
+    elif kind == "rectangle":
+        hw, hh = S * rng.uniform(0.24, 0.36), S * rng.uniform(0.24, 0.36)
+        mask = (np.abs(xx - cx) <= hw) & (np.abs(yy - cy) <= hh)
+    elif kind == "triangle":
+        r = S * rng.uniform(0.34, 0.42)
+        pts = np.array([[cx + r * np.cos(a), cy + r * np.sin(a)]
+                        for a in (-np.pi / 2, -np.pi / 2 + 2 * np.pi / 3, -np.pi / 2 + 4 * np.pi / 3)])
+        mask = _in_triangle(xx, yy, pts)
+    elif kind == "line":
+        ang = rng.uniform(0, np.pi)
+        dx, dy = np.cos(ang), np.sin(ang)
+        L, w = S * 0.42, 1.5
+        # distance from each pixel to the line through the centre
+        dist = np.abs((xx - cx) * (-dy) + (yy - cy) * dx)
+        along = np.abs((xx - cx) * dx + (yy - cy) * dy)
+        mask = (dist <= w) & (along <= L)
+    else:
+        raise ValueError(kind)
+    img = np.empty((S, S, 3), np.uint8)
+    img[:] = np.array(bg, np.uint8)
+    img[mask] = np.array(fg, np.uint8)
+    return img, mask
+
+
+def _in_triangle(xx, yy, pts):
+    """Boolean mask of points inside triangle pts[3,2] via half-plane signs."""
+    def side(a, b):
+        return (xx - a[0]) * (b[1] - a[1]) - (yy - a[1]) * (b[0] - a[0])
+    d1, d2, d3 = side(pts[0], pts[1]), side(pts[1], pts[2]), side(pts[2], pts[0])
+    neg = (d1 < 0) | (d2 < 0) | (d3 < 0)
+    pos = (d1 > 0) | (d2 > 0) | (d3 > 0)
+    return ~(neg & pos)
+
+
+# ======================================================================
+# demo
+# ======================================================================
+
+def _demo():
+    import colorsys
+    print("holographic_vision -- seeing with arithmetic\n" + "-" * 52)
+
+    # colour: prove the HSV transform is exact against the stdlib
+    rng = np.random.default_rng(0)
+    px = rng.random((1000, 3))
+    ours = rgb_to_hsv(px.reshape(1, -1, 3))[0]
+    ref = np.array([colorsys.rgb_to_hsv(*p) for p in px])
+    err = np.abs(np.stack([ours[:, 0] / 360, ours[:, 1], ours[:, 2]], 1) - ref)
+    print(f"RGB->HSV vs colorsys : max error {err.max():.2e}")
+
+    # shapes: classify clean synthetic shapes
+    kinds = ["circle", "rectangle", "triangle", "line"]
+    n_each, ok = 25, 0
+    truth, imgs = [], []
+    for s in range(n_each):
+        for ki, k in enumerate(kinds):
+            img, mask = make_shape(k, 64, seed=100 * s + ki)
+            ok += classify_shape(mask) == k
+            truth.append(ki); imgs.append(img)
+    print(f"rule-based shape ID  : {ok}/{n_each*len(kinds)} correct "
+          f"({100*ok/(n_each*len(kinds)):.0f}%)")
+
+    # hough: a board with one strong horizontal line and one disk
+    board, _ = make_shape("line", 80, seed=3)
+    lines = hough_lines(edges(to_gray(board)), top=2)
+    print(f"hough lines found    : {len(lines)} (top votes {lines[0][2] if lines else 0})")
+    disk, _ = make_shape("circle", 80, seed=4)
+    circ = hough_circles(to_gray(disk), radii=range(15, 35, 2), top=1)
+    print(f"hough circle found   : {circ[0] if circ else None}")
+
+    # emergence: cluster the mixed shapes unsupervised, measure purity
+    labels, X = emergent_classes(imgs, k=4, seed=0, standardize=True)
+    print(f"emergent clusters    : purity {cluster_purity(labels, truth):.0%} "
+          f"(unsupervised; rotated lines scatter, so ~70% is the honest ceiling)")
+
+    # holographic: train prototypes on half, classify the other half by cleanup
+    X = np.stack([describe(im) for im in imgs]); truth = np.array(truth)
+    tr = rng.random(len(imgs)) < 0.5
+    protos, enc = vsa_prototypes(X[tr], truth[tr], dim=2048, seed=1)
+    acc = np.mean([vsa_classify(X[i], protos, enc)[0] == truth[i]
+                   for i in np.nonzero(~tr)[0]])
+    print(f"VSA cleanup classify : {acc:.0%} on held-out shapes "
+          f"(bundle prototypes + cosine)")
+
+
+def _selftest():
+    """Regression trap (T6 backfill; demo only). Pins two classic-CV contracts: the RGB<->HSV transform is a true
+    INVERSE (round-trips exactly), and the edge detector FINDS a step edge where one exists (and the [BLIND-SPOT]
+    complement: reports far fewer on a flat field). Numbers measured against the live functions first."""
+    import numpy as np
+
+    # 1. rgb_to_hsv / hsv_to_rgb are exact inverses on [0,1] colour -- a colour-space transform that doesn't
+    #    round-trip is silently corrupting pixels.
+    rng = np.random.default_rng(0)
+    rgb = rng.random((8, 8, 3))
+    assert np.abs(hsv_to_rgb(rgb_to_hsv(rgb)) - rgb).max() < 1e-6
+
+    # 2. edges() fires on a real vertical step and stays quiet on a flat field -- assert the DISCRIMINATION.
+    step = np.zeros((16, 16, 3)); step[:, 8:] = 1.0
+    flat = np.full((16, 16, 3), 0.5)
+    assert edges(to_gray(step)).sum() > 5 * (edges(to_gray(flat)).sum() + 1)
+
+    # 3. segment_image DEMUXES a synthetic scene: a red disc on a blue field -> at least two regions whose mean
+    #    colours are clearly red-dominant and blue-dominant (colour separation), and the disc region is round.
+    img = np.zeros((40, 40, 3)); img[:, :, 2] = 1.0                     # blue background
+    yy, xx = np.mgrid[0:40, 0:40]
+    disc = (yy - 20) ** 2 + (xx - 20) ** 2 <= 9 ** 2
+    img[disc] = (1.0, 0.0, 0.0)                                         # red disc
+    regs = segment_image(img, k=2, seed=0)
+    assert len(regs) >= 2, len(regs)
+    reds = [r for r in regs if r["mean_color"][0] > r["mean_color"][2]]
+    blues = [r for r in regs if r["mean_color"][2] > r["mean_color"][0]]
+    assert reds and blues, [r["mean_color"] for r in regs]             # both colours recovered as distinct regions
+    assert classify_shape(reds[0]["mask"]) == "circle", classify_shape(reds[0]["mask"])
+    # connected-components splits two separate same-colour blobs
+    two = np.zeros((20, 40), bool); two[5:15, 3:13] = True; two[5:15, 27:37] = True
+    _cc, ncc = _connected_components(two)
+    assert ncc == 2, ncc
+
+    # 3b. ITEM 5: max_dim bounds the segmentation resolution. Contracts: (a) max_dim=None is BYTE-IDENTICAL to the
+    #     historic call (never-flip); (b) with max_dim set, masks come back FULL-SIZE and the distinct colours are
+    #     still recovered; (c) the box downsample hits the target longest side and the nearest mask upsample is
+    #     label-safe (dtype/topology preserved).
+    big = np.zeros((160, 160, 3)); big[:, :, 2] = 1.0                  # blue field
+    yb, xb = np.mgrid[0:160, 0:160]
+    big[(yb - 64) ** 2 + (xb - 56) ** 2 <= 30 ** 2] = (1.0, 0.0, 0.0)  # red disc
+    a0 = segment_image(big, k=2, seed=0)                              # historic full-res
+    a1 = segment_image(big, k=2, seed=0, max_dim=None)               # explicit None
+    assert len(a0) == len(a1)
+    for r0, r1 in zip(a0, a1):
+        assert np.array_equal(r0["mask"], r1["mask"]) and r0["bbox"] == r1["bbox"]   # byte-identical
+    bounded = segment_image(big, k=2, seed=0, max_dim=64)
+    assert all(r["mask"].shape == (160, 160) for r in bounded)        # FULL-SIZE masks despite the 64px run
+    cols = [r["mean_color"] for r in bounded]
+    assert any(c[0] > c[2] for c in cols) and any(c[2] > c[0] for c in cols), cols   # red + blue both survive
+    ds = _downsample_rgb_area(big, 64); assert max(ds.shape[:2]) == 64 and ds.shape[2] == 3
+    up = _upsample_mask_nn(np.array([[True, False], [False, True]]), 6, 6)
+    assert up.shape == (6, 6) and up.dtype == bool and up[0, 0] and up[5, 5] and not up[0, 5]
+    # KEPT NEGATIVE: segmenting a downsampled image is a QUALITY/LATENCY TRADE, not free -- the result is the
+    # segmentation of the thumbnail (masks upsampled), NOT identical to the full-res segmentation; max_dim=None is
+    # the only path that reproduces the historic result exactly.
+
+    # 4. dominant_colours dtype contract (ITEM 1): the LEGACY default returns uint8 0-255; as_float=True returns the
+    #    SAME palette in float 0-1 (the ecosystem's range) with no round-trip loss. Assert both the dtype split and
+    #    that float == uint8/255 to the quantisation floor -- so a caller can trust the two are the same colours.
+    ci = np.zeros((24, 24, 3)); ci[:, :12] = (0.8, 0.1, 0.1); ci[:, 12:] = (0.1, 0.2, 0.9)
+    pal_u, w_u = dominant_colours(ci, k=2, seed=0)                      # legacy uint8 path
+    pal_f, w_f = dominant_colours(ci, k=2, seed=0, as_float=True)       # opt-in float path
+    assert pal_u.dtype == np.uint8 and pal_u.max() > 1, pal_u.dtype     # legacy really is 0-255
+    assert pal_f.dtype != np.uint8 and pal_f.max() <= 1.0 + 1e-9        # float really is 0-1
+    assert np.allclose(pal_f, pal_u.astype(float) / 255.0, atol=1.0/255)  # same colours, just the range differs
+    assert np.array_equal(w_u, w_f)                                     # weights untouched by the dtype flag
+    # KEPT NEGATIVE: default is uint8, NOT float, on purpose -- flipping it would break every existing caller
+    # (the never-flip rule). Float is correct for the ecosystem but must be opted into.
+
+    # tighten_selection: a small opaque blob inside a big transparent marquee must shrink to the blob and pivot
+    # about the BLOB centre (the rotate-centre bug being fixed), not the marquee centre.
+    _al = np.zeros((100, 100), float); _al[20:30, 60:70] = 1.0
+    _t = tighten_selection(_al, bbox=(0, 0, 99, 99))
+    assert _t["bbox"] == (20, 60, 29, 69), _t["bbox"]           # tightened to the drawing, exactly
+    assert _t["centre"] == (24.5, 64.5), _t["centre"]           # pivot is the DRAWING centre, not (49.5, 49.5)
+    assert _t["area"] == 100 and not _t["empty"]
+    # an empty marquee is a REAL answer -> signal empty so the caller keeps the original selection, never collapses
+    _e = tighten_selection(_al, bbox=(0, 0, 10, 10))
+    assert _e["empty"] and _e["bbox"] is None, _e
+    # RGBA input uses the alpha channel; threshold ignores near-transparent fringe
+    _rgba = np.zeros((100, 100, 4), np.uint8); _rgba[20:30, 60:70, 3] = 255; _rgba[40, 40, 3] = 40
+    assert tighten_selection(_rgba, threshold=0.5)["bbox"] == (20, 60, 29, 69)   # the alpha-40 fringe pixel excluded
+    # KEPT NEGATIVE: returns the axis-aligned tight bbox + its centre, NOT a mask or a rotated min-box -- a rotate
+    # needs a pivot POINT, and the bbox centre is it; the full mask lives on segment_image's region records.
+
+    print("OK: holographic_vision self-test passed (RGB<->HSV round-trips to <1e-6, the edge detector fires "
+          "on a vertical step while staying quiet on a flat field, dominant_colours returns uint8 0-255 by "
+          "default / float 0-1 under as_float=True with matching colours, and tighten_selection shrinks a "
+          "marquee to opaque content with the drawing centre as pivot / signals empty on a blank marquee)")
+
+
+if __name__ == "__main__":
+    import sys
+    _selftest()
+    if "--demos" in sys.argv:
+        _demo()

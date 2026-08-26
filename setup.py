@@ -1,16 +1,12 @@
 # setup.py -- packaging for leCore.
 #
-# leCore is a flat collection of ~260 `holographic_*.py` modules that import each other by their plain
-# top-level names (e.g. `from holographic_ai import bind`). The simplest, least-surprising way to ship
-# that is to install them AS top-level modules, exactly as they sit in the repo -- so anything that works
-# from a clone works once installed, with NO import rewrites and NO sys.path tricks.
-#
-# We glob the module list at build time (so adding a new holographic_*.py needs no edit here) and add one
-# small convenience module, `lecore.py`, that re-exports the main API -- so callers can just `import lecore`.
+# leCore's engine code lives in the `holographic` package (holographic/<family>/holographic_*.py), imported as
+# e.g. `from holographic.rendering.holographic_camera import ...`. We ship it as a real package tree via
+# find_packages() (so adding a new module/subpackage needs no edit here), plus one small top-level convenience
+# module, `lecore.py`, that re-exports the main API -- so callers can just `import lecore`.
 
-import glob
 import os
-from setuptools import setup
+from setuptools import setup, find_packages
 
 here = os.path.dirname(os.path.abspath(__file__))
 
@@ -18,25 +14,55 @@ def read(name):
     path = os.path.join(here, name)
     return open(path, encoding="utf-8").read() if os.path.exists(path) else ""
 
-# every holographic_*.py in this folder becomes a top-level module in the wheel.
-# (test files are named test_holographic_*.py, so this glob already excludes them; the build script
-#  also copies only the non-test modules into the staging folder, belt-and-suspenders.)
-modules = [
-    os.path.splitext(os.path.basename(path))[0]
-    for path in sorted(glob.glob(os.path.join(here, "holographic_*.py")))
-    if not os.path.basename(path).startswith("test_")
-]
-modules.append("lecore")                 # the convenience shim: `import lecore` -> lecore.UnifiedMind
+# THE VERSION lives in one place: the top-level VERSION file. You hand-edit the major.minor there (0.2 -> 0.3 ->
+# 1.0); CI's tools/bump_version.py increments only the PATCH digit on each merge to main. Reading it here (rather
+# than hardcoding a number) means setup.py, lecore.py and the wheel can never drift out of sync -- there is
+# exactly one number to change. Fallback to a sentinel if the file is somehow absent, so a build never crashes on
+# a missing VERSION; the CI version-check would catch that separately.
+def read_version():
+    raw = read("VERSION").strip()
+    return raw or "0.0.0"
+
+# every package under holographic/ (holographic itself + every family subpackage) ships in the wheel.
+# lecore_data is a separate runtime-data package, declared alongside it below.
+engine_packages = find_packages(where=here, include=["holographic", "holographic.*"])
 
 setup(
-    name="lecore",
-    version="0.1.0",                     # bump per release (or let CI set it from the git tag -- see PACKAGING.md)
-    description="leCore -- the vector-symbolic core of leOS: memory, geometry, physics and more on one NumPy substrate.",
+    # NOTE ON THE NAME: the *distribution* name (what you `pip install`) and the *import* name (what you
+    # `import` in Python) are independent. The plain name "lecore" is already taken on PyPI by an unrelated
+    # project, and this engine is the core of the larger leOS project -- so we publish as "leos-core" but the
+    # modules still install at the top level, so users write `import lecore` (via the lecore.py shim) exactly
+    # as they did from a clone. Install:  pip install leos-core   ->   then:  import lecore
+    name="leos-core",
+    version=read_version(),             # single source of truth: the VERSION file (CI bumps the patch digit)
+    description="leOS-core (import name: lecore) -- the vector-symbolic core of leOS: memory, geometry, physics and more on one NumPy substrate.",
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
     author="AnOversizedMooseWithSocks",
     url="https://github.com/AnOversizedMooseWithSocks/leCore",
-    py_modules=modules,                  # <- install these flat, top-level modules (no package nesting)
+    py_modules=["lecore", "holographic_service"],   # <- top-level: the import-lecore shim + the standalone HTTP service (from holographic_service import serve)
+    packages=engine_packages + ["lecore_data"],   # <- the real holographic/ package tree + the runtime data package
+    # The runtime data (the WordNet dictionary, material property JSON) ships as the small `lecore_data` PACKAGE, so
+    # it is carried into the wheel and resolves the same from a clone or an install (see lecore_data/__init__.py).
+    include_package_data=True,
+    package_data={
+        "lecore_data": [
+            "knowledge/*",                                  # dictionary.json.xz (lzma), manifest.json, LICENSE_WORDNET.txt
+            "definitions/*.md",
+            "definitions/native/materials/*.json",
+            "definitions/standards/generic_table/*.json",
+            "routing/*.npz",                                # the semantic routing index
+            # THE MACHINE-READABLE CATALOG, bundled by build_package.sh. Its
+            # whole purpose is being read WITHOUT importing the engine, so
+            # leaving it out of the wheel excluded exactly the audience it
+            # exists for -- a pip user has no repo to read it from and no
+            # capdoc.py to regenerate it with.
+            # Listed EXPLICITLY rather than relying on include_package_data,
+            # because MANIFEST.in-driven inclusion is the rule that silently
+            # dropped pipelinemap for seven releases.
+            "capabilities.json",
+        ],
+    },
     python_requires=">=3.9",
     install_requires=["numpy"],          # the core needs ONLY NumPy -- nothing else is ever required
     extras_require={                      # opt-in extras -- the core runs, and passes every test, without them.
@@ -45,14 +71,40 @@ setup(
         #
         # -- optional accelerators --
         "jit":      ["numba"],            # numba-compiled fast paths (holographic_jit / sdf_render / codegen)
+        "fft":      ["pyfftw"],           # FFTW-backed FFT (holographic_fft): a numpy-compatible drop-in with plan
+                                          #   caching, opt-in via mind.fft_backend(use_pyfftw=True). NumPy FFT stays
+                                          #   the deterministic default; this only accelerates the spectral paths.
         "symbolic": ["sympy"],            # design-time symbolic gradients (holographic_codegen / sdf_render)
-        "gpu":      ["cupy"],             # GPU backend (holographic_backend). NOTE: CuPy is tied to your CUDA
-                                          #   version -- you often need a specific wheel like `cupy-cuda12x`
-                                          #   instead, so it is best installed by hand (and left out of `all`).
+        "zig":      ["ziglang"],          # native batch kernels + raymarcher (holographic_zigrun / zigmarch):
+                                          #   measured 2-5x over vectorised NumPy for repeated medium-n kernels,
+                                          #   3.8x on the raymarch demo, BIT-IDENTICAL in safe mode. The wheel
+                                          #   ships the whole Zig toolchain (~45 MB) -- no system compiler needed;
+                                          #   it also backstops the C validation path via `zig cc`.
+        "wgsl":     ["wgpu"],             # THE VENDOR-NEUTRAL GPU PATH (holographic_wgpurun): compute on
+                                          #   Vulkan / Metal / DX12 / WebGPU, so it works on Apple silicon, AMD
+                                          #   and Intel Arc as well as NVIDIA -- and on a SOFTWARE adapter
+                                          #   (llvmpipe / WARP) with no GPU at all, which is how the CI lane
+                                          #   verifies correctness on an ordinary runner.
+                                          #   Prebuilt wheels, no CUDA coupling, so unlike `gpu` this one IS
+                                          #   safe to include in `all`.
+        "gpu":      ["cupy"],             # NVIDIA/CUDA ONLY -- the transparent CuPy backend
+                                          #   (holographic_backend). Kept and supported; it receives no new
+                                          #   investment, and `wgsl` above is the general path. NOTE: CuPy is
+                                          #   tied to your CUDA version -- you often need a specific wheel like
+                                          #   `cupy-cuda12x` instead, so it is best installed by hand (and left
+                                          #   out of `all`, which is why `wgsl` and `gpu` are separate extras
+                                          #   rather than one).
         # -- optional tooling --
         "ui":       ["flask", "pillow"],  # the browser UI (app.py) + image load/save
-        "dev":      ["pytest", "matplotlib"],   # run the test suite and generate the plots
-        # -- convenience: everything portable in one shot (CuPy excluded -- see the note above) --
-        "all":      ["numba", "sympy", "flask", "pillow", "pytest", "matplotlib"],
+        "images":   ["pillow"],           # image I/O beyond stdlib PNG (jpg/webp/... via mind.save_render) --
+                                          #   pillow without pulling in Flask; a subset of `ui` for headless use
+        "dev":      ["pytest", "matplotlib", "nltk"],   # run the test suite, generate the plots, and load the text
+                                          #   corpora the benchmarks/ablations use (nltk is guarded everywhere -- the
+                                          #   engine returns None / skips a benchmark when it is absent, never errors)
+        # -- convenience: everything PORTABLE in one shot. CuPy is excluded (CUDA-version coupling, see the
+        #    note above); wgpu is INCLUDED, because it ships prebuilt wheels for every platform and needs no
+        #    system toolchain -- the reason to leave CuPy out simply does not apply to it. --
+        "all":      ["numba", "pyfftw", "sympy", "flask", "pillow", "pytest", "matplotlib", "ziglang", "nltk",
+                     "wgpu"],
     },
 )

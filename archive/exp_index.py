@@ -4,7 +4,7 @@ import sys as _sys, os as _os
 _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 
 import numpy as np
-from holographic_image import HolographicImage, _demo_image, _psnr
+from holographic.io_and_interop.holographic_image import HolographicImage, _demo_image, _psnr
 img=_demo_image(240); S=240; npix=S*S; K=4000; D=16384
 M=HolographicImage(img.shape,keep=K,dim=D,seed=0)._M[S]
 def dct2(a): return M@a@M.T

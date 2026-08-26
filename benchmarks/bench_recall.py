@@ -16,7 +16,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import time
-from holographic_tree import HoloForest
+from holographic.misc.holographic_tree import HoloForest
 
 
 def _unit(v):

@@ -5,7 +5,7 @@ _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)
 
 import numpy as np, matplotlib
 matplotlib.use("Agg"); import matplotlib.pyplot as plt
-from holographic_image import _fwht, _dct_matrix, _psnr, _cg
+from holographic.io_and_interop.holographic_image import _fwht, _dct_matrix, _psnr, _cg
 
 S=128; npix=S*S; M=_dct_matrix(S)
 def dct2(a): return M@a@M.T

@@ -7,7 +7,7 @@ import io, numpy as np, matplotlib
 matplotlib.use("Agg"); import matplotlib.pyplot as plt
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-from holographic_image import HolographicImage, _demo_image, _psnr
+from holographic.io_and_interop.holographic_image import HolographicImage, _demo_image, _psnr
 
 S=240; img=_demo_image(S); u8=(np.clip(img,0,1)*255).astype(np.uint8)
 jref=io.BytesIO(); Image.fromarray(u8).save(jref,"JPEG",quality=85); jref=jref.getvalue()

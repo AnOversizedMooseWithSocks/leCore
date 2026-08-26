@@ -1,0 +1,33 @@
+# openzoo models for Continue.dev (VS Code / JetBrains AI coding assistant).
+# Merge the `models` entries below into ~/.continue/config.yaml.
+#
+# Continue's native `provider: openai` speaks to any OpenAI-compatible
+# apiBase - no plugin needed. Each model you want available in Continue
+# gets its own entry (Continue has no live model-list fetch), so list the
+# zoo models you actually use. `curl localhost:8402/v1/models` prints the full list.
+
+name: openzoo
+version: 0.0.1
+schema: v1
+
+models:
+  # Chat / edit workhorse. WHY roles are explicit: Continue routes
+  # chat, edit, and apply separately; an entry without roles defaults
+  # to chat-only in some versions.
+  - name: zoo nvidia/nemotron-3.5-lightning
+    provider: openai
+    model: nvidia/nemotron-3.5-lightning
+    apiBase: http://localhost:8402/v1     # hosted: https://x402-tokens.fly.dev/v1
+    apiKey: sk-openzoo                    # any value for local proxy; real key for hosted
+    roles:
+      - chat
+      - edit
+      - apply
+
+  # Add more zoo models by copying the block and changing name/model, e.g.:
+  # - name: zoo lecore-assimilated
+  #   provider: openai
+  #   model: staccs/Qwen3.5-0.8B-lecore-assimilated
+  #   apiBase: http://localhost:8402/v1
+  #   apiKey: sk-openzoo
+  #   roles: [chat]

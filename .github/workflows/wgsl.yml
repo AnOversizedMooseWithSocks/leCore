@@ -1,0 +1,112 @@
+# WGSL correctness on a software adapter -- the vendor-neutral GPU path, checked on an ordinary runner.
+#
+# WHY THIS LANE EXISTS. The CuPy backend was wired, code-reviewed, and NEVER ONCE EXECUTED IN CI, because
+# testing it requires an NVIDIA machine that nobody had. It sat unverified for the whole life of the project.
+# The WGSL path must not repeat that, and it does not have to: llvmpipe (Mesa's software rasteriser)
+# implements Vulkan/OpenGL in software, so a GitHub runner with no GPU at all can compile and RUN the exact
+# same shaders. That asymmetry is the main reason the vendor-neutral path is the main line.
+#
+# WHAT THIS LANE DOES AND DOES NOT CHECK.
+#   CHECKS:     that the shaders compile, dispatch, produce correct results against NumPy, handle partial
+#               workgroups, and break argmax ties by the canonical lowest-index rule.
+#   DOES NOT:   measure speed. llvmpipe is a CPU adapter, so any timing here is NumPy against a CPU driver
+#               emulating a GPU -- meaningless, and publishing it would be worse than not measuring.
+# The crossover numbers need one real device; correctness does not, and correctness is what rots.
+#
+# Runs on changes to the WGSL surfaces, plus weekly -- a software adapter is cheap enough that there is no
+# reason to gate it behind a manual trigger.
+
+name: wgsl
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "holographic/io_and_interop/holographic_wgpurun.py"
+      - "holographic/io_and_interop/holographic_emit.py"
+      - "holographic/io_and_interop/holographic_gpureport.py"
+      - "tests/test_wgsl_runtime.py"
+      - "tests/test_gpu_report.py"
+      - ".github/workflows/wgsl.yml"
+  pull_request:
+    paths:
+      - "holographic/io_and_interop/holographic_wgpurun.py"
+      - "holographic/io_and_interop/holographic_emit.py"
+      - "holographic/io_and_interop/holographic_gpureport.py"
+      - "tests/test_wgsl_runtime.py"
+      - "tests/test_gpu_report.py"
+      - ".github/workflows/wgsl.yml"
+  schedule:
+    - cron: "0 7 * * 1"        # 07:00 UTC Monday -- an hour after the main full-suite run
+  workflow_dispatch:
+
+# ONE LIVE RUN PER REF, same reasoning as ci.yml: superseded pushes should not
+# keep running. docs.yml in particular COMMITS BACK, so two concurrent runs can
+# race each other to push the same regenerated files.
+concurrency:
+  group: wgsl-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wgsl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      PYTHONHASHSEED: "0"       # the determinism rule: hashlib, never hash(), and a fixed seed everywhere
+      LECORE_RUN_SLOW: "1"      # the adversarial tie tests are marked slow and are the point of this lane
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the software Vulkan/GL stack
+        # llvmpipe ships in mesa-vulkan-drivers / libgl1-mesa-dri. Without these wgpu finds no adapter and
+        # the tests SKIP rather than fail -- which would make this lane green while checking nothing, the
+        # exact failure mode the verification step below exists to prevent.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libgl1-mesa-dri libegl1
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install wgpu            # OPTIONAL dependency: not in requirements.txt, installed only here
+
+      - name: Verify an adapter is actually present
+        # A SKIPPED SUITE MUST NOT PASS FOR A GREEN LANE. The wgsl tests skip themselves when no adapter is
+        # reachable (correct behaviour for a developer machine), so without this check a broken driver
+        # install would turn every test into a skip and the lane would report success having run nothing.
+        # This project has already been bitten by a skip that was indistinguishable from a pass.
+        run: |
+          python -c "
+          from holographic.io_and_interop.holographic_wgpurun import device_info
+          info = device_info()
+          print('adapter:', info)
+          assert info.get('available'), 'no compute adapter -- this lane would silently check nothing'
+          "
+
+      # NOT A DUPLICATE OF THE MAIN MATRIX, AND THE DISTINCTION IS THE POINT.
+      # ci.yml's shards also collect these two files -- but with no compute
+      # adapter installed, so every WGSL test SKIPS there and the lane proves
+      # nothing. This job installs an adapter first, asserts one is present, and
+      # then asserts the tests were not all skipped.
+      # SAME FILES, DIFFERENT CLAIM: the matrix says "these do not crash without
+      # a GPU", this says "these are CORRECT with one". Removing either would
+      # lose a real check; what would be wasteful is running the SAME claim
+      # twice, which is not what happens here.
+      - name: Run the WGSL correctness tests (with a real adapter -- the matrix skips them)
+        run: python -m pytest tests/test_wgsl_runtime.py tests/test_gpu_report.py -q
+
+      - name: Verify the tests were not all skipped
+        # Belt and braces on the same failure mode: count what actually ran.
+        run: |
+          python -m pytest tests/test_wgsl_runtime.py -q --collect-only \
+            | tail -1 | tee /dev/stderr | grep -qE "[0-9]+ test" \
+            || (echo "no wgsl tests collected" && exit 1)

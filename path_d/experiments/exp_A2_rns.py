@@ -49,8 +49,8 @@ def rns_matmul(W, x, moduli):
 # the lossy bundle (A2's original encoding) for a head-to-head
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "repo"))
-from holographic_core import unitary_vector, random_vector, bundle
-from holographic_ai import bind_batch, bind_fixed
+from holographic.misc.holographic_core import unitary_vector, random_vector, bundle
+from holographic.agents_and_reasoning.holographic_ai import bind_batch, bind_fixed
 D = 1024
 def inv_stack(A): return np.concatenate([A[:, :1], A[:, :0:-1]], axis=1)
 def bundle_matmul_fidelity(M, N, trials=4):
