@@ -67,7 +67,7 @@ def train_video_drift(clips, k=2, dim=2048, seed=0):
     return model, meta
 
 
-def generate_video(model, meta, n=2, n_frames=8, seed=0, steps=60, coupling="rownorm"):
+def generate_video(model, meta, n=2, n_frames=8, seed=0, steps=90, coupling="rownorm"):
     """Generate n clips: drift a keyframe-pair point, interpolate splat params start -> start +
     delta across n_frames, render every frame. ALWAYS attached: the audit (drift space) and the
     per-clip max frame-to-frame image RMS -- the temporal-coherence number the smoothness claim

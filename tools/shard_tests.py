@@ -22,6 +22,7 @@ Run:
     python3 tools/shard_tests.py --shard 0 --num-shards 4      # stdout: the files in shard 0
     python3 tools/shard_tests.py --report --num-shards 4       # balance table, human-readable
     python3 tools/shard_tests.py --selfcheck --num-shards 4    # exact-cover / disjoint / determinism asserts
+    python3 tools/shard_tests.py --exclude tests/test_all_selftests.py --shard 0
 """
 import argparse
 import glob
@@ -34,9 +35,14 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SLOW_WEIGHT = 20     # one slow-marked test costs about this many ordinary tests of wall time (proxy, see above)
 
 
-def test_files():
-    """Every test file, sorted -- the deterministic universe the shards partition."""
-    return sorted(glob.glob(os.path.join(REPO, "tests", "test_*.py")))
+def test_files(exclude=()):
+    """Every eligible test file, sorted -- the deterministic universe the shards partition.
+
+    Exclusions are repository-relative paths assigned to a dedicated CI job. They are explicit rather than a
+    hidden hard-coded list, so the workflow remains the single source of truth for special scheduling."""
+    excluded = {os.path.abspath(os.path.join(REPO, p)) for p in exclude}
+    return [p for p in sorted(glob.glob(os.path.join(REPO, "tests", "test_*.py")))
+            if os.path.abspath(p) not in excluded]
 
 
 #: MEASURED seconds per test file, when available. Written by
@@ -84,11 +90,11 @@ def weight(path, measured=None):
     return max(1, int(round(25 * (max(n_tests, 1) + SLOW_WEIGHT * n_slow))))
 
 
-def partition(num_shards):
+def partition(num_shards, exclude=()):
     """Greedy largest-first bin packing into `num_shards` bins; ties break by shard index (deterministic).
     Returns (shards, loads): shards is a list of file lists, loads the weight totals."""
     _m = _measured()
-    files = [(weight(p, _m), p) for p in test_files()]
+    files = [(weight(p, _m), p) for p in test_files(exclude)]
     # KEPT NEGATIVE -- SPLITTING OVERSIZED FILES INTO PER-TEST SELECTORS.
     # Written and REMOVED after measuring: the packer's spread across 4 bins is
     # 1.00x, i.e. PERFECTLY EVEN, so no file was ever the imbalance. The 19m51s
@@ -116,21 +122,23 @@ def main():
     ap.add_argument("--num-shards", type=int, default=4)
     ap.add_argument("--report", action="store_true", help="print the balance table instead of a file list")
     ap.add_argument("--selfcheck", action="store_true", help="assert exact cover, disjointness, determinism")
+    ap.add_argument("--exclude", action="append", default=[], metavar="PATH",
+                    help="repository-relative test file run by a separate CI job; repeatable")
     args = ap.parse_args()
     if getattr(args, "measure", False):
         raise SystemExit(measure())
 
-    shards, loads = partition(args.num_shards)
+    shards, loads = partition(args.num_shards, exclude=args.exclude)
 
     if args.selfcheck:
-        universe = set(test_files())
+        universe = set(test_files(args.exclude))
         seen = set()
         for s in shards:
             for p in s:
                 assert p not in seen, "file assigned to two shards: %s" % p
                 seen.add(p)
         assert seen == universe, "shards do not exactly cover the test files"
-        again, _ = partition(args.num_shards)
+        again, _ = partition(args.num_shards, exclude=args.exclude)
         assert [sorted(s) for s in shards] == [sorted(s) for s in again], "partition is not deterministic"
         spread = (max(loads) - min(loads)) / max(sum(loads) / len(loads), 1)
         print("OK: %d files -> %d shards; exact cover, disjoint, deterministic; load spread %.0f%% of mean"

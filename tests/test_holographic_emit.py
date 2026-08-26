@@ -4,8 +4,9 @@ leCore's kernels are written once, in Python, and the browser needs them in WGSL
 hand-written compute shader a projection of the authoritative Python kernel -- one source of truth, two runtimes,
 no drift.
 
-WGSL cannot be run here (no GPU, no browser). The C dialect can, and it is: `c_f64` comes out BIT-IDENTICAL to
-Python, and `c_f32` -- the executable stand-in for WGSL's single precision -- differs by 8e-08 to 3.4e-07.
+WGSL cannot be run here (no GPU, no browser). The C dialect can, and it is: `c_f64` stays within one ULP of
+Python across platform libm implementations, and `c_f32` -- the executable stand-in for WGSL's single precision
+-- differs by 8e-08 to 3.4e-07.
 
     THREE KEPT NEGATIVES:
       1. A WGSL kernel CANNOT be bit-identical to its Python original. WGSL is f32, NumPy is f64. The bar is
@@ -65,11 +66,10 @@ def test_selftest_runs():
                            np.random.default_rng(1).uniform(-1.5, 1.5, 40)], axis=1)),
     (COSINE, np.random.default_rng(2).uniform(0.2, 3.0, (40, 3))),
 ])
-def test_the_emitted_c_f64_is_bit_identical_to_the_python_original(src, args):
+def test_the_emitted_c_f64_matches_the_python_original_to_one_ulp(src, args):
     calls = [tuple(float(v) for v in row) for row in args]
     rep = validate_c(src, calls, "c_f64")                      # TEXT in, both sides from the same text
-    assert rep["bit_identical"] is True
-    assert rep["max_abs_diff"] == 0.0
+    assert rep["max_ulp_diff"] <= 1.0, rep
 
 
 @pytest.mark.parametrize("src,args", [
@@ -86,7 +86,8 @@ def test_kept_negative_c_f32_cannot_be_bit_identical_and_its_error_is_the_wgsl_t
 
 def test_the_compiled_kernel_actually_runs():
     got = run_c(SDF, [(0.3, -0.7, 1.1, 0.85)], "c_f64")
-    assert abs(got[0] - _live(SDF)(0.3, -0.7, 1.1, 0.85)) == 0.0
+    want = _live(SDF)(0.3, -0.7, 1.1, 0.85)
+    assert abs(got[0] - want) <= math.ulp(want)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -202,7 +203,7 @@ def test_wired_to_the_mind_and_discoverable():
     assert "fn sdf_sphere" in w and "-> f32" in w
 
     rep = m.validate_kernel(SDF, [(0.3, -0.7, 1.1, 0.85), (1.0, 0.0, 0.0, 0.5)], "c_f64")
-    assert rep["bit_identical"] is True
+    assert rep["max_ulp_diff"] <= 1.0
 
     rep32 = m.validate_kernel(SDF, [(0.3, -0.7, 1.1, 0.85)], "c_f32")
     assert rep32["bit_identical"] is False

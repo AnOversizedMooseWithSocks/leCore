@@ -4,6 +4,9 @@
 
 #include "holo_program.h"
 
+#if defined(_MSC_VER)
+#include <malloc.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 

@@ -73,10 +73,14 @@ def compile_cached(source, opt="fast", timeout=300):
     if cc is None:
         raise EmitError("no C compiler found (tried $CC, cc, gcc, clang); "
                         "install one or use holographic_zigrun where Zig exists")
-    flags = {"fast": ["-O3"], "safe": ["-O2"]}.get(opt)
+    # Contraction changes the stated expression tree (x*x + y*y can become an
+    # FMA) and produced one-ULP platform differences against the Python source.
+    # Keep optimization, but preserve the emitted operation order.
+    flags = {"fast": ["-O3", "-ffp-contract=off"],
+             "safe": ["-O2", "-ffp-contract=off"]}.get(opt)
     if flags is None:
         raise EmitError("opt must be 'fast' or 'safe'")
-    key = hashlib.sha256(("%s|%s|%s" % (source, opt, cc)).encode()).hexdigest()[:24]
+    key = hashlib.sha256(("%s|%s|%s|%s" % (source, opt, cc, " ".join(flags))).encode()).hexdigest()[:24]
     os.makedirs(CACHE_DIR, exist_ok=True)
     so = os.path.join(CACHE_DIR, "k_%s.so" % key)
     if os.path.exists(so):

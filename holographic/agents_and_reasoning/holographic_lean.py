@@ -546,6 +546,19 @@ def lean_check(source, timeout=60):
     if not exe:
         return {"available": False, "ok": None,
                 "note": "no `lean` binary on PATH; install elan/lean4 to verify externally"}
+    # `elan` installs a `lean` shim before it installs or selects a toolchain.
+    # A PATH hit alone therefore does not mean Lean is usable. Probe the actual
+    # compiler first so an unconfigured shim is reported as unavailable instead
+    # of making every otherwise-optional proof test fail.
+    try:
+        version = subprocess.run([exe, "--version"], capture_output=True, text=True,
+                                 timeout=min(timeout, 15))
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"available": False, "ok": None,
+                "note": "`lean` exists but is not runnable: %s" % exc}
+    if version.returncode != 0:
+        detail = (version.stderr or version.stdout or "Lean toolchain is not configured").strip()
+        return {"available": False, "ok": None, "note": detail}
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "lecore_check.lean")
         with open(p, "w") as f:

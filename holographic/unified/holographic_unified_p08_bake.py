@@ -1191,7 +1191,7 @@ class _UnifiedPart08:
                                      early_stop=early_stop, stats=stats)
         return rendered if denoise else (splats, rendered)
 
-    def splat_densify(self, field, k=12, stage_steps=(50, 80, 210), denoise=False, stats=None):
+    def splat_densify(self, field, k=12, stage_steps=(80, 120, 300), denoise=False, stats=None):
         """Fit an n-D field with K ANISOTROPIC Gaussian splats COARSE-TO-FINE (C1) -- 3D-Gaussian-Splatting
         densification, from scratch (holographic_splat.densify_fit). Rather than placing all K splats at once and
         running one joint gradient fit (`splat_aniso`), grow the set in stages: place a fraction on the current

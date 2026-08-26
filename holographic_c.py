@@ -117,17 +117,23 @@ def _size_ptr(arr: np.ndarray):
 
 def _candidate_paths() -> list[Path]:
     root = Path(__file__).resolve().parent
-    ext = ".dylib" if sys.platform == "darwin" else ".so"
+    if sys.platform == "darwin":
+        names = ["libholoc.dylib"]
+    elif sys.platform == "win32":
+        names = ["holoc.dll", "libholoc.dll"]
+    else:
+        names = ["libholoc.so"]
     paths = []
     explicit = os.environ.get("HOLOSTUFF_C_LIB")
     if explicit:
         paths.append(Path(explicit))
-    paths.extend(
-        [
-            root / "c" / "build" / "accelerate" / f"libholoc{ext}",
-            root / "c" / "build" / "scalar" / f"libholoc{ext}",
-        ]
-    )
+    for directory in (
+        root / "c" / "build" / "windows" / "Release",
+        root / "c" / "build" / "windows",
+        root / "c" / "build" / "accelerate",
+        root / "c" / "build" / "scalar",
+    ):
+        paths.extend(directory / name for name in names)
     return paths
 
 

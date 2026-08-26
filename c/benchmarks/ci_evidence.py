@@ -40,6 +40,8 @@ def _split_ints(value: str) -> list[int]:
 def _shlib_name() -> str:
     if sys.platform == "darwin":
         return "libholoc.dylib"
+    if sys.platform == "win32":
+        return "holoc.dll"
     return "libholoc.so"
 
 

@@ -84,8 +84,11 @@ class Encyclopedia:
     def _read(self, concept, role):
         if concept not in self.ks.recs:
             return None, 0.0
-        return _cleanup(bind(self.ks.recs[concept], involution(self.ks.roles.get(role))),
-                        self.ks._filler_names(), self.ks.fillers)
+        name, confidence = _cleanup(bind(self.ks.recs[concept], involution(self.ks.roles.get(role))),
+                                    self.ks._filler_names(), self.ks.fillers)
+        # Cosine is mathematically bounded by one, but the final divide can land
+        # a few epsilons above it. Confidence is a public [0, 1] quantity.
+        return name, float(np.clip(confidence, 0.0, 1.0))
 
     def is_a(self, concept):
         """One hop: the direct parent, with cleanup confidence."""

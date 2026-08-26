@@ -1,7 +1,7 @@
 #include "holo_core.h"
+#include "test_threads.h"
 
 #include <math.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -32,7 +32,7 @@ static void require_ok(int rc, const char *msg)
     }
 }
 
-static void *core_bind_worker(void *opaque)
+static int core_bind_worker(void *opaque)
 {
     core_thread_case *tc = (core_thread_case *)opaque;
     double pair[DIM];
@@ -44,7 +44,7 @@ static void *core_bind_worker(void *opaque)
             tc->failed = 1;
         }
     }
-    return NULL;
+    return tc->failed;
 }
 
 int main(void)
@@ -70,7 +70,7 @@ int main(void)
     double raw_sum[DIM];
     double bundle[DIM];
     double norms[4];
-    pthread_t threads[THREADS];
+    holo_test_thread threads[THREADS];
     core_thread_case thread_cases[THREADS];
     size_t i;
 
@@ -96,11 +96,11 @@ int main(void)
         thread_cases[i].key = a;
         thread_cases[i].value = b;
         thread_cases[i].failed = 0;
-        require(pthread_create(&threads[i], NULL, core_bind_worker, &thread_cases[i]) == 0,
+        require(holo_test_thread_create(&threads[i], core_bind_worker, &thread_cases[i]) == 0,
                 "thread create");
     }
     for (i = 0; i < THREADS; ++i) {
-        require(pthread_join(threads[i], NULL) == 0, "thread join");
+        require(holo_test_thread_join(&threads[i]) == 0, "thread join");
         require(!thread_cases[i].failed, "shared engine concurrent bind/unbind");
     }
     require_ok(holo_bind_spectrum_accumulate(engine,

@@ -6,6 +6,9 @@
 #include "holo_trace.h"
 
 #include <math.h>
+#if defined(_MSC_VER)
+#include <malloc.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

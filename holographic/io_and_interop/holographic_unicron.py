@@ -400,7 +400,7 @@ def cosine(a, b):
     na, nb = np.linalg.norm(a), np.linalg.norm(b)
     if na == 0 or nb == 0:
         return 0.0
-    return float(np.real(np.vdot(a, b)) / (na * nb))
+    return float(np.clip(np.real(np.vdot(a, b)) / (na * nb), -1.0, 1.0))
 
 
 def compare_models(analysis_a, analysis_b):
@@ -1943,7 +1943,7 @@ def _selftest():
                           @ np.linalg.qr(rng.standard_normal((128, 3)))[0].T))}}
     traj = checkpoint_trajectory([ckpt(s_) for s_ in (0.0, 1.0, 2.0, 4.0)])
     cs = traj["cosine_from_start"]
-    assert cs[0] == 1.0 and all(cs[i + 1] <= cs[i] + 1e-9 for i in range(3)), cs
+    assert abs(cs[0] - 1.0) < 1e-12 and all(cs[i + 1] <= cs[i] + 1e-9 for i in range(3)), cs
     of = traj["layer_series"]["l0"]["outlier_frac"]
     assert of[-1] > of[0], of
 

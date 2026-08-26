@@ -169,7 +169,12 @@ def _try_powerlaw(f, dim, n_check, tol, seed, scale=1.0):
         return None
     worst = 0.0
     for _ in range(n_check):
-        x = rng.uniform(0.2, 3.0, dim) * scale * rng.choice((-1.0, 1.0), dim)
+        # Cover several orders of magnitude, including the near-zero region.
+        # The old 0.2..3.0-only probe mis-certified clip(x, -.1, .1) as the
+        # exponent-zero law sign(x)*.1 because it never crossed the linear
+        # center of the clip. A certificate is only as honest as its domain.
+        mag = 10.0 ** rng.uniform(-3.0, np.log10(3.0), dim)
+        x = mag * scale * rng.choice((-1.0, 1.0), dim)
         y = np.asarray(f(x), float).reshape(-1)
         yhat = s * np.sign(x) * np.abs(x) ** g
         worst = max(worst, float(np.linalg.norm(y - yhat) / (np.linalg.norm(y) + 1e-12)))

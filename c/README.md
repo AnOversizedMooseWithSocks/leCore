@@ -24,11 +24,27 @@ surface.
 
 ## Current Implementation
 
-This directory now builds a small static C99 library:
+This directory now builds small static and shared C99 libraries. The existing
+Make build remains the shortest path on Linux and macOS:
 
 ```sh
 make -C c test
 ```
+
+CMake provides the same build and test path on Linux, macOS, and Windows. On
+Windows, run these commands from a Visual Studio developer shell:
+
+```powershell
+cmake -S c -B c/build/windows -A x64
+cmake --build c/build/windows --config Release --parallel
+ctest --test-dir c/build/windows -C Release --output-on-failure
+$env:HOLOSTUFF_C_LIB = (Resolve-Path "c/build/windows/Release/holoc.dll")
+python -m pytest -q tests/test_holographic_c_backend.py tests/test_holographic_c_program.py
+```
+
+CI runs this exact MSVC build, the three native tests, and the Python bridge
+tests. Windows uses critical sections while Unix builds use recursive pthread
+mutexes; both paths run the same concurrent engine and trace tests.
 
 Implemented:
 

@@ -558,8 +558,9 @@ def channel_capacity_1bit(n, grid=8001):
     def _hb(p):
         p = np.clip(p, 1e-15, 1 - 1e-15)
         return -p * np.log2(p) - (1 - p) * np.log2(1 - p)
-    h_y_given_x = np.trapezoid(px * _hb(p1), x)
-    py1 = np.trapezoid(px * p1, x)
+    _integrate = getattr(np, "trapezoid", None) or getattr(np, "trapz")
+    h_y_given_x = _integrate(px * _hb(p1), x)
+    py1 = _integrate(px * p1, x)
     return float(n * (_hb(np.array([py1]))[0] - h_y_given_x))
 
 

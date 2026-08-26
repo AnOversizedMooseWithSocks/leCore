@@ -1,7 +1,7 @@
 #include "holo_trace.h"
+#include "test_threads.h"
 
 #include <math.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -32,7 +32,7 @@ static void require_ok(int rc, const char *msg)
     }
 }
 
-static void *trace_store_worker(void *opaque)
+static int trace_store_worker(void *opaque)
 {
     trace_thread_case *tc = (trace_thread_case *)opaque;
     for (size_t i = 0; i < TRACE_THREAD_STORES && !tc->failed; ++i) {
@@ -40,7 +40,7 @@ static void *trace_store_worker(void *opaque)
             tc->failed = 1;
         }
     }
-    return NULL;
+    return tc->failed;
 }
 
 int main(void)
@@ -62,7 +62,7 @@ int main(void)
     double copied[DIM];
     uint64_t labels[ACTIONS] = {1, 2, 3, 4};
     holo_match match[1];
-    pthread_t threads[ACTIONS];
+    holo_test_thread threads[ACTIONS];
     trace_thread_case thread_cases[ACTIONS];
     size_t i;
 
@@ -139,11 +139,11 @@ int main(void)
         thread_cases[i].state = states + i * DIM;
         thread_cases[i].action = actions + i * DIM;
         thread_cases[i].failed = 0;
-        require(pthread_create(&threads[i], NULL, trace_store_worker, &thread_cases[i]) == 0,
+        require(holo_test_thread_create(&threads[i], trace_store_worker, &thread_cases[i]) == 0,
                 "trace thread create");
     }
     for (i = 0; i < ACTIONS; ++i) {
-        require(pthread_join(threads[i], NULL) == 0, "trace thread join");
+        require(holo_test_thread_join(&threads[i]) == 0, "trace thread join");
         require(!thread_cases[i].failed, "shared trace concurrent store");
     }
     require(threaded.stored_count == ACTIONS * TRACE_THREAD_STORES,
