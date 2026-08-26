@@ -45,15 +45,22 @@ def _shlib_name() -> str:
 
 def _run(command: list[str], *, env: dict[str, str] | None = None) -> str:
     print("+ " + " ".join(command), flush=True)
-    result = subprocess.run(
-        command,
-        cwd=ROOT,
-        env=env,
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            env=env,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+    except subprocess.CalledProcessError as exc:
+        # A captured compiler error is otherwise replaced by a bare exit code
+        # in CI, hiding the one message needed to repair the job.
+        if exc.stdout:
+            print(exc.stdout, end="", flush=True)
+        raise
     if result.stdout:
         print(result.stdout, end="", flush=True)
     return result.stdout
