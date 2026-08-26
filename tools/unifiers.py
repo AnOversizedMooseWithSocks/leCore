@@ -618,23 +618,44 @@ def _repo_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _find_module(name, root=None):
-    """The path of `name`.py anywhere under holographic/ (the package layout groups modules into subfolders)."""
+def _find_modules(name, root=None):
+    """All paths named `name`.py under holographic/, in a deterministic order.
+
+    A basename is not unique in the grouped package layout: for example,
+    caching, rendering, and persistent storage each have a
+    ``holographic_session.py``.  Returning the first filesystem-walk hit made
+    wiring results differ between APFS and Linux.
+    """
     root = root or _repo_root()
-    for dirpath, _dirs, files in os.walk(os.path.join(root, "holographic")):
+    matches = []
+    for dirpath, dirs, files in os.walk(os.path.join(root, "holographic")):
+        dirs.sort()
         if name + ".py" in files:
-            return os.path.join(dirpath, name + ".py")
-    return None
+            matches.append(os.path.join(dirpath, name + ".py"))
+    return sorted(matches)
+
+
+def _find_module(name, root=None):
+    """The first deterministic path for compatibility with older callers."""
+    matches = _find_modules(name, root)
+    return matches[0] if matches else None
 
 
 def cites(client, unifier, root=None):
     """Does `client` cite `unifier`? A plain text search of the source -- no importing, so it is fast and has no
     side effects. Returns True / False, or None if the client module doesn't exist."""
-    path = _find_module(client, root)
-    if path is None:
+    paths = _find_modules(client, root)
+    if not paths:
         return None
-    src = open(path, "r", encoding="utf-8", errors="ignore").read()
-    return any(sym in src for sym in REGISTRY[unifier]["symbols"])
+    # REGISTRY identifies clients by basename, so every module carrying that
+    # basename is part of the declared client.  Checking all matches avoids a
+    # platform-dependent false negative while keeping the registry format
+    # backward compatible.
+    for path in paths:
+        src = open(path, "r", encoding="utf-8", errors="ignore").read()
+        if any(sym in src for sym in REGISTRY[unifier]["symbols"]):
+            return True
+    return False
 
 
 def status(root=None):
