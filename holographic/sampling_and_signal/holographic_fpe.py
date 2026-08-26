@@ -140,7 +140,10 @@ class VectorFunctionEncoder:
         else:
             pts = np.atleast_2d(pts)
         if pts.ndim != 2 or pts.shape[1] != self.n_dims:
-            raise ValueError(f"points must have shape (count, {self.n_dims})")
+            raise ValueError(
+                f"points must have shape (count, {self.n_dims}) "
+                f"with {self.n_dims} coordinates per point"
+            )
         return pts
 
     def _point_spectra(self, pts):

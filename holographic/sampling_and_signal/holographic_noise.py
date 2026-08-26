@@ -205,7 +205,7 @@ class FractalNoise:
 
         def octave_read(item):
             amp, enc, fld = item
-            return amp * enc.query_many(fld, pts, workers=inner_workers)
+            return amp * sample_many(enc, fld, pts, workers=inner_workers)
 
         if outer_workers == 1:
             parts = [octave_read(item) for item in octave_items]
