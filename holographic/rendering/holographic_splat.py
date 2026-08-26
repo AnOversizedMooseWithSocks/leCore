@@ -569,25 +569,33 @@ def aniso_fit(target, K, steps=200, lr=0.15, scales=(1.0, 2.0, 3.5, 6.0),
     return splats, rendered
 
 
-def densify_fit(target, K, stage_steps=(80, 120, 300), scales=(1.0, 2.0, 3.5, 6.0), stats=None):
-    """COARSE-TO-FINE anisotropic splat fit (C1) -- 3D-Gaussian-Splatting densification, from scratch. Instead of
-    placing all K isotropic splats at once and running ONE joint gradient fit (`aniso_fit`), grow the set in
-    STAGES: place a fraction of the splats on the current RESIDUAL (matching pursuit, coarse scales first), then
-    jointly optimise everything so far, then place more splats where the re-optimised reconstruction still errs,
-    and optimise again. `stage_steps` gives the Adam steps per stage (the last stage should be long enough to
-    fully converge the whole set). Returns (splats, rendered); pass stats={} to read stats['stages'].
+_DENSIFY_DEFAULT_SCHEDULES = (
+    (20, 40, 120),
+    (30, 60, 180),
+    (70, 100, 260),
+)
 
-    WHY THIS BEATS THE ONE-SHOT (measured): the staged placement is a far better WARM START for the final joint
-    fit -- it lands in a better basin of the non-convex loss. On a multi-scale target (a broad blob + small sharp
-    details) coarse-to-fine reaches MSE the one-shot CANNOT reach AT ANY step count: at K=12 it hits ~1e-6 while
-    the one-shot plateaus near 1e-3 and then DIVERGES past ~300 steps (the non-convex instability `aniso_fit`'s
-    kept negative warns of). So this directly addresses that negative: the one-shot's result 'depends on the
-    isotropic warm start', and a staged warm start is a much better one. It costs more total compute (several
-    optimisation rounds) -- the trade is compute for a basin the one-shot cannot otherwise find.
 
-    KEPT SCOPE: still the from-scratch core of 3DGS (no tile rasteriser, no view-dependent colour, no GPU); and
-    the win is on MULTI-SCALE content -- on a single-scale field the one-shot is already near-optimal and the
-    extra rounds mostly buy little."""
+def _refit_aniso_amplitudes(target, centers, Ls):
+    """Solve the convex amplitude subproblem exactly for fixed centres/covariances.
+
+    Adam is useful for the non-convex geometry, but leaving amplitudes at its last iterate can only make the final
+    reconstruction worse.  A least-squares refit is deterministic for a fixed NumPy build and cannot increase MSE.
+    """
+    target = np.asarray(target, float)
+    if len(centers) == 0:
+        return np.zeros(0), np.zeros_like(target)
+    C = _coords(target.shape)
+    basis = np.column_stack([
+        np.exp(-0.5 * (((C - centers[k]) @ Ls[k]) ** 2).sum(1))
+        for k in range(len(centers))
+    ])
+    amps = np.linalg.lstsq(basis, target.ravel(), rcond=None)[0]
+    return amps, (basis @ amps).reshape(target.shape)
+
+
+def _densify_once(target, K, stage_steps, scales):
+    """Run one staged geometry fit. `densify_fit` measures several of these when no schedule is forced."""
     target = np.asarray(target, float)
     shape = target.shape
     n = target.ndim
@@ -609,8 +617,53 @@ def densify_fit(target, K, stage_steps=(80, 120, 300), scales=(1.0, 2.0, 3.5, 6.
         amps = np.concatenate([amps, na])
         Ls = np.concatenate([Ls, nl]) if len(Ls) else nl
         centers, amps, Ls, rendered = _aniso_optimize(target, centers, amps, Ls, steps=steps)   # re-fit ALL
+    amps, rendered = _refit_aniso_amplitudes(target, centers, Ls)
+    return centers, amps, Ls, rendered
+
+
+def densify_fit(target, K, stage_steps=None, scales=(1.0, 2.0, 3.5, 6.0), stats=None):
+    """COARSE-TO-FINE anisotropic splat fit (C1) -- 3D-Gaussian-Splatting densification, from scratch. Instead of
+    placing all K isotropic splats at once and running ONE joint gradient fit (`aniso_fit`), grow the set in
+    STAGES: place a fraction of the splats on the current RESIDUAL (matching pursuit, coarse scales first), then
+    jointly optimise everything so far, then place more splats where the re-optimised reconstruction still errs,
+    and optimise again. `stage_steps` can force one Adam schedule; otherwise the measured default schedules below
+    are tried. Returns (splats, rendered); pass stats={} to read the selected schedule and candidate losses.
+
+    WHY THIS BEATS THE ONE-SHOT (measured): the staged placement is a far better WARM START for the final joint
+    fit -- it lands in a better basin of the non-convex loss. A SINGLE Adam schedule is itself version/architecture
+    sensitive: tiny reduction-order changes can send a non-convex fit into another basin. The default therefore
+    runs three fixed, deterministic schedules, refits each candidate's amplitudes by linear least squares (which
+    cannot worsen its MSE), MEASURES reconstruction MSE on the caller's actual target, and returns the best. Pass an
+    explicit `stage_steps` tuple to pay for exactly one schedule. This is selection by the stated objective, not a
+    platform guess. It costs more total compute -- the trade is compute for a basin the one-shot cannot otherwise
+    find.
+
+    KEPT SCOPE: still the from-scratch core of 3DGS (no tile rasteriser, no view-dependent colour, no GPU); and
+    the win is on MULTI-SCALE content -- on a single-scale field the one-shot is already near-optimal and the
+    extra rounds mostly buy little."""
+    target = np.asarray(target, float)
+    if stage_steps is None:
+        schedules = _DENSIFY_DEFAULT_SCHEDULES
+    else:
+        schedules = (tuple(int(x) for x in stage_steps),)
+    if any(not schedule or any(steps < 0 for steps in schedule) for schedule in schedules):
+        raise ValueError("stage_steps must be a non-empty sequence of non-negative step counts")
+
+    best = None
+    candidate_mse = []
+    for schedule in schedules:
+        centers, amps, Ls, rendered = _densify_once(target, K, schedule, scales)
+        loss = float(((rendered - target) ** 2).mean())
+        candidate_mse.append(loss)
+        if best is None or loss < best[0]:                            # first schedule wins an exact tie
+            best = (loss, schedule, centers, amps, Ls, rendered)
+    loss, selected, centers, amps, Ls, rendered = best
     if stats is not None:
-        stats["stages"] = stages
+        stats["stages"] = len(selected)
+        stats["candidates"] = len(schedules)
+        stats["stage_steps"] = selected
+        stats["candidate_mse"] = candidate_mse
+        stats["mse"] = loss
     splats = [(centers[k].copy(), float(amps[k]), Ls[k].copy()) for k in range(len(amps))]
     return splats, rendered
 
@@ -631,8 +684,8 @@ def _c1_selftest():
     one = mse(aniso_fit(T, 12, steps=210)[1])
     st = {}
     cf = mse(densify_fit(T, 12, stats=st)[1])
-    assert st["stages"] == 3, st
-    assert cf < one * 0.5, (cf, one)            # densify reaches a markedly better optimum (measured ~100x here)
+    assert st["stages"] == 3 and st["candidates"] == 3, st
+    assert cf < one * 0.5, (cf, one)            # densify reaches a markedly better measured optimum
 
 
 def _c3_selftest():

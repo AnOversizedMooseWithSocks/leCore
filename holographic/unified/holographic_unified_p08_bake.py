@@ -1191,22 +1191,22 @@ class _UnifiedPart08:
                                      early_stop=early_stop, stats=stats)
         return rendered if denoise else (splats, rendered)
 
-    def splat_densify(self, field, k=12, stage_steps=(80, 120, 300), denoise=False, stats=None):
+    def splat_densify(self, field, k=12, stage_steps=None, denoise=False, stats=None):
         """Fit an n-D field with K ANISOTROPIC Gaussian splats COARSE-TO-FINE (C1) -- 3D-Gaussian-Splatting
         densification, from scratch (holographic_splat.densify_fit). Rather than placing all K splats at once and
         running one joint gradient fit (`splat_aniso`), grow the set in stages: place a fraction on the current
         residual (coarse scales first), jointly optimise, then place more where the re-optimised reconstruction
-        still errs, and optimise again. `stage_steps` is the Adam steps per stage (the last should be long enough
-        to fully converge the whole set). Returns (splats, rendered); denoise=True returns just the rendered
-        field; pass stats={} to read stats['stages'].
+        still errs, and optimise again. By default three deterministic stage schedules are measured and the lowest
+        actual reconstruction MSE wins; pass one `stage_steps` tuple to run only that schedule. Each candidate ends
+        with a convex least-squares amplitude refit, which cannot worsen it. Returns (splats, rendered);
+        denoise=True returns just the rendered field; pass stats={} to read the selected schedule and losses.
 
         WHY USE THIS over splat_aniso (measured): the staged placement is a far better WARM START for the final
-        joint fit, landing in a better basin of the non-convex loss. On a multi-scale target (a broad blob + small
-        sharp details) it reaches MSE the one-shot CANNOT reach at any step count (~1e-6 vs ~1e-3, where the
-        one-shot then DIVERGES past ~300 steps) -- directly addressing splat_aniso's local-optimum kept negative
-        (its result 'depends on the isotropic warm start'; a staged warm start is a much better one). The trade is
-        more total compute (several optimisation rounds); the win is on MULTI-SCALE content -- on a single-scale
-        field the one-shot is already near-optimal."""
+        joint fit, landing in a better basin of the non-convex loss. On the pinned multi-scale fixture (a broad blob
+        plus small sharp details), the selected fit stays below half the MSE of the 210-step one-shot on the tested
+        NumPy generations; stats reports the actual platform result instead of promising one universal number. This
+        directly addresses splat_aniso's local-optimum kept negative. The trade is more total compute; the win is on
+        MULTI-SCALE content -- on a single-scale field the one-shot is already near-optimal."""
         from holographic.rendering.holographic_splat import densify_fit
         splats, rendered = densify_fit(np.asarray(field, float), k, stage_steps=stage_steps, stats=stats)
         return rendered if denoise else (splats, rendered)
