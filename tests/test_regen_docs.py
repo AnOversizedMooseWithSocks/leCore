@@ -30,6 +30,14 @@ sys.path.insert(0, str(ROOT / "tools"))
 import regen_docs  # noqa: E402
 
 
+def test_docgen_orders_duplicate_basenames_by_full_path():
+    """Generated references must not depend on the filesystem's directory walk order."""
+    import docgen
+    sessions = [str(p) for p in docgen.find_modules(ROOT) if p.name == "holographic_session.py"]
+    assert len(sessions) == 3
+    assert sessions == sorted(sessions)
+
+
 def _ci_gated_files():
     """The files ci.yml actually drift-gates, read from the workflow -- not from a hardcoded copy that rots."""
     ci = ROOT / ".github" / "workflows" / "ci.yml"
@@ -171,4 +179,3 @@ def test_ci_gates_run_once_and_every_shard_is_covered():
         assert used == {declared}, \
             "job %r has %d shards in the matrix but passes --num-shards %s -- part of the suite would " \
             "never run" % (name, declared, sorted(used))
-

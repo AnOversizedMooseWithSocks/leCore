@@ -34,6 +34,13 @@ def test_setup_declares_lecore_data_and_its_files():
     assert "knowledge/*" in src                                      # the dictionary glob is present
 
 
+def test_setup_ships_the_optional_c_bridge():
+    """A wheel must include the Python bridge used with an external or locally built C library."""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(here, "setup.py"), encoding="utf-8").read()
+    assert '"holographic_c"' in src
+
+
 def test_build_script_stages_the_data_package():
     """build_package.sh must copy lecore_data into the staging folder, or the wheel is built without it."""
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -13,6 +13,8 @@ holographic_vsa_complete.zip
 /build_pkg
 *.egg-info
 repo.zip
+holostuff.zip
+/metrics/
 /temp
 /current backlogs
 docs/wiring_audit_backlog.md

@@ -42,5 +42,14 @@ def test_fbm_is_the_octave_bundle():
     assert abs(manual - fb.query(p)) < 1e-12
 
 
+def test_parallel_fbm_query_many_matches_serial():
+    fb = FractalNoise(2, dim=512, bounds=[(0, 8), (0, 8)], octaves=4, gain=0.5, base_bandwidth=2.0, seed=8)
+    rng = np.random.default_rng(8)
+    pts = rng.uniform(0, 8, (128, 2))
+    serial = fb.query_many(pts, workers=1)
+    parallel = fb.query_many(pts, workers=4)
+    assert np.allclose(parallel, serial, atol=1e-12)
+
+
 def test_selftest_runs():
     _selftest()

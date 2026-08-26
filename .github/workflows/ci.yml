@@ -285,20 +285,97 @@ jobs:
   # matrix -- that is the whole tuning knob.
   # ---------------------------------------------------------------------------------------------------------
 
+  c-kernel-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      MPLBACKEND: Agg
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile, test, and benchmark the C kernel
+        run: python c/benchmarks/ci_evidence.py --output-dir c/build/ci-evidence
+
+      - name: Publish C kernel evidence summary
+        if: always()
+        run: |
+          if [ -f c/build/ci-evidence/report.md ]; then
+            cat c/build/ci-evidence/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload C kernel evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c-kernel-evidence
+          path: c/build/ci-evidence/
+
+  c-kernel-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Configure and build the C kernel with MSVC
+        run: cmake -S c -B c/build/windows -A x64
+
+      - name: Run native C tests
+        run: |
+          cmake --build c/build/windows --config Release --parallel
+          ctest --test-dir c/build/windows -C Release --output-on-failure
+
+      - name: Run the Python bridge against the Windows DLL
+        shell: pwsh
+        run: |
+          $env:HOLOSTUFF_C_LIB = (Resolve-Path "c/build/windows/Release/holoc.dll")
+          python -m pytest -q tests/test_holographic_c_backend.py tests/test_holographic_c_program.py
+
   pytest-gate:
     # ONE STABLE CHECK NAME for branch protection. A matrix job reports as "pytest (0)".."pytest (3)", so a
     # required check pinned to "pytest" would no longer match anything. This job depends on every shard and
     # on the gates, and fails if any of them did -- point branch protection at `pytest-gate`.
     if: always() && ((github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request')
-    needs: [pytest, gates]
+    needs: [pytest, gates, c-kernel-evidence, c-kernel-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any shard or gate failed
         run: |
           echo "pytest shards: ${{ needs.pytest.result }}"
           echo "gates:         ${{ needs.gates.result }}"
-          if [ "${{ needs.pytest.result }}" != "success" ] || [ "${{ needs.gates.result }}" != "success" ]; then
-            echo "::error::a test shard or a gate failed"; exit 1
+          echo "C/Linux:       ${{ needs.c-kernel-evidence.result }}"
+          echo "C/Windows:     ${{ needs.c-kernel-windows.result }}"
+          if [ "${{ needs.pytest.result }}" != "success" ] || \
+             [ "${{ needs.gates.result }}" != "success" ] || \
+             [ "${{ needs.c-kernel-evidence.result }}" != "success" ] || \
+             [ "${{ needs.c-kernel-windows.result }}" != "success" ]; then
+            echo "::error::a test shard, gate, or native C job failed"; exit 1
           fi
 
   full-suite:
@@ -355,7 +432,7 @@ jobs:
           python tools/usage_audit.py
 
       - name: Sanity-check the partition (exact cover, disjoint, deterministic)
-        run: python tools/shard_tests.py --selfcheck --num-shards 10
+        run: python tools/shard_tests.py --exclude tests/test_all_selftests.py --selfcheck --num-shards 10
 
       - name: Run shard ${{ matrix.shard }} of 10 (slow tests included, watchdog lifted)
         run: |
@@ -371,5 +448,35 @@ jobs:
           # what it did, and the test was right to fail. A LINTER THAT READS TEXT CANNOT TELL
           # DOCUMENTATION FROM CONFIGURATION, so configuration is the only thing that carries
           # numbers here.
-          SELECTED=$(python tools/shard_tests.py --shard ${{ matrix.shard }} --num-shards 10)
+          # test_all_selftests owns its own eight-process walker and runs in the dedicated job below. Nesting it
+          # inside pytest-xdist made this shard time out even though the walker finishes alone.
+          SELECTED=$(python tools/shard_tests.py --exclude tests/test_all_selftests.py --shard ${{ matrix.shard }} --num-shards 10)
           pytest -q -n auto --run-slow --durations=15 $SELECTED
+
+  module-selftests:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PYTHONHASHSEED: "0"
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run every module self-test without nested pytest workers
+        run: pytest -q --run-slow tests/test_all_selftests.py

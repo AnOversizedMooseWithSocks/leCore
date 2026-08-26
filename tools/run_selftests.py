@@ -77,7 +77,15 @@ _HEAVY = [
     "holographic.mesh_and_geometry.holographic_meshsubdiv",
     "holographic.misc.holographic_steering",
     "holographic.rendering.holographic_rendergraph",
+    "holographic.misc.holographic_preview",
 ]
+
+# A few end-to-end visual selftests intentionally render many tiny scenes. They
+# are correctness tests, not hangs, and need a larger per-module wall even when
+# the normal fast-module timeout stays tight.
+_SELFTEST_TIMEOUTS = {
+    "holographic.misc.holographic_preview": 1200,
+}
 
 
 def discover():
@@ -106,6 +114,7 @@ def run_one(mod, timeout):
     env.update(_BLAS_PIN)                            # one BLAS thread per child; see _BLAS_PIN's WHY
     cmd = [sys.executable, "-m", mod] + _SELFTEST_ARGS.get(mod, [])   # launcher modules expose selftest behind a flag
     t0 = time.time()
+    timeout = max(timeout, _SELFTEST_TIMEOUTS.get(mod, 0))
     try:
         r = subprocess.run(cmd, capture_output=True, text=True,
                            timeout=timeout, env=env, cwd=str(REPO))

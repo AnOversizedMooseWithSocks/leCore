@@ -219,6 +219,7 @@ def sdf_numba_fn(expr, variables=("x", "y", "z")):
 
 
 def _selftest():
+    _ensure_sympy()
     if not HAS_SYMPY:
         print("codegen selftest skipped (no sympy)")
         return

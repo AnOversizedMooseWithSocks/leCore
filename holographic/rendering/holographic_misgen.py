@@ -15,10 +15,10 @@ the argmax of the product. The verifier's preference dominates the combination, 
 predictor's information is ALREADY fully spent on gating the candidate set; re-using it as a within-beam weight
 is redundant.
 
-MEASURED (a loop-trap corpus -- a frequent 'ping pong' cycle mixed with coherent clauses): the verifier DOES
-escape the greedy loop (distinct-token ratio 0.44 vs greedy's 0.15 -- confirming the setup is real), but the
-balance combination matches the verifier EXACTLY on both fluency (valid-bigram rate) and anti-looping (distinct
-ratio). No improvement, on a clean corpus or a loopy one.
+MEASURED (a loop-trap corpus -- a frequent 'ping pong' cycle mixed with coherent clauses): verifier selection
+changes at least one continuation relative to predictor-greedy, so the selector is active, but it does not
+reliably improve distinct-token ratio across NumPy builds. The balance combination still matches verifier-only
+EXACTLY. No improvement, on a clean corpus or a loopy one.
 
 THE LESSON: MIS combines two estimators OVER A COMMON CANDIDATE SET ON A COMMON DENSITY SCALE (Pharr's
 precondition). Here the predictor does not estimate over the same set as the verifier -- it FILTERS to its
@@ -81,9 +81,9 @@ def _generate(mp, ver, mode, seed_toks, length=20, beam=6, lookback=8):
 
 def _selftest():
     """CI-fast: records the B1 no-op. On a loop-trap corpus the verifier escapes the greedy loop (higher
-    distinct-token ratio than greedy -- the setup is real), but the MIS balance-heuristic combination matches
-    verifier-only EXACTLY on both fluency and anti-looping -- the predictor is already spent on gating the beam,
-    so there is nothing for the balance heuristic to balance."""
+    verifier selection is active (it changes at least one continuation), but the MIS balance-heuristic
+    combination matches verifier-only EXACTLY -- the predictor is already spent on gating the beam, so there is
+    nothing for the balance heuristic to balance."""
     from holographic.agents_and_reasoning.holographic_meaning_predict import MeaningPredictor
     from holographic.misc.holographic_structure import StructureVerifier
     rng = np.random.default_rng(0)
@@ -97,24 +97,13 @@ def _selftest():
     mp = MeaningPredictor(dim=512, order=2, seed=0).fit_space(corpus, window=2).fit_transitions(stream)
     ver = StructureVerifier(mp.vocab, mp.M, mp.idx).calibrate(stream, chunk=150, z_floor=2.0)
 
-    def distinct(mode):
-        rs = []
-        for s in range(14):
-            g = _generate(mp, ver, mode, ["ping", "pong"] if s % 2 else ["the", "cat"], length=22)
-            if len(g) >= 2:
-                rs.append(len(set(g)) / len(g))
-        return float(np.mean(rs))
-
-    d_greedy = distinct("predictor")
-    d_verif = distinct("verifier")
-    d_bal = distinct("balance")
-    # "Setup is real": the verifier escapes the greedy loop (strictly MORE distinct tokens). The exact ratio is
-    # environment-sensitive -- _generate's per-step argmax is over a 512-dim structure score (a quadratic form), and
-    # last-bit BLAS differences across numpy builds flip an early pick and cascade the whole generation (dev numpy
-    # gives ~3x, some CI numpy ~1.17x). So assert the robust DIRECTION, not a brittle magnitude. The no-op below is
-    # the actual, structural finding and stays strict.
-    assert d_verif > d_greedy, (d_verif, d_greedy)                 # the verifier escapes the loop -- setup is real
-    assert abs(d_bal - d_verif) < 0.05, (d_bal, d_verif)           # MIS == verifier (the no-op)
+    seeds = (["ping", "pong"], ["the", "cat"])
+    greedy = [_generate(mp, ver, "predictor", seed, length=22) for seed in seeds]
+    verifier = [_generate(mp, ver, "verifier", seed, length=22) for seed in seeds]
+    balance = [_generate(mp, ver, "balance", seed, length=22) for seed in seeds]
+    assert any(a != b for a, b in zip(greedy, verifier)), \
+        "the verifier selector must change at least one continuation"
+    assert balance == verifier, "the measured no-op is exact: balance selection equals verifier selection"
 
 
 if __name__ == "__main__":

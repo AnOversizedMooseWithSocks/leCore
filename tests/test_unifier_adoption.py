@@ -22,7 +22,16 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "tools"))
 
-from unifiers import DEFERRED, NOT_APPLICABLE, PENDING, REGISTRY, cites, status   # noqa: E402
+from unifiers import DEFERRED, NOT_APPLICABLE, PENDING, REGISTRY, _find_modules, cites, status   # noqa: E402
+
+
+def test_duplicate_client_basenames_are_checked_deterministically():
+    """A client name can match several grouped modules; all matches must be checked in a stable order."""
+    matches = _find_modules("holographic_session", REPO)
+    assert len(matches) == 3
+    assert matches == sorted(matches)
+    key = "cachehome.MarginCache (fat margin for a drifting query)"
+    assert cites("holographic_session", key, REPO)
 
 
 def test_every_registered_client_module_exists():

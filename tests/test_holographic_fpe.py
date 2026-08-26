@@ -49,6 +49,60 @@ def test_function_localises_at_its_points():
     assert min(enc.query(f, p) for p in pts) > 3 * enc.query(f, (9.5, 9.5))
 
 
+def test_encode_many_matches_encode_and_bundle_keeps_raw_weights():
+    enc = VectorFunctionEncoder(3, dim=1024, bounds=[(-1, 1)] * 3, bandwidth=7.0, seed=4)
+    rng = np.random.default_rng(4)
+    pts = rng.uniform(-0.8, 0.8, (12, 3))
+    weights = rng.normal(size=len(pts))
+    rowwise = np.stack([enc.encode(p) for p in pts])
+    batched = enc.encode_many(pts)
+    assert np.allclose(batched, rowwise, atol=1e-12)
+    assert np.allclose(enc.bundle(pts, weights), np.sum(rowwise * weights[:, None], axis=0), atol=1e-12)
+
+
+def test_query_many_matches_query_loop():
+    enc = VectorFunctionEncoder(2, dim=1024, bounds=[(0, 10), (0, 10)], seed=5)
+    rng = np.random.default_rng(5)
+    pts = rng.uniform(0, 10, (40, 2))
+    f = enc.bundle(pts[:12], rng.normal(size=12))
+    loop = np.array([enc.query(f, p) for p in pts])
+    assert np.allclose(enc.query_many(f, pts), loop, atol=1e-12)
+
+
+def test_parallel_bundle_and_query_many_match_serial():
+    enc = VectorFunctionEncoder(2, dim=1024, bounds=[(-1, 1), (-1, 1)], seed=8, bandwidth=5.0)
+    rng = np.random.default_rng(8)
+    pts = rng.uniform(-1, 1, (192, 2))
+    weights = rng.normal(size=len(pts))
+    serial_bundle = enc.bundle(pts, weights, chunk_size=32, workers=1)
+    parallel_bundle = enc.bundle(pts, weights, chunk_size=32, workers=4)
+    assert np.allclose(parallel_bundle, serial_bundle, atol=1e-12)
+
+    queries = rng.uniform(-1, 1, (160, 2))
+    serial = enc.query_many(serial_bundle, queries, chunk_size=32, workers=1)
+    parallel = enc.query_many(serial_bundle, queries, chunk_size=32, workers=4)
+    assert np.allclose(parallel, serial, atol=1e-12)
+
+
+def test_query_grid_matches_query_many_on_cartesian_grid():
+    enc = VectorFunctionEncoder(2, dim=1024, bounds=[(-1, 1), (-2, 2)], seed=10, bandwidth=4.0)
+    rng = np.random.default_rng(10)
+    pts = rng.uniform([-1, -2], [1, 2], (32, 2))
+    f = enc.bundle(pts, rng.normal(size=len(pts)))
+    xs = np.linspace(-1, 1, 9)
+    ys = np.linspace(-2, 2, 7)
+    gx, gy = np.meshgrid(xs, ys, indexing="ij")
+    flat = np.stack([gx.ravel(), gy.ravel()], axis=1)
+    assert np.allclose(enc.query_grid(f, [xs, ys]), enc.query_many(f, flat).reshape(9, 7), atol=1e-12)
+
+
+def test_query_many_handles_1d_point_stacks():
+    enc = VectorFunctionEncoder(1, dim=512, bounds=[(0, 10)], seed=6)
+    xs = np.linspace(0, 10, 20)
+    f = enc.bundle(xs[:8], np.linspace(0.2, 1.0, 8))
+    assert np.allclose(enc.query_many(f, xs), [enc.query(f, x) for x in xs], atol=1e-12)
+
+
 def test_function_translates_under_one_binding():
     enc = VectorFunctionEncoder(2, dim=1024, bounds=[(0, 10), (0, 10)], seed=2)
     # a single atom shifts exactly...

@@ -48,8 +48,7 @@ def install(weights, cfg, record=None, payload=None, seed="leCore",
     later edit is not a guarantee, so the audit runs LAST, on the final weights.
     """
     from holographic.io_and_interop.holographic_boot import BootRecord, write_boot
-    from holographic.caching_and_storage.holographic_substrate import (
-        write_payload, capacity_bytes)
+    from holographic.caching_and_storage.holographic_substrate import add_part
 
     w = dict(weights)
     rep = {"steps": [], "seed": str(seed)}
@@ -64,12 +63,10 @@ def install(weights, cfg, record=None, payload=None, seed="leCore",
         progress("boot", brep)
 
     if payload:
-        room = capacity_bytes(w, payload_bits)
-        if len(payload) > room:
-            raise ValueError("payload %d bytes exceeds the %d-byte surface at "
-                             "%d bit(s) -- raise payload_bits or trim"
-                             % (len(payload), room, payload_bits))
-        w, prep = write_payload(w, payload, bits=payload_bits)
+        # The boot record may already occupy the same low-bit surface when it
+        # spills out of the embedding row. Add a named part so both payloads
+        # survive; write_payload() would replace the whole surface silently.
+        w, prep = add_part(w, "payload", payload, bits=payload_bits)
         rep["steps"].append(("payload", prep))
         if progress:
             progress("payload", prep)
@@ -98,7 +95,7 @@ def audit(weights, seed="leCore", boot_rate=0.01, payload=None,
     check corresponds to a defect that has actually occurred in this project."""
     from holographic.io_and_interop.holographic_boot import boot
     from holographic.caching_and_storage.holographic_substrate import (
-        read_payload, read_seeded)
+        read_parts, read_seeded)
 
     checks = []
 
@@ -129,7 +126,7 @@ def audit(weights, seed="leCore", boot_rate=0.01, payload=None,
 
     if payload is not None:
         _check("payload_round_trips",
-               lambda: (read_payload(weights, bits=payload_bits) == payload,
+               lambda: (read_parts(weights, bits=payload_bits).get("payload") == payload,
                         "%d bytes" % len(payload)),
                "checkpoints are float32; a payload that only survives float64 "
                "is not installed")

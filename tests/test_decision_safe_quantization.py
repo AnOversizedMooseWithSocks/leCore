@@ -1,8 +1,8 @@
 """Regression traps for decision-safe quantization (work plan item 1.4, Gate B).
 
 The headline is a MECHANISM, not a number: flip rate is governed by MARGIN, not by corpus size or bit
-width. Well-separated queries survive 2-bit quantization; queries midway between two documents are unsafe
-at 8. Both halves are pinned, plus the confound that makes a uint8-vs-float8 verdict impossible on the
+width. Well-separated queries survive 2-bit quantization; queries midway between two documents become unsafe
+under coarser 4-bit quantization. Both halves are pinned, plus the confound that makes a uint8-vs-float8 verdict impossible on the
 shipped index -- because the confounded numbers looked like a clean win and would have been easy to ship.
 """
 import numpy as np
@@ -45,8 +45,12 @@ def test_ambiguous_queries_collapse_the_margin(index):
     # collapse relative to ordinary queries. This is why flip rate is not predictable from N and bits.
     amb = 0.5 * (_rows(index, 200, seed=2) + _rows(index, 200, seed=3))
     normal = _rows(index, 200, seed=4)
-    r_amb = decision_flip_rate(index, amb, bits=8, mode="uniform")
-    r_norm = decision_flip_rate(index, normal, bits=8, mode="uniform")
+    # The shipped index already lies on an 8-bit grid, so a refreshed corpus can
+    # make another 8-bit pass a no-op for both groups. Four bits is the measured
+    # width where the margin mechanism remains visible on both the old and
+    # refreshed indexes, while normal queries still do not move.
+    r_amb = decision_flip_rate(index, amb, bits=4, mode="uniform")
+    r_norm = decision_flip_rate(index, normal, bits=4, mode="uniform")
     assert r_amb["margin_median"] < 0.2 * r_norm["margin_median"]
     assert r_amb["flip_rate"] > r_norm["flip_rate"]
 

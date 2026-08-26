@@ -131,16 +131,22 @@ def _selftest():
     # BATCHED LAYOUT measurably cache-resident: one batched FFT beats a Python loop of per-pair binds for a record
     m, d = 64, 1024
     keys = rng.standard_normal((m, d)); values = rng.standard_normal((m, d))
-    reps = 30
-    t0 = time.perf_counter()
-    for _ in range(reps):
-        _batched = Memory.bind_batch(keys, values)
-    t_batch = time.perf_counter() - t0
+    reps = 10
     from holographic.agents_and_reasoning.holographic_ai import bundle
-    t0 = time.perf_counter()
-    for _ in range(reps):
-        _looped = bundle(np.stack([bind(keys[i], values[i]) for i in range(m)]))
-    t_loop = time.perf_counter() - t0
+    Memory.bind_batch(keys, values)
+    bundle(np.stack([bind(keys[i], values[i]) for i in range(m)]))
+    batch_runs, loop_runs = [], []
+    for _trial in range(5):
+        t0 = time.perf_counter()
+        for _ in range(reps):
+            _batched = Memory.bind_batch(keys, values)
+        batch_runs.append(time.perf_counter() - t0)
+        t0 = time.perf_counter()
+        for _ in range(reps):
+            _looped = bundle(np.stack([bind(keys[i], values[i]) for i in range(m)]))
+        loop_runs.append(time.perf_counter() - t0)
+    t_batch = float(np.median(batch_runs))
+    t_loop = float(np.median(loop_runs))
     assert t_batch < t_loop                                       # the contiguous batched kernel is faster
     speedup = t_loop / t_batch
 

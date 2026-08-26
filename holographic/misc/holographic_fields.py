@@ -103,7 +103,8 @@ def project_divergence_free(vx, vy):
     VX = np.fft.rfft2(vx); VY = np.fft.rfft2(vy)
     dot = (kx * VX + ky * VY) / k2                      # the offending gradient component, per frequency
     VX = VX - kx * dot; VY = VY - ky * dot
-    return np.fft.irfft2(VX, s=vx.shape), np.fft.irfft2(VY, s=vx.shape)
+    return (np.fft.irfft2(VX, s=vx.shape).astype(dt_, copy=False),
+            np.fft.irfft2(VY, s=vx.shape).astype(dt_, copy=False))
 
 
 # ---------------------------------------------------------------------------

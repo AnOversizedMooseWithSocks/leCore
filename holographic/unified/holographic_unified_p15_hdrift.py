@@ -472,7 +472,7 @@ class _UnifiedPart15:
         import holographic.sampling_and_signal.holographic_driftvideo as _dv
         return _dv.train_video_drift(clips, k=k, dim=dim, seed=self.seed)
 
-    def generate_video(self, model, meta, n=2, n_frames=8, steps=60, coupling="rownorm"):
+    def generate_video(self, model, meta, n=2, n_frames=8, steps=90, coupling="rownorm"):
         """GENERATE clips: drift a keyframe-pair point, interpolate splat params across
         n_frames, render every frame -- temporal coherence by construction and MEASURED anyway
         (per-clip max frame-to-frame RMS rides in the audit; a smoothness claim without its

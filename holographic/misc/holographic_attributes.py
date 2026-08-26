@@ -59,7 +59,7 @@ def bake_to_vertices(encoder, field, sample_points):
     consistent: shared points get the same value either way (that is the resolution independence).
     """
     pts = np.atleast_2d(np.asarray(sample_points, float))
-    return np.array([sample_texture(encoder, field, pts[i]) for i in range(len(pts))])
+    return encoder.query_many(field, pts)
 
 
 # ---------------------------------------------------------------------------

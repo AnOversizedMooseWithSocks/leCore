@@ -12,7 +12,8 @@ assignment or an unused parameter emits fine but will not compile as Zig. That i
 we do not paper over it with `_ = x;` suppressions: a dead local in a kernel is a smell the compiler is right to
 name. KEPT NEGATIVE 5 (Zig) -- `-O ReleaseFast` licenses float reassociation, so it is NOT the deterministic mode;
 `run_zig` compiles `ReleaseSafe`, where zig_f64 is measured bit-identical to the Python original (same order of
-operations, same doubles -- same result as c_f64). KEPT NEGATIVE 6 (Zig) -- **std.math.pow is not libm pow**:
+operations and the same doubles). The C f64 path is checked within one ULP because its platform libm can round an
+intrinsic differently. KEPT NEGATIVE 6 (Zig) -- **std.math.pow is not libm pow**:
 measured 1-ulp disagreement (4.4e-16 abs on pow(1.3, 2.7)). zig_f64 bit-identity is a property of the BUILTIN
 intrinsics (@sqrt/@sin/...); a kernel calling pow is judged at f64-ulp tolerance, stated, not hidden.
 
@@ -21,7 +22,7 @@ original to float tolerance on the same inputs." WGSL cannot be run here -- ther
 the C dialect is compiled with `cc` and RUN, on the same 200 random inputs:
 
     dialect    max |emitted - python|      note
-    c_f64            0.0                   BIT-IDENTICAL: same order of operations, same doubles
+    c_f64       <= 1 ULP                   same expression; platform libm can differ by one ULP
     c_f32            2.866e-07             f32 arithmetic, executed
 
 KEPT NEGATIVE 1 -- **A WGSL KERNEL CANNOT BE BIT-IDENTICAL TO ITS PYTHON ORIGINAL.** WGSL's `f32` is single
@@ -467,7 +468,18 @@ def run_c(kernel, calls, dialect="c_f64", timeout=60):
     node, _fn = _as_node_and_fn(kernel)
     kernel_src = _emit_node(node, dialect)
     name = node.name
-    body = "".join('printf("%%.17g\\n", %s(%s));' % (name, ", ".join(repr(float(a)) for a in c)) for c in calls)
+    # Put inputs in volatile arrays. Direct calls with numeric literals let the
+    # compiler constant-fold the whole kernel, sometimes at a wider internal
+    # precision than the runtime operation being compared. That tested the C
+    # front-end's folder, not the emitted runtime kernel.
+    scalar = "double" if dialect == "c_f64" else "float"
+    rows = []
+    for i, call in enumerate(calls):
+        values = ", ".join(repr(float(a)) for a in call)
+        rows.append("volatile %s args_%d[] = {%s};" % (scalar, i, values))
+        rows.append('printf("%%.17g\\n", (double)%s(%s));' %
+                    (name, ", ".join("args_%d[%d]" % (i, j) for j in range(len(call)))))
+    body = "".join(rows)
     prog = "#include <stdio.h>\n#include <math.h>\n" + kernel_src + "\nint main(){ " + body + " return 0; }\n"
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -476,13 +488,15 @@ def run_c(kernel, calls, dialect="c_f64", timeout=60):
         with open(csrc, "w") as fh:
             fh.write(prog)
         try:
-            subprocess.run(["cc", csrc, "-o", exe, "-lm"], check=True, capture_output=True, timeout=timeout)
+            subprocess.run(["cc", "-ffp-contract=off", csrc, "-o", exe, "-lm"],
+                           check=True, capture_output=True, timeout=timeout)
         except FileNotFoundError:
             # Z6: no system compiler. The `ziglang` wheel ships `zig cc`, a hermetic clang -- one pip install gives
             # the C validation path on any machine. Opt-in accelerator discipline: absent BOTH, run_c raises and the
             # caller (selftest) skips LOUDLY rather than silently passing.
             import sys
-            subprocess.run([sys.executable, "-m", "ziglang", "cc", csrc, "-o", exe, "-lm"],
+            subprocess.run([sys.executable, "-m", "ziglang", "cc", "-ffp-contract=off",
+                            csrc, "-o", exe, "-lm"],
                            check=True, capture_output=True, timeout=timeout)
         out = subprocess.run([exe], check=True, capture_output=True, text=True, timeout=timeout).stdout
     return [float(x) for x in out.split()]
@@ -553,25 +567,29 @@ def validate_zig(kernel, calls, dialect="zig_f64"):
 
 def validate_c(kernel, calls, dialect="c_f64"):
     """Run the emitted C against the Python original on the same inputs. Returns
-    `{dialect, n, max_abs_diff, max_rel_diff, bit_identical}`.
+    `{dialect, n, max_abs_diff, max_rel_diff, max_ulp_diff, bit_identical}`.
 
     `kernel` is source TEXT (preferred) or a live function; from text the Python side is built by `as_python`, so
     both sides run the SAME program rather than two implementations of it. A re-typed Python reference would be a
     second implementation, and comparing two implementations tests neither.
 
-    `c_f64` comes out BIT-IDENTICAL -- same order of operations, same doubles. `c_f32` does not, and cannot: its
-    2.9e-07 IS the tolerance a WGSL port must be judged against."""
+    `c_f64` preserves the expression and is checked to ULP scale because Python's math library and the C
+    compiler's libm can round an intrinsic one ULP differently. `c_f32` does not, and cannot: its 2.9e-07 IS the
+    tolerance a WGSL port must be judged against."""
+    import math
     _node, fn = _as_node_and_fn(kernel)
     got = run_c(kernel, calls, dialect=dialect)
     want = [float(fn(*c)) for c in calls]
     diffs = [abs(g - w) for g, w in zip(got, want)]
     rels = [abs(g - w) / max(abs(w), 1e-30) for g, w in zip(got, want)]
+    ulps = [abs(g - w) / math.ulp(w) if math.isfinite(g) and math.isfinite(w) else float("inf")
+            for g, w in zip(got, want)]
     return {"dialect": dialect, "n": len(calls), "max_abs_diff": max(diffs), "max_rel_diff": max(rels),
-            "bit_identical": all(g == w for g, w in zip(got, want))}
+            "max_ulp_diff": max(ulps), "bit_identical": all(g == w for g, w in zip(got, want))}
 
 
 def _selftest():
-    """Regression trap for K8: the C dialect is compiled and RUN (bit-identical in f64, 1e-7 in f32), the WGSL is
+    """Regression trap for K8: the C dialect is compiled and RUN (one ULP in f64, 1e-7 in f32), the WGSL is
     structurally well-formed, and the emitter refuses every unresolved construct."""
     import math
 
@@ -587,7 +605,7 @@ def _selftest():
 
     # 1. THE BAR, EXECUTED: emitted C compiled with cc and run
     rep64 = validate_c(sdf_sphere, calls, "c_f64")
-    assert rep64["bit_identical"] is True and rep64["max_abs_diff"] == 0.0
+    assert rep64["max_ulp_diff"] <= 1.0, rep64
 
     # 2. KEPT NEGATIVE 1: f32 cannot be bit-identical, and its error IS the WGSL tolerance
     rep32 = validate_c(sdf_sphere, calls, "c_f32")
@@ -688,11 +706,11 @@ def _selftest():
     assert webgl2_wrap(composed) == w
 
     print("OK: holographic_emit self-test passed (the sphere SDF emitted to C and COMPILED with cc: c_f64 is "
-          "BIT-IDENTICAL to the Python original over %d inputs, c_f32 differs by %.3e -- and that number is the "
+          "within %.0f ULP of the Python original over %d inputs, c_f32 differs by %.3e -- and that number is the "
           "tolerance a WGSL port must be judged against, because WGSL is f32 and NumPy is f64. The WGSL text is "
           "structurally well-formed and shares the IR, but is NOT executed here, which is stated. The emitter "
-          "REFUSES an unannotated parameter, an unknown call, a loop, and a missing return)"
-          % (rep64["n"], rep32["max_abs_diff"]))
+          "REFUSES an unannotated parameter, an unknown call, a variable loop, and a missing return)"
+          % (rep64["max_ulp_diff"], rep64["n"], rep32["max_abs_diff"]))
 
 
 if __name__ == "__main__":

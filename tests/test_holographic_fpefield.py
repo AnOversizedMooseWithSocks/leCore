@@ -26,6 +26,13 @@ def test_surface_is_a_single_vector_with_correct_sign():
     assert float(field.value([[0.7, 0.7, 0.7]])[0]) > 0.0          # outside (within the sampled cloud)
 
 
+def test_field_value_uses_the_batched_read_semantics():
+    enc, _, _, field = _sphere_field()
+    pts = np.random.default_rng(0).uniform(-0.8, 0.8, (24, 3))
+    loop = np.array([enc.query(field.f, p) for p in pts])
+    assert np.allclose(field.value(pts), loop, atol=1e-12)
+
+
 def test_edit_is_bind_exactly():
     """The headline: translating the whole field by a SINGLE binding makes value_shifted(x) == value_orig(x - delta)
     to machine precision, and the surface's zero-crossing moves by exactly the delta."""

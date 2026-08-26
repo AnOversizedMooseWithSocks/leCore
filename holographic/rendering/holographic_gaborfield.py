@@ -350,7 +350,8 @@ def _selftest():
     x = o[None] + t[:, None] * d[None]
     om = x - mu
     f = A * np.exp(-0.5 * np.einsum("ni,ij,nj->n", om, Q, om)) * np.cos(x @ w + phi)
-    num = float(np.trapezoid(f, t))
+    _integrate = getattr(np, "trapezoid", None) or getattr(np, "trapz")
+    num = float(_integrate(f, t))
     closed = float(gabor_ray_integral(A, mu[None], Q, w[None, :], np.array([phi]), o, d)[0])
     assert abs(closed - num) < 1e-10, "closed form vs quadrature: %.2e" % abs(closed - num)
 
@@ -394,7 +395,7 @@ def _selftest():
     o5 = np.array([[0.5, 0.5, -1.0]]); d5 = np.array([[0.0, 0.0, 1.0]])
     seg = gf3.optical_depth(o5, d5, 2.0)[0]
     tq = np.linspace(0, 2.0, 100001); Pq = o5[0][None, :] + tq[:, None] * d5[0][None, :]
-    quad = float(np.trapezoid(np.clip(gf3.eval(Pq), 0, None), tq))
+    quad = float(_integrate(np.clip(gf3.eval(Pq), 0, None), tq))
     assert abs(seg - quad) < 1e-6, "finite-segment optical_depth must match quadrature (%.2e)" % abs(seg - quad)
     from holographic.rendering.holographic_cloud import single_scatter
     O5 = np.array([[0.5, 0.5, -0.5], [0.4, 0.6, -0.5]]); D5 = np.tile([0, 0, 1.0], (2, 1))

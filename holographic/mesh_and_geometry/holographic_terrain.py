@@ -49,6 +49,10 @@ class Terrain:
         """The terrain height at a single (x, y)."""
         return float(self.fbm.query(xy))
 
+    def heights(self, xy_points):
+        """Terrain heights at many (x, y) points via batched fBm reads."""
+        return self.fbm.query_many(xy_points)
+
     def heightmap(self, res):
         """A res x res array of heights over `bounds` (for measuring or rasterizing)."""
         return self.fbm.sample_grid(res)
@@ -63,12 +67,12 @@ def terrain_to_mesh(terrain, res, z_scale=1.0):
     (x0, x1), (y0, y1) = terrain.bounds
     xs = np.linspace(x0, x1, res)
     ys = np.linspace(y0, y1, res)
-    verts = []
-    uvs = []
-    for i, x in enumerate(xs):
-        for j, y in enumerate(ys):
-            verts.append([x, y, z_scale * terrain.height([x, y])])
-            uvs.append([i / (res - 1), j / (res - 1)])
+    gx, gy = np.meshgrid(xs, ys, indexing="ij")
+    xy = np.stack([gx.ravel(), gy.ravel()], axis=1)
+    heights = terrain.heightmap(res).ravel()
+    verts = np.column_stack([xy[:, 0], xy[:, 1], z_scale * heights])
+    ui, vj = np.meshgrid(np.linspace(0, 1, res), np.linspace(0, 1, res), indexing="ij")
+    uvs = np.stack([ui.ravel(), vj.ravel()], axis=1)
     faces = []
     for i in range(res - 1):
         for j in range(res - 1):
@@ -78,7 +82,7 @@ def terrain_to_mesh(terrain, res, z_scale=1.0):
             d = i * res + (j + 1)
             faces.append((a, b, c))         # two triangles per cell
             faces.append((a, c, d))
-    mesh = Mesh(np.array(verts), faces, uvs=np.array(uvs))
+    mesh = Mesh(verts, faces, uvs=uvs)
     mesh.vertex_normals(store=True)
     return mesh
 
@@ -96,7 +100,7 @@ def terrain_to_sdf(terrain, z_bounds, res=10, dim=2048, bandwidth=10.0, seed=0):
     xs = np.linspace(x0, x1, res); ys = np.linspace(y0, y1, res); zs = np.linspace(z0, z1, res)
     gx, gy, gz = np.meshgrid(xs, ys, zs, indexing="ij")
     P = np.stack([gx.ravel(), gy.ravel(), gz.ravel()], axis=1)
-    H = np.array([terrain.height([p[0], p[1]]) for p in P])
+    H = np.repeat(terrain.heightmap(res).ravel(), res)
     sdf = P[:, 2] - H                                  # z - height: + above the terrain, - below
     enc = VectorFunctionEncoder(3, dim=dim, bounds=[(x0, x1), (y0, y1), (z0, z1)],
                                 bandwidth=bandwidth, seed=seed)

@@ -79,8 +79,24 @@ def _is_stdlib(name):
     """Is this top-level package part of the standard library? Uses sys.stdlib_module_names (3.10+), the
     interpreter's own answer -- no hand-maintained list to rot. Matters because a bundler cares about PIP
     dependencies; lumping `os` and `numpy` together as 'third-party' makes the one number anyone wants unreadable."""
+    import importlib.util
+    import os
     import sys
-    return name.split(".")[0] in sys.stdlib_module_names
+    import sysconfig
+    head = name.split(".")[0]
+    names = getattr(sys, "stdlib_module_names", None)
+    if names is not None:
+        return head in names
+    # Python 3.9 fallback: built-in/frozen modules are stdlib; file-backed
+    # modules count only when they live under stdlib and outside site-packages.
+    spec = importlib.util.find_spec(head)
+    if spec is None or spec.origin is None:
+        return False
+    if spec.origin in ("built-in", "frozen"):
+        return True
+    origin = os.path.abspath(spec.origin)
+    stdlib = os.path.abspath(sysconfig.get_paths()["stdlib"])
+    return os.path.commonpath([origin, stdlib]) == stdlib and "site-packages" not in origin
 
 
 def _is_ours(name):

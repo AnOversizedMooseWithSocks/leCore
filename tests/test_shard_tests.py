@@ -38,3 +38,16 @@ def test_this_file_is_in_some_shard():
     shards, _ = shard_tests.partition(4)
     me = os.path.abspath(__file__)
     assert any(me in s for s in shards)
+
+
+def test_explicit_exclusion_is_removed_and_everything_else_is_covered():
+    """A test file may leave the matrix only when a dedicated job names it explicitly; the remaining universe
+    must still be an exact, disjoint partition."""
+    import shard_tests
+    rel = "tests/test_all_selftests.py"
+    excluded = os.path.join(_REPO, rel)
+    shards, _ = shard_tests.partition(4, exclude=[rel])
+    seen = [p for shard in shards for p in shard]
+    assert excluded not in seen
+    assert len(seen) == len(set(seen))
+    assert set(seen) == set(shard_tests.test_files([rel]))

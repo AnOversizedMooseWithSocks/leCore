@@ -105,6 +105,7 @@ def benchmark(dims=(512, 1024, 2048, 4096, 8192), batched=((256, 1024), (1000, 1
 
 
 def _selftest():
+    _ensure_pyfftw()
     import numpy as _np
     rng = _np.random.default_rng(0)
     a = rng.standard_normal(1024)
