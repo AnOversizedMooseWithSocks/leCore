@@ -1332,9 +1332,23 @@ def _sanity_check(rt, model_dir, probe=None):
     print("      sanity: perplexity %.1f on plain English (chance ~%d) -- %s"
           % (ppl, vocab, verdict))
     if verdict != "looks correct":
-        print("      ^ the weights are probably being interpreted wrongly "
-              "(layout, head counts, or a transpose). Numbers measured now "
-              "would blame the MODEL for a reading error -- run --verify.")
+        # TWO CAUSES, ONE SYMPTOM, AND THE HEURISTIC CANNOT TELL THEM APART.
+        # Perplexity near chance means either the weights are being READ wrong
+        # OR the model was never TRAINED -- a random-init fixture sits at chance
+        # by construction. On the mini-Qwen fixture this printed "LIKELY MISREAD"
+        # while the install was reading the weights perfectly.
+        # It matters because the quality gates below (router accuracy, self_write
+        # novelty, the improvement search) CANNOT PASS on weights with no learned
+        # structure. Grading them FAIL against an untrained model reads as "the
+        # installer is broken" when the truth is "this cannot be judged here".
+        print("      ^ EITHER the weights are being interpreted wrongly "
+              "(layout, head counts, a transpose) OR this checkpoint was never "
+              "trained -- a random-init fixture sits at chance by construction. "
+              "Run --verify to tell them apart.")
+        print("      ^ if it is untrained: router / self_write / improvement "
+              "measure LEARNED structure and cannot pass here. Judge those on "
+              "real weights; the structural steps (prepend, registers, ladder, "
+              "memory_index, state_track, boot_record) are still meaningful.")
     return ppl
 
 

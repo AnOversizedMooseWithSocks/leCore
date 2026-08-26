@@ -16,6 +16,14 @@ vocabulary, and bf16 on disk. Structure faithful, dimensions tiny.
 
 import json
 import os
+import sys
+
+# RUN FROM ANYWHERE. Every other tool in this directory bootstraps the repo onto
+# sys.path; this one did not, so `python3 tools/build_mini_qwen.py` -- the way
+# the docs spell it -- died with ModuleNotFoundError: No module named
+# 'holographic' before it did anything. The FIXTURE BUILDER FOR THE INSTALL TEST
+# could not be run by the person about to test an install.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 
@@ -108,11 +116,40 @@ def build(out_dir, shrink=8, vocab=2048, added=26, seed=0, layers=None,
     # a tokenizer whose ADDED TOKENS sit above the plain vocab, like the real
     # one -- this is what made "free rows" a dangerous over-count
     plain = vocab - added
+    # A VOCAB OF "tok0..tokN" ENCODES NOTHING. The fixture's added-token layout
+    # was right and its CONTENT was placeholder, so the tokenizer loaded and
+    # returned ZERO TOKENS for 20,000 characters of real text -- and install.py
+    # then reported "check tokenizer.json" as if the corpus were at fault. THE
+    # FIXTURE FOR THE INSTALL TEST COULD NOT SURVIVE AN INSTALL.
+    # Real subwords instead: bytes, then common English fragments, so a corpus
+    # of ordinary prose tokenizes to something. Still not a trained BPE -- it is
+    # a fixture -- but it exercises the ENCODE PATH the installer depends on.
+    _frag = [chr(c) for c in range(32, 127)]
+    _frag += [" the", " of", " and", " to", " a", " in", " is", " that", " it",
+              " for", " as", " with", " on", " are", " be", " this", " by",
+              " an", " or", " from", " at", " not", " but", " which", " one",
+              "ing", "ion", "ed", "er", "es", "ly", "al", "ent", "ate", "tion",
+              " model", " vector", " memory", " token", " layer", " install"]
+    _seen, _vocab = set(), {}
+    for _t in _frag:
+        if _t not in _seen:
+            _seen.add(_t)
+            _vocab[_t] = len(_vocab)
+    # pad out to the plain size with distinct byte-pairs, keeping ids dense
+    for _a in range(32, 127):
+        for _b in range(32, 127):
+            if len(_vocab) >= plain - 30:
+                break
+            _t = chr(_a) + chr(_b)
+            if _t not in _seen:
+                _seen.add(_t)
+                _vocab[_t] = len(_vocab)
+        if len(_vocab) >= plain - 30:
+            break
     with open(os.path.join(out_dir, "vocab.json"), "w") as f:
-        json.dump({"tok%d" % i: i for i in range(plain - 30)}, f)
+        json.dump(_vocab, f)
     with open(os.path.join(out_dir, "tokenizer.json"), "w") as f:
-        json.dump({"model": {"vocab": {"tok%d" % i: i
-                                       for i in range(plain - 30)}},
+        json.dump({"model": {"type": "BPE", "vocab": _vocab, "merges": []},
                    "added_tokens": [{"id": plain - 30 + j,
                                      "content": "<extra%d>" % j}
                                     for j in range(30)]}, f)

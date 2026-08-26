@@ -71,3 +71,45 @@ def test_learned_energy_faculty_through_mind():
     cb = clean[:64]                                                            # fixed soft energy cleanup over stored samples
     soft = np.mean([rel(dense_cleanup(nte[i], cb, beta=25.0, steps=3), cte[i]) for i in range(len(nte))])
     assert ep < soft, f"learned energy should beat the fixed soft cleanup on a continuous manifold, got ep={ep:.3f} soft={soft:.3f}"
+
+
+def test_import_does_not_treat_a_blank_local_answer_as_a_conflict(tmp_path):
+    """**Sharing knowledge fails if "I don't know" counts as disagreement.**
+
+    memory_import tested `q in mine`, which is TRUE for a question this memory holds
+    a BLANK for -- an abstention that reached the taught store. Incoming knowledge
+    was then flagged as a conflict and, under the default on_conflict="flag",
+    SILENTLY NOT IMPORTED.
+    MEASURED on a real bundle: 8 conflicts reported, FOUR against questions that
+    answered T4 with answer='' locally. Half the shared knowledge was withheld for
+    disagreeing with nothing. After: imported 11 -> 15, conflicts 8 -> 4, and the
+    withheld facts answer T0.
+    GENUINE conflicts must still be respected, so this asserts both directions."""
+    import lecore
+
+    src = lecore.UnifiedMind(dim=128, seed=0)
+    src.teach("shared fact alpha", "alpha is the answer")
+    src.teach("shared fact beta", "beta is the answer")
+    pack = str(tmp_path / "bundle.lecorepack")
+    rep = src.memory_export(pack, query="shared fact")
+    assert rep["exported"] >= 2, rep
+
+    # a receiver that knows NEITHER question must import both, not flag them
+    dst = lecore.UnifiedMind(dim=128, seed=0)
+    dst.ask("shared fact alpha")            # provokes any abstention caching
+    dst.ask("shared fact alpha")
+    got = dst.memory_import(pack)
+    blank = [c for c in (got.get("conflicts") or [])
+             if not str(c.get("mine", "")).strip()]
+    assert not blank, (
+        "an empty local answer was reported as a conflict: %r" % blank)
+    assert dst.ask("shared fact alpha").get("answer"), "the fact was not imported"
+
+    # a REAL disagreement must still be flagged and must not overwrite by default
+    other = lecore.UnifiedMind(dim=128, seed=0)
+    other.teach("shared fact alpha", "MY OWN different answer")
+    rep2 = other.memory_import(pack)
+    assert any(c["q"].startswith("shared fact alpha")
+               for c in (rep2.get("conflicts") or [])), rep2
+    assert "MY OWN" in str(other.ask("shared fact alpha").get("answer")), \
+        "on_conflict='flag' must keep the local answer"

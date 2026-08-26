@@ -30,6 +30,25 @@ sees a consistent model.
 import numpy as np
 
 
+
+def _layer_prefix(weights, layer):
+    """The `...layers.N.linear_attn.` prefix THIS checkpoint actually uses.
+
+    Qwen3.5 nests the decoder under `model.language_model.layers.N.` while older
+    checkpoints use `model.layers.N.`; a hardcoded guess silently matches nothing
+    and every caller then skips every layer while reporting success. Returns the
+    first prefix that resolves, falling back to the classic name so behaviour is
+    unchanged on checkpoints that always worked."""
+    for stem in ("model.language_model.layers.%d.linear_attn.",
+                 "model.layers.%d.linear_attn.",
+                 "language_model.layers.%d.linear_attn.",
+                 "layers.%d.linear_attn."):
+        pre = stem % int(layer)
+        if pre + "A_log" in weights:
+            return pre
+    return "model.layers.%d.linear_attn." % int(layer)
+
+
 def grow_channel(weights, cfg, a_log=-4.0, gain=0.0, layers=None, seed=0):
     """Add one key-head group of persistent holographic memory per layer.
 
@@ -46,7 +65,17 @@ def grow_channel(weights, cfg, a_log=-4.0, gain=0.0, layers=None, seed=0):
     rng = np.random.default_rng(int(seed))
     grown = []
     for L in range(int(c["n_layers"])):
-        pre = "model.layers.%d.linear_attn." % L
+        # THE LAYER PREFIX IS NOT UNIVERSAL. This hardcoded "model.layers.N."
+        # and Qwen3.5 ships its decoder under "model.language_model.layers.N."
+        # (the multimodal layout, with a vision tower beside it). Every lookup
+        # missed, `if pre + "A_log" not in w: continue` skipped EVERY LAYER, and
+        # the function returned reporting success having touched NOTHING -- while
+        # still incrementing linear_num_key_heads in the config.
+        # SO THE LADDER WAS A NO-OP THAT CORRUPTED THE CONFIG: 0 tensors changed
+        # at any gain, Kh 16 -> 20 after four rungs, and the crash surfaced two
+        # modules later in the runtime's reshape. Discover the prefix from the
+        # weights instead of asserting it.
+        pre = _layer_prefix(w, L)
         if pre + "A_log" not in w:
             continue
 
@@ -132,6 +161,36 @@ def grow_channel(weights, cfg, a_log=-4.0, gain=0.0, layers=None, seed=0):
 
     c["linear_num_key_heads"] = Kh + 1
     c["linear_num_value_heads"] = Vh + r
+    # THE SAME POSTCONDITION, AT THE PER-RUNG LEVEL -- and it catches a bug the
+    # 1:1 fixture could not show. Real Qwen3.5 runs GROUPED VALUE ATTENTION:
+    # linear_num_value_heads=32 against linear_num_key_heads=16, so r = Vh/Kh = 2.
+    # At r=1 this widens in_proj_qkvz correctly (1088 rows, runtime wants 1088).
+    # AT r=2 IT WIDENS TO 1120 AND THE RUNTIME WANTS 1632 -- the widening does
+    # not scale the value half by r. That is the SHIPPING configuration, and the
+    # fixture's 1:1 heads hid it completely.
+    # Left as a REFUSAL rather than a silent correction: getting the row layout
+    # wrong writes garbage into q/k/v/z at every layer, and a wrong install that
+    # runs is worse than one that stops.
+    _kh = int(c.get("linear_num_key_heads", 0))
+    _vh = int(c.get("linear_num_value_heads", 0))
+    if _kh:
+        _r = max(1, _vh // _kh)
+        _need = _kh * (2 * int(c["linear_key_head_dim"])
+                       + 2 * _r * int(c["linear_value_head_dim"]))
+        _bad = [k for k, v in w.items()
+                if "linear_attn.in_proj_qkvz" in k
+                and np.asarray(v).ndim == 2 and np.asarray(v).shape[0] != _need]
+        if _bad:
+            raise ValueError(
+                "grow_channel left in_proj_qkvz at %d rows but the runtime needs "
+                "%d (Kh=%d, dk=%d, Vh=%d, dv=%d, r=Vh/Kh=%d). The widening does "
+                "not scale the value half by r, so this is correct at r=1 and "
+                "wrong at the r=2 grouped-value layout real Qwen3.5 ships. "
+                "(first: %s)"
+                % (int(np.asarray(w[_bad[0]]).shape[0]), _need, _kh,
+                   int(c["linear_key_head_dim"]), _vh,
+                   int(c["linear_value_head_dim"]), _r, _bad[0]))
+
     return w, c, {"layers": grown, "a_log": float(a_log), "gain": float(gain),
                   "new_value_heads": r, "off_by_default": gain == 0.0}
 
@@ -160,6 +219,39 @@ def autoscale_memory(weights, cfg, target_tokens=4096, scales=4, gain=0.05,
 
     The rungs come from a_log_for(), so asking for 8k of context sets the
     exponents arithmetically rather than by taste."""
+    # POSTCONDITION: IF THE HEAD COUNT MOVES, THE TENSORS MUST MOVE WITH IT.
+    # This raised linear_num_key_heads from 16 to 20 (four extra rungs) and
+    # widened NO tensor -- every in_proj_qkvz stayed at 1024 rows when the
+    # runtime then needs Kh*(2*dk + 2*r*dv) = 1280. The install did not fail
+    # here; it failed two modules later inside the forward pass, as
+    #     cannot reshape array of size 65536 into shape (64,20,64)
+    # which names two numbers and no tensor, and cost a full sweep to trace.
+    # A CONFIG THAT PROMISES MORE HEADS THAN THE WEIGHTS CARRY IS A LIE THE
+    # RUNTIME DISCOVERS. Check it where it is created.
+    def _check_heads(_w, _c_in, _c_out):
+        _kh_in = int(_c_in.get("linear_num_key_heads", 0))
+        _kh_out = int(_c_out.get("linear_num_key_heads", 0))
+        if _kh_out == _kh_in:
+            return
+        _dk = int(_c_out["linear_key_head_dim"])
+        _dv = int(_c_out["linear_value_head_dim"])
+        _vh = int(_c_out["linear_num_value_heads"])
+        _r = max(1, _vh // max(1, _kh_out))
+        _need = _kh_out * (2 * _dk + 2 * _r * _dv)
+        _bad = [k for k, v in _w.items()
+                if "linear_attn.in_proj_qkvz" in k
+                and np.asarray(v).ndim == 2 and np.asarray(v).shape[0] != _need]
+        if _bad:
+            raise ValueError(
+                "autoscale_memory raised linear_num_key_heads %d -> %d but %d "
+                "in_proj_qkvz tensor(s) still have %d rows, not the %d the "
+                "runtime will demand. Either widen the projections or keep the "
+                "extra rungs as a_log values on the existing heads -- the "
+                "config must not promise heads the weights do not carry. "
+                "(first: %s)"
+                % (_kh_in, _kh_out, len(_bad),
+                   int(np.asarray(_w[_bad[0]]).shape[0]), _need, _bad[0]))
+
     n = max(1, int(scales))
     lo, hi = float(shortest), float(max(shortest * 2, target_tokens))
     rungs = [lo * (hi / lo) ** (i / max(n - 1, 1)) for i in range(n)]
@@ -170,6 +262,7 @@ def autoscale_memory(weights, cfg, target_tokens=4096, scales=4, gain=0.05,
         w, c, rep = grow_channel(w, c, a_log=a, gain=gain)
         installed.append({"half_life_tokens": round(D, 1), "a_log": round(a, 3),
                           "layers": len(rep["layers"])})
+    _check_heads(w, cfg, c)
     return w, c, {"rungs": installed, "target_tokens": int(target_tokens),
                   "gain": float(gain)}
 

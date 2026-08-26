@@ -85,6 +85,31 @@ def antiperiodic_fraction(signal):
     diagnostic for "does this pattern belong on a Mobius strip rather than a circle?".
     """
     x = np.asarray(signal, float)
+    _NAME = "antiperiodic_fraction"
+    # A DIAGNOSTIC MUST NOT RETURN NaN. This is a number a caller BRANCHES ON,
+    # and a NaN compares False to every threshold -- so a poisoned input reads
+    # as "ordinary periodic" and the caller proceeds on a measurement that was
+    # never made. The doctrine is already on record in the declare ladder:
+    # "a NaN must never pass a gate". Applied where the number is PRODUCED.
+    # AND THE EMPTY CASE, which the `x.size and` above SKIPPED BY CONSTRUCTION.
+    # I wrote that guard last sweep to stop a NaN reading as 0.0, and left the
+    # hole immediately beside it: an EMPTY signal returns 0.0 too, and 0.0 is
+    # the real answer for "ordinary periodic". Fewer than two samples cannot be
+    # split into two halves at all, so there is nothing to measure.
+    # A GUARD THAT STARTS WITH `if x.size and` IS A GUARD THAT EXEMPTS THE
+    # EMPTIEST INPUT FROM THE CHECK.
+    if x.size < 2:
+        raise ValueError(
+            "%s needs at least 2 samples (got %d): the measurement splits the "
+            "signal into two halves, and 0.0 -- the value returned for an empty "
+            "input -- is also the real answer for 'ordinary periodic'."
+            % (_NAME, int(x.size)))
+    if not np.all(np.isfinite(x)):
+        raise ValueError(
+            "antiperiodic_fraction needs a finite signal: %d of %d samples are NaN or inf. A NaN "
+            "diagnostic reads as 0.0 at every threshold -- a measurement that "
+            "was never made, wearing a real-looking answer."
+            % (int((~np.isfinite(x)).sum()), int(x.size)))
     n = len(x) // 2
     a, b = x[:n], x[n:2 * n]
     anti = (a - b) / 2.0
@@ -97,6 +122,31 @@ def antiperiodic_split(signal):
     """Return (periodic_component, antiperiodic_component) of the first two periods of `signal`.
     The antiperiodic component is the part a circular representation cannot hold."""
     x = np.asarray(signal, float)
+    _NAME = "antiperiodic_split"
+    # A DIAGNOSTIC MUST NOT RETURN NaN. This is a number a caller BRANCHES ON,
+    # and a NaN compares False to every threshold -- so a poisoned input reads
+    # as "ordinary periodic" and the caller proceeds on a measurement that was
+    # never made. The doctrine is already on record in the declare ladder:
+    # "a NaN must never pass a gate". Applied where the number is PRODUCED.
+    # AND THE EMPTY CASE, which the `x.size and` above SKIPPED BY CONSTRUCTION.
+    # I wrote that guard last sweep to stop a NaN reading as 0.0, and left the
+    # hole immediately beside it: an EMPTY signal returns 0.0 too, and 0.0 is
+    # the real answer for "ordinary periodic". Fewer than two samples cannot be
+    # split into two halves at all, so there is nothing to measure.
+    # A GUARD THAT STARTS WITH `if x.size and` IS A GUARD THAT EXEMPTS THE
+    # EMPTIEST INPUT FROM THE CHECK.
+    if x.size < 2:
+        raise ValueError(
+            "%s needs at least 2 samples (got %d): the measurement splits the "
+            "signal into two halves, and 0.0 -- the value returned for an empty "
+            "input -- is also the real answer for 'ordinary periodic'."
+            % (_NAME, int(x.size)))
+    if not np.all(np.isfinite(x)):
+        raise ValueError(
+            "antiperiodic_split needs a finite signal: %d of %d samples are NaN or inf. A NaN "
+            "diagnostic reads as 0.0 at every threshold -- a measurement that "
+            "was never made, wearing a real-looking answer."
+            % (int((~np.isfinite(x)).sum()), int(x.size)))
     n = len(x) // 2
     a, b = x[:n], x[n:2 * n]
     return (a + b) / 2.0, (a - b) / 2.0

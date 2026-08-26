@@ -553,12 +553,15 @@ class _UnifiedPart03:
         return Ladder(self, max_rung=max_rung, z_min=z_min, seed=seed, null_check=null_check,
                       n_null=n_null, cache=cache).resolve(request, args=args, dry_run=dry_run)
 
-    def declare_explain(self, request, args=None, max_rung=5, z_min=0.8, seed=0):
+    def declare_explain(self, request, args=None, max_rung=5, z_min=0.8, seed=0, null_check=False, n_null=64):
         """DRY RUN of declare(): report which rung WOULD answer and why the ones above would decline,
         without executing anything (holographic_declare). Same descent log, no side effects -- for asking
         'what will this do, and on what evidence' before letting it do it."""
         from holographic.agents_and_reasoning.holographic_declare import Ladder
-        return Ladder(self, max_rung=max_rung, z_min=z_min, seed=seed).resolve(
+        # FORWARD null_check: it CALIBRATES the ladder's bare 0.85 coherence
+        # gate against a permutation null instead of trusting it, and the
+        # faculty used to drop it. See NOTES, dropped-parameter sweep.
+        return Ladder(self, max_rung=max_rung, z_min=z_min, seed=seed, null_check=null_check, n_null=n_null).resolve(
             request, args=args, dry_run=True)
 
     def declares(self, fn):
@@ -719,13 +722,17 @@ class _UnifiedPart03:
         from holographic.sampling_and_signal.holographic_ntt import ntt_unbind
         return ntt_unbind(c, a)
 
-    def ntt_convolve(self, a, b):
+    def ntt_convolve(self, a, b, check_bound=True):
         """EXACT cyclic convolution of two integer vectors (holographic_ntt) -- the exact-arithmetic
         replacement for irfft(rfft(a)*rfft(b)), bit-identical on every machine. ntt_bind is this under its
         VSA name; use this spelling for signal work. Verified against a naive O(n^2) integer convolution with
         array_equal, never a tolerance. Raises if the modulus cannot hold the signed result."""
         from holographic.sampling_and_signal.holographic_ntt import ntt_convolve
-        return ntt_convolve(a, b)
+        # check_bound verifies 2*n*max|a|*max|b| < q -- that the true signed result
+        # FITS THE MODULUS. Its default is to RAISE, and the delegate says "pass
+        # check_bound=False only if you have done the arithmetic yourself".
+        # Dropping it meant nobody could turn the proof off OR reason about it.
+        return ntt_convolve(a, b, check_bound=check_bound)
 
     def ntt_measure_vs_fft(self, sizes=(256, 512, 1024, 2048, 4096), repeats=40, seed=0):
         """MEASURE exact NTT convolution against the float FFT convolution bind() actually uses
@@ -1269,11 +1276,6 @@ class _UnifiedPart03:
         from holographic.misc.holographic_recipe import StructureRecipe
         return StructureRecipe(self.dim, self.seed)
 
-    def realize(self, recipe):
-        """Replay a StructureRecipe to its output vector(s) -- the single realize path for any structure."""
-        outs = recipe.outputs()
-        return outs[0] if len(outs) == 1 else outs
-
     def validate_recipe(self, recipe):
         """Check a StructureRecipe is WELL-FORMED (holographic_recipeops, ARCH-1) -- the recipe's is_manifold():
         every op references only EARLIER existing results (a DAG, no forward/dangling/out-of-range refs), raw
@@ -1460,11 +1462,6 @@ class _UnifiedPart03:
         """A 4x4 translation transform for scene_graph nodes (holographic_scenegraph)."""
         from holographic.scene_and_pipeline.holographic_scenegraph import translation
         return translation(t)
-
-    def scene_scaling(self, s):
-        """A 4x4 scale transform (uniform scalar or per-axis length-3) for scene_graph nodes."""
-        from holographic.scene_and_pipeline.holographic_scenegraph import scaling
-        return scaling(s)
 
     def scene_rotation(self, axis, angle):
         """A 4x4 rotation transform (Rodrigues, radians) for scene_graph nodes."""
@@ -1843,27 +1840,6 @@ class _UnifiedPart03:
             forest = HoloForest(V.shape[1], seed=self.seed).build(V)   # index over the vectors' own dim
         return graph_denoise(vectors, k=k, method=method, lam=lam, mu=mu, iters=iters, forest=forest)
 
-    def manifold_chart(self, vectors, dim=2, method="isomap", k=10, sublinear=False):
-        """Flatten a CURVED hypervector manifold to a low-D coordinate chart -- the nonlinear extension of
-        `consolidation` (which is a LINEAR SVD chart and folds a curved manifold) (reverse-transfer RT-II1; UV
-        unwrapping mapped onto the concept/state manifold). `method='isomap'` is the geodesic-preserving chart
-        (recommended -- unrolls the manifold); 'spectral' is Laplacian Eigenmaps (local cluster structure, the
-        graph-spectral cousin of `graph_denoise`'s Laplacian). Use it to SEE the concept space / a brain's state
-        space, or as a tighter storage coordinate where the manifold is curved.
-
-        Measured: on a swiss roll lifted into high-D, Isomap beats the linear SVD chart on geodesic-distance
-        fidelity and class separation 5/5 seeds. SCOPE: a chart assumes disk topology -- a CLOSED manifold (a
-        torus, genus>0) needs a cut first (the `topology` faculty finds the genus); a flat manifold is better
-        served by the linear `consolidation`. `sublinear=True` finds neighbours via a HoloForest (RT-III1's
-        index reuse); the geodesic step is otherwise O(N^3), so subsample for very large sets."""
-        from holographic.misc.holographic_chart import manifold_chart
-        forest = None
-        if sublinear:
-            from holographic.misc.holographic_tree import HoloForest
-            V = np.asarray(vectors, float)
-            forest = HoloForest(V.shape[1], seed=self.seed).build(V)
-        return manifold_chart(vectors, dim=dim, method=method, k=k, forest=forest)
-
     def denoise(self, x, method="auto", samples=None, codebook=None, sigma=None,
                 rank=8, beta=25.0, steps=3, forward=None, adjoint=None, mu=0.5, pnp_steps=30,
                 readout="softmax", points=None, spectral_k=10, spectral_nbasis=12, check_manifold=False):
@@ -1996,3 +1972,24 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+    def manifold_chart(self, vectors, dim=2, method="isomap", k=10, sublinear=False):
+        """Flatten a CURVED hypervector manifold to a low-D coordinate chart -- the nonlinear extension of
+        `consolidation` (which is a LINEAR SVD chart and folds a curved manifold) (reverse-transfer RT-II1; UV
+        unwrapping mapped onto the concept/state manifold). `method='isomap'` is the geodesic-preserving chart
+        (recommended -- unrolls the manifold); 'spectral' is Laplacian Eigenmaps (local cluster structure, the
+        graph-spectral cousin of `graph_denoise`'s Laplacian). Use it to SEE the concept space / a brain's state
+        space, or as a tighter storage coordinate where the manifold is curved.
+
+        Measured: on a swiss roll lifted into high-D, Isomap beats the linear SVD chart on geodesic-distance
+        fidelity and class separation 5/5 seeds. SCOPE: a chart assumes disk topology -- a CLOSED manifold (a
+        torus, genus>0) needs a cut first (the `topology` faculty finds the genus); a flat manifold is better
+        served by the linear `consolidation`. `sublinear=True` finds neighbours via a HoloForest (RT-III1's
+        index reuse); the geodesic step is otherwise O(N^3), so subsample for very large sets."""
+        from holographic.misc.holographic_chart import manifold_chart
+        forest = None
+        if sublinear:
+            from holographic.misc.holographic_tree import HoloForest
+            V = np.asarray(vectors, float)
+            forest = HoloForest(V.shape[1], seed=self.seed).build(V)
+        return manifold_chart(vectors, dim=dim, method=method, k=k, forest=forest)

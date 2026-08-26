@@ -32,13 +32,20 @@ class _UnifiedPart08:
         from holographic.caching_and_storage.holographic_cachehome import Cache
         return Cache.bake(evaluator, vary=vary, **kw)
 
-    def build_index(self, vectors, labels=None, method="auto", seed=0):
+    def build_index(self, vectors, labels=None, method="auto", seed=0,
+                    recall_budget=None, **kw):
         """CONSOLIDATION INDEX (H1) -- build a nearest-neighbour index over `vectors` with one interface: an exact
         cosine scan for small sets, the sub-linear RP-forest for large ones (chosen by `method='auto'`). The result
         has `.nearest(query, k, abstain=alpha)` -> [(label_or_index, score), ...], with an optional calibrated
         abstain. See holographic_index.Index."""
         from holographic.caching_and_storage.holographic_index import Index
-        return Index(vectors, labels=labels, method=method, seed=seed)
+        # FORWARD THE REST. The wrapper took (vectors, labels, method, seed) and
+        # dropped everything else Index accepts -- so method="ladder" was
+        # UNREACHABLE FROM THE MIND, because the ladder needs recall_budget and
+        # there was no way to pass one. Same shape as register_capability's
+        # dropped consumes/produces: an arm that exists in the module and cannot
+        # be selected through the faculty does not exist.
+        return Index(vectors, labels=labels, method=method, seed=seed, recall_budget=recall_budget, **kw)
 
     def find_capability(self, problem, k=3, accepts=None, produces=None):
         """CONSOLIDATION CATALOG (C1) -- 'search before you build'. Describe a problem in plain English and get the

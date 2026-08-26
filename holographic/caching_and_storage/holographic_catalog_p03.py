@@ -69,7 +69,7 @@ def register_p03(c):
                           "z=-0.9/-1.5; real queries route from z=+1.0; z_min=0.8 sits in the measured gap. "
                           "KEPT NEG: a genuine query in words the catalog never uses abstains CORRECTLY -- "
                           "the fix is aliases.",
-                          example="r=mind.route_or_abstain('counter traders'); "
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=mind.route_or_abstain('counter traders'); "
                                   "print(r['abstain'], round(r['z'],1))",
                           native=True, aliases=("no capability matches", "router that can abstain",
                                                 "abstain instead of misroute",
@@ -99,7 +99,7 @@ def register_p03(c):
                           "level-blindness kept negative). Feeds causal_index recall (5/5 right-regime "
                           "neighbours, fitless) and signal_program screening. D4 note travels with it: "
                           "calibration on these states is NOT exploitability.",
-                          example="import numpy as np; e=mind.wave_state_encoder(256, window=8); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); e=mind.wave_state_encoder(256, window=8); "
                                   "o=np.arange(8.0); w=np.stack([o,o+1,o-1,o+0.5],axis=1); "
                                   "v=e.encode(w); print(round(float(v@v),2))",
                           native=True, aliases=("wave state encoder carrier and envelope",
@@ -120,7 +120,7 @@ def register_p03(c):
                           "when 'residual' carries the majority (a sliver removed, the rest renamed). Energy "
                           "shares NOT normalised: correlated components stay visibly double-counted. Dogfood "
                           "on record: smooth_sharp_split certifies COMPLETE + NON-CAUSAL.",
-                          example="import numpy as np; x=np.cumsum(np.random.default_rng(0).standard_normal(200)); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); x=np.cumsum(np.random.default_rng(0).standard_normal(200)); "
                                   "f=lambda s:{'mean':np.full(s.size,0.0),'residual':s}; "
                                   "print(mind.decomposition_contract(f,x)['residual_dominates'])",
                           native=True, aliases=("decomposition contract components plus residual",
@@ -142,7 +142,7 @@ def register_p03(c):
                           "mind.paper_book(lag, cost): forward harness with gates attached -- actionable "
                           "entries (lag>=1), costs, gate masks, sleeves with the MEDIAN beside the mean. "
                           "Proves plumbing, not edge.",
-                          example="import numpy as np; r=np.random.default_rng(0); p=list(np.cumsum(r.standard_normal(3000))); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); p=list(np.cumsum(r.standard_normal(3000))); "
                                   "res=mind.resting_fill_sim(p, list(range(50,2900,40)), delta=1.0); "
                                   "print(round(res['selection_cost'],2), round(res['fill_rate'],2))",
                           native=True, aliases=("resting order adverse selection",
@@ -184,7 +184,7 @@ def register_p03(c):
                           "(<0.25, measured); concentration trades lobe width for dip. decode() = circular "
                           "cleanup. Audit carried: SignedEncoder REFUTED -- signed is native to "
                           "ScalarEncoder.",
-                          example="import numpy as np; e=mind.circular_encoder(512, period=24.0); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); e=mind.circular_encoder(512, period=24.0); "
                                   "a=e.encode(23.9); b=e.encode(0.1); c=e.encode(12.0); "
                                   "print(round(float(a@b),2), round(float(a@c),2), round(e.decode(a),1))",
                           native=True, aliases=("circular variable encoding", "encode an angle as a vector",
@@ -203,7 +203,7 @@ def register_p03(c):
                           "together). CONDITION: per mask, loss share vs occupancy under the circular-shift "
                           "null -- 10% occupancy carrying 60% of loss is the gate candidate. Loss-side "
                           "sibling of the insurance profile. Too few losses -> a scarcity report, not a z.",
-                          example="import numpy as np; r=np.random.default_rng(0); v=r.normal(0.05,1,500); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); v=r.normal(0.05,1,500); "
                                   "storm=np.zeros(500,bool); storm[100:160]=True; v[storm]-=1.5; "
                                   "rep=mind.loss_space_report(v, conditions={'storm': storm}); "
                                   "print(rep['verdict'][:60])",
@@ -226,7 +226,7 @@ def register_p03(c):
                           "its achievable value: calibration is a REPAIR, resolution is the SOURCE. KEPT NEG: "
                           "value_best is an argmax over taus (a selection) -- pick tau elsewhere or ledger "
                           "the sweep.",
-                          example="import numpy as np; r=np.random.default_rng(0); p=np.clip(r.beta(2,2,500),.01,.99); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); p=np.clip(r.beta(2,2,500),.01,.99); "
                                   "y=(r.random(500)<p).astype(float); "
                                   "res=mind.calibration_vs_value(p,y,cost=0.05); "
                                   "print(res['verdicts']['value'][:40], round(res['resolution'],3))",
@@ -250,7 +250,7 @@ def register_p03(c):
                           "shared_fraction. KEPT NEGATIVE, measured: overlap makes the naive across-events t "
                           "false-alarm at 28% on noise where this null holds 2% -- never rebuild a CI from "
                           "mean_path. Edges dropped, never truncated.",
-                          example="import numpy as np; r=np.random.default_rng(0); y=r.standard_normal(3000); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); y=r.standard_normal(3000); "
                                   "ev=list(range(100,2900,140)); "
                                   "[y.__setitem__(slice(e+1,e+9), y[e+1:e+9]+0.4) for e in ev]; "
                                   "res=mind.event_study(y, ev, horizon=15); print(round(res['forward']['z'],1), res['n_events'])",
@@ -273,7 +273,7 @@ def register_p03(c):
                           "the O(n) cumsum path is opt-in (1e8 offset: fast std off by 8.75 vs 2e-9 exact). "
                           "mind.streaming_stats(window) is the live sibling: Welford + monotonic deques; "
                           "warm_start replays history through the same push() so live == backtest tail.",
-                          example="import numpy as np; x=np.cumsum(np.random.default_rng(0).standard_normal(100)); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); x=np.cumsum(np.random.default_rng(0).standard_normal(100)); "
                                   "r=mind.rolling_stats(x, 20, stats=('std','drawdown')); "
                                   "s=mind.streaming_stats(window=20).warm_start(x); "
                                   "print(round(r['std'][-1],6), round(s.std(),6))",
@@ -301,7 +301,7 @@ def register_p03(c):
                           "trailing EMA/z pass at exactly 0.0. Pair with mind.target_shift_probe (signal "
                           "AHEAD of its target or explaining it? catches the contemporaneous leak; a "
                           "symmetric centred-label leak belongs to the lint). Necessary, not sufficient.",
-                          example="import numpy as np; x=np.cumsum(np.random.default_rng(0).standard_normal(300)); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); x=np.cumsum(np.random.default_rng(0).standard_normal(300)); "
                                   "bad=lambda s:(s-s.mean())/s.std(); good=lambda s: np.concatenate([[0.],np.diff(s)]); "
                                   "print(mind.lookahead_lint(bad,x)['causal'], mind.lookahead_lint(good,x)['causal'])",
                           native=True, aliases=("look ahead linter", "detect future leakage in an evaluation",
@@ -322,7 +322,7 @@ def register_p03(c):
                           "The demo it pins: naive full-history k=1 history-matching finds the query ITSELF -- "
                           "perfect fake skill, 100% inflation -- while this index cannot self-match at any k. "
                           "Exact scan only: a similarity forest cannot be time-masked (declared, not a TODO).",
-                          example="ci=mind.causal_index(); import numpy as np; r=np.random.default_rng(0); "
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); ci=mind.causal_index(); import numpy as np; r=np.random.default_rng(0); "
                                   "[ci.append(r.standard_normal(8), float(t)) for t in range(50)]; "
                                   "print(ci.nearest(r.standard_normal(8), 25.0, k=2), ci.nearest(r.standard_normal(8), 0.0))",
                           native=True, aliases=("nearest neighbour search restricted to the past",
@@ -343,7 +343,7 @@ def register_p03(c):
                           "64-look book). Append-only: withdraw() needs a reason and keeps the multiplicity "
                           "cost; re-runs are sequences. to_json/from_json persist behind a hashlib chain that "
                           "refuses a book with a deleted row. KEPT NEGATIVE: covers only what is written down.",
-                          example="led=mind.selection_ledger(); led.record('effect_a', 0.0004, family='routing'); "
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); led=mind.selection_ledger(); led.record('effect_a', 0.0004, family='routing'); "
                                   "[led.record('sweep_%d'%i, 0.5, family='sweep') for i in range(60)]; "
                                   "r=led.correct(alpha=0.05); print(r['family_size'], r['n_passed'])",
                           native=True, aliases=("ledger of every test I ran",
@@ -367,7 +367,7 @@ def register_p03(c):
                           "an empty pass-list is a RESULT with a reason. build_committee seats a VETO "
                           "COMMITTEE (one rep per cluster, tie=abstain) that must pass ITS OWN gates on "
                           "fresh data; empty committee refuses. program_vector fingerprints the battery.",
-                          example="import numpy as np; r=np.random.default_rng(0); s=r.standard_normal((600,4)); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); s=r.standard_normal((600,4)); "
                                   "t=np.sign(s[:,0])*np.abs(r.standard_normal(600)); p=mind.signal_program(seed=0); "
                                   "p.add_check('real', lambda x: x[:,0]); p.add_check('noise', lambda x: x[:,1]); "
                                   "rep=p.screen(s,t); print(rep['passed'], rep['clusters'], rep['refused'])",
@@ -393,7 +393,7 @@ def register_p03(c):
                           "added nothing (|z|<1.4). duration_stats + duration_resolution_check read the "
                           "channel honestly. KEPT NEGATIVES: events completing inside one sample are counted "
                           "(skipped_gap), never fabricated; a quantised duration grid makes stats artifacts.",
-                          example="import numpy as np; x=np.cumsum(np.random.default_rng(0).normal(size=800)); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); x=np.cumsum(np.random.default_rng(0).normal(size=800)); "
                                   "ev=mind.reclock(x, step=2.0); "
                                   "print(ev['n_events'], mind.duration_resolution_check(ev)['ok'])",
                           native=True, aliases=("reclock a series by movement", "renko bricks",
@@ -412,7 +412,7 @@ def register_p03(c):
                           "structureless input. null_mean far from 0.5 IS the manufacturing, on display. KEPT "
                           "NEGATIVE: price clock only -- an external axis has no defined reordering under a "
                           "surrogate.",
-                          example="import numpy as np; x=np.random.default_rng(0).normal(size=2000); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); x=np.random.default_rng(0).normal(size=2000); "
                                   "r=mind.null_persistence(x, step=2.0, n=60); "
                                   "print(round(r['observed'],2), round(r['null_mean'],2), round(r['z'],1))",
                           native=True, aliases=("brick direction persistence", "renko momentum test",
@@ -430,7 +430,7 @@ def register_p03(c):
                           "into direction). envelope_vs_constant is the mandatory baseline; verdict names "
                           "the case: BOTH-COVER (ratio is the score), CONSTANT-FAILED (drift broke the "
                           "constant band; ratio is not a ranking), CONDITIONAL-FAILED (do not quote).",
-                          example="import numpy as np; r=np.random.default_rng(0); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); "
                                   "s=np.where((np.arange(2000)//250)%2==0,0.5,2.5); x=np.cumsum(r.normal(size=2000)*s); "
                                   "e=mind.envelope_forecast(x); print(round(e['coverage_holdout'],2), round(e['upper'],2))",
                           native=True, aliases=("predict the size of the next move not its direction",
@@ -448,7 +448,7 @@ def register_p03(c):
                           "useless where needed. `degraded` flags a side missing nominal by >2 binomial SEs; "
                           "thin sides report reliable=False. KEPT NEGATIVE: the split-conformal guarantee IS "
                           "marginal; closing a gap needs per-condition calibration -- this says whether.",
-                          example="import numpy as np; r=np.random.default_rng(0); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); "
                                   "storm=np.arange(400)%4==0; test=np.where(storm,r.normal(0,3,400),r.normal(0,1,400)); "
                                   "print(mind.conditional_coverage(r.normal(0,1,400), test, storm, alphas=(0.1,))[0]['degraded'])",
                           native=True, aliases=("conformal coverage by regime", "coverage report conditional",
@@ -466,7 +466,7 @@ def register_p03(c):
                           "after the event is known vs the idealized emission price; latency_cost = the move "
                           "that completed during recognition (canon: z=+20 at emission, NEGATIVE actionable). "
                           "lag=0 refused by name; sweep the lag before believing an edge.",
-                          example="import numpy as np; r=np.random.default_rng(0); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); "
                                   "v=r.normal(10,20,300); print(mind.net_of_costs(v,cost=17)['survives'], "
                                   "round(mind.net_of_costs(v,cost=17)['breakeven_cost'],1))",
                           native=True, aliases=("does the signal survive costs", "gross edge versus transaction costs",
@@ -488,7 +488,7 @@ def register_p03(c):
                           "kernel lifts / embeddings / foreign clocks, weeks spent, ~0 new bits). KEPT "
                           "NEGATIVES: novel may be noise (owes a target-side test in bits); exotic transforms "
                           "outside the basis can slip. mind.holdout_auc pairs separability the same way.",
-                          example="import numpy as np; r=np.random.default_rng(0); F=r.normal(size=(500,3)); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); F=r.normal(size=(500,3)); "
                                   "g=np.tanh(F[:,0]+0.3*F[:,1]*F[:,2]); "
                                   "print(mind.dpi_guard(F,g)['verdict'][:9], round(mind.dpi_guard(F,g)['r2_holdout'],2))",
                           native=True, aliases=("is this feature actually new information",
@@ -508,7 +508,7 @@ def register_p03(c):
                           "mean/t/p plus `passed`. Measured: killed four artifacts every other readout called "
                           "real, no false rejections. KEPT NEGATIVE: normal-approx p (small_sample flags halves "
                           "under 30); replication is not multiplicity control -- run bh_fdr too.",
-                          example="import numpy as np; r=np.random.default_rng(0); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); "
                                   "v=np.concatenate([r.normal(0.6,1,200), r.normal(0.0,1,200)]); "
                                   "print(mind.split_half(v)['passed'], mind.split_half(v,mode='interleave')['passed'])",
                           native=True, aliases=("split half replication", "does it hold in both halves",
@@ -525,7 +525,7 @@ def register_p03(c):
                           "the data. Measured: a re-clock made 72% direction persistence on noise (referenced "
                           "truth: ANTI-persistence z=-7.3); a denoiser made 83.6%. Returns z/p/collapsed. KEPT "
                           "NEGATIVE: a bad surrogate gives a healthy-looking meaningless z.",
-                          example="import numpy as np; d=np.random.default_rng(0).normal(size=1500); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); d=np.random.default_rng(0).normal(size=1500); "
                                   "pipe=lambda v:(lambda s: float(np.mean(s[1:]==s[:-1])))(np.sign(np.convolve(v,np.ones(9)/9,'valid'))); "
                                   "r=mind.pipeline_null(pipe,d,surrogate='iid_shuffle',n=50); "
                                   "print(round(r['observed'],3), round(r['z'],2))",
@@ -545,7 +545,7 @@ def register_p03(c):
                           "means extend the grid upward, not that the floor is zero. KEPT NEGATIVE: a floor is "
                           "conditional on the injection SHAPE, and the surrogate must DESTROY the statistic "
                           "tested or the curve degenerates to 0/1.",
-                          example="import numpy as np, math; x=np.random.default_rng(0).normal(size=400); "
+                          example="import numpy as np, math; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); x=np.random.default_rng(0).normal(size=400); "
                                   "t=lambda v: math.erfc(abs(v.mean()/(v.std(ddof=1)/math.sqrt(len(v))))/math.sqrt(2)); "
                                   "print(mind.min_detectable_effect(t,x,[0.05,0.1,0.15,0.2],surrogate='sign_flip',n_trials=40)['floor'])",
                           native=True, aliases=("smallest effect I could detect", "detection floor",
@@ -562,7 +562,7 @@ def register_p03(c):
                           "Defaults to the IAAFT null because a merely SKEWED series scores big against a "
                           "phase-randomised one. KEPT NEGATIVE, measured: a global arrow can be entirely DIFFUSE "
                           "(z=+6.4, all three localisation attempts null) -- never a per-window signal.",
-                          example="import numpy as np; saw=(np.arange(1024)%50)/50.0; "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); saw=(np.arange(1024)%50)/50.0; "
                                   "print(round(mind.trev(saw),2), round(mind.time_arrow_test(saw,n_surrogates=40)['z'],1))",
                           native=True, aliases=("time reversal asymmetry", "is this series time reversible",
                                                 "arrow of time in a signal", "trev statistic",
@@ -578,7 +578,7 @@ def register_p03(c):
                           "destroys longer (the SCALE dial). iid_shuffle destroys all order. surrogate_ensemble "
                           "streams n of any kind, memory-light. KEPT NEGATIVES: sign_flip is degenerate for "
                           "magnitude-only statistics; block joins are fake jumps; block=1 IS iid_shuffle.",
-                          example="import numpy as np; x=np.cumsum(np.random.default_rng(0).normal(size=512)); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); x=np.cumsum(np.random.default_rng(0).normal(size=512)); "
                                   "s=mind.sign_flip(x); "
                                   "print(bool(np.array_equal(np.abs(s),np.abs(x))), "
                                   "len(list(mind.surrogate_ensemble(x,'block_shuffle',n=3,block=64))))",
@@ -597,7 +597,7 @@ def register_p03(c):
                           "with & | ~. Measured: a storm gate (trailing drawdown <=-15% OR vol top decile) left "
                           "entries untouched and moved a book +22% -> +58.4% CAGR, maxDD -85.9% -> -47.1%. KEPT "
                           "NEGATIVE: a hand-written mask claiming causal=True is a claim, not a proof.",
-                          example="import numpy as np, lecore; "
+                          example="import numpy as np, lecore; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); "
                                   "path=np.cumsum(np.random.default_rng(0).normal(size=300))+100.0; "
                                   "g=mind.causal_gate('drawdown',window=60,threshold=-0.05,compare='le'); "
                                   "print(mind.causal_gate('std',window=60,threshold=1.0,compare='ge',"
@@ -618,7 +618,7 @@ def register_p03(c):
                           "caller is how look-ahead gets in). Measured reframe: an unconditional average hid two "
                           "OPPOSITE behaviours -- trending when calm, whipsawing in storms, flat on average. "
                           "Condition a weak effect before abandoning it, a strong one before believing it.",
-                          example="import numpy as np; r=np.random.default_rng(0); v=r.normal(0,1,600); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); v=r.normal(0,1,600); "
                                   "f=np.zeros(600,bool); f[::3]=True; v[f]+=1.0; "
                                   "c=mind.conditional(v,f); print(round(c['diff'],2), c['separates'], c['causal'])",
                           native=True, aliases=("compare the statistic inside and outside a condition",
@@ -637,7 +637,7 @@ def register_p03(c):
                           "sign test, and `concentration` (share carried by one regime). Measured: a real effect "
                           "was positive in 3 of 4 regimes; an artifact with a comparable headline had >0.9 in "
                           "one. KEPT NEGATIVE: the sign test is underpowered -- read concentration first.",
-                          example="import numpy as np; r=np.random.default_rng(0); v=r.normal(0,1,600); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); v=r.normal(0,1,600); "
                                   "v[150:300]+=1.2; a=mind.across_regimes(v,segments=[(0,150),(150,300),"
                                   "(300,450),(450,600)]); print(round(a['concentration'],2), a['consistent'])",
                           native=True, aliases=("measure the effect separately in each regime",
@@ -655,7 +655,7 @@ def register_p03(c):
                           "and filtering them removed ~90% of the edge while every other statistic improved. "
                           "Applies to code and caches: pruning a rarely-hit path deletes error-path insurance. "
                           "KEPT NEGATIVE: a premium in a rare state also signals too little data there.",
-                          example="import numpy as np; f=np.zeros(500,bool); f[:60]=True; "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); f=np.zeros(500,bool); f[:60]=True; "
                                   "pay=np.where(f,0.36,0.04); i=mind.insurance_profile(pay,f); "
                                   "print(i['premium_inside'], round(i['lift'],1))",
                           native=True, aliases=("is the payoff concentrated in the times I would exclude",
@@ -787,7 +787,7 @@ def register_p03(c):
                           "distinctively nearer than the runner-up). Reports basin coverage, dead zones, and the "
                           "honest verdict structure_over_null (coverage minus a band-limited random null, Quilez "
                           "Q8 -- high-D noise has basins too). For capacity forecasting and codebook placement",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "A=np.random.default_rng(0).standard_normal((8,128)); "
                           "print(m.chart_space(A)['structure_over_null'])",
                           native=True, aliases=("map the basins of an alphabet", "atlas of a vector space",
@@ -959,7 +959,7 @@ def register_p03(c):
     c.register_capability("Text generation", "GENERATE text on the VSA substrate: generate(seed, length, temperature) "
                           "and generate_structured (n-gram / beam), respond(query) for a query-conditioned reply, and "
                           "answer(question) / answer_text for factual answers. The engine's write-a-sentence faculties",
-                          example="mind.generate('once upon a', length=120); mind.respond('describe a sunset'); mind.answer('what is gravity')",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.generate('once upon a', length=120); mind.respond('describe a sunset'); mind.answer('what is gravity')",
                           native=True, aliases=("generate text", "write", "write a sentence", "write a paragraph",
                                                 "text generation", "compose text", "respond", "reply", "answer a question",
                                                 "language model", "ngram", "sentence", "paragraph", "prose"))
@@ -967,7 +967,7 @@ def register_p03(c):
                           "learn_dictionary / learn_vocabulary (word meaning from definitions -- including the vendored "
                           "dictionary), learn_encyclopedia (relational facts + is_a taxonomy), and learn_sequence "
                           "(order/grammar). The language CURRICULUM -- definitions, then facts, then reading",
-                          example="mind.read(corpus); mind.learn_vocabulary(words); mind.learn_encyclopedia(facts)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.read(corpus); mind.learn_vocabulary(words); mind.learn_encyclopedia(facts)",
                           native=True, aliases=("learn from a corpus", "train on text", "teach the model", "teach language",
                                                 "language curriculum", "learn word meanings", "learn a language",
                                                 "read a corpus", "curriculum", "learn vocabulary", "learn facts"))
@@ -1028,7 +1028,7 @@ def register_p03(c):
                           "previews what it understood + 'did you mean?' hints, scene.options() lists what you can say, "
                           "scene.feedback holds the last report. Or wrap an existing object list with "
                           "mind.semantic_scene(objects). Controlled vocabulary, deterministic",
-                          example="scene = mind.build_scene('a red metal sphere and a blue box'); scene.name('the sphere','hero'); scene.adjust('give hero a rusty texture'); scene.render()",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); scene = mind.build_scene('a red metal sphere and a blue box'); scene.name('the sphere','hero'); scene.adjust('give hero a rusty texture'); scene.render()",
                           native=True, module="scene_semantic", aliases=("scene", "describe a scene", "build a scene", "make a scene", "create a scene",
                                                 # the ROUTER probe, verbatim: "Describe to document" (J-3D) shares this
                                                 # entry's whole vocabulary, and route() decays as the catalog grows, so
@@ -1064,7 +1064,7 @@ def register_p03(c):
                           "compose time -- a surface material only binds to a mesh, a volumetric one (fog/smoke/fire) "
                           "only to a volume -- so a bad binding is refused, not rendered wrong. flatten_surface() "
                           "materialises the surface instances into one mesh. CMP4",
-                          example="chair = mind.shared_definition('chair', box_mesh, 'metal'); s = mind.instanced_scene(); s.place(chair); chair.set_material('glass')",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); chair = mind.shared_definition('chair', box_mesh, 'metal'); s = mind.instanced_scene(); s.place(chair); chair.set_material('glass')",
                           native=True, aliases=("instance", "instancing", "shared definition", "edit once", "duplicate",
                                                 "reuse geometry", "material binding", "surface volume", "place copies",
                                                 "instanced scene", "clone", "prototype"))
@@ -1074,7 +1074,7 @@ def register_p03(c):
                           "share topics -- a swarm coordinates across the farm the way it does in one process. Received "
                           "messages deliver local-only (no loops), dedup by a global id, and a dead peer never blocks "
                           "the publisher. Bound a mailbox (open_mailbox(maxlen=)) for backpressure at high fan-out.",
-                          example="bus = mind.distributed_bus(['hostB:9100'], token, node_id='A'); from holographic.scene_and_pipeline.holographic_distbus import serve_bus  # serve_bus(bus, port=9100, token) in a thread",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); bus = mind.distributed_bus(['hostB:9100'], token, node_id='A'); from holographic.scene_and_pipeline.holographic_distbus import serve_bus  # serve_bus(bus, port=9100, token) in a thread",
                           native=True, aliases=("distributed bus", "messaging across machines", "cross-node messaging",
                                                 "swarm messaging", "pub sub across nodes", "fan out", "gossip",
                                                 "backpressure", "bounded mailbox", "flow control", "topic across nodes"))
@@ -1084,7 +1084,7 @@ def register_p03(c):
                           "round-robins the buckets across nodes and reassembles by the monoid reducer -- the same call "
                           "as the local pool, just cross-machine. SAFE by design: workers run BY NAME (a node only runs "
                           "workers it registered), so no code crosses the wire, only data. stdlib sockets/JSON.",
-                          example="from holographic.scene_and_pipeline.holographic_coordinator import serve_worker; serve_worker(port=9000, workers={'sum': fn})  # then: mind.farm(['host:9000'], token).run(buckets, 'sum', None, reduce_sum)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.scene_and_pipeline.holographic_coordinator import serve_worker; serve_worker(port=9000, workers={'sum': fn})  # then: mind.farm(['host:9000'], token).run(buckets, 'sum', None, reduce_sum)",
                           native=True, aliases=("farm", "distributed compute", "cluster", "network farm", "worker node",
                                                 "serve_worker", "render farm", "compute across machines", "scale out",
                                                 "map reduce", "parallel across nodes", "grid"))
@@ -1092,7 +1092,7 @@ def register_p03(c):
                           "a heartbeat, registry.list(kind=, workspace=) discovers who's here, is_online() checks one, "
                           "and an actor that stops heart-beating for `ttl` seconds drops out on its own. Rides the "
                           "mind's bus so presence is visible across nodes -- how a swarm or farm finds its peers.",
-                          example="mind.registry.announce(agent); online = mind.registry.list(kind='agent'); mind.registry.is_online(agent)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.registry.announce(agent); online = mind.registry.list(kind='agent'); mind.registry.is_online(agent)",
                           native=True, aliases=("registry", "presence", "who is online", "heartbeat", "discover peers",
                                                 "list agents", "who's connected", "liveness", "roster", "online users",
                                                 "node discovery"))
@@ -1102,7 +1102,7 @@ def register_p03(c):
                           "nothing but its own namespace) and writes only its own. mind.grant / mind.revoke share and "
                           "un-share namespaces later; holographic_access.require_readable is the read chokepoint (the "
                           "symmetric twin of the DB's write-only-your-own rule).",
-                          example="code = mind.invite(kind='user', grants={'read':['lab/scene']}); g = mind.admit(code, 'visitor'); mind.grant(g, read='lab/notes')",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); code = mind.invite(kind='user', grants={'read':['lab/scene']}); g = mind.admit(code, 'visitor'); mind.grant(g, read='lab/notes')",
                           native=True, aliases=("access control", "invite", "grant", "revoke", "permissions", "share",
                                                 "who can read", "admit a guest", "invite token", "selective sharing",
                                                 "read grant", "guest access", "authorize", "private namespace"))
@@ -1113,7 +1113,7 @@ def register_p03(c):
                           "then mind.apply(merged, world=name) writes the agreed edits back. Closes the "
                           "fork -> edit -> merge -> apply loop; a world is a seed + deltas, so only the sparse changes "
                           "travel.",
-                          example="f = mind.workspace.fork('lab'); f.set('sky', v); mind.apply(mind.merge_forks([f.delta, other])['merged'], world='lab')",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); f = mind.workspace.fork('lab'); f.set('sky', v); mind.apply(mind.merge_forks([f.delta, other])['merged'], world='lab')",
                           native=True, aliases=("workspace", "fork a world", "apply changes", "copy on write", "world",
                                                 "shared world", "checkout", "branch a world", "edit in isolation",
                                                 "commit changes", "seed and deltas", "single-player fork"))
@@ -1124,7 +1124,7 @@ def register_p03(c):
                           "conflict for a human, 'auto' keeps only agreements, 'left'/'right'/callable resolve it. "
                           "Because a world is a seed + deltas, forking to single-player and merging back is cheap. "
                           "Returns {merged, conflicts}.",
-                          example="res = mind.merge_forks([mine, theirs], policy='select'); apply(res['merged']); resolve(res['conflicts'])",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); res = mind.merge_forks([mine, theirs], policy='select'); apply(res['merged']); resolve(res['conflicts'])",
                           native=True, aliases=("merge", "merge forks", "fork and merge", "reconcile", "combine worlds",
                                                 "resolve conflicts", "multiplayer merge", "branch and merge", "diff merge",
                                                 "three-way merge", "collaborative edit", "sync changes"))
@@ -1135,7 +1135,7 @@ def register_p03(c):
                           "contributes (holographic_provenance.source_role / from_external), and an optional private "
                           "learning overlay. Signals and state can't cross between principals -- so multiplayer "
                           "workspaces, agent swarms, and guest peer nodes are the same isolation solved once.",
-                          example="alice = mind.principal('alice', workspace='lab', kind='user'); alice.send(mind.bus(), to='bob', payload={...}); alice.poll(mind.bus())",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); alice = mind.principal('alice', workspace='lab', kind='user'); alice.send(mind.bus(), to='bob', payload={...}); alice.poll(mind.bus())",
                           native=True, aliases=("principal", "identity", "scoped identity", "per-agent state",
                                                 "per-user namespace", "multiplayer", "multi-user", "swarm", "agent isolation",
                                                 "inbox", "directed message", "provenance", "source role", "who sent this",
@@ -1156,7 +1156,7 @@ def register_p03(c):
                           "register_command / register_remote add remote tools, shell programs (allowlisted), and whole "
                           "remote nodes so a planner can chain local faculties, remote tools, LLMs, and commands "
                           "uniformly.",
-                          example="for t in remote_tools('http://host:8080', token='x'): mind.orchestrator.register(t)  # + mind.attach_llm(llm); mind.orchestrator.register_command('ffmpeg', ['ffmpeg','-i','{}'])",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); for t in remote_tools('http://host:8080', token='x'): mind.orchestrator.register(t)  # + mind.attach_llm(llm); mind.orchestrator.register_command('ffmpeg', ['ffmpeg','-i','{}'])",
                           native=True, aliases=("call a tool", "remote tools", "use an llm", "attach llm", "orchestrator",
                                                 "register a tool", "run a command", "shell command tool", "call another node",
                                                 "chain tools", "planner", "toolclient", "peer node", "federation"))
@@ -1167,7 +1167,7 @@ def register_p03(c):
                           "b_exclusive -- the emergent signal in NEITHER alone), and divergence_score (the angular "
                           "disagreement). Act on the agreement when divergence is small; surface the conflict when "
                           "it's large. classify() names the disagreement type; blend() mixes them by the channels.",
-                          example="ch = mind.opponent_channels(est_a, est_b); if ch['divergence_score'] < 0.2: use ch['agreement']  # else look at ch['purple']",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); ch = mind.opponent_channels(est_a, est_b); if ch['divergence_score'] < 0.2: use ch['agreement']  # else look at ch['purple']",
                           native=True, aliases=("opponent", "agreement", "disagreement", "purple channel", "consensus",
                                                 "vote", "voting", "ensemble", "combine estimates", "reconcile",
                                                 "who agrees", "divergence", "abstain when uncertain", "cross-check",
@@ -1177,7 +1177,7 @@ def register_p03(c):
                           "human), adjusts, and retries until it's good enough or the budget runs out -- the pipeline "
                           "middle that sits leCore between a big compute and a checker. Returns {result, score, "
                           "accepted, tries}. The callable-critic sibling of project_onto_constraints.",
-                          example="log = mind.refine(produce=lambda: gen(), critique=score, adjust=lambda r,s: tweak(r,s), accept=0.9)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); log = mind.refine(produce=lambda: gen(), critique=score, adjust=lambda r,s: tweak(r,s), accept=0.9)",
                           native=True, aliases=("refine", "iterate", "produce critique adjust", "retry until good",
                                                 "optimization loop", "analysis by synthesis", "draft and revise",
                                                 "improve until accepted", "critic loop", "feedback loop"))
@@ -1216,7 +1216,7 @@ def register_p03(c):
                           "condition is R1's: no structure, no dividend, and mind.structure_score measures it first. "
                           "Note MAP binding is self-inverse, so a leaf appearing twice CANCELS -- mind.reduce_involution "
                           "recovers the minimal multiset, and a non-minimal expansion can still be exactly correct.",
-                          example="vocab = mind.map_codebook(16, 2048, seed=0); cb = mind.learn_chunks(stream); "
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); vocab = mind.map_codebook(16, 2048, seed=0); cb = mind.learn_chunks(stream); "
                                   "res = mind.recursive_factor(mind.map_bind(*[vocab[i] for i in [0,1,2,3,4,5,6,7]]), cb, vocab)",
                           native=True, aliases=("recursive factoring", "factor using learned chunks", "chunk levels",
                                                 "factor a deep composite that the resonator cannot handle",
@@ -1308,7 +1308,7 @@ def register_p03(c):
                           "doing all the work. mind.exact_k_oldest takes exactly k with a stated tie-break. HONEST "
                           "SCOPE: 57.5 dB belongs to a scene with no parallax and no view-dependent shading; on a real "
                           "3-D scene the reprojection ceiling is itself ~38-41 dB, and refresh cannot beat it.",
-                          example="import numpy as np; H = W = 64; "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); H = W = 64; "
                                   "world = lambda ox: np.sin((np.arange(W)+ox)*0.11)[None,:] * np.cos(np.arange(H)*0.09)[:,None]; "
                                   "r = mind.refresh_report(lambda i: world(i*1.7), n_frames=6, known_shift=(0.0, -1.7)); "
                                   "print(round(r['shaded_fraction'],3), round(r['psnr_mean'],1))",
@@ -1382,7 +1382,7 @@ def register_p03(c):
                           "the previous frame and a per-pixel AGE buffer; `scene_version` keys the mesh/splat/lod "
                           "payloads so a camera move rebuilds no geometry; the RenderSession's fat-margin preview "
                           "cache is deliberately left alone, because serving a stale frame into a warp compounds.",
-                          example="import numpy as np; from holographic.mesh_and_geometry.holographic_surface import SurfaceMaterial; "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.mesh_and_geometry.holographic_surface import SurfaceMaterial; "
                                   "from holographic.rendering.holographic_render import Camera; "
                                   "from holographic.scene_and_pipeline.holographic_session import RenderSession; "
                                   "class S:\n    def eval(self, P): return np.linalg.norm(P, axis=1) - 0.9\n    def ids(self, P): return np.zeros(len(P), int)\n"
@@ -1439,25 +1439,25 @@ def register_p03(c):
                                                 "quad dominant mesh", "field aligned quad mesh", "retopologize to quads",
                                                 "convert triangles to quads", "make a quad mesh"))
     c.register_capability("Guided cross field (deformation/curvature-aware field design)", "A GUIDED 4-RoSy field (field DESIGN): m.guided_cross_field(mesh, guide_dirs, guide_weight) solves the smoothest field that ALSO aligns to a prescribed per-face direction. guide_dirs is (n_faces,3): a non-zero row guides that face (length=confidence), zero row free. Soft-constrained solve (L + w)u = w c -- a linear SOLVE, not an eigenproblem; no guides == cross_field. Returns (phi, ctx) for quad_remesh(field=...). Makes retopo DEFORMATION-AWARE (feed strain_directions) or curvature-aware, following deliberate topology instead of only minimising distortion. Needs a CLOSED oriented manifold mesh.",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons; from holographic.mesh_and_geometry.holographic_crossfield import face_frames; tb=triangulate_ngons(box()); n,ex,ey=face_frames(np.asarray(tb.vertices,float),np.asarray(tb.faces,int)); phi,ctx=m.guided_cross_field(tb, np.cos(np.pi/8)*ex+np.sin(np.pi/8)*ey, guide_weight=12.0); round(float(np.mean(np.abs(np.cos(4*(phi-np.pi/8))))),2)",
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons; from holographic.mesh_and_geometry.holographic_crossfield import face_frames; tb=triangulate_ngons(box()); n,ex,ey=face_frames(np.asarray(tb.vertices,float),np.asarray(tb.faces,int)); phi,ctx=m.guided_cross_field(tb, np.cos(np.pi/8)*ex+np.sin(np.pi/8)*ey, guide_weight=12.0); round(float(np.mean(np.abs(np.cos(4*(phi-np.pi/8))))),2)",
                           native=True, aliases=("guided cross field", "field design", "constrain a cross field", "align a field to a direction",
                                                 "deformation aware field", "curvature aware field", "steer a cross field"))
     c.register_capability("Deformation strain directions (retopo guide)", "Per-face PRINCIPAL STRETCH direction of a deformation (rest -> deformed vertices): m.strain_directions(mesh, deformed_vertices) -- the DEFORMATION guide that makes retopo place edge loops FOLLOWING how a surface bends/stretches, which an off-the-shelf remesher cannot (no strain signal). Per triangle: deformation gradient -> right Cauchy-Green C -> max-stretch eigenvector to 3-D, SCALED by anisotropy (isotropic face -> ~0 confidence, free). Returns (n_faces,3) as guide_dirs for guided_cross_field; guiding the field to the stretch puts quad LOOPS perpendicular to it -- encircling the bend.",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons; tb=triangulate_ngons(box()); V=np.asarray(tb.vertices,float); Vs=V.copy(); Vs[:,0]=V[:,0]+0.8*V[:,1]; m.strain_directions(tb, Vs).shape",
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons; tb=triangulate_ngons(box()); V=np.asarray(tb.vertices,float); Vs=V.copy(); Vs[:,0]=V[:,0]+0.8*V[:,1]; m.strain_directions(tb, Vs).shape",
                           native=True, aliases=("deformation aware retopology", "strain directions", "principal stretch direction",
                                                 "edge loops that follow deformation", "animation aware retopo", "deformation guide for retopo",
                                                 "loops around a joint"))
     c.register_capability("Position field (IFAM 4-PoSy lattice remesh)", "IFAM POSITION FIELD (4-PoSy, Jakob et al. 2015): m.position_field(mesh, orient, edge_length) optimises a per-vertex LATTICE position aligned to the orientation field by local extrinsic smoothing -- per edge it forms q_ij, translates the neighbour by INTEGER rho-steps to line up, then averages, so neighbours differ by integer lattice steps. Regularises vertex spacing/valence (a field-aligned grid). Vertex-graph only. Returns P; position_field_regularity scores convergence (0=perfect grid). HONEST: the position FIELD only; extraction to the quad MESH (IFAM 4.4) is next, not built.",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import grid; g=grid(8,8,width=7.0,height=7.0); V=np.asarray(g.vertices,float); o=np.tile([1.,0,0],(len(V),1)); rng=np.random.default_rng(0); g.vertices=V+np.column_stack([rng.normal(0,.24,len(V)),rng.normal(0,.24,len(V)),np.zeros(len(V))]); P=m.position_field(g,o,7.0/8,iterations=20); round(m.position_field_regularity(g,P,o,7.0/8),3)",
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import grid; g=grid(8,8,width=7.0,height=7.0); V=np.asarray(g.vertices,float); o=np.tile([1.,0,0],(len(V),1)); rng=np.random.default_rng(0); g.vertices=V+np.column_stack([rng.normal(0,.24,len(V)),rng.normal(0,.24,len(V)),np.zeros(len(V))]); P=m.position_field(g,o,7.0/8,iterations=20); round(m.position_field_regularity(g,P,o,7.0/8),3)",
                           native=True, aliases=("position field", "posy field", "instant meshes position field", "field aligned lattice",
                                                 "regularise vertex spacing", "position field remesh", "ifam position field", "snap vertices to a field grid"))
     c.register_capability("Trace streamlines (field -> curves)", "Trace STREAMLINES of a per-face direction field on a triangle mesh: m.trace_streamlines(mesh, field) walks the field edge to edge until a boundary / max_steps / a loop, returning polylines. The general FIELD -> CURVES primitive, source-agnostic -- the SAME tracer serves a cross_field (retopo guides, hatching), strain_directions (deformation flow lines), an SDF gradient, or a SIMULATION velocity field (streamlines / pathlines). field is per-face angles or 3-D vectors; four_rosy=True treats it as a 4-RoSy cross (nearest-travel branch, never reverses), False for a true vector field.",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import grid; g=grid(10,10,width=5.0,height=5.0); uni=np.tile([1.,0,0],(len(g.faces),1)); lines=m.trace_streamlines(g, uni, four_rosy=False, seeds=[0,40,80]); (len(lines), max(len(L) for L in lines)>5)",
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import grid; g=grid(10,10,width=5.0,height=5.0); uni=np.tile([1.,0,0],(len(g.faces),1)); lines=m.trace_streamlines(g, uni, four_rosy=False, seeds=[0,40,80]); (len(lines), max(len(L) for L in lines)>5)",
                           native=True, aliases=("trace streamlines", "integral curves of a field", "field lines", "flow lines",
                                                 "streamlines of a velocity field", "pathlines", "hatching curves from a field",
                                                 "trace a direction field", "flow visualization", "guide curves from a cross field"))
     c.register_capability("UV / attribute transfer (texture-preserving retopo)", "TRANSFER per-vertex UVs -- or ANY per-vertex attribute (colours, weights, normals) -- onto NEW vertices by closest-point + barycentric interpolation: m.transfer_uv(source_mesh, source_uv, target_vertices) -> (attr, residual). THE step that makes retopo TEXTURE-PRESERVING: the remeshed surface lies on the original, so each new vertex takes the interpolated UV of its closest source triangle. Spatial-hash accelerated; the residual is the honest error signal. MEASURED: exact on-surface; mantis 1490 verts in 1.6s, residual mean 4e-5. KEPT NEG: wrong across UV SEAMS; seam-split not built.",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import grid; g=grid(6,6,width=6.0,height=6.0); V=np.asarray(g.vertices,float); uv=(V[:,:2]-V[:,:2].min(0))/6.0; got,res=m.transfer_uv(g, uv, np.array([[0.5,0.5,0.0]])); (np.round(got,3).tolist(), float(res[0]))",
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import grid; g=grid(6,6,width=6.0,height=6.0); V=np.asarray(g.vertices,float); uv=(V[:,:2]-V[:,:2].min(0))/6.0; got,res=m.transfer_uv(g, uv, np.array([[0.5,0.5,0.0]])); (np.round(got,3).tolist(), float(res[0]))",
                           native=True, aliases=("transfer uvs to a new mesh", "reproject uv coordinates", "texture preserving retopology",
                                                 "keep the texture after remeshing", "attribute transfer between meshes",
                                                 "closest point barycentric transfer", "bake uvs onto a retopo mesh"))

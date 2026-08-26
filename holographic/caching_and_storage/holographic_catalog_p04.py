@@ -160,7 +160,7 @@ def register_p04(c):
                           "determinism is free here). Kept negative: the f32 march is a DIFFERENT PROGRAM -- a "
                           "1-ulp hit-branch flip changes the step count, so it gets a measurement, never a "
                           "tolerance. See holographic_zigmarch.",
-                          example="print(mind.zig_march_compare(width=64, height=48))",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.zig_march_compare(width=64, height=48))",
                           native=True, aliases=("zig raymarcher", "native sphere trace", "compare two renders",
                                                 "one kernel two runtimes", "bit identical render",
                                                 "cpu shader", "native sdf render", "march an sdf natively"), semantic="simulate/run")
@@ -172,7 +172,7 @@ def register_p04(c):
                           "a named union/intersection/subtraction (C6 composition). Unmatched: 'not recognized', "
                           "never a guess. mind.register_code_idiom + register_composition_primitive grow it. See "
                           "holographic_codeverbal.",
-                          example="print(mind.explain_code('def lerp(a: float, b: float, t: float) -> float:"
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.explain_code('def lerp(a: float, b: float, t: float) -> float:"
                                   "\\n    return a + (b - a) * t\\n')['text'])",
                           native=True, aliases=("explain code", "explain what code does in english",
                                                 "summarize a function", "describe the logic flow of a program",
@@ -188,7 +188,7 @@ def register_p04(c):
                           "written C with real precedence parses too. Refusals by name outside the kernel "
                           "grammar (K10); zigv_* is derived exhaust, not parsed. dialect= on mind.explain_code "
                           "gives English for all 7 languages through ONE verbalizer (C4). See holographic_codeparse.",
-                          example="c = mind.emit_kernel('def lerp(a: float, b: float, t: float) -> float:\\n"
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); c = mind.emit_kernel('def lerp(a: float, b: float, t: float) -> float:\\n"
                                   "    return a + (b - a) * t\\n', 'c_f64'); "
                                   "print(mind.translate_kernel(c, 'c_f64', 'zig_f64'))",
                           native=True, aliases=("translate code between languages", "convert c to zig",
@@ -202,7 +202,7 @@ def register_p04(c):
                           "to any dialect. NOT free-form NL->code (out of scope): outside the vocabulary it "
                           "REFUSES BY NAME, and colour/material words are NOTED as ignored, not dropped -- an SDF "
                           "has no colour. mind.register_geometry_form grows it. See holographic_codecompose.",
-                          example="print(mind.kernel_from_description('a sphere radius 0.4 at (1, 0, 0) union a "
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.kernel_from_description('a sphere radius 0.4 at (1, 0, 0) union a "
                                   "floor at height -0.5'))",
                           native=True, aliases=("generate code from a description", "build an sdf from words",
                                                 "english to code", "describe a shape and get a kernel",
@@ -216,7 +216,7 @@ def register_p04(c):
                           "what the code does -- grammar induction from one sample is a hallucination this "
                           "refuses. Triage, not comprehension: explain_code falls back here on an unknown "
                           "dialect. See holographic_codetriage.",
-                          example="print(mind.triage_code('fn quicksort(xs: List) { let pivot = xs[0]; }', "
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.triage_code('fn quicksort(xs: List) { let pivot = xs[0]; }', "
                                   "as_text=True))",
                           native=True, aliases=("analyze code in an unknown language", "triage unfamiliar code",
                                                 "extract identifiers from source", "what language is this",
@@ -232,7 +232,7 @@ def register_p04(c):
                           "one wheel, whole toolchain; pillow [images] -- jpg/webp via mind.save_render (PNG "
                           "stays stdlib on purpose); numba [jit], cupy [gpu], sympy [symbolic], flask [ui]. "
                           "All opt-in: the engine runs and passes every test with none of them.",
-                          example="import json; print(json.dumps(mind.accelerator_report(), indent=1))",
+                          example="import json; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(json.dumps(mind.accelerator_report(), indent=1))",
                           native=True, aliases=("optional dependencies", "which accelerators are installed",
                                                 "how do i speed this up", "install zig", "enable gpu",
                                                 "what does pillow unlock", "pip extras", "accelerator status",
@@ -259,7 +259,7 @@ def register_p04(c):
                           "coordinates, so this IS a codec for large elements, unlike the same idea applied to source "
                           "code (which came out 1.12x LARGER than zlib). Per-triangle canonicalisation is a "
                           "RECOGNISER; its dividend is the dependency-keyed compute cache, not storage.",
-                          example="import numpy as np; rng = np.random.default_rng(0); base = rng.normal(size=(50,3)); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rng = np.random.default_rng(0); base = rng.normal(size=(50,3)); "
                                   "els = [base @ np.linalg.qr(rng.normal(size=(3,3)))[0].T + rng.normal(size=3) for _ in range(30)]; "
                                   "r = mind.canon_storage_report(els, 'rigid'); "
                                   "print(r['classes'], round(r['ratio'],1), r['beats_zlib'])",
@@ -298,7 +298,7 @@ def register_p04(c):
                           "`nearest_affine` deliberately does not exist, because projecting a perspective onto the "
                           "affine subgroup throws away the only thing that made it perspective. With equal depths the "
                           "affine map is exact: the ceiling only bites under perspective.",
-                          example="print(mind.affine_normality()); print(mind.texture_projection_error()); "
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.affine_normality()); print(mind.texture_projection_error()); "
                                   "from holographic.mesh_and_geometry.holographic_projectivetower import projective; "
                                   "from holographic.mesh_and_geometry.holographic_grouptower import translation; "
                                   "print('affine?', mind.is_affine_matrix(mind.compose_word([translation([0.1,0.2,0.3]), projective([0.1,0,0])])))",
@@ -355,7 +355,7 @@ def register_p04(c):
                           "TransformBank.tower_layer() says the bank IS that ideal. lecore exports TOWER, "
                           "classify_transform, commutator_table, semidirect_law, hypervector_layer, "
                           "affine_normality, is_affine and texture_projection_error at the top level.",
-                          example="import numpy as np, lecore; "
+                          example="import numpy as np, lecore; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); "
                                   "print(lecore.classify_transform(lambda x: x + np.array([0.1, 0, 0]))['name']); "
                                   "print(lecore.classify_transform(lambda x: 1.7 * x)['name']); "
                                   "print(lecore.classify_transform(lambda x: x / (1 + 0.3 * x[2]))['name']); "
@@ -391,7 +391,7 @@ def register_p04(c):
                           "across M vectors pays only 1.6x-2.3x because the transforms dominate not the loop, and the "
                           "bank costs 1.002x the bytes of its atoms -- I guessed 2x, and an rfft of a real vector is "
                           "Hermitian, so half the coefficients are never stored.",
-                          example="import numpy as np; b = mind.transform_bank(512); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); b = mind.transform_bank(512); "
                                   "[b.add_random_unitary('t%d' % i) for i in range(4)]; b.add_rotation('rot7', 7); "
                                   "v = np.random.default_rng(0).normal(size=512); "
                                   "print(np.abs(b.apply('rot7', v) - np.roll(v, 7)).max()); "
@@ -430,7 +430,7 @@ def register_p04(c):
                           "moves it. AND RECOGNITION ALONE IS NOT ENOUGH -- reusing the canonical's area directly "
                           "under `similarity` is wrong by 8.54. `max_x` finds 5 classes and still does 200 computes, "
                           "because `recompute` means there is no dividend and it says so.",
-                          example="import numpy as np; from holographic.mesh_and_geometry.holographic_equivariance import area; "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.mesh_and_geometry.holographic_equivariance import area; "
                                   "rng = np.random.default_rng(0); "
                                   "bases = [rng.normal(size=(3,3)) for _ in range(5)]; "
                                   "els = [1.5*b @ np.linalg.qr(rng.normal(size=(3,3)))[0].T + rng.normal(size=3) for b in bases for _ in range(20)]; "
@@ -467,7 +467,7 @@ def register_p04(c):
                           "UNIT: the scale lands at 3.7e-04, the SHIFT at 0.37 SAMPLES, not the 1e-4 the backlog "
                           "reports. HONEST SCOPE: 1-D. Two dimensions adds rotation and needs the log-POLAR resample "
                           "of the full Fourier-Mellin transform.",
-                          example="import numpy as np; from holographic.sampling_and_signal.holographic_registration import resample_affine; "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.sampling_and_signal.holographic_registration import resample_affine; "
                                   "x = np.linspace(0,1,2048); f = np.sin(2*np.pi*(20*x + 60*x**2)) * np.exp(-((x-0.5)**2)/0.06) + 0.5*np.sin(2*np.pi*180*x)*np.exp(-((x-0.3)**2)/0.005); "
                                   "S, T = mind.affine_compose([(1.03, 4.0), (0.98, -2.5), (1.05, 3.1)]); "
                                   "g = resample_affine(f, S, T); r = mind.recover_affine(f, g); "
@@ -519,7 +519,7 @@ def register_p04(c):
                           "the TT is only 1.8x smaller than dense; and a coarse level is the same shape SMOOTHED, not "
                           "a smaller field -- rank is not resolution, and a front end wanting fewer samples needs a "
                           "mip chain, which is a different object.",
-                          example="import numpy as np; g = np.linspace(0,1,12); X,Y,Z = np.meshgrid(g,g,g,indexing='ij'); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); g = np.linspace(0,1,12); X,Y,Z = np.meshgrid(g,g,g,indexing='ij'); "
                                   "F = sum(w*np.sin((k+1)*np.pi*X)*np.cos((k+1)*np.pi*Y)*np.exp(-(k+1)*Z) for k,w in enumerate([1,.5,.25,.12])); "
                                   "p = mind.stream_encode(F); r = mind.stream_report(F, p); "
                                   "print(r['monotone_rms'], p['descriptor']['bytes'], mind.stream_prefix(p, 1000))",
@@ -548,7 +548,7 @@ def register_p04(c):
                           "which (again) reads the normal. `max_x` is registered as a genuine recompute case so the "
                           "negative branch is exercised by something real: which vertex attained the maximum is "
                           "information the scalar threw away.",
-                          example="t = mind.equivariance_table(); print(t['area']); "
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); t = mind.equivariance_table(); print(t['area']); "
                                   "print(mind.cache_policy('area', 'shear')); print(mind.cache_policy('max_x', 'rotate'))",
                           native=True, aliases=("equivariance table", "equivariance", "invariance",
                                                 "is this operator invariant under rotation", "cache policy",
@@ -571,7 +571,7 @@ def register_p04(c):
                           "closed form's physical SCALE is a fitted constant whose accuracy is that of the short "
                           "march it was calibrated against (3.5e-05 at calibration_steps=24, 5.1e-07 at 256). "
                           "`optical_depth` takes a PER-RAY L -- passing a median instead is a 1000x accuracy loss.",
-                          example="import numpy as np; from holographic.misc.holographic_volint import HolographicVolume; "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.misc.holographic_volint import HolographicVolume; "
                                   "from holographic.sampling_and_signal.holographic_fpe import VectorFunctionEncoder; "
                                   "rng = np.random.default_rng(0); enc = VectorFunctionEncoder(3, dim=256, bounds=[(-1,1)]*3, bandwidth=2.5, seed=0); "
                                   "vol = HolographicVolume.from_blobs(enc, rng.uniform(-0.5,0.5,size=(16,3)), calibration_steps=96); "
@@ -613,7 +613,7 @@ def register_p04(c):
                           "crossings cancels per-sample noise -- do not read one error as the other, in either "
                           "direction. The all-pairs distance matrix is chunked: unchunked, a 24^3 grid against 9,600 "
                           "points allocated 133M floats and the process was killed.",
-                          example="import numpy as np; rng = np.random.default_rng(0); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rng = np.random.default_rng(0); "
                                   "p = rng.normal(size=(400,3)); p /= np.linalg.norm(p, axis=1, keepdims=True); "
                                   "V, Q, F, g = mind.points_to_mesh(p, p, np.full(3,-1.6), np.full(3,1.6), 20); "
                                   "print(mind.mesh_report(V, Q, sdf=lambda X: np.linalg.norm(X,axis=1)-1.0))",
@@ -639,7 +639,7 @@ def register_p04(c):
                           "cleanup is per-role but the bundle is shared; and merely encoding a scalar into a 2-role "
                           "record and reading it back costs MAE 0.0160, more than twice what a harmonic solve achieves "
                           "while actually reconstructing missing values.",
-                          example="import numpy as np; N = 32; y, x = np.meshgrid(np.linspace(0,1,N), np.linspace(0,1,N), indexing='ij'); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); N = 32; y, x = np.meshgrid(np.linspace(0,1,N), np.linspace(0,1,N), indexing='ij'); "
                                   "f = 0.3*x + 0.4*np.exp(-((x-0.6)**2 + (y-0.3)**2)/0.05); "
                                   "known = np.random.default_rng(0).random((N,N)) > 0.5; "
                                   "print(mind.fill_report(f, mind.inpaint(f, known), known))",
@@ -671,7 +671,7 @@ def register_p04(c):
                           "you are in (a pure translation has the largest spread and global still wins by 22 dB). So "
                           "the backlog's 'one unbind per tile INSTEAD of motion vectors from geometry' does not hold: "
                           "the unbind is an excellent ESTIMATOR, not a substitute for knowing how the camera moved.",
-                          example="import numpy as np; from holographic.rendering.holographic_reproject import warp; "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.rendering.holographic_reproject import warp; "
                                   "x = np.linspace(0, 6, 64); a = np.outer(np.sin(x), np.cos(1.7*x)) + 0.3*np.outer(x, x[::-1]); "
                                   "b = warp(a, 1.4, -2.6, wrap=True); "
                                   "print('truth (1.4, -2.6) ->', np.round(mind.est_dx(a, b), 3))",
@@ -696,7 +696,7 @@ def register_p04(c):
                           "zlib on the whole tree, because 83.2% of shapes occur exactly once -- code's tail is long. "
                           "The shape is a semantic KEY (structural search, duplicate detection, refactor targeting), "
                           "and never a cache key.",
-                          example="import ast; tmpl, delta = mind.code_decompose('total = a + 7'); print(delta); "
+                          example="import ast; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); tmpl, delta = mind.code_decompose('total = a + 7'); print(delta); "
                                   "print(ast.unparse(mind.code_recompose(tmpl, ['x', 'y', 9])))",
                           native=True, aliases=("code structure", "canonical shape and name delta",
                                                 "decompose code into shape and names", "ast round trip",
@@ -711,7 +711,7 @@ def register_p04(c):
                           "selftests?' without shelling out. The actual RUN of every selftest is the CLI/CI tool "
                           "tools/run_selftests.py; this is the instant census behind it, and it exists because an "
                           "above/below sweep found the walker had no mind door.",
-                          example="c = mind.selftest_coverage(); print(round(c['coverage'], 3), c['missing'])",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); c = mind.selftest_coverage(); print(round(c['coverage'], 3), c['missing'])",
                           native=True, aliases=("selftest coverage", "which modules lack a selftest",
                                                 "test coverage census", "modules missing tests",
                                                 "is the engine covered by tests", "which modules have no selftest",
@@ -735,7 +735,7 @@ def register_p04(c):
                           "within ONE module, so a function that calls an IMPORTED helper is refused as unresolved "
                           "(sound, and why tucker.rank_gate is rejected -- it reaches fix_eigvec_signs from another "
                           "module). Cross-module resolution wants types.",
-                          example="import numpy as np; from holographic.simulation_and_physics.holographic_island import island_energy; "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.simulation_and_physics.holographic_island import island_energy; "
                                   "f = mind.memoize_pure(island_energy); X = np.zeros((64,3)); V = np.ones((64,3)); "
                                   "f(X, V); f(X, V); print(f.cache_stats())",
                           native=True, aliases=("memoize", "memoize a pure function", "cache a function keyed on its inputs",
@@ -756,7 +756,7 @@ def register_p04(c):
                           "magnitude, the float scatter differs by 1.12e-08 under a permutation (9.31e-09 for a "
                           "nearest histogram) and the exact one does not differ at all. scatter_to_field and "
                           "scatter_to_field_3d are the graphics doors onto this same function.",
-                          example="import numpy as np; idx = np.random.default_rng(0).integers(0, 8, size=200); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); idx = np.random.default_rng(0).integers(0, 8, size=200); "
                                   "hist = mind.scatter(idx[:, None].astype(float), np.ones(200), (8,), kernel='nearest'); "
                                   "print(np.array_equal(hist, np.bincount(idx, minlength=8).astype(float)))",
                           native=True, aliases=("scatter", "gather", "scatter add", "atomic add",
@@ -787,7 +787,7 @@ def register_p04(c):
                           "unit (376,032 ns) on a single scalar access, because NONE of these is a scalar unit. They "
                           "are BATCH units: BakedGrid costs 61,765 ns/point at N=1 and 274 ns/point at N=10,000, and "
                           "`gather`'s marginal cost is CONSTANT in N (182,010x at N=2,048 -- when the rule is reused).",
-                          example="sheet = mind.machine_spec_sheet(); "
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); sheet = mind.machine_spec_sheet(); "
                                   "print(mind.machine_place_unit('t2_baked_grid', baseline_ns=50_000, n_calls=10**6, sheet=sheet)); "
                                   "print(mind.machine_unit('gather_unit')['do_not_use_when'])",
                           native=True, aliases=("machine model", "hardware units", "spec sheet", "cost model",
@@ -823,7 +823,7 @@ def register_p04(c):
                           "rank 50 (1.27x, marginal), white noise rank 124 (refused). DEFERRED for postfx: it STREAMS "
                           "frames, so an SVD costs 53.7x the FFT blur it would accelerate at 128^2 and 91.7x at 256^2 "
                           "-- LowRankField pays where a field is baked once and queried many times.",
-                          example="import numpy as np; x = np.linspace(0,1,256); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); x = np.linspace(0,1,256); "
                                   "X = np.outer(np.sin(3*np.pi*x), np.cos(2*np.pi*x)); "
                                   "k = np.array([1.,4,6,4,1]); k /= k.sum(); "
                                   "print(mind.factored_field_report(X, k)); print(mind.worth_factoring(X))",
@@ -858,7 +858,7 @@ def register_p04(c):
                           "chunk_similarity 0.036, covered 0.502. Pass min_chunk_similarity=0.15 to ABSTAIN instead of "
                           "lying, and mind.chunk_coverage(...) tells you the fraction at risk (60 merges covered 8 of "
                           "16 groups; 150 covered all 16).",
-                          example="import numpy as np; from holographic.agents_and_reasoning.holographic_ai import unitary_vector; "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.agents_and_reasoning.holographic_ai import unitary_vector; "
                                   "from holographic.misc.holographic_superposed import pack; r = np.random.default_rng(0); "
                                   "at = lambda n: np.stack([unitary_vector(512, r) for _ in range(n)]); "
                                   "lk, gk, items = at(4), at(8), at(16); "
@@ -911,7 +911,7 @@ def register_p04(c):
                           "DeltaChain is the wrong tool here -- it skips unchanged rows, but a sim moves every body "
                           "every frame, so it takes 614,144 bytes, MORE than the raw 460,800. Dense mutation with "
                           "sparse causes is a different structure from sparse mutation.",
-                          example="trace, ev = mind.record_physics_trace(n=8, frames=200); "
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); trace, ev = mind.record_physics_trace(n=8, frames=200); "
                                   "assert (mind.replay_physics_trace(ev) == trace).all(); "
                                   "print(mind.physics_compression_report(trace, ev))",
                           native=True, aliases=("event codec", "physics codec", "compress a physics simulation trace",
@@ -945,7 +945,7 @@ def register_p04(c):
                           "stops at 0.094558 and 0.095158 is already catastrophic. The admissible margin is a CLIFF. "
                           "SECOND CORRECTION: lightcache and domecache are NOT clients -- they are stateless per-frame "
                           "screen-space stride caches with no query stream to drift.",
-                          example="import numpy as np; q = np.cumsum(np.random.default_rng(0).normal(size=(400,2)), axis=0); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); q = np.cumsum(np.random.default_rng(0).normal(size=(400,2)), axis=0); "
                                   "mc = mind.margin_cache(lambda p: ('bake', tuple(p)), margin=mind.suggest_margin(q, 0.9)); "
                                   "vals = [mc.get(x) for x in q]; print(mc.stats())",
                           native=True, aliases=("fat margin", "margin cache", "drifting query", "cache reuse",
@@ -967,7 +967,7 @@ def register_p04(c):
                           "verified conflict-free. A physics constraint graph, a mesh's edge adjacency, a farm's "
                           "conflict graph and a DB write set are the same object; greedy is not optimal (colouring is "
                           "NP-hard) and does not need to be -- one extra wave costs one extra pass.",
-                          example="n, edges = mind.conflict_graph([{'a','b'}, {'b','c'}, {'d'}]); waves = mind.color_waves(n, edges)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); n, edges = mind.conflict_graph([{'a','b'}, {'b','c'}, {'d'}]); waves = mind.color_waves(n, edges)",
                           native=True, aliases=("graph colouring", "graph coloring", "colour a graph", "waves",
                                                 "lock free", "run tasks in parallel without locks", "no atomics",
                                                 "deterministic parallelism", "conflict graph", "conflict free batches",
@@ -998,7 +998,7 @@ def register_p04(c):
                           "the worker returns the bucket's CONTRIBUTIONS, not their sum, and that contract change IS "
                           "the fix. Swapping reduce_sum_exact into distribute() does NOT repair it -- by then the "
                           "worker has already float-summed inside its own bucket.",
-                          example="import numpy as np; d = np.random.default_rng(0).normal(size=(64,3)); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); d = np.random.default_rng(0).normal(size=(64,3)); "
                                   "total, info = mind.distribute_exact(np.array_split(d, 7), lambda b, c: np.asarray(b, float)); "
                                   "print(info['scale'], total)",
                           native=True, aliases=("partition invariant", "bit exact sum", "reproducible sum",
@@ -1029,7 +1029,7 @@ def register_p04(c):
                           "mind.resolve_swept_collision(X_prev, X, sdf) is the POSITIONAL twin for a PBD solver, and "
                           "softbody.step(continuous=True) is the wired door: nodes the sweep does not catch come back "
                           "bit-identical, so it is a strict addition.",
-                          example="hit, toi, contact = mind.time_of_impact([[-3,0,0]], [[120,0,0]], 1/60., '(sphere 1.0)')",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); hit, toi, contact = mind.time_of_impact([[-3,0,0]], [[120,0,0]], 1/60., '(sphere 1.0)')",
                           native=True, aliases=("ccd", "continuous collision detection", "tunnelling", "tunneling",
                                                 "stop a fast bullet going through a thin wall",
                                                 "my object passes through the floor", "swept collision",
@@ -1059,7 +1059,7 @@ def register_p04(c):
                           "suspensions); where contacts churn, substepping is still the right tool and the gate says "
                           "so -- it degrades to stepping, never worse. Kept negative: a free-body island is a Jordan "
                           "block with no eigenbasis; it is REFUSED and stepped, not silently jumped.",
-                          example="A, b, h = mind.soft_chain_matrices(12, hertz=15.0, zeta=0.7); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); A, b, h = mind.soft_chain_matrices(12, hertz=15.0, zeta=0.7); "
                                   "s = mind.affine_jump(np.zeros(24), A, b, 3840)",
                           native=True, aliases=("modal jump", "closed form physics", "skip substeps",
                                                 "skip thousands of physics substeps", "substepping too slow",
@@ -1086,7 +1086,7 @@ def register_p04(c):
                           "straight to the fixed point via iterate.limit() instead of stepping until it settles. "
                           "Measured negative: that fixed point is NOT rest -- modes with |eigenvalue|~1 persist, so a "
                           "diffusive island settles to its MEAN; only a strictly contractive operator settles to zero.",
-                          example="isl = mind.islands(6, [(0,1),(1,2),(4,5)]); tr = mind.island_sleep_tracker(); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); isl = mind.islands(6, [(0,1),(1,2),(4,5)]); tr = mind.island_sleep_tracker(); "
                                   "state, awake, asleep = mind.step_islands(np.zeros((6,3)), isl, lambda s: s+1.0, tracker=tr); "
                                   "print(awake, asleep)",
                           native=True, aliases=("island", "islands", "sleep", "sleeping bodies", "put bodies to sleep",
@@ -1117,7 +1117,7 @@ def register_p04(c):
                           "2 / 8 / 40 Hz; a stretched PBD bone relaxes to 1.7498 at 2 Hz and 1.028 at 20 Hz against a "
                           "rest length of 1.0. The XPBD path ignores it -- its per-constraint compliance already IS "
                           "this idea.",
-                          example="x, n, ok = mind.project_onto_constraints(x0, [proj], iters=64, stiffness=(15.0, 1.0), dt=1/240)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); x, n, ok = mind.project_onto_constraints(x0, [proj], iters=64, stiffness=(15.0, 1.0), dt=1/240)",
                           native=True, aliases=("soft constraint", "soft constraints", "stiffness", "hertz",
                                                 "damping ratio", "zeta", "springy constraint", "make it springy",
                                                 "how stiff should my constraint be", "spring stiffness",
@@ -1140,7 +1140,7 @@ def register_p04(c):
                           "skeleton plus morph-target blending, returning the deformed mesh at time t. Stdlib+NumPy; PIL "
                           "lazy for textures. HONEST: proprietary .sbsar/.spp and sparse OpenVDB .vdb need their vendor tools -- "
                           "import the exported open forms.",
-                          example="lm = mind.load_obj('chair.obj'); glb = mind.load_glb('robot.glb'); mat = mind.load_texture_set('exports/brick'); vol, b = mind.load_volume('smoke.npy')",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); lm = mind.load_obj('chair.obj'); glb = mind.load_glb('robot.glb'); mat = mind.load_texture_set('exports/brick'); vol, b = mind.load_volume('smoke.npy')",
                           native=True, aliases=("import", "load obj", "load gltf", "load glb", "mtl", "wavefront",
                                                 "substance painter", "adobe painter", "texture set", "pbr material import",
                                                 "load model", "import mesh", "volumetric", "load volume", "vdb", "voxel",
@@ -1161,7 +1161,7 @@ def register_p04(c):
                           "idle tables: db.enable_cold_storage(keep_warm=K) then db.cool_idle() compresses tables you "
                           "haven't queried lately and a query warms them back -- and a DB shipped to a distributed "
                           "worker arrives warm + cooling-off, so a shared read-only cache is never mutated.",
-                          example="store = mind.cold_store(keep_warm=4); store.put('t1', big_table); store.get('t1')  # transparently warmed",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); store = mind.cold_store(keep_warm=4); store.put('t1', big_table); store.get('t1')  # transparently warmed",
                           native=True, aliases=("cold storage", "compress inactive", "evict", "spill to disk", "cool",
                                                 "fast file compression", "compress a file on disk quickly",
                                                 "speed up compression", "fast array compression",
@@ -1176,7 +1176,7 @@ def register_p04(c):
                           "fm.find_by_meaning('lighting')). fm.tree() is the folder hierarchy. Every file is also tracked "
                           "for RELOCATION/CHANGE (fm.missing()/changed()/relink(one,new)/resolve_assets(roots)), so a "
                           "moved/edited tree self-heals. Stdlib only; text indexing is size-capped.",
-                          example="fm = mind.ingest_files('my_project.zip'); fm.find('*.obj'); fm.search_text('normal map'); fm.tree()",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); fm = mind.ingest_files('my_project.zip'); fm.find('*.obj'); fm.search_text('normal map'); fm.tree()",
                           native=True, aliases=("ingest", "ingest files", "index a folder", "digest a folder", "read a zip",
                                                 "scan folder", "file map", "make files queryable", "search my files",
                                                 "index files", "folder to database", "query a directory", "catalog files",
@@ -1189,7 +1189,7 @@ def register_p04(c):
                           "lib.changed() spots files edited on disk (size/mtime or content hash); lib.search_under("
                           "folder) finds missing files under a folder; lib.resolve(asset, roots=) locates a file by "
                           "CONTENT HASH across machines (the distributed fallback). Saves/loads a JSON manifest.",
-                          example="lib = mind.asset_library(); lib.add('project/textures/water/wave.png'); lib.relink(lib.assets[0], 'newroot/project/textures/water/wave.png')",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); lib = mind.asset_library(); lib.add('project/textures/water/wave.png'); lib.relink(lib.assets[0], 'newroot/project/textures/water/wave.png')",
                           native=True, aliases=("asset", "assets", "relink", "relocate", "missing textures", "broken path",
                                                 "fix paths", "external files", "find moved files", "asset paths",
                                                 "texture path", "reconnect assets", "repath", "file moved", "asset manifest"))
@@ -1201,7 +1201,7 @@ def register_p04(c):
                           "it look right?') calls YOUR llm (any text->reply callable -- no LLM library is imported, so "
                           "it's fully optional) and posts the reply on the bus. Over HTTP a remote agent uses "
                           "/bus/publish + /bus/poll. The LLM is optional; leCore runs with no agent attached.",
-                          example="bridge = mind.agent_bridge(llm=my_llm); bridge.notify_on('render.done', 'does it look right?'); mind.run_task('render', lambda: scene.render(), background=True)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); bridge = mind.agent_bridge(llm=my_llm); bridge.notify_on('render.done', 'does it look right?'); mind.run_task('render', lambda: scene.render(), background=True)",
                           native=True, aliases=("message bus", "event bus", "pubsub", "publish subscribe", "agent bridge",
                                                 "llm bridge", "notify the agent", "push notification", "on render done",
                                                 "connect an agent", "send message to agent", "mailbox", "inbox",
@@ -1213,7 +1213,7 @@ def register_p04(c):
                           "mind.route(task) is a decision node ('act' with the call when confident, else 'choose' the "
                           "options); mind.complete_method(prefix) autocompletes method names; mind.describe_skill(name) is a "
                           "skill card. Also over HTTP: GET /skills, POST /skills/suggest|route|complete|card",
-                          example="mind.route('render a scene'); mind.suggest('edit an image'); mind.complete_method('learn_')",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.route('render a scene'); mind.suggest('edit an image'); mind.complete_method('learn_')",
                           native=True, aliases=("agent", "agentic", "skills", "skill description", "autocomplete",
                                                 "suggest", "decision tree", "route", "list abilities", "available skills",
                                                 "which tool", "find a tool", "capabilities", "manifest", "discover", "help"))
@@ -1228,7 +1228,7 @@ def register_p04(c):
     c.register_capability("Rendering (path trace)", "render a scene to an image: path_trace (Monte-Carlo global "
                           "illumination), a camera controller, indirect-light gather + irradiance cache "
                           "(globalillum), precomputed radiance transfer (prt), volumetric integration, and lens/DOF + "
-                          "post-FX. The analysis-by-synthesis render path", example="mind.path_trace(scene); mind.camera(); from holographic.rendering.holographic_raymarch import sphere_trace",
+                          "post-FX. The analysis-by-synthesis render path", example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.path_trace(scene); mind.camera(); from holographic.rendering.holographic_raymarch import sphere_trace",
                           native=True, aliases=("render a scene", "path trace", "ray tracing", "global illumination",
                                                 "camera", "depth of field", "lens", "volumetric render", "radiance transfer",
                                                 "prt", "ambient occlusion", "post processing", "gbuffer", "raytrace", "render", 'render a mesh with vertex colours', 'draw a mesh with no texture just vertex colors'), module="render", consumes=('sdf_scene',), produces=('image',))
@@ -1250,14 +1250,14 @@ def register_p04(c):
     c.register_capability("Mesh editing (DCC)", "modeling/DCC edits on a Mesh: extrude/inset faces (meshpoly; extrude/inset quad_walls=True emit pure-quad side/ring walls for a Catmull-Clark cage; loop_cut takes cuts=N + factor for N spaced parallel loops), "
                           "subdivide + smooth (meshsubdiv, Catmull-Clark), deform/warp (deform), rig-skin-pose a "
                           "skeleton (blendpose), UV unwrap (chart), decimate/QEM, booleans, and mesh<->SDF. "
-                          "Blender-parity polygon editing", example="mind.deform(mesh, ...); mind.mesh_to_sdf(mesh); from holographic.mesh_and_geometry.holographic_meshverbs import extrude_face",
+                          "Blender-parity polygon editing", example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.deform(mesh, ...); mind.mesh_to_sdf(mesh); from holographic.mesh_and_geometry.holographic_meshverbs import extrude_face",
                           native=True, aliases=("edit a mesh", "extrude", "bevel", "inset", "subdivide", "smooth a mesh",
                                                 "decimate", "reduce polygons", "uv unwrap", "unwrap uv", "rig", "skin",
                                                 "pose a skeleton", "skeleton", "deform", "boolean", "remesh", "dcc", "modeling"), consumes=('mesh',), produces=('mesh',))
     c.register_capability("SDF & procedural geometry", "implicit + procedural geometry: signed distance fields (sdf), "
                           "sphere-trace raymarching with ambient occlusion (raymarch), sculpting, procedural terrain "
                           "(procgen), spatial tiling + octree, and voxelization. Native-first shape building",
-                          example="from holographic.rendering.holographic_raymarch import sphere_trace; mind.terrain(...); from holographic.mesh_and_geometry.holographic_sdf import ...",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.rendering.holographic_raymarch import sphere_trace; mind.terrain(...); from holographic.mesh_and_geometry.holographic_sdf import ...",
                           native=True, aliases=("sdf", "signed distance field", "raymarch", "sphere trace", "sculpt",
                                                 "procedural terrain", "procedural geometry", "voxelize", "voxel", "octree",
                                                 "tile in space", "implicit surface", "marching"))
@@ -1294,14 +1294,14 @@ def register_p04(c):
                                                 "sample cosine palette as rgb", "plottable palette colours"))
     c.register_capability("Navigation & planning", "find a way through a space or structure: A*/shortest-path route "
                           "planning (plan), slime-mould flow networks (flow), tree/graph navigation (navigator), and "
-                          "maze solving. Pathfinding on the VSA substrate", example="from holographic.scene_and_pipeline.holographic_plan import ...; mind.solve_maze(world); from holographic.misc.holographic_flow import ...",
+                          "maze solving. Pathfinding on the VSA substrate", example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.scene_and_pipeline.holographic_plan import ...; mind.solve_maze(world); from holographic.misc.holographic_flow import ...",
                           native=True, aliases=("navigation", "plan a route", "pathfinding", "shortest path", "maze",
                                                 "slime mould", "flow network", "route", "navigate", "wayfinding", "traverse",
                                                 "slime mold maze solver", "pheromone pathfinding", "solve a maze"))
     c.register_capability("Learning & agents", "gradient-free learning on the substrate: an RL agent with a value head "
                           "+ drives (agent), a holographic classifier, an echo-state reservoir (reservoir), "
                           "mixture-of-experts (moe), KAN, forward-forward, recurrent/predictive nets, and dreaming. NPC "
-                          "brains and on-line learners with NO autodiff", example="mind.agent(...); mind.classify(x); mind.reservoir(...)",
+                          "brains and on-line learners with NO autodiff", example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.agent(...); mind.classify(x); mind.reservoir(...)",
                           native=True, aliases=("reinforcement learning", "rl agent", "train a classifier", "classify",
                                                 "policy", "npc brain", "game ai", "reservoir", "echo state", "mixture of experts",
                                                 "moe", "kan", "forward forward", "gradient free", "learn a policy", "predictor", "agent"))
@@ -1315,7 +1315,7 @@ def register_p04(c):
     c.register_capability("Symbolic reasoning", "recover structure symbolically: symbolic regression to find a formula "
                           "(symbolic), resonator networks that FACTOR a bound vector into its parts (sbc/resonator), "
                           "is_a taxonomy climbing, and relational reasoning over records. Turning data and vectors back "
-                          "into laws", example="from holographic.agents_and_reasoning.holographic_symbolic import ...; mind.climb('dog'); from holographic.misc.holographic_sbc import ...",
+                          "into laws", example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.agents_and_reasoning.holographic_symbolic import ...; mind.climb('dog'); from holographic.misc.holographic_sbc import ...",
                           native=True, aliases=("symbolic regression", "find a formula", "factor a vector", "resonator",
                                                 "factorization", "decompose a signal", "reason", "reasoning", "climb hierarchy",
                                                 "relational", "law from data"))

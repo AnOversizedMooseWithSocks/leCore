@@ -84,7 +84,7 @@ def register_p01(c):
                           "crossfade/morph, pattern_field procedural noise/fbm/checker/stripes, svg_canvas vector "
                           "drawing), store & compare (image_archive damage-tolerant recall, compare_images / "
                           "image_distance perceptual similarity). Raster and vector, all on the VSA substrate",
-                          example="mind.recolor_image(img, ref); mind.blend_images(a, b); mind.sharpen_image(img); mind.splat_points(pts, cam, 128, 128)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.recolor_image(img, ref); mind.blend_images(a, b); mind.sharpen_image(img); mind.splat_points(pts, cam, 128, 128)",
                           native=True, aliases=("2d", "image", "edit an image", "generate an image", "draw", "draw a picture",
                                                 "make a drawing", "paint", "paint on a canvas", "canvas", "sharpen", "blur",
                                                 "downscale", "resize", "recolor", "colour transfer", "color transfer",
@@ -260,7 +260,7 @@ def register_p01(c):
                           "Also .rebuild(base) replays the whole recipe, and .replace_command(i, new_cmd, base) "
                           "edits a PAST operation's parameters and re-evaluates downstream (the Maya/C4D reach-back). "
                           "Build commands with vertex_move_command / capture_edit_command",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "h=m.edit_history(); P=[[0,0,0],[1,0,0]]; "
                           "s=h.do(P,m.vertex_move_command([1],[0,1,0])); print(np.allclose(h.undo(s),P))",
                           native=True, aliases=("undo redo", "undo a geometry edit", "edit history",
@@ -309,7 +309,7 @@ def register_p01(c):
                           "(is_novel, surprise); slow drift is absorbed by a moving prediction while an abrupt "
                           "change fires once. Pass only surprising observations downstream, stay quiet on "
                           "predictable ones -- an event gate for a stream",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "pf=m.predictive_filter(); print(pf.observe(np.ones(64))[0] in (True,False))",
                           native=True, aliases=("surprise filter", "novelty detector", "event gate for a stream",
                                                 "predictive novelty filter", "only report surprising observations"))
@@ -318,7 +318,7 @@ def register_p01(c):
                           ".eval (nearest-surface distance = min over parts, what a ray-marcher calls), .part_ids / "
                           ".material_at (argmin, material lookup), .parts_near (spatial cull). The SDF-scene state "
                           "model, composing parts the way a splat scene bundles primitives",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "sc=m.sdf_scene([(lambda p: np.linalg.norm(np.asarray(p,float),axis=-1)-1.0,'red')]); "
                           "print(float(sc.eval(np.array([[0,0,0.0]]))[0]))",
                           native=True, aliases=("sdf scene", "compose sdf parts", "scene of sdf primitives",
@@ -406,7 +406,7 @@ def register_p01(c):
                           "an SDF (any sdf_fn(pt)->distance) and return the hit {position, distance, normal, steps} "
                           "or None. The native pick for the field/procedural half of a scene -- exact to the field, "
                           "no triangulation",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "sph=lambda p: float(np.linalg.norm(np.asarray(p,float))-1.0); "
                           "print(round(m.ray_sdf_intersect(sph,[0,0,3],[0,0,-1])['distance'],1))",
                           native=True, aliases=("ray march an sdf", "cast a ray into an sdf",
@@ -426,7 +426,7 @@ def register_p01(c):
                           "consumes. Inverse-distance falloff to the nearest bones, keeping max_influences and "
                           "renormalizing to a PARTITION OF UNITY (rigid motion stays exact). The distance-based "
                           "auto-bind a rig starts from",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "w=m.skin_bind_weights([[0,0,0],[5,0,0.0]],[[0,0,0],[5,0,0.0]],max_influences=2); "
                           "print(np.round(w.sum(axis=1),3).tolist())",
                           native=True, aliases=("bind mesh to skeleton", "compute skin weights from bones",
@@ -495,7 +495,7 @@ def register_p01(c):
                           "is per-bone None/hinge/cone in radians (hinge axis may be 'auto' so the bend plane follows "
                           "the limb). Returns (joints, reach_error); error>0 when limits correctly block an out-of-"
                           "range target. Kept negative: angle limits only, no self-collision",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "arm=np.array([[0,0,0.],[0.4,0,0],[0.8,0,0]]); "
                           "lim=[None,{'type':'hinge','axis':'auto','lo':0.0,'hi':2.6}]; "
                           "print(round(m.solve_ik_limited(arm,np.array([0.3,0,0.4]),lim)[1],2))",
@@ -545,7 +545,7 @@ def register_p01(c):
                           "Per cluster it fits a SPHERE (round), an ORIENTED BOX (blocky, via PCA), and a CAPSULE "
                           "(elongated limb) and keeps the best -- unioned into an EXACT SDF you can raymarch / "
                           "sdf_to_mesh / to_shadertoy. quality = improvement over one bounding sphere; auto_k grows K",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "rng=np.random.default_rng(0); d=rng.normal(size=(400,3)); d/=np.linalg.norm(d,axis=1,keepdims=True); "
                           "print(m.fit_primitives(d*0.7, k=4)['kinds'])",
                           native=True, aliases=("approximate a shape with primitives", "fit sdf primitives to a shape",
@@ -742,7 +742,7 @@ def register_p01(c):
                                                 "fill an open boundary with faces"),
                           semantic="create/emit", consumes=("mesh",), produces=("mesh",))
     c.register_capability("Mesh repair (weld + split non-manifold + fill + compact)", "REPAIR a raw mesh (holographic_meshtools): m.mesh_repair(mesh) WELDS near-dup vertices, SPLITS non-manifold vertices into umbrellas (makes it MANIFOLD so cross-field retopo accepts it), optionally FILLS holes, DROPS unreferenced; triangulate=True gives uniform triangles. Returns (repaired, report) with before/after counts, manifold/closed flags, split count -- makes a marching-cubes / import / boolean / photo-to-mesh result RETOPO-READY. m.mesh_weld / m.mesh_make_manifold are single-step ops. Deterministic; never raises. KEPT NEG: a pure X-junction over-splits into open sheets.",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import Mesh; book=Mesh(np.array([[0,0,0],[1,0,0],[0,1,0],[0,-1,0],[0,0,1.],[0,0,-1]]),[(0,1,2),(0,1,3),(0,1,4),(0,1,5)]); rm,rep=m.mesh_repair(book, fill_holes=False); (book.is_manifold(), rm.is_manifold(), rep['split_vertices'])",
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import Mesh; book=Mesh(np.array([[0,0,0],[1,0,0],[0,1,0],[0,-1,0],[0,0,1.],[0,0,-1]]),[(0,1,2),(0,1,3),(0,1,4),(0,1,5)]); rm,rep=m.mesh_repair(book, fill_holes=False); (book.is_manifold(), rm.is_manifold(), rep['split_vertices'])",
                           native=True, aliases=("repair a broken mesh", "fix a mesh", "weld duplicate vertices", "merge vertices by distance",
                                                 "make a mesh watertight", "remove degenerate triangles", "clean up a mesh", "mesh cleanup",
                                                 "fix a non-manifold mesh", "make a mesh manifold", "weld a mesh", "heal a mesh", "retopo-ready mesh"),
@@ -754,7 +754,7 @@ def register_p01(c):
                           "image (the fishing-spider file). Split first, then render/LOD each material with its own "
                           "texture. face_material already records the per-face name; this is the one-call path that "
                           "was otherwise re-implemented (group + reindex + subset UVs) by every consumer.",
-                          example="import lecore, numpy as np; "
+                          example="import numpy as np; import lecore, numpy as np; "
                                   "from holographic.io_and_interop.holographic_assetimport import LoadedMesh; "
                                   "lm=LoadedMesh(np.array([[0,0,0],[1,0,0],[0,1,0],[1,1,0]],float), "
                                   "np.array([[0,1,2],[1,3,2]],int), face_material=['red','blue']); "

@@ -17,9 +17,34 @@ Fastest accurate path:
    (six flagship claims as live assertions, ~2 s, laptop CPU, no GPU/torch).
 3. Ask the engine itself — it contains a semantic search engine over its own
    capabilities, and it is better at finding the right module than grep:
+
        import lecore
-       mind = lecore.UnifiedMind()
+       mind = lecore.agent_boot()          # you are an agent: use this one
        mind.find_capability("prevent hallucination")
+
+   BOOT WITH BOTH ENDS ATTACHED. `agent_boot()` is `autoboot()` plus a model
+   rung, and the difference is measurable:
+
+       lecore.UnifiedMind()      no memory at all — even doctrine answers "refused"
+       lecore.autoboot()         memory in front: known questions answer at T0
+       lecore.agent_boot()       ...and unknown ones ESCALATE to your model
+                                 instead of stopping at T4
+
+   It takes no arguments in a harness. The memory partition comes from
+   `$LECORE_PARTITION` (falling back to ./lecore_memory, then the shipped
+   release_bundle/), and the model from an OpenAI-compatible endpoint via
+   `$LECORE_LLM_URL` / `$LECORE_LLM_MODEL` / `$LECORE_LLM_KEY` (`OPENAI_*` are
+   read too) — which is the normal case, because YOUR MODEL IS USUALLY IN
+   ANOTHER PROCESS: Claude or ChatGPT behind OpenWebUI, openzoo, ollama or a
+   vendor API. Pass a base URL or a local `text -> text` callable to be explicit.
+
+   Use plain `lecore.autoboot()` when a HUMAN is at the keyboard: agent_boot
+   requires a model and would otherwise wire the person in as the back end.
+
+   TEACH AS YOU GO. `mind.teach(question, answer)` costs nothing and makes the
+   next session's answer a T0 lookup instead of a rediscovery; if the fact is
+   about source files, `mind.teach_about(question, answer, [paths])` fingerprints
+   them so `mind.stale_facts()` tells you when the code moved underneath it.
        mind.suggest("compress a float series")
 
 ## Docs

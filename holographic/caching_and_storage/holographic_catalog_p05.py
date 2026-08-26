@@ -60,7 +60,7 @@ def register_p05(c):
                                                 "quantize", "content addressed storage", "encode data", "shrink data", "deduplicate"))
     c.register_capability("Video (temporal)", "temporal image sequences: video compression with keyframe/delta coding "
                           "(video), temporal compression, motion/phase morph between frames (phasemorph), and frame "
-                          "interpolation. Moving pictures on the substrate", example="from holographic.io_and_interop.holographic_video import ...; mind.blend_images(a, b)",
+                          "interpolation. Moving pictures on the substrate", example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.io_and_interop.holographic_video import ...; mind.blend_images(a, b)",
                           native=True, aliases=("video", "compress a video", "temporal compression", "frames", "motion",
                                                 "interpolate frames", "keyframe", "sequence of images", "movie"))
     c.register_capability("Honesty & measurement", "measure claims honestly: error bars + significance (measure), "
@@ -89,7 +89,7 @@ def register_p05(c):
                           "ONE batched spectral sweep and answers every later visit from a content-addressed "
                           "cache. MEASURED 6.7x-14x end-to-end; accumulators bit-identical and traces identical "
                           "across 126 programs x 3 dims x 3 seeds. Opt-in, never-flip rule",
-                          example="mind.vm_decode_plan(True); mind.run_procedure([('LOAD','a'),('BIND','b'),('HALT',None)]); mind.vm_plan_stats()",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.vm_decode_plan(True); mind.run_procedure([('LOAD','a'),('BIND','b'),('HALT',None)]); mind.vm_plan_stats()",
                           native=True, aliases=("decoded instruction cache", "instruction cache", "decode cache",
                                                 "vectorize the interpreter", "batch decode a program",
                                                 "decode once execute many times", "why is my program slow",
@@ -104,7 +104,7 @@ def register_p05(c):
                           "~3.3 MB on disk) into a plain dict in RAM (~22 MB), after which lookups are instant. Control "
                           "it explicitly with holographic.misc.holographic_dictionary.is_loaded()/preload()/unload()/stats(). Stdlib-only "
                           "(lzma+json); the mind can also LEARN meaning from it. Princeton WordNet, free with attribution",
-                          example="mind.lookup('gravity'); mind.word_taxonomy('dog'); import holographic.misc.holographic_dictionary as hd; hd.stats()",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.lookup('gravity'); mind.word_taxonomy('dog'); import holographic.misc.holographic_dictionary as hd; hd.stats()",
                           native=True, aliases=("dictionary", "define", "definition", "word meaning", "synonyms",
                                                 "encyclopedia", "taxonomy", "hypernym", "wordnet", "vocabulary",
                                                 "contextual awareness", "knowledge", "lexicon", "what does word mean",
@@ -116,7 +116,7 @@ def register_p05(c):
                           "separate: nothing loads or builds until you call it. Approximate by design (this is where "
                           "leCore's geometry-preserving/lossy side belongs) -- reliable for the top hit, noisy in the "
                           "tail, and word-sense sensitive.",
-                          example="idx = mind.build_semantic_index(words=my_vocab); idx.find('a young dog'); idx.similar('ocean')",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); idx = mind.build_semantic_index(words=my_vocab); idx.find('a young dog'); idx.similar('ocean')",
                           native=True, aliases=("semantic index", "find words by meaning", "reverse dictionary",
                                                 "words like", "similar words", "meaning search", "word similarity",
                                                 "describe a word", "what's the word for", "concept to word", "synonym search"))
@@ -130,7 +130,7 @@ def register_p05(c):
                           "material_info(name) gives BOTH how "
                           "a material looks AND how it behaves; find_materials()/materials() search + list across both. "
                           "Users can add their own to either library",
-                          example="mind.material_info('gold'); mind.find_materials('clear liquid'); mind.materials()",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.material_info('gold'); mind.find_materials('clear liquid'); mind.materials()",
                           native=True, aliases=("material library", "materials", "physical material", "material properties",
                                                 "density", "refractive index", "render material", "pbr preset", "gold",
                                                 "copper", "diamond", "material data", "material list", "scientist material"))
@@ -150,7 +150,7 @@ def register_p05(c):
                           "onto stone, a decal onto a surface. 'blend' = soft weighted sum (weights normalised so "
                           "brightness stays put); 'select' = hard pick the dominant material (a material-ID / splat "
                           "map). CMP3",
-                          example="mind.multi_material([metal, rust], [1.0, mind.texture_leaf('fbm', n_dims=2)]).sample('albedo', [0.3, 0.7])",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.multi_material([metal, rust], [1.0, mind.texture_leaf('fbm', n_dims=2)]).sample('albedo', [0.3, 0.7])",
                           native=True, aliases=("multi-material", "multimaterial", "blend materials", "material mask",
                                                 "material map", "splat map", "material id", "paint materials", "mix materials",
                                                 "layer materials by mask"))
@@ -160,7 +160,7 @@ def register_p05(c):
                           "front). Each layer composites OVER the one below by a coverage alpha (a number, field, or "
                           "texture graph). Honest: fixes the stacking, not the energy-conserving radiometry of a true "
                           "layered BRDF. CMP2",
-                          example="mind.layered_material([mind.material_layer('base', paint), mind.material_layer('clearcoat', gloss, alpha=0.3)]).sample('albedo', [0.3, 0.7])",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.layered_material([mind.material_layer('base', paint), mind.material_layer('clearcoat', gloss, alpha=0.3)]).sample('albedo', [0.3, 0.7])",
                           native=True, aliases=("layered material", "material layers", "clearcoat", "coat", "layer stack",
                                                 "material stack", "over compositing", "base diffuse specular coat",
                                                 "stacked material", "material order"))
@@ -197,7 +197,7 @@ def register_p05(c):
                           "(with a dry-run preview); python_check (syntax) and import_check (real import in a subprocess) "
                           "catch a broken edit immediately. Exposed as mind.file_* methods, so callable over the HTTP "
                           "tool protocol (GET /tools, POST /invoke) like any faculty",
-                          example="mind.set_file_root('.'); mind.file_find_definition('make_cloud'); mind.file_replace('a.py', 'old()', 'new()'); mind.file_import_check('a.py'); mind.file_undo()",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.set_file_root('.'); mind.file_find_definition('make_cloud'); mind.file_replace('a.py', 'old()', 'new()'); mind.file_import_check('a.py'); mind.file_undo()",
                           native=True, aliases=("edit file", "edit code", "modify file", "modify code", "write file",
                                                 "read file", "replace in file", "patch", "insert lines", "delete file",
                                                 "archive file", "move file", "rename file", "grep", "search code",
@@ -212,7 +212,7 @@ def register_p05(c):
                           "change widens to the WHOLE suite; a docs-only change selects nothing. The same "
                           "selection CI already runs on push/PR -- previously CLI-only, now a mind faculty. See "
                           "mind.affected_tests's own docstring for the full contract",
-                          example="mind.set_file_root('.'); mind.affected_tests(changed_paths=['holographic/rendering/holographic_render.py'])  # or mind.affected_tests() alone to auto-detect from git",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.set_file_root('.'); mind.affected_tests(changed_paths=['holographic/rendering/holographic_render.py'])  # or mind.affected_tests() alone to auto-detect from git",
                           native=True, aliases=("affected tests", "which tests to run", "select tests", "test selection",
                                                 "run only affected tests", "skip unrelated tests", "reduce test count",
                                                 "test suite too slow", "avoid full test suite", "only run changed tests",
@@ -223,14 +223,14 @@ def register_p05(c):
                           "monitorable background JOB you can pause/resume/cancel (even across a process restart), then "
                           "feed the baked grid straight into a render without re-baking. The agent-friendly way to "
                           "handle a render that takes minutes: kick it off, poll progress, do other work",
-                          example="jid = mind.bake_cloud_job(radius=1.0, seed=0, background=True); mind.job_status(jid); mind.job_pause(jid); mind.job_resume(jid); grid = mind.job_result(jid)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); jid = mind.bake_cloud_job(radius=1.0, seed=0, background=True); mind.job_status(jid); mind.job_pause(jid); mind.job_resume(jid); grid = mind.job_result(jid)",
                           native=True, aliases=("bake cloud", "background render", "resumable render", "monitor render",
                                                 "pause render", "long render", "render job", "noise bake"))
     c.register_capability("Compare rendered images (files)", "perceptual similarity in [0,1] between two images given "
                           "as FILE PATHS (e.g. two rendered PNGs) -- SSIM + colour + edge, shift/lighting-tolerant, the "
                           "on-disk companion to compare_images. The call an agent makes to check 'did my render change "
                           "or match the target?' when the images are files",
-                          example="mind.compare_image_files('render_a.png', 'render_b.png')  # -> {similarity, distance, ...}",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.compare_image_files('render_a.png', 'render_b.png')  # -> {similarity, distance, ...}",
                           native=True, aliases=("compare images", "image diff", "render diff", "compare renders",
                                                 "image comparison", "did the render change", "image similarity"))
     c.register_capability("Distributed hardening (R5)", "fault tolerance + verification for untrusted farm nodes: "
@@ -275,14 +275,14 @@ def register_p05(c):
                           "object's (colour, shape, texture) tags into a composite vector and superpose objects into "
                           "a scene -- composing what was never stored, rather than morphing what was. "
                           "mind.novel_object_specs() enumerates the whole generation space.",
-                          example="specs = mind.novel_object_specs(); scene = mind.compose_from_tags(specs[:3])",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); specs = mind.novel_object_specs(); scene = mind.compose_from_tags(specs[:3])",
                           native=True, aliases=("compose a scene", "forward generation", "generate new objects",
                                                 "novel combinations", "compose from tags", "procedural scene"))
     c.register_capability("Regime-shift detector (fast/slow layers)", "borrowed from ocean physics: a FAST component "
                           "tracks the present while a SLOW one holds the persistent state; when their divergence stays "
                           "high the system commits to a new LAYER. mind.regime_detector().observe(x) -> (divergence, "
                           "layer, started_new_layer). Tells a genuine regime CHANGE from a wobble.",
-                          example="d = mind.regime_detector(); div, layer, new = d.observe(x)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); d = mind.regime_detector(); div, layer, new = d.observe(x)",
                           # NB: no bare "diffusion" alias -- it collides with the reaction-diffusion automaton home
                           # and displaced it for the probe "reaction diffusion cellular automaton". One token, two
                           # unrelated meanings; the specific phrase keeps this findable without stealing that query.
@@ -308,7 +308,7 @@ def register_p05(c):
                           "farm-parallel with NO seed coordination -- every random number is a pure function of "
                           "position (hash_unit). Pass dirichlet_sdf to make the rest of the boundary zero-flux "
                           "(Neumann/insulating) -- that is Walk on STARS, which vanilla Walk on Spheres cannot do.",
-                          example="u = mind.solve_laplace(sdf.eval, pts, boundary_value, walks=1024, dim=3)  # + dirichlet_sdf= for insulating walls",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); u = mind.solve_laplace(sdf.eval, pts, boundary_value, walks=1024, dim=3)  # + dirichlet_sdf= for insulating walls",
                           native=True, aliases=("solve laplace", "poisson equation", "pde without a mesh", "walk on spheres",
                                                 "walk on stars", "grid free solver", "harmonic function", "steady state heat",
                                                 "boundary value problem", "mesh free", "monte carlo pde", "diffusion curves"))
@@ -344,7 +344,7 @@ def register_p05(c):
                           "evaluation (each mode decays by exp(-alpha k^2 t)) -- no time step, no stability limit, "
                           "no substepping. Measured exact to 6.7e-16 where 1000 iterative steps sit at 1.5e-4. "
                           "Periodic only: the Neumann/edge-replicated Laplacian is NOT circular.",
-                          example="u = mind.solve_poisson_periodic(f, dx=1/64); T = mind.diffuse_periodic(T0, alpha=0.01, t=1e6, dx=1/64)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); u = mind.solve_poisson_periodic(f, dx=1/64); T = mind.diffuse_periodic(T0, alpha=0.01, t=1e6, dx=1/64)",
                           native=True, aliases=("spectral laplace", "poisson fft", "closed form heat", "exact diffusion",
                                                 "periodic pde", "fourier solve", "no time step", "steady state exact",
                                                 "diagonalise the laplacian", "diffuse a field to a given time", "propagator as a transfer",
@@ -358,7 +358,7 @@ def register_p05(c):
                           "against 5.9x for a per-slice SVD (which sees structure within a frame but none across "
                           "frames). On data with NO low-rank structure the gate returns full rank -- store it raw. "
                           "Never CP: for 3+ modes a best rank-R CP approximation may not even exist.",
-                          example="code = mind.compress_tensor(field, energy=0.999); X = mind.decompress_tensor(code)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); code = mind.compress_tensor(field, energy=0.999); X = mind.decompress_tensor(code)",
                           native=True, aliases=("tensor compression", "tucker", "hosvd", "tensor train", "low rank tensor",
                                                 "compress a volume", "compress a frame stack", "multiway svd",
                                                 "rank gate", "should i compress this"))
@@ -369,7 +369,7 @@ def register_p05(c):
                           "field, where a per-slice SVD denoiser reaches 39.5 (it is blind to correlation ACROSS "
                           "slices). KEPT NEGATIVE: a low-rank prior is a claim about the signal -- on a FULL-RANK "
                           "signal it destroys the data (43 dB -> 17 dB). Check the rank gate first.",
-                          example="clean, ranks, sigma = mind.denoise_tensor(noisy_field)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); clean, ranks, sigma = mind.denoise_tensor(noisy_field)",
                           native=True, aliases=("denoise a volume", "denoise a field", "low rank denoise",
                                                 "tensor denoising", "clean a frame stack", "remove noise from a field",
                                                 "multiway denoise"), module="denoise", consumes=('image', 'field'),
@@ -396,7 +396,7 @@ def register_p05(c):
                           "volume it encloses, and a tensor train is cheap. Ranks that saturate = a VOLUME LAW: every "
                           "degree of freedom is independent, store it raw. Measured: a diffusing field scores 0.21 "
                           "(TT: 4,394 B vs int8 24,576); white noise scores 1.00 (TT: 104,782 B).",
-                          example="v = mind.tensor_structure(field); v['verdict']  # 'area-law' or 'volume-law'",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); v = mind.tensor_structure(field); v['verdict']  # 'area-law' or 'volume-law'",
                           native=True, aliases=("will compression help", "area law", "volume law", "schmidt rank",
                                                 "bond rank", "is this compressible", "should i compress this",
                                                 "entanglement entropy", "structure diagnostic"))
@@ -407,7 +407,7 @@ def register_p05(c):
                           "ratio, achieved cosine (mean+min), rank, and a `pays` flag. KEPT NEGATIVE (loud): "
                           "incompressible near-orthogonal vectors do NOT pay -- the code can be LARGER than float32 "
                           "and pays=False. Measured: low-rank ~3x (691 vs 2048 b/vec); random unit vectors 0.95x.",
-                          example="import numpy as np; rng=np.random.default_rng(0); B=rng.normal(size=(3,64)); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rng=np.random.default_rng(0); B=rng.normal(size=(3,64)); "
                                   "A=[(np.array([1,.4,-.2])+.05*rng.normal(size=3))@B for _ in range(12)]; "
                                   "r=mind.rate_distortion_report(A, target_cos=0.999); print(r['ratio'], r['pays'])",
                           native=True, aliases=("bits per vector", "how many bits to store a vector", "rate distortion",
@@ -422,7 +422,7 @@ def register_p05(c):
                           "observed, collapsed, n_null}; p carries the +1 plug (never exactly 0). Generalises the "
                           "engine's five procedure-matched private nulls. KEPT NEGATIVE: a wrong resample_fn gives a "
                           "mis-calibrated null -- the procedure-match is the caller's job. Calibrated + deterministic.",
-                          example="import numpy as np; cb=np.random.default_rng(0).standard_normal((20,64)); "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cb=np.random.default_rng(0).standard_normal((20,64)); "
                                   "cb/=np.linalg.norm(cb,axis=1,keepdims=True); "
                                   "sc=lambda q: float(np.max(cb@(q/np.linalg.norm(q)))); "
                                   "rs=lambda r: r.standard_normal(64); "
@@ -542,7 +542,7 @@ def register_p05(c):
                           "it). KEPT NEGATIVE: if the map IGNORES the guide it is NOT better than a box blur and "
                           "injects a spurious edge. REGIME: needs only a guide image; for G-buffer render "
                           "denoising use denoise_svgf.",
-                          example="import numpy as np; g=np.zeros((48,48)); g[:,24:]=1.0; "
+                          example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); g=np.zeros((48,48)); g[:,24:]=1.0; "
                                   "m=np.clip(g+0.15*np.random.default_rng(0).standard_normal((48,48)),0,1); "
                                   "print(mind.guided_filter(g, m, radius=6).shape)",
                           native=True, aliases=("edge preserving smooth", "smooth but keep edges",
@@ -558,7 +558,7 @@ def register_p05(c):
                           "be FRACTIONAL (half a blur pass; two halves compose to one), and N may be INFINITE -- "
                           "mind.filter_limit returns the steady state as an idempotent projection, where a literal "
                           "loop can need 200,000 passes.",
-                          example="soft = mind.filter_passes(img, blur, 64); half = mind.filter_passes(img, blur, 0.5); steady = mind.filter_limit(img, blur)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); soft = mind.filter_passes(img, blur, 64); half = mind.filter_passes(img, blur, 0.5); steady = mind.filter_limit(img, blur)",
                           native=True, aliases=("many blur passes", "iterated filter", "blur n times", "fractional blur",
                                                 "half a pass", "steady state filter", "filter to convergence",
                                                 "shader algebra", "operator power"))
@@ -570,7 +570,7 @@ def register_p05(c):
                           "confident WRONG answer and raises nothing. So the bandwidth is chosen from the data "
                           "(measured: RMS error under 0.06 at every frequency tried; half that bandwidth gives "
                           "0.09-0.30). Supplying too small a bandwidth warns.",
-                          example="b = mind.bake_field(xs, ys); y = mind.fetch_field(b, 0.37)   # any x, one dot product",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); b = mind.bake_field(xs, ys); y = mind.fetch_field(b, 0.37)   # any x, one dot product",
                           native=True, aliases=("bake a function", "texture unit", "lookup table", "LUT", "interpolate a lookup table at arbitrary points", "approximate a function I only have samples of", "function approximation", "cache an expensive function", "memoize a continuous function", "gpu texture", "store a curve", "lookup table",
                                                 "interpolate anywhere", "bandwidth", "nyquist", "sample a field",
                                                 "function encoding"))
@@ -587,7 +587,7 @@ def register_p05(c):
                           "kernel toward a delta. It costs nothing when the endpoints already agree. RETIRED "
                           "NEGATIVE: 'near-singular functions need domain warping' -- wrong cause (the wrap, not "
                           "the singularity) and the weaker fix (warping buys 1.9x where detrending buys 8-16x).",
-                          example="b = mind.bake_field(xs, ys, detrend=True); y = mind.fetch_field(b, 0.37, normalize=True)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); b = mind.bake_field(xs, ys, detrend=True); y = mind.fetch_field(b, 0.37, normalize=True)",
                           native=True, aliases=("detrend", "bake a lookup table", "bake sqrt", "non-periodic bake",
                                                 "endpoint jump", "spectral leakage", "lut", "near singular function"))
     c.register_capability("Bake an N-D function into one vector (n-D texture unit)", "mind.bake_field_nd(grids, "
@@ -605,7 +605,7 @@ def register_p05(c):
                           "drops keep spending dimension, if it does not move raise the margin. KEPT NEGATIVE: at "
                           "the default margin this is a SHAPE estimator, amplitude gain 0.66; raise margin and dim "
                           "together or calibrate the gain.",
-                          example="b = mind.bake_field_nd([xs, ys], V); v = mind.fetch_field_nd(b, [0.3, 0.7])",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); b = mind.bake_field_nd([xs, ys], V); v = mind.fetch_field_nd(b, [0.3, 0.7])",
                           native=True, aliases=("bake a 2d function", "n-d texture unit", "bake a volume",
                                                 "multivariate lookup table", "encode a 2d point", "bake a grid",
                                                 "n dimensional function encoding", "bake a field over a grid"))
@@ -619,7 +619,7 @@ def register_p05(c):
                           "of hard-coded. Deep subdivision converges to it: 6.0e-4 -> 3.7e-5 -> 2.3e-6 at k=4/6/8. "
                           "HONEST SCOPE: this is the k -> infinity case; a FINITE number of levels on an irregular "
                           "mesh still needs the full Stam evaluation, so use mind.mesh_subdivide(mesh, k) there.",
-                          example="positions, normals = mind.mesh_limit_surface(mesh)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); positions, normals = mind.mesh_limit_surface(mesh)",
                           native=True, aliases=("limit surface", "loop limit", "subdivision limit",
                                                 "exact limit normal", "infinite subdivision", "smooth normals",
                                                 "push vertices to the limit", "stam evaluation"))
@@ -637,7 +637,7 @@ def register_p05(c):
                           "overlap double-counting, which splat_refit already fixed (12.9 -> 20.9 dB across K). "
                           "Use mind.spectral_detail to check whether a fit STORED the sharpness, since PSNR will "
                           "not tell you.",
-                          example="atoms, img = mind.splat_field(grating, k=64, basis='gabor'); hf = mind.spectral_detail(img)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); atoms, img = mind.splat_field(grating, k=64, basis='gabor'); hf = mind.spectral_detail(img)",
                           native=True, aliases=("gabor splat", "gabor atom", "frequency lifted splat",
                                                 "oriented splat", "fit a grating", "fit a texture with splats",
                                                 "bandpass primitive", "recover high frequency detail",
@@ -671,7 +671,7 @@ def register_p05(c):
                           "HTTP /invoke boundary the bake and the rule are live objects that do not survive JSON, "
                           "so mind.gather_samples(xs, ys, points, weights) is the stateless one-shot twin: plain "
                           "numbers in, a plain number out, no reuse win.",
-                          example="b = mind.bake_field(xs, ys); Q = mind.gather_rule(b, us, ws); v = mind.gather_field(b, Q)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); b = mind.bake_field(xs, ys); Q = mind.gather_rule(b, us, ws); v = mind.gather_field(b, Q)",
                           native=True, aliases=("gather", "quadrature rule", "filter stencil", "many lookups at once",
                                                 "weighted sum of samples", "compile a stencil", "slide a stencil",
                                                 "superposed gather", "interpolate from many points"))
@@ -682,7 +682,7 @@ def register_p05(c):
                           "FFT, one multiply, one inverse FFT no matter how many stages it has. Measured exact to "
                           "6.7e-16 against running the stages, and 6.0x faster per application. Fractional passes "
                           "and sub-sample (fractional) translations are exact -- neither has a GPU analogue.",
-                          example="out = mind.shader_pipeline(img.shape).blur(k, 8).translate(3).unsharp(kw, 0.6).apply(img)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); out = mind.shader_pipeline(img.shape).blur(k, 8).translate(3).unsharp(kw, 0.6).apply(img)",
                           native=True, aliases=("filter graph", "compose filters", "shader pipeline", "multi pass",
                                                 "fuse passes", "post process chain", "unsharp", "sub-pixel shift"))
     # --- ENGINE CONTRACTS (D-3). These are not user-facing features; they are the rules a CONTRIBUTOR must cite
@@ -812,7 +812,7 @@ def register_p05(c):
                           "KEPT NEGATIVE, loud: it LOSES by 16x on content that is already compressible on its own "
                           "(smooth gradients, photographs) -- 32,274 B against 1,987 B. It is content-dependent, so "
                           "mind.pack_benchmark(images) prints the table. Run it; do not guess.",
-                          example="blob = mind.pack_images(logos); back = mind.unpack_images(blob)   # bit-exact",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); blob = mind.pack_images(logos); back = mind.unpack_images(blob)   # bit-exact",
                           native=True, aliases=("pack images", "compress a set of images", "delta compression",
                                                 "sprite sheet compression", "store the diff not the frame",
                                                 "image family", "lossless set packer"))
@@ -826,7 +826,7 @@ def register_p05(c):
                           "strawman): the navigator reaches 98.0% recall at 173 comparisons; the cheapest fixed beam "
                           "matching that recall is beam 12 at 450 (2.6x more), and at the navigator's own budget the "
                           "best fixed beam reaches only 81.6%. mind.navigator_benchmark() reproduces both readings.",
-                          example="mind.train_navigator(items, queries=1500)\n"
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.train_navigator(items, queries=1500)\n"
                                   "hit = mind.navigator_find(cue)          # {'index':..., 'comparisons':...}\n"
                                   "mind.navigator_benchmark()              # recall + the fixed-beam baseline",
                           native=True, aliases=("navigator", "adaptive search", "learned search", "search a tree",
@@ -844,7 +844,7 @@ def register_p05(c):
                           "1/(1+depth_a+depth_b) to the nearest common ancestor: identical 1.000, parent 0.500, "
                           "siblings 0.333, cousins 0.200, unrelated 0.000. The state lives on the mind, so a "
                           "long-lived service accumulates knowledge across /invoke calls.",
-                          example="mind.encyclopedia_add('dog.n.01', is_a='canine.n.01', has=['tail'])\n"
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.encyclopedia_add('dog.n.01', is_a='canine.n.01', has=['tail'])\n"
                                   "mind.encyclopedia_relatedness('dog.n.01', 'wolf.n.01')   # 0.333, siblings",
                           native=True, aliases=("encyclopedia", "taxonomy", "ontology", "is a hierarchy",
                                                 "how are two concepts related", "relatedness between concepts",
@@ -860,7 +860,7 @@ def register_p05(c):
                           "reachable over /invoke -- measured: an agent could register `sh` before that was fixed). "
                           "run_command can only run a name already on the list; values fill {placeholders} one token "
                           "in one token out with NO shell, so an injection attempt in a value is a literal value.",
-                          example="info = mind.run_command('probe', {'path': 'clip.mp4'})  # 'probe' registered in process",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); info = mind.run_command('probe', {'path': 'clip.mp4'})  # 'probe' registered in process",
                           native=True, aliases=("run a command", "external program", "shell out", "run ffmpeg",
                                                 "call an external tool", "run a script", "job runner",
                                                 "wrap a program as a tool"))
@@ -880,7 +880,7 @@ def register_p05(c):
                           "NONE. RETIRED CLIENTS, each already adaptive: splat (greedy placement), volint (a closed "
                           "form -- no cells to escalate), and volume_render (empty_skip + early_term ARE coarse-"
                           "first, buying 15.2x where a residual mask buys 1.0x).",
-                          example="u = mind.gradient_uncertainty(coarse)\n"
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); u = mind.gradient_uncertainty(coarse)\n"
                                   "if mind.uncertainty_concentration(u) > 0.3:\n"
                                   "    fine, mask, n = mind.refine_where_uncertain(coarse, u, expensive_fn, frac=0.25)",
                           native=True, aliases=("coarse first", "coarse-to-fine", "adaptive refine",

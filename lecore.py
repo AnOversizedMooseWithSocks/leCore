@@ -153,6 +153,50 @@ def _read_version():
 __version__ = _read_version()
 
 
+def agent_boot(llm="remote", partition=None, session=None):
+    """Boot leCore with BOTH ENDS ATTACHED: memory in front, an LLM behind.
+
+    THE PATTERN THIS NAMES. Forty-odd sweeps of agent work converged on the same
+    two-line opening -- autoboot with a partition so the reflex answers from
+    accumulated memory, and an `llm` callable so a question the reflex CANNOT
+    answer escalates to the model instead of stopping at T4. Measured on a live
+    partition:
+        autoboot()                  known question T4, unknown T4, 0 escalations
+        autoboot(partition=...)     known question T0, unknown T4, 0 escalations
+        autoboot(partition, llm=..) known question T0, unknown escalates, 3 calls
+    The partition half already had a default ($LECORE_PARTITION). The LLM half had
+    none, and `llm="auto"` looks for a MODEL DIRECTORY on disk -- which is the
+    wrong question when the caller IS the model.
+
+    `llm` IS REQUIRED AND MUST BE CALLABLE, deliberately. A human chatting at a
+    REPL must never be wired in as the back end: they would be prompted by the
+    engine mid-conversation, which is absurd and also unfalsifiable from inside
+    the process -- there is no reliable way to detect "an LLM is calling me", so
+    this asks instead of guessing. If you cannot pass a callable, you are not an
+    agent and autoboot() is your door.
+
+    Everything else is autoboot's: partition search order, doctrine, POST."""
+    # "remote" IS THE COMMON CASE, NOT THE EXCEPTION. The first version of this
+    # required a local callable, which fits a model loaded in-process and nothing
+    # else. People run Claude or ChatGPT behind an OpenAI-compatible endpoint --
+    # OpenWebUI, openzoo, ollama, a vendor API -- with the model in ANOTHER
+    # PROCESS and usually another machine. There is no callable to pass there,
+    # only a URL, and it is normally already in the environment.
+    if llm == "remote" or (isinstance(llm, str) and llm.startswith("http")):
+        from holographic.io_and_interop.holographic_remotellm import remote_llm
+        llm = remote_llm(url=(llm if isinstance(llm, str)
+                              and llm.startswith("http") else None))
+    if not callable(llm):
+        raise TypeError(
+            "agent_boot(llm=...) needs the model on the other end: a CALLABLE, or "
+            "\"remote\" / a base URL for an OpenAI-compatible endpoint (set "
+            "LECORE_LLM_URL, LECORE_LLM_MODEL, LECORE_LLM_KEY -- OPENAI_* also "
+            "read). Got %r. A human at a REPL wants lecore.autoboot(), which "
+            "leaves the back end unattached."
+            % type(llm).__name__)
+    return autoboot(partition=partition, session=session, llm=llm, memory=True)
+
+
 def autoboot(partition=None, session=None, llm="auto", memory=True):
     """ONE CALL, BOTH ENDS, MEMORY IN (cp62): the standing boot ritual made standard so
     it never has to be asked for again. Finds the partition (arg, or $LECORE_PARTITION,

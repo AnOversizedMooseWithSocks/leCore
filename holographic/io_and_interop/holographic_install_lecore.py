@@ -300,10 +300,26 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
         # aborting, because registers, router and improvement do not need it.
         _kh = c.get("linear_num_key_heads")
         _vh = c.get("linear_num_value_heads")
+        # AND NAME THE LINE. The config context above tells you the SHAPES the
+        # caller believed in; it does not tell you WHERE the belief broke, and
+        # without that the only way to find a reshape two modules down is to
+        # rebuild the call by hand -- which I did, three times, and could not
+        # reproduce it because the faculty path normalises the config
+        # differently from a hand-built dict.
+        # A DIAGNOSTIC THAT CANNOT BE REPRODUCED BY HAND MUST CARRY ITS OWN
+        # LOCATION. One frame is enough: file, line, and the expression.
+        import traceback as _tb
+        _fr = _tb.extract_tb(exc.__traceback__)
+        _at = ""
+        if _fr:
+            _last = _fr[-1]
+            _at = " at %s:%d in %s(): %s" % (
+                _last.filename.split("/")[-1], _last.lineno, _last.name,
+                (_last.line or "")[:60])
         _note("hrnn_channel", False,
-              "%s: %s [heads k=%s v=%s, kdim=%s vdim=%s, hidden=%s, %d layers "
+              "%s: %s%s [heads k=%s v=%s, kdim=%s vdim=%s, hidden=%s, %d layers "
               "-- the ladder is optional, continuing without it]"
-              % (type(exc).__name__, str(exc)[:70], _kh, _vh,
+              % (type(exc).__name__, str(exc)[:70], _at, _kh, _vh,
                  c.get("linear_key_head_dim"), c.get("linear_value_head_dim"),
                  c.get("hidden"), int(c["n_layers"])))
 

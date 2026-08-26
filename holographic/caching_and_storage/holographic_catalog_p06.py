@@ -116,7 +116,7 @@ def register_p06(c):
                           "which may be another map, so graphs nest to any depth. Sampling walks the tree; the input types "
                           "are checked at COMPOSE time so a bad graph (a colour used as a weight, a missing input) is refused "
                           "up front, not rendered wrong. Encode a graph to a hypervector to cache/search it. CMP1",
-                          example="mind.texture_op('mix', a=mind.texture_leaf(value=[1,0,0]), b=mind.texture_leaf(value=[0,0,1]), t=mind.texture_leaf('fbm', n_dims=2)); mind.sample_texture(g, [0.3,0.7])",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.texture_op('mix', a=mind.texture_leaf(value=[1,0,0]), b=mind.texture_leaf(value=[0,0,1]), t=mind.texture_leaf('fbm', n_dims=2)); mind.sample_texture(g, [0.3,0.7])",
                           native=True, aliases=("texture graph", "map graph", "shader graph", "compose texture",
                                                 "layered texture", "node graph", "blend maps", "mix textures", "procedural graph",
                                                 "compose a texture from noise and colors", "combine noise and colours",
@@ -128,7 +128,7 @@ def register_p06(c):
                           "mind.run_simulation(kind, steps) is the stateless twin for /invoke -- build a known "
                           "solver ('fluid' or 'automaton'), run it, and return its field grid as plain JSON (the "
                           "live wrapper holds a solver+adapter that does not survive serialization).",
-                          example="grid = mind.run_simulation('fluid', 30)   # step a fresh fluid and return its density",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); grid = mind.run_simulation('fluid', 30)   # step a fresh fluid and return its density",
                           native=True, aliases=("simulation", "solver", "fluid", "smoke", "fire", "cloth", "softbody",
                                                 "step", "advance", "sim loop", "mpm", "reaction diffusion",
                                                 "particle system", "particles", "emitter", "mass spring", "spring",
@@ -161,7 +161,7 @@ def register_p06(c):
                           "adds is BAKE a static texture graph to a grid (O(1) bilinear lookup, mind.bake_texture) vs "
                           "SAMPLE it live -- baking amortises a deep graph over many hits, live avoids re-baking a "
                           "changing map every frame. Trade: memory + interpolation error. CMP5",
-                          example="rg = mind.render_graph(); rg.add_texture('rust', graph, static=True).set_scene(scene); rg.plan(); prep = rg.prepare()",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rg = mind.render_graph(); rg.add_texture('rust', graph, static=True).set_scene(scene); rg.plan(); prep = rg.prepare()",
                           native=True, aliases=("render graph", "bake texture", "bake vs live", "prepare scene",
                                                 "resolve textures", "orchestrate render", "material lod", "precompute texture",
                                                 "static texture", "render pipeline graphs"))
@@ -171,7 +171,7 @@ def register_p06(c):
                           "material's roughness/metallic channels) -- works on a plain Material or a CMP2/CMP3 "
                           "layered/multi material. Returns a float image in [0,1] to save/view. The missing step "
                           "between composing a texture/material and looking at it.",
-                          example="img = mind.preview_texture(graph); ball = mind.preview_material(layered_material)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); img = mind.preview_texture(graph); ball = mind.preview_material(layered_material)",
                           native=True, aliases=("preview", "swatch", "material ball", "material preview", "texture preview",
                                                 "see the texture", "render swatch", "thumbnail", "material sphere",
                                                 "visualize texture", "visualize material", "look at the material"))
@@ -242,7 +242,7 @@ def register_p06(c):
                           "texture onto its object (spherical map on a sphere, planar on a box), and shades with the "
                           "real Cook-Torrance BRDF + a light + a hard shadow. This is the composability stack driving "
                           "a full 3-D render, not just a swatch. Honest: textbook UV (seams), single hard light.",
-                          example="tex = mind.texture_op('mix', a=mind.texture_leaf(value='orange'), b=mind.texture_leaf(value='purple'), t=mind.texture_leaf('fbm', n_dims=2)); mind.render_textured(scene, {scene.names()[0]: tex})",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); tex = mind.texture_op('mix', a=mind.texture_leaf(value='orange'), b=mind.texture_leaf(value='purple'), t=mind.texture_leaf('fbm', n_dims=2)); mind.render_textured(scene, {scene.names()[0]: tex})",
                           native=True, aliases=("textured render", "paint texture on object", "wrap texture", "uv render",
                                                 "texture the sphere", "composed texture render", "map onto object"))
     c.register_capability("Denoise (domain)", "clean a render or signal with one home: image SVGF (variance-guided "
@@ -271,7 +271,7 @@ def register_p06(c):
                           "pinned so the id cannot be recycled): 2.4x-2.6x scalar, 3.7x-4.3x in fuse_record, "
                           "bit-identical. Content keying stays the default and is required when byte-identical "
                           "arrays arrive as distinct objects",
-                          example="c = mind.spectrum_cache(key='identity'); mind.fuse_record(keys, values, spectrum_cache=c)",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); c = mind.spectrum_cache(key='identity'); mind.fuse_record(keys, values, spectrum_cache=c)",
                           native=True, aliases=("cache key cost", "identity keyed cache", "content addressing cost",
                                                 "is my cache slower than no cache", "cheap cache key for a big array",
                                                 "avoid rehashing an immutable array", "hashing costs more than the work",
@@ -284,7 +284,7 @@ def register_p06(c):
                           "partitions every public engine function into faculty / catalogued / called / "
                           "TEST-ONLY / orphan. TEST-ONLY is the valuable bucket: works, tested, exposed "
                           "nowhere -- so by this repo's own rule it does not exist. Conservative, never deletes",
-                          example="mind.audit_orphans()['counts']",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.audit_orphans()['counts']",
                           native=True, aliases=("find dead code", "which functions are never called",
                                                 "unused methods", "audit the codebase", "map the codebase",
                                                 "what is built but not wired", "orphan functions",
@@ -298,7 +298,7 @@ def register_p06(c):
                           "faculty and no catalog entry (the orphan audit collects functions only, so classes "
                           "were invisible to it). MEASURED: 9 of 10 path-tracer light classes are dark while "
                           "every module audit read 0 gaps. ADVISORY, under-reports, never a delete list",
-                          example="mind.audit_agent_reach()['counts']",
+                          example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.audit_agent_reach()['counts']",
                           native=True, module="orphanaudit",
                           aliases=("can an agent actually call this", "which classes can I not construct",
                                    "what can I not reach through the mind", "half wired module",
@@ -533,7 +533,7 @@ def register_p06(c):
                                    "make a described scene renderable with the path tracer",
                                    "words to primitives with handles", "create a scene by describing it"))
     c.register_capability("Refine a scene toward a target image (the self-improving loop)", "hand a described scene a TARGET IMAGE and the engine improves itself toward it -- past screenshot-and-hope: Blender's integration shows an agent its render but cannot score candidate edits against a goal and apply the best. apply=True runs the bounded greedy loop (applied/start/final/history); apply=False only SCORES, ranked, touching nothing. Verified live: 'a red sphere' toward a night target, 0.2625 -> 0.0000 -- it rediscovered 'make it night' itself. Deterministic. KEPT NEG: edits are sentences, so it works on SemanticScene; promote via describe_to_scene after",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); g=m.build_scene('a red sphere'); g.adjust('make it night'); t=np.asarray(g.render(width=96,height=72),float); s=m.build_scene('a red sphere'); print(m.refine_scene(s, t)['applied'])",
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(); g=m.build_scene('a red sphere'); g.adjust('make it night'); t=np.asarray(g.render(width=96,height=72),float); s=m.build_scene('a red sphere'); print(m.refine_scene(s, t)['applied'])",
                           native=True, module="scene_semantic",
                           aliases=("critique my render and improve it", "match my scene to this image",
                                    "automatically refine a scene toward a target image",
@@ -549,7 +549,7 @@ def register_p06(c):
                                    "download an hdri", "pin an external asset",
                                    "reproducible asset download", "pull a file from the web reproducibly"))
     c.register_capability("Parametric sky (time of day, sun, moon, stars, high cloud layers)", "a PARAMETRIC sky: hour drives a keyed gradient palette AND the sun's arc; stars are a hash of direction (same seed = same sky forever), fading by daylight and by cloud; moon=True auto-places opposite the sun; SEVEN cloud kinds (cirrus/cirrostratus/cirrocumulus/altocumulus/altostratus/stratocumulus/nimbostratus): Beer-Lambert shells, per-kind extinction/threshold/warp/erosion; cellular kinds keep GAPS. time_s/wind/evolve ANIMATE clouds (wind drifts; evolve slides through the solid noise so shapes MORPH; sky_keys feeds frame time). KEPT NEG: low clouds refused toward cloud_scene",
-                          example="import lecore, numpy as np; m=lecore.UnifiedMind(); sky=m.sky_model(hour=19.0, clouds=[('cirrus',0.5)]); print(np.round(sky([[0,1,0]]),3))",
+                          example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(); sky=m.sky_model(hour=19.0, clouds=[('cirrus',0.5)]); print(np.round(sky([[0,1,0]]),3))",
                           native=True, module="skymodel",
                           aliases=("time of day sky gradient", "night sky with stars",
                                    "render the moon in the sky", "starfield generator", "sunset sky colors",
@@ -587,7 +587,7 @@ def register_p06(c):
         "floor the loop refuses and the MODEL IS NEVER CONSULTED. Measured with a stub that always claims "
         "done: has-tool 20/20, no-tool 0/20 -- FALSE-ACTION RATE 0%. Refuses non-finite args and off-manifest "
         "tools; never guesses an unparsed reply",
-        example="mind.attach_llm(my_fn); mind.agent_loop('smooth a bumpy mesh')",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.attach_llm(my_fn); mind.agent_loop('smooth a bumpy mesh')",
         native=True, aliases=("let a model use my tools", "in process tool use loop",
                               "run an agent against the catalog", "agent loop",
                               "refuse a step when no tool fits", "model picks tools and i run them",
@@ -600,7 +600,7 @@ def register_p06(c):
         "capability, so it is a coherent idiomatic request with nothing behind it and every near neighbour "
         "still present. Strictly harder than word salad. MEASURED 60/20 seeded: resolution 100.0%, FALSE-ACTION "
         "RATE 0.0%, variance ZERO, model calls 0. KEPT NEGATIVE: rungs 1-5 fired 0/60",
-        example="mind.agent_benchmark(n_has=60, n_no=20); mind.catalog_without(['some capability'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.agent_benchmark(n_has=60, n_no=20); mind.catalog_without(['some capability'])",
         native=True, aliases=("measure the false action rate", "benchmark the agent socket",
                              "how often does it act when no tool exists", "agent benchmark",
                              "remove a capability and see if it still answers",
@@ -613,7 +613,7 @@ def register_p06(c):
         "matmul kernels -- no bit-reversal, no twiddle tables, no multi-stage barriers -- and ARITHMETIC IS "
         "WHAT A GPU HAS. Batched on purpose: a single bind is ~0.03ms on CPU, below any dispatch floor. "
         "Correctness verified against bind_batch; the crossover needs a real device",
-        example="out = mind.wgsl_bind_batch(a_stack, b_stack)   # (K, D) each",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); out = mind.wgsl_bind_batch(a_stack, b_stack)   # (K, D) each",
         native=True, aliases=("bind many vectors at once on the gpu", "batched bind on any gpu",
                               "circular convolution on the gpu", "gpu bind", "convolve a batch on the gpu"))
 
@@ -625,7 +625,7 @@ def register_p06(c):
         "index lives in ONE space, a cosine against a different model's vectors is MEANINGLESS yet still "
         "returns confident ranks. Dimension is checkable, space is not -- so sampled modules must self-recall "
         "on their own docstrings (chance 5/509)",
-        example="mind.set_embedder(my_encode); mind.route_semantic('smooth a bumpy mesh'); mind.set_embedder(None)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.set_embedder(my_encode); mind.route_semantic('smooth a bumpy mesh'); mind.set_embedder(None)",
         native=True, aliases=("supply my own embedding model", "bring your own vector encoder",
                               "plug in an external embedder", "use a sentence transformer for routing",
                               "dense retrieval with my own model", "set embedder",
@@ -641,7 +641,7 @@ def register_p06(c):
         "ratio COLLAPSES across dims, which is why capacity is m/D not a count). Reference numbers are for "
         "an INCOHERENT dictionary; coherence inverts the ranking, so pass codebook= for your atoms. Gate is "
         "mean minus sd: a lucky-seed capacity is not a capacity",
-        example="mind.bundle_capacity(512, 'cosamp'); mind.measure_recovery_curve(512, 'amp')",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.bundle_capacity(512, 'cosamp'); mind.measure_recovery_curve(512, 'amp')",
         native=True, aliases=("how many things fit in a bundle", "safe number of items to superpose",
                               "capacity of a bundle at this dimension", "load ratio before recovery fails",
                               "will recovery still work with this many items", "bundle capacity",
@@ -654,7 +654,7 @@ def register_p06(c):
         "least-squares (exact coefficients, best on COHERENT dictionaries); amp_recall Onsager-corrected AMP (K "
         "OPTIONAL, flat cost, best at HEAVY load). NEITHER DOMINATES -- measured D=512/N=2048: all tie at 1.000 to "
         "M/D=0.17; AMP 0.558 vs CoSaMP 0.167 at M/D=0.33; but on a coherent dictionary AMP 0.052 vs CoSaMP 1.000",
-        example="mind.cosamp_recall(cue, codebook, K); mind.iht_recall(cue, codebook, K); mind.occlusion_recall(cue, codebook, K)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.cosamp_recall(cue, codebook, K); mind.iht_recall(cue, codebook, K); mind.occlusion_recall(cue, codebook, K)",
         native=True, aliases=("recover many items from one bundle", "find which codebook entries are in this sum",
                               "unmix a superposition into its parts", "what went into this bundle",
                               "sparse recovery against a dictionary", "greedy solver for a mixture of atoms",
@@ -671,7 +671,7 @@ def register_p06(c):
         "backend='wgsl' routes the same computation to ANY GPU, DEFAULT OFF because the host<->device "
         "crossover has never been measured on real hardware and the one thing worse than not using a device "
         "is using it on a guess. Indices resolve by lowest index on both paths, so ties cannot move",
-        example="idx, scores = mind.cleanup_batch(codebook, queries)   # backend='wgsl' to try a device",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); idx, scores = mind.cleanup_batch(codebook, queries)   # backend='wgsl' to try a device",
         native=True, aliases=("clean up many cues at once", "batch cleanup", "recall many vectors at once",
                               "nearest atom for a stack of queries", "batched nearest neighbour"))
 
@@ -683,7 +683,7 @@ def register_p06(c):
         "509x128 routing index: normal queries flip 0.00% down to 2 BITS; queries midway between two "
         "documents collapse to margin ~0.058 and flip at 8. FLIP RATE IS GOVERNED BY MARGIN, not by corpus "
         "size or bit width",
-        example="mind.decision_flip_rate(index, queries, bits=8); mind.crowded_subset(index, 200)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.decision_flip_rate(index, queries, bits=8); mind.crowded_subset(index, 200)",
         native=True, aliases=("does quantization change the answer", "top 1 flip rate",
                               "is this index decision safe", "argmax flips under compression",
                               "how few bits can i use for retrieval", "quantization decision safety",
@@ -698,7 +698,7 @@ def register_p06(c):
         "log saying why each rung above declined -- that log IS the explanation. REFUSAL IS A RESULT: an "
         "unresolvable request returns ok=False, never a guess. max_rung=5 keeps it deterministic; every "
         "gate is NaN-guarded because a NaN score WINS an unguarded argmax",
-        example="mind.declare('smooth a bumpy mesh'); mind.declare_explain('...'); f = mind.declares(fn)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.declare('smooth a bumpy mesh'); mind.declare_explain('...'); f = mind.declares(fn)",
         native=True, aliases=("declare a method and let the engine fill it in",
                               "resolve an empty function body at runtime",
                               "try cheap deterministic ways before calling a model",
@@ -713,7 +713,7 @@ def register_p06(c):
         "is exactly zero, and argmax is the exact ML nearest-codeword decode (Reed-Muller's Green machine). "
         "MEASURED at equal K and D: 6.9x at D=1024, 219x at D=8192. KEPT NEGATIVES: LOSES at D=256 (0.49x, "
         "crossover ~D=512), and K is CAPPED at 2*D by construction",
-        example="cb = mind.hadamard_codebook(1024); cb.cleanup(cue); mind.hadamard_codebook_measure()",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cb = mind.hadamard_codebook(1024); cb.cleanup(cue); mind.hadamard_codebook_measure()",
         native=True, aliases=("cleanup without comparing against every codebook entry",
                               "find the nearest codebook entry without scanning every one",
                               "structured codebook so cleanup is a transform", "nearest codeword in log time",
@@ -729,7 +729,7 @@ def register_p06(c):
         "cores: slower than sequential and 64x the memory. Takes the MINIMUM of affinity, cgroup v2/v1 quota "
         "and cpu_count. should_pool() then decides if a pool pays, refusing on <2 cores, <2 buckets, or work "
         "per bucket below ~4x the 0.2ms dispatch cost",
-        example="mind.cpu_budget(); mind.should_pool(n_buckets=8, est_ms_per_bucket=50.0)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.cpu_budget(); mind.should_pool(n_buckets=8, est_ms_per_bucket=50.0)",
         native=True, aliases=("how many cores do i have", "detect available cpus",
                               "pick a worker count automatically", "should i use a process pool",
                               "is parallelism worth it here", "how many workers should i start",
@@ -742,7 +742,7 @@ def register_p06(c):
         "while n_items/(keep*dim) stays under the safe ratio. NO NEW THEORY -- verified across 5 configs. "
         "CORRECTION KEPT LOUD: the 100%-at-40%-destroyed figure is about DAMAGE (zeroed slots, no memory "
         "saved); TRUNCATING to 40% at the same load gives 85%, not 100%. Different quantities",
-        example="mind.drop_budget(dim=1024, n_items=16)   # -> keep 78%, 1792 bytes saved",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.drop_budget(dim=1024, n_items=16)   # -> keep 78%, 1792 bytes saved",
         native=True, aliases=("how many slots can i drop", "degrade instead of running out of memory",
                               "shrink a vector under memory pressure", "memory budget for a bundle",
                               "how much can i truncate"))
@@ -755,7 +755,7 @@ def register_p06(c):
         "breaker). THE POINT: a registered model can be FAILED OVER AWAY FROM -- measured, a flaky model's "
         "breaker opens after 3 failures and the planner is then only offered the deterministic tool. A system "
         "whose only mechanism IS the model cannot do that",
-        example="mind.attach_llm(my_fn); tool = mind.llm_tool(description='rewrite text')",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.attach_llm(my_fn); tool = mind.llm_tool(description='rewrite text')",
         native=True, aliases=("let the planner use the language model", "register an llm as a tool",
                               "make the model visible to the planner", "fail over away from a flaky model",
                               "llm as a tool", "use my model in a plan",
@@ -768,7 +768,7 @@ def register_p06(c):
         "reports the crossover in bytes. HANDLES THE TIMING TRAP -- GPU calls are async, so it reads every "
         "result back to force completion; timing a launch instead of an execution is the classic spectacular "
         "wrong number. REFUSES TO FLATTER A SOFTWARE ADAPTER: llvmpipe/WARP get a MEANINGLESS banner",
-        example="print(mind.gpu_crossover(kind='cleanup', text=True))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.gpu_crossover(kind='cleanup', text=True))",
         native=True, aliases=("measure the gpu crossover", "benchmark cpu vs gpu",
                               "find where the device starts winning", "is my gpu actually faster",
                               "when should i use the gpu", "gpu benchmark"))
@@ -780,7 +780,7 @@ def register_p06(c):
         "flip is an argmax flip. Integer input only; the modulus bound is checked and RAISES rather than "
         "wrapping. KEPT NEGATIVES: 19-50x SLOWER than the float bind (exactness, never speed), and unbind is "
         "still HRR's QUASI-inverse -- cleanup is not deleted",
-        example="mind.ntt_bind(a, b); mind.ntt_unbind(c, a); mind.ntt_convolve(a, b); mind.ntt_measure_vs_fft()",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.ntt_bind(a, b); mind.ntt_unbind(c, a); mind.ntt_convolve(a, b); mind.ntt_measure_vs_fft()",
         native=True, aliases=("exact circular convolution with integers", "bind two vectors with no rounding error",
                               "modular arithmetic convolution", "number theoretic transform",
                               "convolution that is identical on every machine", "integer only binding",
@@ -795,7 +795,7 @@ def register_p06(c):
         "not the algorithm. Re-runs the identical synthesis on random unit goals (no chain behind them by "
         "construction) and reports where the real score sits. MEASURED: real goals 1.000, random 0.14-0.24, "
         "so 0.85 separates -- the number the constant hides. Wired into declare(null_check=True)",
-        example="mind.gap_gate_null(library, goal_sig); mind.declare(req, args=..., null_check=True)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.gap_gate_null(library, goal_sig); mind.declare(req, args=..., null_check=True)",
         native=True, aliases=("is my threshold meaningful", "null reference a coherence gate",
                               "check a synthesis threshold against chance",
                               "score versus its own null for capability synthesis",
@@ -808,7 +808,7 @@ def register_p06(c):
         "COUNT so dilution scores worse), but a TARGETED rewrite sails through (1/3: 'purple monkey "
         "dishwasher' -> 'smooth a bumpy mesh' routes confidently). A NULL DETECTS IRRELEVANCE, NOT "
         "INFIDELITY. So the primary gate is overlap with the ORIGINAL; both gates apply, not either",
-        example="mind.attach_llm(my_fn); mind.expand_query('how do i fix a lumpy model')",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.attach_llm(my_fn); mind.expand_query('how do i fix a lumpy model')",
         native=True, aliases=("rewrite my query into catalog words", "query expansion",
                               "let the model rephrase before searching",
                               "stop a rewrite from changing what i asked", "expand a search query",
@@ -821,7 +821,7 @@ def register_p06(c):
         "workgroup partials in shared memory, host finishes -- because a grid-wide barrier does not exist in "
         "WGSL and atomics are float-nondeterministic. ARGMAX splits deliberately: value on device, INDEX on "
         "host by lowest index, so ties break canonically. Measured 200/200 on adversarial exact ties",
-        example="mind.wgsl_reduce('sum', data); idx, val = mind.wgsl_argmax(similarities)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.wgsl_reduce('sum', data); idx, val = mind.wgsl_argmax(similarities)",
         native=True, aliases=("sum an array on the gpu", "gpu reduction", "argmax on the gpu",
                               "reduce a vector on any gpu", "find the max on the graphics card",
                               "cleanup on the gpu"))
@@ -833,7 +833,7 @@ def register_p06(c):
         "reason is the cost profile: a bigger cap is nearly free when an answer exists (early exit) and 13x "
         "slower when there is NONE, because a refusal must exhaust the budget. The sequence is PREFIX-STABLE, "
         "so raising it could not flip an existing answer -- the objection is cost alone",
-        example="mind.advise_restarts([bookA, bookB], targets=(0.95,))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.advise_restarts([bookA, bookB], targets=(0.95,))",
         native=True, aliases=("how many restarts does my resonator need", "pick a search budget",
                               "how long should i search before giving up", "advise a restart count",
                               "is my factoring failing from budget or capacity"))
@@ -845,7 +845,7 @@ def register_p06(c):
         "real work. A POLICY CAPS, IT DOES NOT COMMAND: cpu_cores=4 means never more than 4 and the measured "
         "gates still decide inside it. Precedence explicit > policy > env > auto. Reports the SOURCE of every "
         "value and flags which settings change NUMERICS (gpu) versus only speed (cores, pool)",
-        example="mind.resource_policy(cpu_cores=4, gpu='off'); mind.resource_policy()",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.resource_policy(cpu_cores=4, gpu='off'); mind.resource_policy()",
         native=True, aliases=("limit how many cores it uses", "turn off the gpu",
                               "configure resource limits", "set a cpu limit",
                               "stop it using all my cores", "system configuration settings",
@@ -858,7 +858,7 @@ def register_p06(c):
         "in rank order and keeps the first that VERIFIES, reporting all-failed instead of guessing. Not a "
         "learned tie-breaker: at a real tie candidates are EQUALLY GOOD, so verification beats learning. "
         "MEASURED: 0% ties on a random codebook, 84% on a coherent one under noise -- a degraded-regime tool",
-        example="t = mind.tied_candidates(ranked, margin=0.01); mind.verify_and_keep(t['candidates'], check)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); t = mind.tied_candidates(ranked, margin=0.01); mind.verify_and_keep(t['candidates'], check)",
         native=True, aliases=("what were the runner up matches", "return several candidates instead of one",
                               "how close was the second best answer", "try both and see which works",
                               "handle an ambiguous match", "dont guess when its a tie",
@@ -871,7 +871,7 @@ def register_p06(c):
         "is a PROJECTION of the authoritative Python, so verify_wgsl_kernel can DIFFERENTIALLY TEST the two "
         "on real data (CuPy cannot: no shared source). Works on software adapters, so correctness is "
         "CI-testable with no GPU. SCOPE: elementwise f32 maps; a cross-invocation reduction is not solved",
-        example="info = mind.wgsl_device(); mind.verify_wgsl_kernel(my_fn, data, extra_args=(2.0,))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); info = mind.wgsl_device(); mind.verify_wgsl_kernel(my_fn, data, extra_args=(2.0,))",
         native=True, aliases=("run this on any gpu", "use my amd or intel gpu", "gpu without cuda",
                               "run a kernel on metal or vulkan", "webgpu compute",
                               "check my shader matches the python", "vendor neutral gpu"))
@@ -884,7 +884,7 @@ def register_p06(c):
         "you already started. Pass it as distribute_compute(backend=...). VERIFIED bit-identical to "
         "in-process. Workers must be TOP-LEVEL picklable functions. Default stays single-process -- measure "
         "on your own hardware first",
-        example="pool = mind.local_pool(n=4); mind.distribute_compute(buckets, my_fn, backend=pool); pool.close()",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); pool = mind.local_pool(n=4); mind.distribute_compute(buckets, my_fn, backend=pool); pool.close()",
         native=True, aliases=("spin up another instance", "start a second worker", "use more cores",
                               "launch a local worker pool", "run work in parallel across processes",
                               "parallel execution on one machine", "balance load across instances",
@@ -897,7 +897,7 @@ def register_p06(c):
         "otherwise. SELECTIVE BY DESIGN -- a big FFT or matmul wins because the transfer amortises, a small "
         "per-vector op LOSES to the transfer. HONEST: this is CUDA/NVIDIA ONLY, and GPU matches NumPy only "
         "to a TOLERANCE, so the bit-exact and tie-sensitive paths stay on CPU. Throughput, not determinism",
-        example="mind.use_gpu(True)   # -> False when no CUDA device is present",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.use_gpu(True)   # -> False when no CUDA device is present",
         native=True, aliases=("use my gpu", "offload work to cuda", "run this on the graphics card",
                               "do i have a gpu", "enable cuda acceleration",
                               "make it faster with my graphics card", "use hardware acceleration",
@@ -910,7 +910,7 @@ def register_p06(c):
         "splitting pays submission twice and ships the intermediate back. Index resolves host-side by lowest "
         "index (canonical tie rule). MEASURED RISK: a similarity gap <=1e-7 can flip (3/150); that is 4 orders "
         "below any sensible tie margin, so pair with tied_candidates",
-        example="idx, sc = mind.wgsl_cleanup_batch(codebook, queries); mind.wgsl_matmul(codebook, queries)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); idx, sc = mind.wgsl_cleanup_batch(codebook, queries); mind.wgsl_matmul(codebook, queries)",
         native=True, aliases=("cleanup on the gpu", "matrix times vector on the gpu",
                               "codebook similarity on any gpu", "nearest atom on the graphics card",
                               "matvec on the gpu", "vsa recall on the gpu",
@@ -923,7 +923,7 @@ def register_p06(c):
         "pure WoS at 32 walks: 0.043 vs 0.075 error (about HALF). KEPT NEGATIVES: BIASED by interface "
         "resolution, so unbiased WoS OVERTAKES at high budgets; the paper's low-variance headline does NOT "
         "reproduce -- this earns sample efficiency. 2-D rectangle + Dirichlet; use wost for general SDFs",
-        example="pts = mind.wods_interface_grid(6, 6); mind.wods_solve(pts, g); mind.wods_measure_vs_pure_wos()",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); pts = mind.wods_interface_grid(6, 6); mind.wods_solve(pts, g); mind.wods_measure_vs_pure_wos()",
         native=True, aliases=("split a domain into pieces and solve each one",
                               "estimate a local solution operator by random walks",
                               "combine local solvers into one global sparse system",
@@ -938,7 +938,7 @@ def register_p06(c):
         "microarchitecture-dependent, NumPy #11926) -- and in this engine a ULP flip is an argmax flip. "
         "wht_exact refuses float so the guarantee is enforced. KEPT NEGATIVE, measured: 4-9x SLOWER than "
         "numpy.rfft at D=256..16384 -- it is an EXACTNESS tool, not an FFT speedup",
-        example="mind.wht(x); mind.wht_exact(x); mind.wht_inverse(y); mind.wht_measure_vs_fft()",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.wht(x); mind.wht_exact(x); mind.wht_inverse(y); mind.wht_measure_vs_fft()",
         native=True, aliases=("fast walsh hadamard transform", "walsh hadamard", "hadamard transform",
                               "transform that uses only additions and subtractions",
                               "exact integer orthogonal transform", "matrix free transform",
@@ -960,7 +960,7 @@ def register_p06(c):
         "and transparent; WGSL = vendor-neutral and explicit), because a CuPy-only report tells an Apple or "
         "AMD user they have no GPU. should_offload() is the pre-gate: refuses on no device, too little data, "
         "too little work per byte, or REPEATED ROUND TRIPS (fuse first). Thresholds PROVISIONAL, unmeasured",
-        example="mind.gpu_report(); mind.should_offload(n_bytes=10**8, flops_per_byte=50.0)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.gpu_report(); mind.should_offload(n_bytes=10**8, flops_per_byte=50.0)",
         native=True, aliases=("what gpu do i have", "is the gpu worth using here",
                               "should i offload this to the gpu", "why is my gpu not being used",
                               "check gpu availability", "is my graphics card being used"))
@@ -972,7 +972,7 @@ def register_p06(c):
         "recommend a device the operator had forbidden. This composes them. POLICY VETO FIRST (no arithmetic "
         "makes a banned device faster), then CHEAPEST-CORRECT: unit, pool, device -- the device last because "
         "it is the only one that changes the NUMBERS, not just the speed. Device answers are marked provisional",
-        example="mind.place_work(n_buckets=64, est_ms_per_bucket=50.0, n_bytes=10**8, flops_per_byte=40.0)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.place_work(n_buckets=64, est_ms_per_bucket=50.0, n_bytes=10**8, flops_per_byte=40.0)",
         native=True, aliases=("where should this work run", "should this go on the gpu or cpu",
                               "pick the best place to run this", "cpu pool or gpu",
                               "one answer for where to run", "placement decision"))
@@ -985,7 +985,7 @@ def register_p06(c):
         "representation via atan2 + round, and that round is itself a tie), so this does NOT delete "
         "tie-arbitration; and bundle fidelity saturates at ~0.892 vs a complex bundle however fine the "
         "phase grid, because magnitude is discarded",
-        example="q = mind.qfhrr_quantize(v); mind.qfhrr_bind(q, k); mind.qfhrr_unbind(c, k); mind.qfhrr_measure_fidelity()",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); q = mind.qfhrr_quantize(v); mind.qfhrr_bind(q, k); mind.qfhrr_unbind(c, k); mind.qfhrr_measure_fidelity()",
         native=True, aliases=("store a hypervector at three or four bits per dimension",
                               "quantize phase angles to integers", "bind by adding phase indices modulo k",
                               "shrink a codebook by quantizing", "low bit width vector representation",
@@ -1004,7 +1004,7 @@ def register_p06(c):
         "Crystal lattices (the 14 Bravais lattices)", "atom SITE positions for any of the 14 Bravais lattices "
         "(7 crystal systems x P/I/F/C centring), their nearest-neighbour bonds, and a faceted habit SDF from "
         "Miller-index planes; feed sites to metaball_mesh for ball-and-stick or scatter_mesh for unit cells",
-        example="pts = mind.lattice_sites('cubic', centring='F', extent=2); bonds, d = mind.lattice_bonds(pts)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); pts = mind.lattice_sites('cubic', centring='F', extent=2); bonds, d = mind.lattice_bonds(pts)",
         native=True, aliases=("cubic lattice", "salt crystal structure", "how do crystals stack",
                               "bravais lattice", "crystal unit cell", "make a crystal", "atom positions",
                               "face centred cubic", "body centred cubic", "diamond lattice",
@@ -1014,7 +1014,7 @@ def register_p06(c):
         "Scatter meshes over a surface (grass, rocks, plants)", "place many copies of a mesh across the AREA of "
         "another mesh -- area-weighted sampling, normal-aligned frames with yaw/scale jitter, optional blue-noise "
         "thinning and a density mask; merge into one mesh or share one definition across n instances",
-        example="lawn = mind.scatter_mesh(ground, mind.grass_blade(), 500, seed=0, mode='merge')",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); lawn = mind.scatter_mesh(ground, mind.grass_blade(), 500, seed=0, mode='merge')",
         native=True, aliases=("put grass on my terrain mesh", "cover a surface in plants", "lawn", "grass field",
                               "scatter grass", "instance a model many times over a mesh", "fur on a mesh",
                               "rocks on a hill", "barnacles on a hull", "sprinkle objects on a surface",
@@ -1024,7 +1024,7 @@ def register_p06(c):
         "Procedural plants & trees (L-system grammar)", "grow branching plants and trees from rewrite rules: "
         "expand an L-system, walk it with a 3-D turtle into branch segments, then mesh it as tapered limbs; also "
         "greebles, seeded procedural objects and terrain vegetation",
-        example="ls = mind.lsystem('F', {'F': 'F[+F]F[-F]F'}); mesh, segs, scene = mind.grow_plant(ls, 3)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); ls = mind.lsystem('F', {'F': 'F[+F]F[-F]F'}); mesh, segs, scene = mind.grow_plant(ls, 3)",
         native=True, aliases=("branching plant generator", "make a bush", "vegetation generator", "procedural tree",
                               "grow a tree from rules", "l-system", "turtle graphics", "foliage generation",
                               "tree generator", "shrub", "fern", "plant model", "branch structure"))
@@ -1033,7 +1033,7 @@ def register_p06(c):
         "Scrub through growth (staged growers + verification)", "step a plant, crystal or dendrite from nothing to "
         "finished form: discrete stages or a continuous t in [0,1]. grow_at is PURE, so scrubbing backwards is safe; "
         "growth_report checks purity and that nothing retracts between stages. t is growth PROGRESS, not time",
-        example="stages = mind.grow_stages('crystal', {'system': 'cubic', 'centring': 'F'}, 8); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); stages = mind.grow_stages('crystal', {'system': 'cubic', 'centring': 'F'}, 8); "
                 "rep = mind.growth_report('crystal', {'system': 'cubic', 'centring': 'F'})",
         native=True, aliases=("watch it grow step by step", "scrub through growth", "growth stages",
                              "step through crystal formation", "growth preview", "intermediate growth stages",
@@ -1044,7 +1044,7 @@ def register_p06(c):
         "Creature idle animation (show where the joints bend)", "a simple looping idle that flexes each joint within "
         "its OWN stored limit, so knees/elbows/hips visibly show where they are and which way they bend -- the limit "
         "is the driver, so an impossible bend cannot be shown. A limits demo, NOT locomotion (no gait or balance)",
-        example="c = mind.creature(mind.quadruped_spec()); frames = mind.creature_idle_frames(c, 24)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); c = mind.creature(mind.quadruped_spec()); frames = mind.creature_idle_frames(c, 24)",
         native=True, aliases=("make the creature move a little", "show me where the joints bend",
                               "idle animation", "creature idle", "which way does the elbow bend",
                               "animate a creature", "simple animation for a monster", "joint limit preview",
@@ -1060,7 +1060,7 @@ def register_p06(c):
         "attractor crown (Runions 2007) -- natural limb spread and a shaped canopy; thickness by the da Vinci "
         "rule (parent^2 = sum of children^2); leaves placed at the golden angle. Segments come out in growth "
         "order, so scrubbing is free",
-        example="A = mind.crown_attractors(n=250); t = mind.grow_tree(A); mesh = mind.tree_mesh(t)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); A = mind.crown_attractors(n=250); t = mind.grow_tree(A); mesh = mind.tree_mesh(t)",
         native=True, aliases=("leaves on a tree", "oak tree", "how thick should a branch be",
                               "tree branches thickness", "grow a realistic tree", "space colonization",
                               "branch taper", "canopy", "conifer", "foliage on branches",
@@ -1071,7 +1071,7 @@ def register_p06(c):
         "their own radius, so stretching a spine or limb adds balls instead of stretching a shape, and limbs "
         "blend into the torso; per-node spine radii give a fat belly and a thin neck, and the spine can be "
         "extended, subdivided, re-thickened and reshaped -- every edit returning a new spec",
-        example="s = mind.spine_profile(mind.quadruped_spec(), [.06,.16,.2,.16,.06]); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); s = mind.spine_profile(mind.quadruped_spec(), [.06,.16,.2,.16,.06]); "
                 "mesh = mind.creature_skin_mesh(mind.creature(s, skin=False), s)",
         native=True, aliases=("make the belly fatter", "fat torso thin neck", "sculpt the torso",
                               "spore style body", "blobby creature skin", "stretch the spine",
@@ -1090,7 +1090,7 @@ def register_p06(c):
         "atoms with authored deformation handles; attaching to sockets builds ONE bound record, so the layout is "
         "queryable (what is on this socket), comparable between creatures, and mirrored or radially repeated by a "
         "symmetry GROUP. assembly_report measures the bundle's recall margin rather than assuming capacity",
-        example="lib = mind.part_library(); lib.define('horn', handles={'length': (0.5, 2.0)}); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); lib = mind.part_library(); lib.define('horn', handles={'length': (0.5, 2.0)}); "
                 "a, v = mind.attach_part({}, 'shoulder', 'horn', lib, symmetry='bilateral')",
         native=True, aliases=("snap parts onto a creature", "library of body parts", "rigblock",
                               "what part is on the left shoulder", "mirror parts to both sides",
@@ -1103,7 +1103,7 @@ def register_p06(c):
         "bones produced the metaballs near each vertex -- skinning as the soft mixture of experts it already is. "
         "Returns the compact indexed form linear_blend_skin_indexed wants. Distance-based, not geodesic: touching "
         "limbs bleed weight",
-        example="C, R, bones = mind.creature_metaballs(cr); idx, w, names, book = "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); C, R, bones = mind.creature_metaballs(cr); idx, w, names, book = "
                 "mind.skin_weights_from_balls(mesh.vertices, C, R, bones)",
         native=True, aliases=("which bone controls this vertex", "automatic skin weights",
                               "bind vertices to bones", "weight painting", "rig a generated creature",
@@ -1114,7 +1114,7 @@ def register_p06(c):
         "into ONE vector bound by region code, so you can ask whether anything is scattered near a point without a "
         "spatial index; plus deterministic spec VARIANTS, so a pool of twenty different plants is a loop over seeds "
         "rather than twenty authored assets, and never needs storing",
-        example="g = mind.scatter_mesh(ground, mind.grass_blade(), 500, holographic=True); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); g = mind.scatter_mesh(ground, mind.grass_blade(), 500, holographic=True); "
                 "mind.region_occupancy(g['layer'], g['instance'], g['transforms'][0, :3, 3])",
         native=True, aliases=("is anything scattered here", "query the grass field", "twenty different ferns",
                               "random variations of a plant", "what is scattered near this point",
@@ -1131,7 +1131,7 @@ def register_p06(c):
         "pattern (stripes/dots/checker/noise): because the tint reads the skin weights, markings follow the "
         "anatomy and travel with a pose instead of swimming through world-space noise, and a limb is its own "
         "colour region for free. Per-vertex -- finer detail needs a texture bake",
-        example="idx, w, names, book = mind.skin_weights_from_balls(V, C, R, bones); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); idx, w, names, book = mind.skin_weights_from_balls(V, C, R, bones); "
                 "cols = mind.paint_creature(V, idx, w, names, pattern='stripes')",
         native=True, aliases=("skin markings", "colour the body", "stripes on an animal",
                               "paint a creature", "creature colours", "fur pattern", "spots and stripes",
@@ -1142,7 +1142,7 @@ def register_p06(c):
         "from the cache: thin the population and drop to a coarser blade as it recedes. Thinning is deterministic "
         "and NESTED, so the far set is a subset of the near set and blades never flicker as the camera moves. "
         "Reports exact triangle counts against the full-resolution baseline",
-        example="b = mind.scatter_bake(g['transforms'], mind.grass_blade()); print(b.report())",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); b = mind.scatter_bake(g['transforms'], mind.grass_blade()); print(b.report())",
         native=True, aliases=("level of detail for grass", "thin distant grass", "cheaper geometry far away",
                               "cache a scatter", "lod for scattered objects", "reduce grass in the distance",
                               "bake the grass", "scatter performance", "too many blades"))
@@ -1156,7 +1156,7 @@ def register_p06(c):
         "amphibian glands, insect chitin plates, worm annuli, mammal pores -- as channel fields evaluated in the "
         "creature's own BODY frame, so scale rows elongate down the body and travel with it. Feeds render_surface "
         "as a solid 3-D texture: no UV unwrap, no seams",
-        example="mat = mind.creature_surface_material('reptile', axis=(0,0,1)); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mat = mind.creature_surface_material('reptile', axis=(0,0,1)); "
                 "img = mind.render_surface(field, cam, 256, 256, {0: mat})",
         native=True, aliases=("scales for a lizard", "frog skin", "eel skin", "beetle shell", "chitin",
                               "fish scales", "snake skin", "reptile skin", "amphibian skin",
@@ -1168,7 +1168,7 @@ def register_p06(c):
         "really is, composed through the layered-material order schema so base<diffuse<specular<coat is enforced at "
         "compose time. INSECTS REFUSE A BONE LAYER -- an arthropod's rigid structure is its exoskeleton. Interior "
         "layers only show through translucency; this is not an x-ray",
-        example="st = mind.anatomy_stack('reptile'); print(st['layers'], st['interior_visible'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); st = mind.anatomy_stack('reptile'); print(st['layers'], st['interior_visible'])",
         native=True, aliases=("bone and organ layers", "layered skin", "exoskeleton", "endoskeleton",
                               "what is my creature made of", "skin layers", "tissue stack",
                               "anatomy material", "dermis and epidermis", "organ material",
@@ -1184,7 +1184,7 @@ def register_p06(c):
         "document, records every change so it can be undone and redone, saves and loads as JSON that round-trips "
         "exactly, validates that the thing is buildable, meters a Spore-style complexity budget, and builds skin "
         "plus placed parts. Edits return self, so a UI can chain and still undo each step",
-        example="ed = mind.creature_editor(); ed.extend_spine(2).set_thickness(0.5, 0.22, falloff=0.3); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); ed = mind.creature_editor(); ed.extend_spine(2).set_thickness(0.5, 0.22, falloff=0.3); "
                 "ed.undo(); print(ed.validate(), ed.complexity())",
         native=True, aliases=("spore creature creator", "creature editor", "undo my last change",
                               "save a creature to a file", "load a creature", "is my creature valid",
@@ -1196,7 +1196,7 @@ def register_p06(c):
         "theta around it) -- resolved by marching the creature's own skin field outward. Because a socket stores "
         "anatomy coordinates rather than a world position, a part rides the skin through every later spine and "
         "thickness edit. Includes the inverse (click point -> socket) and a viewport ray pick, which round-trip",
-        example="cr, f = ed.creature(), ed.field(); s = mind.pick_socket(cr, f, eye, ray); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cr, f = ed.creature(), ed.field(); s = mind.pick_socket(cr, f, eye, ray); "
                 "ed.add_part('horn', s['t'], s['theta'], symmetry='bilateral')",
         native=True, aliases=("click to place a part", "where did i click on the model",
                               "stick a horn on the back", "drag a part onto the body",
@@ -1212,7 +1212,7 @@ def register_p06(c):
         "on a stalk), mouth, foot and hand with a variable number of digits, claw, horn, spike, fin, antenna, ear "
         "-- each with authored handle ranges that clamp. Procedural, so digits=3 versus digits=5 is a genuinely "
         "different foot rather than one mesh scaled, which is what a rigblock handle is supposed to mean",
-        example="lib = mind.creature_parts(); ed = mind.creature_editor(part_library=lib); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); lib = mind.creature_parts(); ed = mind.creature_editor(part_library=lib); "
                 "ed.add_part('eye', 0.95, 0.7, symmetry='bilateral')",
         native=True, aliases=("give it eyes", "add a mouth", "three toed foot", "how many fingers",
                               "make a claw", "wings or fins", "antennae", "body part library",
@@ -1224,7 +1224,7 @@ def register_p06(c):
         "along the path, in a rotation-minimizing frame so the ring does not spin on a curve. The shipped "
         "sweep_tube takes one profile for the whole tube and so cannot taper -- which is the one thing every "
         "organic appendage does, and why every part in the creature library is built on this",
-        example="import numpy as np; P = np.stack([np.zeros(6), np.zeros(6), np.linspace(0, 1, 6)], 1); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); P = np.stack([np.zeros(6), np.zeros(6), np.linspace(0, 1, 6)], 1); "
                 "m = mind.sweep_profile(P, np.linspace(0.1, 0.01, 6))",
         native=True, aliases=("tapered tube", "varying radius sweep", "cone along a curve",
                               "taper a sweep", "swept profile", "tapered extrusion"))
@@ -1240,7 +1240,7 @@ def register_p06(c):
         "the classic gait diagrams -- walk, trot, pace, bound, gallop for tetrapods, a metachronal wave for any "
         "other leg count. Body speed is DERIVED from stride/(duty*period), never a free input, which is what "
         "keeps planted feet from sliding. Legs are posed through the rig's own limit-constrained IK",
-        example="rep = mind.gait_report(cr, gait='trot'); frames = mind.gait_frames(cr, n_frames=24)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rep = mind.gait_report(cr, gait='trot'); frames = mind.gait_frames(cr, n_frames=24)",
         native=True, aliases=("make it walk", "trot gallop", "locomotion", "walk cycle", "gait",
                               "animate walking", "step cycle", "stride length", "which limbs are legs",
                               "quadruped walk", "biped walk", "hexapod walk", "run cycle"))
@@ -1251,7 +1251,7 @@ def register_p06(c):
         "and this is a number rather than a matter of taste. Also reports distance travelled, measured duty per "
         "foot, and any leg the IK could not place. KEPT NEGATIVE: a foot that never moves cannot slip, so a low "
         "score means nothing unless `unreachable` is empty -- check it first",
-        example="r = mind.gait_report(cr); print(r['slip_ratio'], r['unreachable'], r['duty_measured'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r = mind.gait_report(cr); print(r['slip_ratio'], r['unreachable'], r['duty_measured'])",
         native=True, aliases=("foot slip", "moonwalk", "does my creature walk properly",
                               "feet sliding", "walk quality", "sliding feet", "verify a walk cycle",
                               "gait measurement", "duty factor"))
@@ -1266,7 +1266,7 @@ def register_p06(c):
         "SPACE in the body frame instead of using ellipsoid primitives, so every ball becomes the same ellipse for "
         "free: broaden across, flatten front-to-back, raise a spinal crest, flatten the underside. Measured: no "
         "evaluation cost over spheres",
-        example="w = mind.section_warp(cr, width=1.5, depth=0.75, ridge=0.3, belly=0.35); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); w = mind.section_warp(cr, width=1.5, depth=0.75, ridge=0.3, belly=0.35); "
                 "f = mind.creature_skin_field(cr, spec, warp=w)",
         native=True, aliases=("make the body wider than deep", "flat belly", "barrel chested",
                               "body shape not round", "squash the body", "body silhouette",
@@ -1277,7 +1277,7 @@ def register_p06(c):
         "the resolution that would fix it. A feature needs at least 4 cells to mesh smoothly; below 2 it BEADS "
         "into visible lumps -- which is what a thin limb does inside the bounding box of a much larger body, "
         "because the cell size is set by the whole body and the limb gets no say",
-        example="q = mind.skin_quality(cr, spec, resolution=104); print(q['verdict'], q['recommended_resolution'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); q = mind.skin_quality(cr, spec, resolution=104); print(q['verdict'], q['recommended_resolution'])",
         native=True, aliases=("why is my creature lumpy", "beaded mesh", "what resolution do i need",
                               "lumpy limbs", "bumpy surface", "marching resolution", "sausage limbs",
                               "mesh looks bad"))
@@ -1287,7 +1287,7 @@ def register_p06(c):
         "the body, so a horn is one continuous mesh with a smooth fillet where it meets the flank instead of a "
         "cone resting against it. Only tapered-tube parts survive being reduced to a ball chain; fins, hands and "
         "mouths would become blobs and are returned for placing as geometry instead",
-        example="fld, fused, unfused = mind.fused_field(cr, spec, spec['sockets'], lib)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); fld, fused, unfused = mind.fused_field(cr, spec, spec['sockets'], lib)",
         native=True, aliases=("make the horn look attached", "parts blended into the body",
                               "fuse a part", "seamless parts", "parts look glued on",
                               "blend a horn into the skin", "continuous skin"))
@@ -1301,7 +1301,7 @@ def register_p06(c):
         "angle around it, and optionally down its own AXIS, which is what a foot needs because a foot goes on the "
         "END of a leg rather than its side. auto_feet identifies legs the way the gait does (which limbs reach the "
         "ground) and sockets a foot on each, so an arm correctly gets none",
-        example="feet = mind.auto_feet(cr, ed.field(), part='foot', scale=1.2); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); feet = mind.auto_feet(cr, ed.field(), part='foot', scale=1.2); "
                 "ed.spec['sockets'].extend(feet)",
         native=True, aliases=("put feet on the legs", "attach a foot", "socket on a limb",
                               "limb tip socket", "hands on the arms", "part on a leg",
@@ -1313,7 +1313,7 @@ def register_p06(c):
         "new render path. The silhouette comes from GEOMETRY (the surface turning away from the eye) rather than "
         "from filtering the image, which would trace colour edges on a flat belly just as happily. Darkens the "
         "silhouette only -- interior creases need an image pass with depth and ids",
-        example="cols = mind.toon_shade(mesh, cols, cam['eye'], bands=3, rim=0.42); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cols = mind.toon_shade(mesh, cols, cam['eye'], bands=3, rim=0.42); "
                 "img = mind.render_mesh(mesh, cam, vertex_colors=cols, lights=[], ambient=1.0)",
         native=True, aliases=("cel shading", "toon shading", "flat cartoon look", "outline the creature",
                               "posterize shading", "non photorealistic render", "comic book look",
@@ -1327,7 +1327,7 @@ def register_p06(c):
         "lowest importance = recency-decay x (1+hits), with a recency-window veto (kept negative: pure "
         "frequency ordering starved every new item, twice). LT access verifies trace vs spill, then PROMOTES "
         "back to hot. get() returns (value, tier).",
-        example="tm=mind.tiered_memory(hot_capacity=4); [tm.put(k,(k*7)%256) for k in range(9)]; "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); tm=mind.tiered_memory(hot_capacity=4); [tm.put(k,(k*7)%256) for k in range(9)]; "
                 "print(tm.get(0), tm.stats())",
         native=True, aliases=("short term and long term memory", "adaptive memory tiers",
                               "consolidate short term into long term", "promote important memories",
@@ -1350,7 +1350,7 @@ def register_p06(c):
         "MEASURED on real corpus pairs at dim 4096: ONE memory 70x past the law recalls at 0.007 "
         "(interference collapse, as the law predicts); celled recalls 1.000 across 71 cells. Kept "
         "negative: a holographic directory would re-buy the interference the cells escape.",
-        example="cm=mind.celled_memory(dim=2048, vocab=4096); import numpy as np; "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cm=mind.celled_memory(dim=2048, vocab=4096); import numpy as np; "
                 "ks=np.arange(500); cm.store(ks,(ks*7)%4096); print((cm.recall(ks)==(ks*7)%4096).mean(), cm.stats())",
         native=True, aliases=("store more pairs than the capacity law allows", "escape the capacity limit",
                               "unbounded associative memory", "tile memory into cells",
@@ -1376,7 +1376,7 @@ def register_p06(c):
         "close over spec (targets, steps, channels), so dispatch COMPOSES. AMBIGUITY IS AN ERROR: no "
         "match or two tasks claiming one role raises WITH NAMES -- silent misstaffing is a ghost. "
         "Pinned end-to-end: routed members converge in the workspace loop.",
-        example="import lecore, numpy as np; m=lecore.UnifiedMind(); [r for r,_ in m.dispatch_roles(['leave a map of the target direction','adjust the texture gains'], {'target_params': np.ones(3)})]",
+        example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(); [r for r,_ in m.dispatch_roles(['leave a map of the target direction','adjust the texture gains'], {'target_params': np.ones(3)})]",
         native=True, aliases=("route tasks to swarm roles", "staff the swarm", "assign agent roles",
                               "texture the scene routes to texturer", "role dispatch"))
 
@@ -1671,7 +1671,7 @@ def register_p06(c):
         "bit-identical weights. unitary=True bakes norm-preserving atoms for DEEP programs (depth-256 error "
         "7.8e82 -> 6e-15 measured; the conditioning warning names this switch). to_dense(op) exports the "
         "literal host matrix.",
-        example="mdl=mind.native_model(512, 7, [('LOAD','a'),('BIND','k'),('HALT',None)], data=['a','k']); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mdl=mind.native_model(512, 7, [('LOAD','a'),('BIND','k'),('HALT',None)], data=['a','k']); "
                 "y=mdl.forward(); print(mdl.layers())",
         native=True, aliases=("model without pretrained weights", "bake a model from a program",
                               "deep bind chain explodes", "norm preserving atoms", "unitary bake",
@@ -1703,7 +1703,7 @@ def register_p06(c):
         "whatever the file size. MEASURED: 600 MB file, 40.5 ms/q k=5, peak RSS 0.75 GB. The 2026 ANN "
         "consensus calls exact 'not applicable' at scale and ships approximate+rerank; this is the honest "
         "inversion -- exact all the way down, recall 1.0 by construction, deterministic ties.",
-        example="import numpy as np; np.save('/tmp/d.npy', np.random.default_rng(0).standard_normal((5000,64))); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); np.save('/tmp/d.npy', np.random.default_rng(0).standard_normal((5000,64))); "
                 "v,i = mind.out_of_core_search('/tmp/d.npy', np.random.default_rng(1).standard_normal(64), k=3); print(i[:,0])",
         native=True, aliases=("search a file bigger than memory", "exact search on disk",
                               "top k over a huge npy", "streaming nearest neighbours",
@@ -1716,7 +1716,7 @@ def register_p06(c):
         "their last host links). scale= names the DOMAIN. Census: 8.8% facade / 8.6% module verdict "
         "rate -- frame hypothesis REFUTED; the ore is the 11.4% module refusals (vocabulary targets); "
         "FAC closures make this a LOWER bound.",
-        example="import numpy as np; p=mind.project_faculty(lambda v: np.roll(v,3), 64); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); p=mind.project_faculty(lambda v: np.roll(v,3), 64); "
                 "print(p['kind'], p['residual'])",
         native=True, aliases=("turn a function into a matrix", "can this install into weights",
                               "block diagonal detection", "certify against host layers", "rmsnorm target",
@@ -1730,7 +1730,7 @@ def register_p06(c):
         "Fractions SUM TO 1 by construction -- the ledger attributes power, never creates it. Membership "
         "MAD-gated when stored_idx unknown (estimated=True). Selftest: clean~all-signal; injected damage "
         "moves only the damage account.",
-        example="import numpy as np; A=np.random.default_rng(0).standard_normal((128,512)); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); A=np.random.default_rng(0).standard_normal((128,512)); "
                 "A/=np.linalg.norm(A,axis=1,keepdims=True); t=A[:9].sum(0); print(mind.trace_partition(t, A))",
         native=True, aliases=("how much of this bundle is signal", "signal versus crosstalk fraction",
                               "is my trace damaged or just loaded", "memory health report",
@@ -1770,7 +1770,7 @@ def register_p06(c):
         "memory_capacity_law PREDICTS how many pairs fit; allocate_memory_dim inverts it BEFORE storing. "
         "recall(decoder='pic') cancels interference to ~1.5x the one-shot wall, LOAD-GATED past its phase "
         "transition (kept negative: undamped PIC there is worse). int8 decision-free; sign keeps ~70%.",
-        example="import numpy as np; mem=mind.superposed_memory(vocab=256); n=mind.memory_capacity_law(vocab=256); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mem=mind.superposed_memory(vocab=256); n=mind.memory_capacity_law(vocab=256); "
                 "ks=np.arange(n); vs=(ks*7)%256; r=mem.store(ks,vs).recall(ks, decoder='pic'); "
                 "print(n, (r['values']==vs).mean(), r['decoder'])",
         native=True, aliases=("how many pairs fit in a vector", "associative memory size",
@@ -1786,7 +1786,7 @@ def register_p06(c):
         "{h, E}: h~0 marks the deterministic regime (a generator exists), h>0 prices irreducible novelty; "
         "dense-regime GUARDED (refuses block lengths the sample count cannot support -- the measured "
         "silent-low-bias failure of naive plug-in). Feed demand into allocate_memory_dim.",
-        example="import numpy as np; x=np.tile(np.arange(4),5000); print(mind.state_demand(x)['ranks'], "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); x=np.tile(np.arange(4),5000); print(mind.state_demand(x)['ranks'], "
                 "mind.entropy_rate(x)['h'])",
         native=True, aliases=("how much state does this stream need", "count causal states",
                               "bond dimension of a process", "entropy rate of a signal",
@@ -1800,7 +1800,7 @@ def register_p06(c):
         "stochastic imposters). Every verdict carries a HORIZON: the same process honestly earns different "
         "verdicts at different windows (measured -- short windows of a long randomisation ARE locally pure), "
         "so a pass certifies THIS window only; extrapolating past it is the caller's declared risk.",
-        example="import numpy as np; t=np.arange(2000.); print(mind.compressibility_check(np.sin(2*np.pi*t/210))['passed'])",
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); t=np.arange(2000.); print(mind.compressibility_check(np.sin(2*np.pi*t/210))['passed'])",
         native=True, aliases=("is this signal compressible", "does a deterministic generator exist",
                               "is this noise or structure", "compressibility test with null",
                               "should I fit or refuse", "certified at what horizon",
@@ -1813,7 +1813,7 @@ def register_p06(c):
         "allocation, load-gated resonator decode) or classifier() (trajectory readout carrying BOTH "
         "invariances: arrival-time traps AND Levy areas -- neither subsumes the other). Incompressible "
         "streams are refused WITH an allocator quote. Every verdict carries {regime, h, horizon, why}.",
-        example="import numpy as np; eng=mind.holographic_rnn(); t=np.arange(1000.); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); eng=mind.holographic_rnn(); t=np.arange(1000.); "
                 "r=eng.process_stream(np.sin(2*np.pi*t/150)); print(r['regime'], r['horizon'])",
         native=True, aliases=("holographic rnn", "better rnn", "sequence model that abstains",
                               "recurrent model with provenance", "route a stream to the right model",
@@ -1828,7 +1828,7 @@ def register_p06(c):
         "(~30 floats, prefix-fit/suffix-CERTIFIED so a lone tone's surrogate degeneracy cannot block it), "
         "quantile symbols at the measured rate, or raw floats -- noise is never fake-compressed. replay() "
         "reconstructs in-window only (no extrapolation past any horizon), certificates riding every entry.",
-        example="import numpy as np; s=mind.stream_sentinel(); t=np.arange(4000.); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); s=mind.stream_sentinel(); t=np.arange(4000.); "
                 "x=np.concatenate([np.sin(2*np.pi*t[:2000]/170), np.random.default_rng(0).standard_normal(2000)]); "
                 "w=s.watch(x); print(len(w['events']), [seg['regime'] for seg in w['segments']])",
         native=True, aliases=("watch a stream for changes", "regime change detector", "drift monitor",
@@ -1843,7 +1843,7 @@ def register_p06(c):
         "regime change appears as the small-window verdict diverging from the large one, and the divergence "
         "scale brackets when it happened (measured on a sine->noise splice: h climbs 0.87 -> 1.34 -> 1.98 as "
         "the window narrows onto the noise). Memoised meters keep the repeated sub-window work cheap.",
-        example="import numpy as np; e=mind.holographic_rnn(); x=np.concatenate([np.sin(np.arange(1500.)/24), "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); e=mind.holographic_rnn(); x=np.concatenate([np.sin(np.arange(1500.)/24), "
                 "np.random.default_rng(0).standard_normal(500)]); print([(p['window'],p['regime']) for p in e.route_profile(x)])",
         native=True, aliases=("did the regime change", "when did this stream change", "drift detection",
                               "verdict at multiple scales", "is it still the same process",
@@ -1856,7 +1856,7 @@ def register_p06(c):
         "accept runs the full machinery, so accept decisions are the oracle's by construction. Calibrated "
         "so training positives are never fast-rejected (threshold below the lowest positive, minus a "
         "safety spread); held-out false-reject rate is measured, not assumed. Trained heads save()/load().",
-        example="import numpy as np; t=np.arange(600.); casc=mind.triage_cascade(); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); t=np.arange(600.); casc=mind.triage_cascade(); "
                 "casc.fit([np.sin(2*np.pi*t/105), np.random.default_rng(0).standard_normal(600)]); "
                 "print(casc(np.random.default_rng(1).standard_normal(600))['path'])",
         native=True, aliases=("speed up an expensive check", "fast pre-filter before fitting",
@@ -1872,7 +1872,7 @@ def register_p06(c):
         "(keys, values) -> pair memory with dimension allocated from the capacity law BEFORE storing; "
         "a bare stream -> the HRNN ladder (a generator with predict(), or an honest verdict). Every "
         "result: {kind, trained, why}; every model ...",
-        example="import numpy as np; r=mind.train_model((np.arange(50), (np.arange(50)*7)%%97)); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=mind.train_model((np.arange(50), (np.arange(50)*7)%%97)); "
                 "print(r['kind'], r['trained'], r['model'].recall(np.arange(5))['values'])",
         native=True, aliases=("train a model on my data", "make a classifier from examples",
                               "learn from labeled sequences", "train and export a model",
@@ -1886,7 +1886,7 @@ def register_p06(c):
         "'entropy rate moved 0.00 -> 1.99', 'state demand moved: max rank 4 -> 1' -- with tolerances set "
         "from this tree's own observed spreads. The regression detector for pipelines: structure changes "
         "move the fingerprint before they break a unit test.",
-        example="import numpy as np; a=mind.structure_fingerprint(np.tile(np.arange(4),2000)); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); a=mind.structure_fingerprint(np.tile(np.arange(4),2000)); "
                 "b=mind.structure_fingerprint(np.random.default_rng(0).integers(0,4,8000)); "
                 "print(mind.structure_drift(a,b)['why'])",
         native=True, aliases=("did this data change", "detect drift between versions",
@@ -1902,7 +1902,7 @@ def register_p06(c):
         "bind's associativity flattens sum_i bind(name_i, sum_j bind(k,v)) into composite-key pairs "
         "-- no base is ever reconstructed to be read. Load-gated PIC decode; int8 decision-free; "
         "exports at 1 bit/dim.",
-        example="lib=mind.nested_memory(n_bases=2, facts_per_base=3); import numpy as np; "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); lib=mind.nested_memory(n_bases=2, facts_per_base=3); import numpy as np; "
                 "lib.add('a', np.arange(3), np.arange(3)*7); lib.add('b', np.arange(3), np.arange(3)*11); "
                 "print(lib.query('b', np.arange(3))['values'])",
         native=True, aliases=("many databases in one vector", "library of memories",
@@ -1918,7 +1918,7 @@ def register_p06(c):
         "find_capability, comprehension to DECLARE (key ids -> values, sequences -> labels, a count "
         "-> that many forecast steps); m.save(path) and mind.load_easy_model(path) round-trip it as a "
         "small npz. All train_model honesty guards apply: ...generator ...",
-        example="import numpy as np; m2=mind.easy_model((np.arange(30),(np.arange(30)*7)%%64)); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); m2=mind.easy_model((np.arange(30),(np.arange(30)*7)%%64)); "
                 "print(m2.ask(np.arange(3))['answer']); m2.save('/tmp/em.npz'); "
                 "print(mind.load_easy_model('/tmp/em.npz').ask(np.arange(3))['answer'])",
         native=True, aliases=("easiest way to train a model", "train then query a model",
@@ -1933,7 +1933,7 @@ def register_p06(c):
         "cascades), 'text generation' (price the corpus; generation routes to n-gram faculties; "
         "comprehension to DECLARE), 'audio' (streams route like any signal). Every recipe carries an "
         "HONEST field stating what the mechanism will not do.",
-        example="print(mind.hrnn_recipes()); print(mind.hrnn_recipes('weather forecasting')['how'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.hrnn_recipes()); print(mind.hrnn_recipes('weather forecasting')['how'])",
         native=True, aliases=("forecast the weather", "weather forecasting", "analyze market data",
                               "predict a time series", "process my data with hrnn", "scientific data analysis",
                               "generate text with hrnn", "audio analysis", "what can the hrnn do for me",
@@ -1946,7 +1946,7 @@ def register_p06(c):
         "flat fires the WRONG-HABIT ALARM -- measured live on a real CreatureMind that crystallised "
         "(h 1.96 -> 0.97) at policy-correct 0.25. Neither meter alone can see a confidently wrong habit. "
         "Cheap (memoised fingerprints), online, per creature per epoch; actions may be any hashables.",
-        example="import numpy as np; r=np.random.default_rng(0); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); "
                 "e0=mind.behavior_meter(r.integers(0,4,240), rewards=r.random(240)*0.1); "
                 "e1=mind.behavior_meter(np.tile(np.arange(4),60), rewards=r.random(240)*0.1, prev=e0); "
                 "print(e1['formation'], e1['alarm'])",
@@ -1962,7 +1962,7 @@ def register_p06(c):
         "diffable, versionable, replayable. v1 scope stated honestly: choices are measurement-driven rules "
         "over the shipped stages, not open-ended codegen. Also: mind.find_capability is now BAKED (per-cap "
         "haystacks precomputed + cross-session memo keyed by catalog hash: 50ms -> 1ms warm, repeats free).",
-        example="r=mind.synthesize_model((__import__('numpy').arange(40),(__import__('numpy').arange(40)*3)%%50)); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=mind.synthesize_model((__import__('numpy').arange(40),(__import__('numpy').arange(40)*3)%%50)); "
                 "print([s['stage']+':'+s['choice'] for s in r['recipe']['stages']])",
         native=True, aliases=("build a model pipeline automatically", "synthesize a model on the fly",
                               "emit a training recipe", "why did it choose this model",
@@ -1975,7 +1975,7 @@ def register_p06(c):
         "(memoised) otherwise -- never fabrication. .provenance states which contract is in force and why. "
         "For big-vocab context stores, mind.big_pair_memory streams seed-derived codebooks in chunks (the "
         "MQAR pattern) so the state is ONE vector and materialised codebooks cost nothing.",
-        example="s=mind.make_surrogate(lambda i: float(__import__('numpy').sin(2*3.14159*i/40)), range(400)); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); s=mind.make_surrogate(lambda i: float(__import__('numpy').sin(2*3.14159*i/40)), range(400)); "
                 "print(s(7)['path'], s(450)['path'])",
         native=True, aliases=("replace heavy computation with a model", "surrogate for a simulation",
                               "cache a computation as a model", "certified surrogate",
@@ -1990,7 +1990,7 @@ def register_p06(c):
         "lost); expansions reported, never silent. Also mind.replay_model_recipe(recipe, data): "
         "retrain from a stored synthesis recipe and ASSERT the stage choices reproduce -- a recipe is "
         "a contract, drift raises with the diff.",
-        example="r=mind.find_capability_enriched('prognosticate the morrow'); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=mind.find_capability_enriched('prognosticate the morrow'); "
                 "print(r['expansions'], [str(c)[:30] for c in r['results'][:2]])",
         native=True, aliases=("search with synonyms", "dictionary augmented search", "enriched routing",
                               "find capability with rare words", "replay a training recipe",
@@ -2004,7 +2004,7 @@ def register_p06(c):
         "-- and returns margins, the BINDING constraint, and a concrete prescription; fix=True "
         "returns the corrected spec. Empirical knobs (depth) route to mind.auto_scale by name, which "
         "doubles the responsive knob and diagnoses genuine walls.",
-        example="print(mind.advise_scale(n_pairs=200, vocab=1000, dim=512, fix=True)['prescription'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.advise_scale(n_pairs=200, vocab=1000, dim=512, fix=True)['prescription'])",
         native=True, aliases=("hit a capacity wall", "how big should dim be", "auto scale capacity",
                               "overcome depth limit", "memory is full", "bundle overloaded",
                               "too many factors", "which constraint is binding", "grow the dimension",
@@ -2018,7 +2018,7 @@ def register_p06(c):
         "2-5x regime) and the real gpu_crossover row when hardware has measured one -- an unmeasured "
         "device is NAMED blocked, never guessed. Where the GPU wins raw throughput, the winning move "
         "is often shrinking the work: superposition, ...",
-        example="print(mind.compute_plan(10**6, repeat_fraction=0.9)['tier']); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.compute_plan(10**6, repeat_fraction=0.9)['tier']); "
                 "print(mind.compute_plan(10**6)['why'])",
         native=True, aliases=("should this run on the gpu", "cpu or gpu decision", "route a computation",
                               "avoid recomputing", "beat the gpu", "compute dispatch policy",
@@ -2031,7 +2031,7 @@ def register_p06(c):
         "discovered) or correlated/periodic sampling. Measured trap on record: two streams with "
         "near-identical CLT half-widths (~0.008, both claiming converged), one with TRUE error 0.083 "
         "-- 10x its interval.",
-        example="import numpy as np; r=np.random.default_rng(0); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); "
                 "print(mind.convergence_guard(r.standard_normal(400)*0.1)['iid_ok']); "
                 "print(mind.convergence_guard(r.standard_normal(400)*0.1+np.linspace(0,.2,400))['why'][:60])",
         native=True, aliases=("is this pixel really converged", "can I stop sampling", "clt assumption check",
@@ -2045,7 +2045,7 @@ def register_p06(c):
         "shot settled at step 96 -- 504 frames served from equilibrium, 4.7x wall-clock, final-frame "
         "max error vs the fully-simulated ground truth 0.00e+00."
         "cloth settling, particle systems; pair with make_surrogate for settled-but-oscillatory regimes.",
-        example="import numpy as np; r=mind.run_until_settled(lambda v: v*0.7, np.ones(32), steps=200); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=mind.run_until_settled(lambda v: v*0.7, np.ones(32), steps=200); "
                 "print(r['why'])",
         native=True, aliases=("stop simulating when settled", "simulation early exit", "fluid settle speedup",
                               "skip equilibrium frames", "softbody relaxation stop", "cloth settle",
@@ -2059,7 +2059,7 @@ def register_p06(c):
         "are never demoted, and report() says which and why. pool.add(name, tick_fn, state); "
         "pool.step_all(inputs); pool.report()."
         "behavior costs what its information content costs.",
-        example="p=mind.behavior_pool(window=48); p.add('npc', lambda st,inp: ((st or 0)%%4,(st or 0)+1), 0); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); p=mind.behavior_pool(window=48); p.add('npc', lambda st,inp: ((st or 0)%%4,(st or 0)+1), 0); "
                 "[p.step_all() for _ in range(120)]; print(p.report()['why'])",
         native=True, aliases=("tick many agents cheaply", "npc crowd on one server", "behavior level of detail",
                               "agent pool", "mmorpg npc optimization", "demote idle npcs",
@@ -2072,7 +2072,7 @@ def register_p06(c):
         "rate report. For audio blocks, simulation residuals, and agent action streams: the instruments "
         "run where the data is born instead of re-scanning history. Warmup answers iid_ok=None honestly. "
         "Over HTTP the meter travels as an object handle (call push/verdict via the handle registry).",
-        example="sm=mind.stream_meter(window=64); import numpy as np; "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); sm=mind.stream_meter(window=64); import numpy as np; "
                 "[sm.push(v) for v in np.random.default_rng(0).standard_normal(64)*0.1]; "
                 "print(sm.verdict()['iid_ok'])",
         native=True, aliases=("online convergence check", "live entropy meter", "streaming guard",
@@ -2087,7 +2087,7 @@ def register_p06(c):
         "level-d's carrier, strip the position tag, clean up: deep-leaf recovery 0.94-1.00 at depths "
         "7-32 where the flat encoding carries ZERO bits about the leaf."
         "depth must survive. The advisor (advise_scale) prescribes exactly this lever past depth 4.",
-        example="v=mind.encode_tree_carrier(('add',('mul','x','y'),'z')); print(len(v), float((v*v).sum()))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); v=mind.encode_tree_carrier(('add',('mul','x','y'),'z')); print(len(v), float((v*v).sum()))",
         native=True, aliases=("encode a deep tree", "tree too deep to encode", "carrier levels",
                               "depth addressable structure", "read a leaf from a deep tree",
                               "nested structure beyond depth limit", "deep hierarchy encoding", "why is my deep tree unreadable", "capacity warning at encode time", "unmix a bundle with sparse decoding", "recover all bundle members", "omp bundle readout"))
@@ -2100,7 +2100,7 @@ def register_p06(c):
         "backtrace is local; projection stays global; coarse-global + fine-local is the standard "
         "hybrid)."
         "projection only.",
-        example="import numpy as np; z=np.zeros((32,32),np.float32); "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); z=np.zeros((32,32),np.float32); "
                 "print(mind.fluid_step(z,z.copy(),z.copy(),boundary='wall')[0].dtype)",
         native=True, aliases=("fluid walls not torus", "canvas edges are walls", "ink wraps around the edge",
                               "mass conserving boundary", "advect rgb dye", "float32 fluid",
@@ -2114,7 +2114,7 @@ def register_p06(c):
         "(lit sphere, 48x48): 84% of a flat 128-spp render's samples avoided, error 7x under the "
         "contracted tolerance, spp 16-112 spatially adaptive. Uses path_trace's own active mask -- "
         "the shipped tracer, not a fork.",
-        example="import numpy as np; from holographic.rendering.holographic_render import Camera; "
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.rendering.holographic_render import Camera; "
                 "img,rep=mind.path_trace_adaptive(lambda P: np.linalg.norm(P,axis=-1)-1.0, Camera(), "
                 "width=24, height=24, max_spp=32); print(rep['why'])",
         native=True, aliases=("adaptive sampling render", "stop sampling converged pixels",
@@ -2130,7 +2130,7 @@ def register_p06(c):
         "holes (a blob scores 0; the quadruped scores 0). part_ids says which rig segment owns a "
         "point, for the flat per-part colour seam test. KEPT NEGATIVE: a corridor blocked by a third "
         "bone is `shielded` and excluded -- watch the TREND, not the absolute.",
-        example="cr, _sdf = mind.creature(mind.quadruped_spec()); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cr, _sdf = mind.creature(mind.quadruped_spec()); "
                 "print(mind.creature_webbing_report(cr)['webbing_pairs'], "
                 "mind.creature_silhouette_report(cr, res=64)['holes'])",
         native=True, aliases=("does my creature look like a blob", "webbing between limbs",
@@ -2149,7 +2149,7 @@ def register_p06(c):
         "AND humanoid. rig_roles labels foot/tip/torso from geometry. KEPT NEGATIVE: "
         "find_by_role is the EXACT dict and is authoritative; the VSA unbind path is exact at 16 "
         "segments but recall falls to 0.04 by 128 (module docstring has the table).",
-        example="cr, _s = mind.creature(mind.quadruped_spec()); print(mind.rig_invariant(cr)); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cr, _s = mind.creature(mind.quadruped_spec()); print(mind.rig_invariant(cr)); "
                 "print(mind.rig_roles(cr).find_by_role('foot'))",
         native=True, aliases=("one rig for creatures and humanoids", "shared skeleton type",
                               "which segments are feet", "tag parts by role", "capability tags",
@@ -2167,7 +2167,7 @@ def register_p06(c):
         "76 -> 0, negative space 0.130 -> 0.443. Returns an SDF; default-off. Joint blend is "
         "RELATIVE to the limb (D-7). KEPT NEGATIVE: an ABSOLUTE 0.30 blend still webs (58 smooth / "
         "60 exact-fillet) -- the bounded operator did not rescue it.",
-        example="cr, _s = mind.creature(mind.quadruped_spec()); sdf = mind.creature_tree(cr); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cr, _s = mind.creature(mind.quadruped_spec()); sdf = mind.creature_tree(cr); "
                 "print(mind.creature_webbing_report(cr, field=sdf)['webbing_pairs'])",
         native=True, aliases=("limbs melt into the body", "stop the skin blending everything",
                               "metaball groups", "webbing between limbs fix", "creature sdf tree",
@@ -2185,7 +2185,7 @@ def register_p06(c):
         "tissue_visible_field hides layers and/or cuts with a plane -- hide the skin and the WHOLE "
         "skeleton shows in place, no separate geometry. ORGANS are metaballs in anatomy space (the "
         "one place metaballs are right), fitted inside muscle with bone subtracted.",
-        example="cr, _s = mind.creature(mind.quadruped_spec()); f = mind.tissue_fields(cr); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cr, _s = mind.creature(mind.quadruped_spec()); f = mind.tissue_fields(cr); "
                 "print(mind.anatomy_report(cr, fields=f)['fractions'])",
         native=True, aliases=("see inside my creature", "show the skeleton", "muscle and fat sliders",
                               "what tissue is at this point", "cross section of a creature",
@@ -2204,7 +2204,7 @@ def register_p06(c):
         "nesting 0 violations, and it WALKS on its four horse legs (slip 7.0% of stride) with the "
         "arms correctly not treated as legs. Chains can be named for readability; unnamed keeps the "
         "old L0/L0m tags byte-for-byte.",
-        example="cr, _s = mind.creature(mind.centaur_spec()); print(mind.rig_invariant(cr)['segments'], "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cr, _s = mind.creature(mind.centaur_spec()); print(mind.rig_invariant(cr)['segments'], "
                 "mind.gait_report(cr)['slip_ratio'])",
         native=True, aliases=("centaur", "hybrid creature", "half horse half human",
                               "mount a limb on another limb", "torso on a quadruped",
@@ -2220,7 +2220,7 @@ def register_p06(c):
         "directional twin -- it hit DIRECTIONS three more (mirror plane, limb dir, spine arch). "
         "Neither knows which quantities SHOULD vary: shape belongs to the BODY frame, gravity to the "
         "WORLD.",
-        example="cr, _s = mind.creature(mind.quadruped_spec()); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cr, _s = mind.creature(mind.quadruped_spec()); "
                 "mat = mind.creature_material('insect', creature=cr)",
         native=True, aliases=("my creature breaks when I rotate it", "rotation invariance check",
                               "which frame should this be in", "body relative or world relative",
@@ -2239,7 +2239,7 @@ def register_p06(c):
         "pairs and 0 nesting violations on each, 16/26/4 segments. rig_from_primitives closes the "
         "loop -- a fitted capsule IS a bone segment, so observe and generate produce the same type. "
         "KEPT NEGATIVE: a fitted rig has no spine so it gets no organs, reported not hidden.",
-        example="print(mind.creature_regression_report(res=48))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.creature_regression_report(res=48))",
         native=True, aliases=("does the centaur work", "hybrid body plan test",
                               "rig from a point cloud", "fitted rig", "close the loop",
                               "photo to creature rig", "do all body plans use one code path",
@@ -2255,7 +2255,7 @@ def register_p06(c):
         "gap between fitted bone and observed skin, body_params-shaped so an inferred body drives "
         "tissue_fields like an authored one. KEPT NEGATIVES: single-branch (torso, not limbs); the "
         "muscle/fat split is not observable from a silhouette.",
-        example="cr, _s = mind.creature(mind.quadruped_spec()); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cr, _s = mind.creature(mind.quadruped_spec()); "
                 "lo, hi = mind.rig(cr).extent(); "
                 "mesh = mind.mesh_from_sdf(mind.creature_tree(cr), (tuple(lo-0.1), tuple(hi+0.1)), res=32, vectorized=True); "
                 "rig, thick = mind.rig_from_mesh(mesh, res=24); print(len(rig.tags))",
@@ -2273,7 +2273,7 @@ def register_p06(c):
         "(scaffold), with FEWER verts (7,570 vs 10,754), landing on the isosurface to 1e-16. A "
         "composition, not a new mesher: skin_skeleton + shrinkwrap_field + creature_tree. KEPT "
         "NEGATIVE: closest-POINT, so a cage vertex nearer a neighbouring limb is pulled onto it.",
-        example="cr, _s = mind.creature(mind.quadruped_spec()); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cr, _s = mind.creature(mind.quadruped_spec()); "
                 "out = mind.creature_scaffold_mesh(cr); print(len(out['mesh'].vertices))",
         native=True, aliases=("my limbs look lumpy", "beading on thin limbs", "better mesh than marching cubes",
                               "quad cage on a skeleton", "project a mesh onto an sdf",
@@ -2288,7 +2288,7 @@ def register_p06(c):
         "MONOTONE in limb thickness (0.470 -> 0.332), so maximising it yields a spider-legged wisp; "
         "mass dominance runs the other way (0.817 -> 0.516), giving an interior optimum. Webbing is a "
         "hard GATE, not a term. Also grounds a creature (A-4) so it reads as an animal.",
-        example="print(mind.creature_proportion_search(mind.quadruped_spec(), res=48)['chosen'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.creature_proportion_search(mind.quadruped_spec(), res=48)['chosen'])",
         native=True, aliases=("my creature looks wrong but I don't know why", "proportion rules",
                               "does this read as a creature", "make the limbs subordinate",
                               "stand my creature on the ground", "line of action",
@@ -2305,7 +2305,7 @@ def register_p06(c):
         "module and the editor -- everything except how to make one. KEPT NEGATIVE: a placed foot does "
         "not yet make a leg READ as footed; the limb's capsule already caps that space (0.58% of "
         "pixels change).",
-        example="out = mind.build_creature(mind.quadruped_spec(), quads=True); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); out = mind.build_creature(mind.quadruped_spec(), quads=True); "
                 "print(len(out['mesh'].faces), out['quads']['quad_fraction'])",
         native=True, aliases=("make a creature", "create a creature", "design a monster from scratch",
                               "build an animal", "generate a creature from a spec", "creature pipeline",
@@ -2326,7 +2326,7 @@ def register_p06(c):
         "background); against the BODY the same parts add 11% of silhouette. Alongside it, "
         "creature_auto_sockets places parts by ROLE -- ground tip -> foot, LATERAL tip -> hand, head -> "
         "eyes/mouth. One rule set: quadruped 4+0, centaur 4+2, humanoid 2+2.",
-        example="print(mind.measured_ratio(694, 6162, of='body silhouette')['value']); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.measured_ratio(694, 6162, of='body silhouette')['value']); "
                 "cr, _s = mind.creature(mind.quadruped_spec()); print(len(mind.creature_auto_sockets(cr)))",
         native=True, aliases=("percent of what", "state the denominator", "is this ratio meaningful",
                               "put hands on the arms", "where do parts go on any body plan",
@@ -2341,7 +2341,7 @@ def register_p06(c):
         "less. Fuentes Suarez/Hubert/Zanni 2019 adds ELLIPSOIDAL sections so a sole is flat (4:1) "
         "without extra primitives. KEPT NEGATIVE, Bloomenthal's own: convolution SUMS, so separate "
         "digits still web (3-toe fan: 1 blob summed, 3 grouped) -- grouping is required.",
-        example="g, _a = mind.foot_skeleton(digits=3); f = mind.convolution_groups(g); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); g, _a = mind.foot_skeleton(digits=3); f = mind.convolution_groups(g); "
                 "print(float(f([[0.0, 0.0, 0.05]])[0]))",
         native=True, aliases=("how do I model a hand", "fingers and toes", "no bulge at joints",
                               "convolution surface", "skeleton to smooth surface",
@@ -2356,7 +2356,7 @@ def register_p06(c):
         "gives a SLAB: measured volume 5.76 where a cube is 1.00, and not invariant under a 90-degree "
         "turn (pointwise field difference 0.97). Pass form=True and you get a real cube (1.0022) and "
         "octahedron (0.8495 vs 0.866 analytic), symmetric to 1e-16.",
-        example="s = mind.crystal_habit('cubic', ((1,0,0),), 0.5, form=True)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); s = mind.crystal_habit('cubic', ((1,0,0),), 0.5, form=True)",
         native=True, aliases=("make a cube crystal", "crystal form vs face", "miller indices braces",
                               "octahedron crystal", "why is my crystal a slab", "crystal symmetry faces"))
 
@@ -2369,7 +2369,7 @@ def register_p06(c):
         "geode is the SAME call with inward=True. `where` takes a weight FIELD, so crystals grow only "
         "where a material says -- measured, gating lifted the mean field value under the crystals from "
         "0.313 to 0.577. Geode measured hollow: 0.00 filled at centre, 1.00 rind.",
-        example="g = mind.crystal_geode(radius=0.7, count=40); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); g = mind.crystal_geode(radius=0.7, count=40); "
                 "print(float(mind.crystal_cut(g).cut_face_normal[0]))",
         native=True, aliases=("grow crystals on a surface", "crystal cluster", "druse",
                               "make a geode", "crystals inside a rock", "crystals in a cavern",
@@ -2386,7 +2386,7 @@ def register_p06(c):
         "interior path length it already computes for refraction. MEASURED on glass pixels: sigma=0 "
         "gives (0.93,0.93,0.96), absorbing gives (0.11,0.10,0.16) -- darker AND hue-shifted, since "
         "each channel is absorbed at its own rate.",
-        example="cb = mind.material_trace_channels('amethyst'); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cb = mind.material_trace_channels('amethyst'); "
                 "print(mind.material_absorption('amethyst'))",
         native=True, aliases=("beer lambert", "absorption through glass", "why is my gem flat",
                               "thick crystal darker", "extinction coefficient", "gem depth",
@@ -2401,7 +2401,7 @@ def register_p06(c):
         "growth mode. Cloudiness is SCATTERING not pigment, so it raises absorption NEUTRALLY across "
         "RGB (measured [1.92,1.92,1.92]) and desaturates 0.571 -> 0.296. Phantoms are the same habit "
         "scaled down, so they hug it to |d| 0.011. Chips only ever subtract.",
-        example="cl = mind.crystal_cloudiness(seed=1); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cl = mind.crystal_cloudiness(seed=1); "
                 "cb = mind.crystal_flawed_material('quartz', cloud=cl)",
         native=True, aliases=("milky quartz", "cloudy crystal", "inclusions in a crystal",
                               "rutilated quartz", "phantom quartz", "crystal flaws",
@@ -2416,7 +2416,7 @@ def register_p06(c):
         "after denoise). Every step already shipped separately and was hand-wired per render, which is "
         "how the adaptive tracer went unused by an entire crystal arc. CAUTION: at min_spp=8 the block "
         "CI is optimistic and pins spp at the floor; 16 escalates properly.",
-        example="img, rep = mind.render_specimen(sdf, (1.3,0.7,1.5), (0,0,0), mat, "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); img, rep = mind.render_specimen(sdf, (1.3,0.7,1.5), (0,0,0), mat, "
                 "mind.sky_model(hour=10.0), width=48, height=40); print(rep['sample_saving'])",
         native=True, aliases=("render a crystal", "render until converged", "one call render",
                               "denoised render", "adaptive sampling render", "how do I render a gem",
@@ -2431,7 +2431,7 @@ def register_p06(c):
         "(supported False on a normal walk cycle). render_plan MEASURES cost on a tiny tile instead of "
         "extrapolating: four overruns here came from linear estimates, which understate glass because "
         "more samples means more rays marching through interiors.",
-        example="o = mind.build_creature(mind.quadruped_spec(), pose=0.25, cage_res=16); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); o = mind.build_creature(mind.quadruped_spec(), pose=0.25, cage_res=16); "
                 "print(o['ground']['planted'], o['ground']['supported'])",
         native=True, aliases=("pose a creature", "walking creature", "creature mid stride",
                               "how long will this render take", "render budget",
@@ -2445,7 +2445,7 @@ def register_p06(c):
         "recent frame matches the one p back, certified at a numeric tolerance -- or certified=False, never a best "
         "guess. Works on any sequence, not just a simulation: a REGIME STREAM is a square wave that a harmonic fit "
         "rings on (NRMSE 0.584) while an exact cycle certificate replays it at 0.037",
-        example="c = mind.certify_cycle(series.reshape(-1, 1), tol=0.15); print(c['period'], c['certified'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); c = mind.certify_cycle(series.reshape(-1, 1), tol=0.15); print(c['period'], c['certified'])",
         native=True, aliases=("does this repeat", "is it cycling", "find the period of a sequence",
                               "limit cycle detection", "period of a repeating state",
                               "has the simulation started looping", "detect a loop", "cycle period"))
@@ -2459,7 +2459,7 @@ def register_p06(c):
         "fundamental and refuses on incommensurate tones (beating oscillators, two-rotor vibration, tidal "
         "constituents). Greedy matching pursuit with off-grid refinement, deliberately NOT a sparse solve over a "
         "frequency dictionary: a dense dictionary is coherent and blows up across its density parameter",
-        example="m = mind.fit_multitone(x, n_tones=3); print(m['ok'], [1/f for f in m['frequencies']])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); m = mind.fit_multitone(x, n_tones=3); print(m['ok'], [1/f for f in m['frequencies']])",
         native=True, aliases=("two tones at once", "incommensurate frequencies", "beating oscillator",
                               "sum of sinusoids", "multi tone fit", "several frequencies at once",
                               "two rotors", "fit multiple sine waves", "not a harmonic stack"))
@@ -2475,7 +2475,7 @@ def register_p06(c):
         "STRUCTURE (predictable but not reducible), is INCOMPRESSIBLE (independent facts -- do not fit a model), "
         "or UNMEASURED (a refusal, not a finding). Carries the recommended next call as runnable code, the honest "
         "refusal, the measured evidence, a predict() callable when there is one, and the verdict as a hypervector",
-        example="r = mind.explain_stream(series); print(r['headline'], r['what_to_do'], r['wont_do'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r = mind.explain_stream(series); print(r['headline'], r['what_to_do'], r['wont_do'])",
         native=True, aliases=("analyse my time series", "what should i do with this stream",
                               "is my data predictable", "explain this signal", "what is this data",
                               "should i fit a model to this", "does my data have a pattern",
@@ -2493,7 +2493,7 @@ def register_p06(c):
         "directly comparable with no normalisation and no per-sensor calibration, and the signature does not grow "
         "with cohort size. Catches DRIFT, which amplitude and spectral baselines miss. Kept negative: a FLATLINE "
         "is not caught (a constant IS a generator) -- pair it with an amplitude check",
-        example="sig = mind.fleet_signature(streams); r = mind.fleet_anomaly(new_stream, sig); "
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); sig = mind.fleet_signature(streams); r = mind.fleet_anomaly(new_stream, sig); "
                 "print(r['score'], r['floor'], r['anomalous'])",
         native=True, aliases=("is this sensor behaving like the others", "which machine is misbehaving",
                               "compare sensors in different units", "fleet anomaly", "cohort outlier",
@@ -2511,7 +2511,7 @@ def register_p06(c):
         "jump is taken ONLY if it VALIDATES against one more step, because naive extrapolation on a multi-mode "
         "solve measured 250x WORSE than simply iterating. Works on any fixed-point iteration: relaxation sweeps, "
         "physics settling, IK passes",
-        example="r = mind.accelerate_convergence(step_fn, x0); print(r['iters'], r['jumps'], r['why'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r = mind.accelerate_convergence(step_fn, x0); print(r['iters'], r['jumps'], r['why'])",
         native=True, aliases=("make my solver converge faster", "skip iterations", "jump to the answer",
                               "accelerate an iterative solve", "extrapolate a fixed point",
                               "fewer iterations", "speed up relaxation", "converge in fewer steps"))
@@ -2526,7 +2526,7 @@ def register_p06(c):
         "the data field minus repulsion from the batch's own field (the corrective for the measured "
         "attraction-only memorisation, max-cos 1.000). No adversary, no backprop, no learned weights; field "
         "cost is independent of N. labels= packs every class into ONE vector set; condition= unbinds one",
-        example="mdl = mind.drift_train(pts); X = mind.drift_generate(mdl, n=32); print(mind.generation_audit(X, pts))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mdl = mind.drift_train(pts); X = mind.drift_generate(mdl, n=32); print(mind.generation_audit(X, pts))",
         native=True, aliases=("train a generative model", "generate new samples like my data", "gan",
                               "holographic gan", "hgan", "drift model", "generative model without a discriminator",
                               "sample from a learned distribution", "make more data like this",
@@ -2540,7 +2540,7 @@ def register_p06(c):
         "no retraining -- exact when b's data is a subset of a's, an approximation otherwise, stated); "
         "mind.drift_transport(m, delta) MOVES the whole distribution by shift-is-a-bind with the first-"
         "moment cross-term the naive shift drops. Models must share one encoder space (enforced)",
-        example="ab = mind.drift_compose(a, b); mind.drift_generate(ab, n=16)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); ab = mind.drift_compose(a, b); mind.drift_generate(ab, n=16)",
         native=True, aliases=("combine two trained models", "merge generative models", "subtract a model",
                               "make the model forget", "unlearn a class", "negative prompt",
                               "shift a distribution", "move a trained model", "model arithmetic"))
@@ -2552,7 +2552,7 @@ def register_p06(c):
         "both are measured together. novelty ~0 = memorised (nearest-training distance in units of the "
         "training set's own NN scale); coverage = fraction of k data modes some sample lands nearest to. "
         "mind.generate_media attaches this automatically; nothing generated should ship without it",
-        example="a = mind.generation_audit(samples, train); print(a['novelty_mean'], a['coverage'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); a = mind.generation_audit(samples, train); print(a['novelty_mean'], a['coverage'])",
         native=True, aliases=("is my model memorising", "novelty of generated samples", "mode collapse check",
                               "coverage of modes", "did it just copy the training data",
                               "overfitting check for a generator"))
@@ -2565,7 +2565,7 @@ def register_p06(c):
         "mind.generate_media(model, meta, n) drifts new splat sets and renders them, ALWAYS attaching the "
         "generation audit when audit_train is given. HONEST v1 SCOPE: generated images render isotropic "
         "(soft-edged) splats; the aniso structure is not yet carried through the drift space",
-        example="mdl, meta = mind.train_media_model(images, k=8); out = mind.generate_media(mdl, meta, n=4)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mdl, meta = mind.train_media_model(images, k=8); out = mind.generate_media(mdl, meta, n=4)",
         native=True, aliases=("train a model on my images", "generate images like these",
                               "make more images like this folder", "image generation from examples",
                               "learn the style of these pictures", "media generation"))
@@ -2575,7 +2575,7 @@ def register_p06(c):
         "mind.write_wav(path, samples, rate) writes float samples in [-1,1] to 16-bit PCM -- the OUT half "
         "of read_wav, shipped in holographic_audio all along but never wired to the mind (a generation "
         "pipeline that cannot emit audio is not a pipeline). Round-trips read_wav to 1/32768",
-        example="mind.write_wav('/tmp/tone.wav', np.sin(np.linspace(0, 2*np.pi*440, 8000)), 8000)",
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.write_wav('/tmp/tone.wav', np.sin(np.linspace(0, 2*np.pi*440, 8000)), 8000)",
         native=True, aliases=("write a wav audio file", "save audio to a file", "export sound",
                               "emit a wav", "audio output file"))
 
@@ -2585,7 +2585,7 @@ def register_p06(c):
         "loop -- eval is the bandwidth prober's spread-fidelity at the current operating point; the most "
         "responsive knob is doubled until the target is met or a WALL is named (no knob helps: stop and "
         "say so). No private tuner grown; every step in the trajectory carries the probe that justified it",
-        example="traj = mind.drift_autoscale(pts, target_spread=0.9); print(traj)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); traj = mind.drift_autoscale(pts, target_spread=0.9); print(traj)",
         native=True, aliases=("tune the drift model automatically", "autoscale generative knobs",
                               "pick dim and bandwidth for me", "scale the generator"))
 
@@ -2600,7 +2600,7 @@ def register_p06(c):
         "pairwise slot co-occurrence licenses but the full set lacks, REFUSED when the structure "
         "cannot beat a shuffle; mind.transfer_voids: present in B, absent in A -- instantiated "
         "elsewhere, the cross-disciplinary warrant",
-        example="vm = mind.void_map(mdl, pts); sv = mind.structured_voids(rows); tv = mind.transfer_voids(a, b)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); vm = mind.void_map(mdl, pts); sv = mind.structured_voids(rows); tv = mind.transfer_voids(a, b)",
         native=True, aliases=("explore the unknown", "find gaps in my knowledge", "what is missing from my data",
                               "undiscovered combinations", "mendeleev gaps", "predict missing entries", "my data is missing something", "what is my data missing",
                               "predict entries that should exist", "what should exist but does not",
@@ -2617,7 +2617,7 @@ def register_p06(c):
         "SHOULD read irreducible); mind.support_gauge: a CAUSAL inside/sparse/void monitor per step, "
         "the void closing as the trailing window absorbs it; mind.hidden_drivers: a common factor in a "
         "panel's RESIDUALS beyond surrogated nulls -- the puppet string no single series discloses",
-        example="rv = mind.residual_verdict(y); g = mind.support_gauge(y); hd = mind.hidden_drivers(panel)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rv = mind.residual_verdict(y); g = mind.support_gauge(y); hd = mind.hidden_drivers(panel)",
         native=True, aliases=("noise is not noise", "structure hidden in the noise", "puppet strings in market data",
                               "the noise has patterns", "is the leftover signal meaningful",
                               "structure in my residuals", "common cause across my sensors",
@@ -2636,7 +2636,7 @@ def register_p06(c):
         "the next grammar (closed-form AR rung) until a rung prices it as noise or admits "
         "'rungs-exhausted'. mind.stream_watch merges sentinel regime events and gauge void/recovered "
         "events into ONE time-ordered timeline",
-        example="pg = mind.panel_gauge(panel); rl = mind.residual_ladder(y); sw = mind.stream_watch(y)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); pg = mind.panel_gauge(panel); rl = mind.residual_ladder(y); sw = mind.stream_watch(y)",
         native=True, aliases=("correlation regime change", "correlations all jumped together",
                               "relationships between my streams changed", "assets crashing at the same time",
                               "dependence structure never seen before", "climb the residual",
@@ -2655,7 +2655,7 @@ def register_p06(c):
         "NEGATIVE lag-1 coefficient (the bid-ask bounce, ~-0.21), tiny-n returns read irreducible "
         "(the EMH at acknowledged low power), and price levels are an AR fit's favourite meal. "
         "Slow-ish (surrogate ensembles per stream); the selftest pins a reduced pass",
-        example="rep = mind.market_residual_report(); print({k: v['terminal'] for k, v in rep.items()})",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rep = mind.market_residual_report(); print({k: v['terminal'] for k, v in rep.items()})",
         native=True, aliases=("stylized facts of markets", "run the ladder on real market data",
                               "volatility clustering in real returns", "bid ask bounce",
                               "which model explains real returns", "efficient market check on real data"))
@@ -2670,7 +2670,7 @@ def register_p06(c):
         "families reported; an impassable p-floor refuses. mind.transit_detection_floor: the "
         "detection-limit curve with per-transit SNR. The ladder gained a fold rung: comb detects, "
         "BLS names, the folded median consumes",
-        example="r = mind.transit_search(t, flux, 60, 400); print(r['verdict'], r['period'], r['family'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r = mind.transit_search(t, flux, 60, 400); print(r['verdict'], r['period'], r['family'])",
         native=True, aliases=("find a transit in a light curve", "exoplanet transit search",
                               "fold on the holographic substrate", "kernel fold uneven sampling",
                               "how faint a signal can you detect", "how faint a signal can you still detect", "subtract the periodic part",
@@ -2689,7 +2689,7 @@ def register_p06(c):
         "Verdicts: hd-consistent / correlated-not-sky-patterned (the monopole clock-error diagnosis) "
         "/ independent; amplitude a stated lower bound, the certified quantity is the curve SHAPE. "
         "mind.hd_panel_demo plants ground truth (hd | mono | none)",
-        example="p, pos = mind.hd_panel_demo(); r = mind.hd_search(p, pos); print(r['verdict'], r['shape'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); p, pos = mind.hd_panel_demo(); r = mind.hd_search(p, pos); print(r['verdict'], r['shape'])",
         native=True, aliases=("gravitational wave background", "hellings downs curve",
                               "correlated pulsar timing residuals", "pulsar timing array analysis",
                               "is the correlation explained by sky geometry", "sky scramble test",
@@ -2706,7 +2706,7 @@ def register_p06(c):
         "a single match is numerology; z = median per-line. mind.fit_decay: A exp(-lambda t)+C, "
         "d^2 delta-method weights (d-weights read 17% low, pinned), bootstrap CI, bias-aware "
         "truncation flag. Doppler math delegates to dedoppler",
-        example="fl = mind.spectral_lines(x, y, catalog=BALMER); rz = mind.redshift_verdict([l['center'] for l in fl['lines']], BALMER)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); fl = mind.spectral_lines(x, y, catalog=BALMER); rz = mind.redshift_verdict([l['center'] for l in fl['lines']], BALMER)",
         native=True, aliases=("find spectral lines", "identify emission lines", "what element is this line",
                               "measure the redshift", "radial velocity from spectrum", "fit an exponential decay",
                               "half life from counts", "randomized benchmarking decay", "ringdown rate",
@@ -2722,7 +2722,7 @@ def register_p06(c):
         "classical bound 2 (beyond every local hidden-variable model?), and the TSIRELSON ALARM -- "
         "data past 2*sqrt(2) accuses the apparatus, not the theory. mind.chsh_demo plants quantum / classical / "
         "independent / broken trials",
-        example="r = mind.level_statistics(eigvals); q = mind.chsh_verdict(*mind.chsh_demo(4000, 'quantum'))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r = mind.level_statistics(eigvals); q = mind.chsh_verdict(*mind.chsh_demo(4000, 'quantum'))",
         native=True, aliases=("is my spectrum chaotic or integrable", "level spacing statistics",
                               "poisson vs wigner dyson", "random matrix statistics",
                               "bell test analysis", "chsh violation check", "quantum correlations test",
@@ -2739,7 +2739,7 @@ def register_p06(c):
         "levels (Poisson/GOE/GUE spacing ratios), chsh (Bell verdict with the Tsirelson alarm), "
         "series (the residual interrogation tower). Unknown kind raises WITH the list -- the door "
         "never guesses. Citations map: docs/SCIENCE_INSTRUMENTS.md",
-        example="rep = mind.science_report({'t': t, 'y': counts}, kind='decay'); print(rep['verdict'], rep['why'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rep = mind.science_report({'t': t, 'y': counts}, kind='decay'); print(rep['verdict'], rep['why'])",
         native=True, aliases=("analyze my scientific data", "run the science instruments",
                               "one report for my measurement", "which instrument fits my data",
                               "analyze my experiment", "science front door",
@@ -2754,7 +2754,7 @@ def register_p06(c):
         "space; mixed corpora refuse with the counts. mind.generate_audio drifts in that space and "
         "resynthesizes deterministically (exact additive sine / seeded envelope-shaped noise), "
         "always attaching the audit + nearest-training spectral distance. Save with mind.write_wav",
-        example="m2, meta = mind.train_audio_drift(clips, 8000); out = mind.generate_audio(m2, meta, n=4)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); m2, meta = mind.train_audio_drift(clips, 8000); out = mind.generate_audio(m2, meta, n=4)",
         native=True, aliases=("generate audio like this folder", "train on my sound clips",
                               "make more sounds like these", "audio texture generation",
                               "synthesize similar tones", "sound model from examples"))
@@ -2769,7 +2769,7 @@ def register_p06(c):
         "mind.generate_video drifts a pair, interpolates splat params across n_frames, renders "
         "every frame, and reports per-clip max frame-to-frame RMS in the audit: the smoothness "
         "claim carries its own number. Single-frame clips refuse",
-        example="vm, vmeta = mind.train_video_drift(clips); out = mind.generate_video(vm, vmeta, n=2, n_frames=8)",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); vm, vmeta = mind.train_video_drift(clips); out = mind.generate_video(vm, vmeta, n=2, n_frames=8)",
         native=True, aliases=("generate video like these clips", "train on my short clips",
                               "make more motion like this", "video texture generation",
                               "animate like my examples", "motion model from clips"))
@@ -2784,7 +2784,7 @@ def register_p06(c):
         "baseline, with 'store raw' a first-class row. Lossy units run ONLY under a stated "
         "error budget (never 99% energy; loss is never volunteered). Refusal on incompressible "
         "data is the finding.",
-        example="r = mind.codec_place(__import__('numpy').add.outer(__import__('numpy').sin(__import__('numpy').arange(64)/7.), __import__('numpy').cos(__import__('numpy').arange(64)/9.)), max_error=1e-6); print(r['best'], r['rows'][0])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r = mind.codec_place(__import__('numpy').add.outer(__import__('numpy').sin(__import__('numpy').arange(64)/7.), __import__('numpy').cos(__import__('numpy').arange(64)/9.)), max_error=1e-6); print(r['best'], r['rows'][0])",
         native=True, aliases=("which codec should I use", "compare compressors on my data",
                               "benchmark all compressors", "pick a compression method automatically",
                               "codec atlas", "route data to the best compressor",
@@ -2799,7 +2799,7 @@ def register_p06(c):
         "within the budget (measured 8.5x vs zlib on a noisy 3-regime signal; exact mode caps "
         "at ~1.1x -- irreducible mantissa planes). Self-refuses into mode='raw' when the model "
         "head does not pay. mind.residual_decode(blob) inverts; codec_place routes 1-D here.",
-        example="import numpy as np; y=np.sin(2*np.pi*np.arange(600.)/23); r=mind.residual_encode(y, max_error=1e-4); out=mind.residual_decode(r['blob']); print(r['report']['mode'], r['report']['ratio_vs_zlib'], float(np.abs(out-y).max()))",
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); y=np.sin(2*np.pi*np.arange(600.)/23); r=mind.residual_encode(y, max_error=1e-4); out=mind.residual_decode(r['blob']); print(r['report']['mode'], r['report']['ratio_vs_zlib'], float(np.abs(out-y).max()))",
         native=True, aliases=("pack this array smaller than zlib", "beat zlib on a float array", "quantize my weights", "quantize model weights with an error bound", "entropy code residuals after a model predicts",
                               "predictive residual codec", "compress a signal exactly with a model plus error",
                               "lossless model based compression", "store the law and the leftovers",
@@ -2814,7 +2814,7 @@ def register_p06(c):
         "bytes (coarsen sweep 16/64/128/256 -> 1.17/1.36/1.57/1.71x; the varint floor caps it). "
         "A chance gate refuses the split when the news share sits at the quantile's own "
         "expected level. Lossy by design on the predicted mass. mind.surprise_decode inverts.",
-        example="import numpy as np; rng=np.random.default_rng(0); ref=rng.standard_normal((100,2))*0.05+0.5; batch=np.vstack([ref[:60], rng.uniform(0,1,(25,2))]); r=mind.surprise_code(batch, ref, fine_step=1e-4); print(r['report']['mode'], round(r['report']['ratio_vs_uniform_fine'],2))",
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rng=np.random.default_rng(0); ref=rng.standard_normal((100,2))*0.05+0.5; batch=np.vstack([ref[:60], rng.uniform(0,1,(25,2))]); r=mind.surprise_code(batch, ref, fine_step=1e-4); print(r['report']['mode'], round(r['report']['ratio_vs_uniform_fine'],2))",
         native=True, aliases=("allocate bits where the information is",
                               "spend more bits on surprising samples",
                               "code the news finely and the expected coarsely",
@@ -2832,7 +2832,7 @@ def register_p06(c):
         "report prices break_even_n (below it, pays=False) and carries the post-quantization "
         "generation audit, so a broken distribution is visible at encode time. "
         "mind.distribution_decode inverts.",
-        example="import numpy as np; rng=np.random.default_rng(0); pts=np.vstack([c+0.05*rng.standard_normal((800,2)) for c in ([0.3,0.3],[0.7,0.7])]); r=mind.distribution_encode(pts); mdl=mind.distribution_decode(r['blob']); print(round(r['report']['ratio_vs_zlib'],1), r['report']['audit'])",
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rng=np.random.default_rng(0); pts=np.vstack([c+0.05*rng.standard_normal((800,2)) for c in ([0.3,0.3],[0.7,0.7])]); r=mind.distribution_encode(pts); mdl=mind.distribution_decode(r['blob']); print(round(r['report']['ratio_vs_zlib'],1), r['report']['audit'])",
         native=True, aliases=("compress a point cloud to distribution moments",
                               "shrink this point cloud for storage",
                               "store distribution not samples", "distributional codec",
@@ -2850,7 +2850,7 @@ def register_p06(c):
         "tier is VERIFIED pointwise at tol*amplitude BEFORE commit; when both miss it "
         "refuses with measured errors and routes to residual_encode/codec_place. "
         "mind.regen_procedural(blob[, n]) plays it back.",
-        example="import numpy as np; y=2.5*np.sin(2*np.pi*np.arange(3000.)/333)+7; r=mind.store_procedural(y); g=mind.regen_procedural(r['blob'], n=5000); print(r['report']['mode'], round(r['report']['ratio_vs_zlib']), g['valid'])",
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); y=2.5*np.sin(2*np.pi*np.arange(3000.)/333)+7; r=mind.store_procedural(y); g=mind.regen_procedural(r['blob'], n=5000); print(r['report']['mode'], round(r['report']['ratio_vs_zlib']), g['valid'])",
         native=True, aliases=("compress by storing the program not the data",
                               "store the generator instead of the output",
                               "save a signal as a formula and regenerate it",
@@ -2868,7 +2868,7 @@ def register_p06(c):
         "NEGATIVE, the headline: explicit refs carry the information the anchors subtract, "
         "so uniform wins on every mesh measured; implicit refs are the deferred rung. "
         "mind.mesh_decode inverts.",
-        example="import numpy as np; mesh=mind.mesh_from_sdf(lambda p: np.linalg.norm(np.atleast_2d(p),axis=1)-0.8, bounds=((-1,-1,-1),(1,1,1)), res=20); r=mind.mesh_encode(mesh, max_error=2e-3, try_base=False); V,F=mind.mesh_decode(r['blob']); print(r['report']['mode'], round(r['report']['ratio_vs_zlib'],2))",
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mesh=mind.mesh_from_sdf(lambda p: np.linalg.norm(np.atleast_2d(p),axis=1)-0.8, bounds=((-1,-1,-1),(1,1,1)), res=20); r=mind.mesh_encode(mesh, max_error=2e-3, try_base=False); V,F=mind.mesh_decode(r['blob']); print(r['report']['mode'], round(r['report']['ratio_vs_zlib'],2))",
         native=True, aliases=("compress a mesh", "mesh codec", "store a mesh smaller",
                               "coarse mesh plus displacement",
                               "compress geometry with a base and details",
@@ -2884,7 +2884,7 @@ def register_p06(c):
         "CONSISTENCY); logic_proof_measure sizes a checked proof; encode/decode_atom "
         "round-trip atoms (decode abstains); fact_capacity's NEGATIVE: bundled recall "
         "cliffs by load 8 independent of D -- INDEX fact bases. Deduction, not regression.",
-        example="p=mind.logic_prove(['mortal',['socrates']], [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]); print(mind.logic_check_proof(p, [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); p=mind.logic_prove(['mortal',['socrates']], [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]); print(mind.logic_check_proof(p, [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]))",
         native=True, aliases=("lean4", "lean 4", "prove a theorem", "theorem prover",
                               "formal verification", "check a proof", "proof assistant",
                               "export to lean", "horn clauses", "forward chaining",
@@ -2906,7 +2906,7 @@ def register_p06(c):
         "deduces the theory's consequences, refutes vs negatives (count reported), and "
         "emits Lean 4 proving a positive FROM THE LEARNED RULES. rules=None when the "
         "space exhausts -- never a guess. See Formal logic for deduction.",
-        example="out=mind.logic_induce([{'head':['parent',['tom','bob']],'name':'p0'},{'head':['parent',['bob','liz']],'name':'p1'}], [['ancestor',['tom','bob']],['ancestor',['tom','liz']]], [['ancestor',['bob','tom']]], 'ancestor', {'parent':2,'ancestor':2}); print(len(out['rules']), out['refuted_count'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); out=mind.logic_induce([{'head':['parent',['tom','bob']],'name':'p0'},{'head':['parent',['bob','liz']],'name':'p1'}], [['ancestor',['tom','bob']],['ancestor',['tom','liz']]], [['ancestor',['bob','tom']]], 'ancestor', {'parent':2,'ancestor':2}); print(len(out['rules']), out['refuted_count'])",
         native=True, aliases=("learn rules from examples", "rule induction",
                               "inductive logic programming", "ILP", "conjecture and refute",
                               "induce a law from data", "learn horn clauses",
@@ -2925,7 +2925,7 @@ def register_p06(c):
         "optional, its verdict is kept. mind.proof_recall: exact or k-nearest by "
         "goal/tree/trace cosine (self excluded), provenance-filtered, honest empties. "
         "Rows not bundles, per the fact_capacity negative.",
-        example="mind.proof_store(['mortal',['socrates']], [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]); print(mind.proof_recall(['mortal',['socrates']])['exact']['provenance'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.proof_store(['mortal',['socrates']], [{'head':['human',['socrates']],'name':'h'},{'head':['mortal',['?x']],'body':[['human',['?x']]],'name':'m'}]); print(mind.proof_recall(['mortal',['socrates']])['exact']['provenance'])",
         native=True, aliases=("remember a proof", "store verified knowledge",
                               "recall a proof", "similar proofs", "proof memory",
                               "verified knowledge base", "knowledge with provenance",
@@ -2943,7 +2943,7 @@ def register_p06(c):
         "budget caps the tabled answers and fallback=True reruns as a seminaive fixpoint, "
         "reporting which route ran. Never the silent default; see Formal logic to derive "
         "everything instead.",
-        example="print(mind.logic_query(['ancestor',['tom','?w']], [{'head':['parent',['tom','bob']],'name':'p0'},{'head':['parent',['bob','liz']],'name':'p1'},{'head':['ancestor',['?x','?y']],'body':[['parent',['?x','?y']]],'name':'ab'},{'head':['ancestor',['?x','?z']],'body':[['parent',['?x','?y']],['ancestor',['?y','?z']]],'name':'as'}])['answers'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.logic_query(['ancestor',['tom','?w']], [{'head':['parent',['tom','bob']],'name':'p0'},{'head':['parent',['bob','liz']],'name':'p1'},{'head':['ancestor',['?x','?y']],'body':[['parent',['?x','?y']]],'name':'ab'},{'head':['ancestor',['?x','?z']],'body':[['parent',['?x','?y']],['ancestor',['?y','?z']]],'name':'as'}])['answers'])",
         native=True, aliases=("query with variables", "tabling", "tabled resolution",
                               "backward chaining", "goal directed search", "SLD resolution",
                               "answer a logic query", "what does X reach",
@@ -2960,7 +2960,7 @@ def register_p06(c):
         "ONE searchable vector (locality measured monotone; noise abstains). "
         "shape_memory_* hold morphologies as attractors: 1.00 recall vs 0.00 for a "
         "depth-matched scrambled control.",
-        example="r=mind.morphogenesis_grow(n_cells=48, seed=3, steps=150); print(len(r['positions']), round(r['sphericity'],3))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=mind.morphogenesis_grow(n_cells=48, seed=3, steps=150); print(len(r['positions']), round(r['sphericity'],3))",
         native=True, aliases=("morphogenesis", "grow a creature body", "cell aggregate",
                               "reaction diffusion on cells", "turing pattern on a body",
                               "morphogen gradient", "limb bud", "symmetry breaking",
@@ -2983,7 +2983,7 @@ def register_p06(c):
         "makes each LOD level a RULE (nested prefix, 9.1x smaller than stored meshes) and "
         "REFUSES levels that orphan a limb. SCOPE: clean point sets, not TetGen. LAW: an "
         "attachment 1-2 cells across is NOT connected; 3 is minimum.",
-        example="a=mind.morphogenesis_grow(n_cells=40,seed=0,steps=80); mesh=mind.tetrahedralize(a['positions'],a['radii']); print(mesh['T'], mesh['components'], mind.tet_connectivity_certificate(mesh,0,list(range(mesh['T'])))['ok'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); a=mind.morphogenesis_grow(n_cells=40,seed=0,steps=80); mesh=mind.tetrahedralize(a['positions'],a['radii']); print(mesh['T'], mesh['components'], mind.tet_connectivity_certificate(mesh,0,list(range(mesh['T'])))['ok'])",
         native=True, aliases=("tetrahedral mesh", "delaunay triangulation", "tetrahedralize",
                               "certified LOD", "volumetric LOD", "LOD without storing meshes",
                               "decimate without breaking topology",
@@ -3003,7 +3003,7 @@ def register_p06(c):
         "hand-derived, checked vs fd_gradient to 2e-11, rest stress-free to 7e-17. "
         "fem_select_fibers picks axis-aligned edges; fem_rest_quality reports "
         "degenerate/INVERTED elements before you trust a solve.",
-        example="a=mind.morphogenesis_grow(n_cells=30,seed=0,steps=60); mesh=mind.tetrahedralize(a['positions'],a['radii']); fib,rl=mind.fem_select_fibers(a['positions'],mesh['tets']); r=mind.fem_simulate(a['positions'],mesh['tets'],steps=60,fibers=fib,rest_lengths=rl,activation=0.7,pinned=[0]); print(round(r['history'][0],2), round(r['history'][-1],2))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); a=mind.morphogenesis_grow(n_cells=30,seed=0,steps=60); mesh=mind.tetrahedralize(a['positions'],a['radii']); fib,rl=mind.fem_select_fibers(a['positions'],mesh['tets']); r=mind.fem_simulate(a['positions'],mesh['tets'],steps=60,fibers=fib,rest_lengths=rl,activation=0.7,pinned=[0]); print(round(r['history'][0],2), round(r['history'][-1],2))",
         native=True, aliases=("neo hookean", "hyperelastic material", "FEM tetrahedron",
                               "soft body FEM", "muscle actuation", "deformation gradient",
                               "piola kirchhoff stress", "element inversion",
@@ -3020,7 +3020,7 @@ def register_p06(c):
         "noise envelope), pose_certify, conservation_ledger (exact vs BOUNDED tested "
         "differently), lyapunov_certify (settle CERTIFIED for a true gradient flow), "
         "plan_certify (a GOAP plan's preconditions and goal).",
-        example="print(mind.tier_certify_plan({'hot':{'capacity':8,'cost':1},'trace':{'capacity':10**6,'cost':10,'holographic':True,'dim':4096}}, [{'item':'b','tier':'trace','count':256}], min_recall=0.98)['violations'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.tier_certify_plan({'hot':{'capacity':8,'cost':1},'trace':{'capacity':10**6,'cost':10,'holographic':True,'dim':4096}}, [{'item':'b','tier':'trace','count':256}], min_recall=0.98)['violations'])",
         native=True, aliases=("tier contract", "certify a plan", "memory budget check",
                               "will this fit in cache", "roofline", "precondition check",
                               "refuse a plan", "memory hierarchy contract",
@@ -3049,7 +3049,7 @@ def register_p06(c):
         "improves triangle quality 66.6 -> 38.3. template_wrap_quality reports landing "
         "error, ROBUST p95/p5 bunching, degenerate edges, flipped faces. NEGATIVE: needs "
         "matching topology.",
-        example="import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; t=mind.mesh_from_sdf(sph,((-1.4,)*3,(1.4,)*3),res=24,vectorized=True); ax=np.array([1.3,0.8,1.0]); ell=lambda P:(np.linalg.norm(P/ax,axis=1)-1.0)*ax.min(); V=mind.template_wrap(t.vertices,t.faces,ell,rounds=4); print(round(mind.template_wrap_quality(V,t.faces,ell)['surface_error'],4))",
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); sph=lambda P: np.linalg.norm(P,axis=1)-1.0; t=mind.mesh_from_sdf(sph,((-1.4,)*3,(1.4,)*3),res=24,vectorized=True); ax=np.array([1.3,0.8,1.0]); ell=lambda P:(np.linalg.norm(P/ax,axis=1)-1.0)*ax.min(); V=mind.template_wrap(t.vertices,t.faces,ell,rounds=4); print(round(mind.template_wrap_quality(V,t.faces,ell)['surface_error'],4))",
         native=True, aliases=("template wrap", "shrink wrap a mesh", "fixed topology",
                               "vertex correspondence", "retopology", "same mesh new body",
                               "morph between creatures"))
@@ -3064,7 +3064,7 @@ def register_p06(c):
         "activation region, but an authored basis DECLARES it -- free and exact (measured "
         "overreach 0.000e+00; 8-15% of the mesh moves). blend_locality_report checks it. "
         "NEGATIVE: locality guaranteed, anatomical realism not.",
-        example="import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; msh=mind.mesh_from_sdf(sph,((-1.3,)*3,(1.3,)*3),res=18,vectorized=True); V=np.asarray(msh.vertices); s=int(np.argmax(V[:,1])); t=mind.blend_corrective(msh,s,0.8,'normal',0.2); print(mind.blend_locality_report(V,[t],msh,[s],[0.8])['max_overreach'])",
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); sph=lambda P: np.linalg.norm(P,axis=1)-1.0; msh=mind.mesh_from_sdf(sph,((-1.3,)*3,(1.3,)*3),res=18,vectorized=True); V=np.asarray(msh.vertices); s=int(np.argmax(V[:,1])); t=mind.blend_corrective(msh,s,0.8,'normal',0.2); print(mind.blend_locality_report(V,[t],msh,[s],[0.8])['max_overreach'])",
         native=True, aliases=("blendshape", "morph target", "pose corrective",
                               "local support", "shape basis", "sparse deformation",
                               "make a blendshape"))
@@ -3079,7 +3079,7 @@ def register_p06(c):
         "blend_corrective. WHY NOT FLAME: 3DMMs fix topology and expression basis at scan "
         "time and assume adult human anatomy, fitting stylized/non-human assets unstably. "
         "NOT a likeness and NOT photo reconstruction -- no scan basis to fit.",
-        example="lm = mind.face_landmarks((0.0,1.6,0.0), 0.24, 0.10); print(len(lm), sorted(lm)[:3], len(mind.face_part_graph(lm)))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); lm = mind.face_landmarks((0.0,1.6,0.0), 0.24, 0.10); print(len(lm), sorted(lm)[:3], len(mind.face_part_graph(lm)))",
         native=True, aliases=("face", "facial landmarks", "head features", "expression",
                               "eyes nose mouth", "character face", "make a face"))
 
@@ -3093,7 +3093,7 @@ def register_p06(c):
         "theorem about the code. mind.skin_pose_is_safe refuses a pinching pose BEFORE "
         "deforming; mind.skin_max_safe_twist inverts it (even 50/50 weights allow only 63.6 "
         "deg at a 0.85 floor). Exact for pure twist, conservative for bending.",
-        example="import numpy as np; print(round(float(mind.skin_twist_shrink([0.5,0.5],[0.0,np.pi/2])),4), mind.skin_pose_is_safe([[0.5,0.5]],[0.0,np.pi])['ok'])",
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(round(float(mind.skin_twist_shrink([0.5,0.5],[0.0,np.pi/2])),4), mind.skin_pose_is_safe([[0.5,0.5]],[0.0,np.pi])['ok'])",
         native=True, aliases=("candy wrapper", "volume loss", "skinning artifact",
                               "collapsed elbow", "twist limit", "is this pose safe"))
 
@@ -3106,7 +3106,7 @@ def register_p06(c):
         "normals closer than twice the offset). The global term bites: armpits and finger "
         "gaps are LOW-curvature surfaces FACING each other, so a curvature-only check "
         "passes exactly the cases that fail. NEGATIVE: samples the reach, no medial axis.",
-        example="import numpy as np; sph=lambda P: np.linalg.norm(P,axis=1)-1.0; msh=mind.mesh_from_sdf(sph,((-1.3,)*3,(1.3,)*3),res=14,vectorized=True); print(mind.wrap_is_injective(msh.vertices,msh.faces,0.05,sph,samples=200)['ok'])",
+        example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); sph=lambda P: np.linalg.norm(P,axis=1)-1.0; msh=mind.mesh_from_sdf(sph,((-1.3,)*3,(1.3,)*3),res=14,vectorized=True); print(mind.wrap_is_injective(msh.vertices,msh.faces,0.05,sph,samples=200)['ok'])",
         native=True, aliases=("safe offset", "self intersection", "reach", "will this fold",
                               "offset distance", "shrink wrap safety", "medial axis limit"))
 
@@ -3120,7 +3120,7 @@ def register_p06(c):
         "exactly invariant (0.13241) across a 16x scale range where plain scales by lam; and "
         "on a spike 5.7x thinner than its trunk, plain renders it at 9% of the asked radius "
         "-- swallowed -- while SCALIS gives 123%. Default-off; opt in per field.",
-        example="f = mind.convolution_field_scalis([((0,0,-0.5),(0,0,0.5),0.15,(1.,1.,1.))]); import numpy as np; print(round(float(f(np.array([[0.1,0.0,0.0]]))[0]),4))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); f = mind.convolution_field_scalis([((0,0,-0.5),(0,0,0.5),0.15,(1.,1.,1.))]); import numpy as np; print(round(float(f(np.array([[0.1,0.0,0.0]]))[0]),4))",
         native=True, aliases=("SCALIS", "scale invariant surface", "thin feature lost",
                               "convolution radius control", "tail tip vanishes",
                               "blend thin into thick"))
@@ -3135,7 +3135,7 @@ def register_p06(c):
         "meat from red plastic. Christensen-Burley parameterisation; the ORDERING is "
         "grounded in measured SDOCT coefficients (bone/skin 1.95-2.13 /mm, liver 1.30-1.46, "
         "spleen 0.52-0.63) so viscera scatter furthest. NEGATIVE: single medium per tissue.",
-        example="v = mind.tissue_pbr('skin'); print([round(x,2) for x in v['sss_radius']], v['sss_weight'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); v = mind.tissue_pbr('skin'); print([round(x,2) for x in v['sss_radius']], v['sss_weight'])",
         native=True, aliases=("tissue material", "subsurface scattering", "organ material",
                               "skin shader", "bone material", "realistic flesh", "SSS"))
 
@@ -3202,7 +3202,7 @@ def register_p06(c):
     c.register_capability(
         "Render a plate (fixed white point, reproducible tone)",
         "mind.render_plate(...) is render_specimen's pipeline -- same trace, denoise and firefly clamp -- with a FIXED white point instead of a SEARCHED exposure. render_specimen's grade re-normalises its input, so lowering the lights cannot fix a blowout, and on a mostly-BRIGHT subject (fat 0.90, bone 0.87) it has no dark reference and clips the pale tissues. A plate also needs REPRODUCIBLE tone: two renders of one subject must be comparable. Headroom is load-bearing -- Reinhard maps L==W to exactly 1.0, so white AT the percentile clips 100%. Report gives measured highlight_fraction.",
-        example="import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.rendering.holographic_plate import tonemap_fixed, highlight_fraction; print(round(highlight_fraction(tonemap_fixed(np.full((8,8,3),2.4), white=4.0)),3))",
+        example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.rendering.holographic_plate import tonemap_fixed, highlight_fraction; print(round(highlight_fraction(tonemap_fixed(np.full((8,8,3),2.4), white=4.0)),3))",
         native=True, aliases=("fixed exposure instead of auto",
                              "reproducible tone across renders", "stop the auto exposure clipping",
                              "tonemap with a white point", "why is my render washed out",
@@ -3301,7 +3301,7 @@ def register_p06(c):
         "hit_rate 0.000, prefix_reuse 0.832 -- together they say 'use a prefix-caching backend'; hit_rate "
         "alone reads as 'caching does not help'. After FreeToken (2608.16157). KEPT NEG: measures reuse, "
         "cannot itself reuse remote compute.",
-        example="import lecore; m=lecore.UnifiedMind(); m.attach_llm(lambda p:'ok', cache=True); m._llm('aa'); m._llm('aab'); print(m.llm_prefix_advice()['recommend_prefix_backend'])",
+        example="import lecore; from holographic.agents_and_reasoning.holographic_llmseam import MeteredLLM; m=lecore.UnifiedMind(); m.attach_llm(MeteredLLM(lambda p:'ok', cache=True)); m._llm('aa'); m._llm('aab'); print(m.llm_prefix_advice()['recommend_prefix_backend'])",
         native=True, aliases=("why is my cache not hitting", "agent history keeps changing",
                              "prefix caching worth it", "my prompts grow every turn",
                              "cache hit rate is zero but prompts are similar",
@@ -3316,7 +3316,7 @@ def register_p06(c):
         "MEASURED on a 3-branch swarm, 360 asks: 40 round trips -> 1. Falls back to sequential with no batch "
         "backend. KEPT NEG: dedup is tied to cache=True -- collapsing identical prompts is sound only for a "
         "PURE function; a sampler must disagree with itself.",
-        example="import lecore; m=lecore.UnifiedMind(); m.attach_llm(lambda p:'hi', cache=True, batch_fn=lambda ts:['hi']*len(ts)); print(m.llm_batch(['a','b','a']))",
+        example="import lecore; from holographic.agents_and_reasoning.holographic_llmseam import MeteredLLM; m=lecore.UnifiedMind(); m.attach_llm(MeteredLLM(lambda p:'hi', cache=True, batch_fn=lambda ts:['hi']*len(ts))); print(m.llm_batch(['a','b','a']))",
         native=True, aliases=("send many prompts in one request", "batch several questions together",
                              "one round trip instead of many", "ask the model many things at once",
                              "speed up my agent fan out", "parallel prompts to a backend",
@@ -3331,7 +3331,7 @@ def register_p06(c):
         "hit_rate 0.889. "
         "KEPT NEG: cache=False by default -- caching a SAMPLING model collapses N branches to one and "
         "manufactures a false consensus (pinned in the selftest).",
-        example="import lecore; m=lecore.UnifiedMind(); m.attach_llm(lambda p: 'hi', cache=True); m._llm('q'); m._llm('q'); print(m.llm_report()['hit_rate'])",
+        example="import lecore; from holographic.agents_and_reasoning.holographic_llmseam import MeteredLLM; m=lecore.UnifiedMind(); m.attach_llm(MeteredLLM(lambda p:'hi', cache=True)); m._llm('q'); m._llm('q'); print(m.llm_report()['hit_rate'])",
         native=True, aliases=("how much is my llm costing me", "cache model responses",
                              "stop calling the model for the same thing twice",
                              "limit how many times the model is called",
@@ -3447,7 +3447,7 @@ def register_p06(c):
         "/ abstained / misrouted. MEASURED n=40, seeds 0-4: false-abstain 0.820 +/- 0.075, model calls 0. "
         "KEPT NEGATIVE: dictionary enrichment makes it WORSE (0.980 +/- 0.019, every seed) -- "
         "route_or_abstain's null is length-matched, so added tokens lift the floor faster than the score",
-        example="r = mind.agent_paraphrase_benchmark(n=40); print(r['arms']['lexical']['false_abstain_rate'])",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r = mind.agent_paraphrase_benchmark(n=40); print(r['arms']['lexical']['false_abstain_rate'])",
         native=True, aliases=("how often does it refuse work it could do",
                              "does it find my tool if i word it differently",
                              "measure the false abstain rate",
@@ -3477,6 +3477,37 @@ def register_p06(c):
         aliases=("boot up lecore", "start lecore with its memory",
                  "the one call that gets me going", "how do I start",
                  "load doctrine and memory and a model", "autoboot"),
+    )
+
+    # BOTH ENDS, IN ONE CALL. autoboot's `llm="auto"` hunts for a MODEL DIRECTORY
+    # on disk, which is the wrong question when THE CALLER IS THE MODEL -- an
+    # agent driving leCore has no model dir, it has itself. Measured on a live
+    # partition: autoboot() answers a known question at T4 and never escalates;
+    # with a partition it reaches T0; with a partition AND an llm an unknown
+    # question escalates to the model instead of stopping. Same pointer shape as
+    # autoboot above -- module-level, so nothing auto-registers it.
+    c.register_capability(
+        "Boot leCore with BOTH ENDS (agent_boot: memory in front, your LLM behind)",
+        "lecore.agent_boot(llm=fn) is autoboot plus a required model rung: memory "
+        "answers what it knows at T0, and anything it cannot answer escalates to "
+        "your callable instead of stopping at T4. The llm argument is REQUIRED and "
+        "must be callable -- a human at a REPL must never be wired in as the back "
+        "end, and there is no reliable way to detect an LLM caller from inside the "
+        "process, so it asks rather than guesses. Use lecore.autoboot() for the "
+        "memory end only. THE MODEL IS USUALLY IN ANOTHER PROCESS -- Claude or "
+        "ChatGPT behind OpenWebUI, openzoo, ollama or a vendor API -- so llm "
+        "defaults to \"remote\": an OpenAI-compatible /chat/completions client "
+        "built from LECORE_LLM_URL / LECORE_LLM_MODEL / LECORE_LLM_KEY (OPENAI_* "
+        "also read). Pass a base URL directly, or a callable for a local model.",
+        example="import lecore; m = lecore.agent_boot(llm=lambda p, **k: 'answer'); m._autoboot_report['rung']",
+        aliases=("attach an llm to both ends of lecore",
+                 "boot lecore with memory and a model",
+                 "let an agent drive lecore",
+                 "wire my llm into lecore as the back end",
+                 "boot both sides with external memory",
+                 "boot lecore and use it", "use lecore with claude",
+                 "connect lecore to openwebui", "point lecore at my api",
+                 "my model runs in another process", "agent_boot"),
     )
 
 

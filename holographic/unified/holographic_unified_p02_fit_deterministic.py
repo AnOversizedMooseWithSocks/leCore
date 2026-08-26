@@ -1027,14 +1027,18 @@ class _UnifiedPart02:
         from holographic.caching_and_storage.holographic_adaptive_cache import reconstruct_from_anchors
         return reconstruct_from_anchors(x, anchor_x, y)
 
-    def robust_accumulate(self, samples, schedule="harmonic", alpha=0.2, clamp_k=None):
+    def robust_accumulate(self, samples, schedule="harmonic", alpha=0.2, clamp_k=None, exact=False):
         """Average noisy estimates of one quantity robustly, for the engine's averaging paths (consolidation over
         a growing store, forest vote-averaging). schedule='harmonic' uses 1/n weights (ACCUM-2: converges, best
         for a STATIONARY target; 'ema' tracks a DRIFTING target but plateaus; 'mean' is the plain mean). clamp_k
         (ACCUM-3), if set, winsorizes outlier samples to clamp_k robust-scales from the median first, so one
         firefly can't dominate -- measured ~100x lower error under outliers, with no loss on clean data."""
         from holographic.misc.holographic_accumulate import robust_accumulate
-        return robust_accumulate(samples, schedule=schedule, alpha=alpha, clamp_k=clamp_k)
+        # exact=True reduces through reduce_sum_exact -- integer accumulation, so the
+        # SAME samples in a different ORDER give the SAME sum. Float addition is
+        # not associative; this is the determinism guarantee, and it was
+        # unreachable from the mind.
+        return robust_accumulate(samples, schedule=schedule, alpha=alpha, clamp_k=clamp_k, exact=exact)
 
     def capacity_report(self, alpha=0.05, loads=(64, 256, 1024), n_floor=800, n_fa=800):
         """Where this store sits relative to the noise-wins CLIFF (Plate's HRR capacity theory), AND whether

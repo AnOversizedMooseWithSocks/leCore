@@ -56,8 +56,33 @@ class Scene:
         self.dim = dim
         self.role_vocab = Vocabulary(dim, seed)
         self.value_vocab = Vocabulary(dim, seed + 1)
-        self.records = np.stack([_encode_object(o, self.role_vocab, self.value_vocab, dim) for o in self.objects]) \
-            if self.objects else np.zeros((0, dim))
+        # ENCODE LAZILY. This built a VSA record for EVERY object in __init__ --
+        # three FFTs each -- and the docstring above already says the stored
+        # objects are "the exact source of truth for output". A plain
+        # `{ id name }` selection reads NONE of the records and paid for all of
+        # them: MEASURED 122 ms at 1,000 objects, 609 ms at 5,000, 3,553 ms at
+        # 20,000, with 15,000 FFTs in a 5,000-object profile.
+        # The records DEMONSTRATE the nested-bind structure and back
+        # project_via_unbind; they are not the output path. Build them on first
+        # use, so the demonstration still works and the common query does not
+        # buy it.
+        self._records = None
+
+
+    @property
+    def records(self):
+        """The nested VSA encoding of every object, built on first access.
+
+        A property rather than an eager field because the ONLY reader is
+        project_via_unbind -- the VSA-native projection -- while the ordinary
+        GraphQL output path reads `self.objects`. Same values, same order, same
+        determinism; the cost simply moves to whoever actually wants it."""
+        if self._records is None:
+            self._records = (
+                np.stack([_encode_object(o, self.role_vocab, self.value_vocab,
+                                         self.dim) for o in self.objects])
+                if self.objects else np.zeros((0, self.dim)))
+        return self._records
 
     def project_via_unbind(self, obj_index, path):
         """Recover a CATEGORICAL leaf field by unbinding along the nested role path (e.g. ['transform', 'kind'])

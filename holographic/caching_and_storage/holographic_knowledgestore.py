@@ -79,7 +79,22 @@ class KnowledgeStore:
     KINDS = ("turn", "document", "note", "output")
 
     def __init__(self, root, session=None):
-        self.root = str(root)
+        # REFUSE A NON-PATH. `str(root)` accepts ANY object and makedirs then
+        # creates whatever it stringifies to -- a caller who passed a list got a
+        # directory literally named "[]", and it SHIPPED: `[]/knowledge.lecore`
+        # and `[]/learning/state.lecore` were in the release zip, found by
+        # globbing for containers rather than by anything failing.
+        # A path is a string or an os.PathLike. Everything else is a bug at the
+        # call site, and creating a directory named after its repr hides that bug
+        # behind a plausible-looking artifact.
+        if not isinstance(root, (str, bytes, os.PathLike)):
+            raise TypeError(
+                "KnowledgeStore(root=...) needs a path (str or PathLike), got %s "
+                "%r -- str() would turn it into a directory name like %r."
+                % (type(root).__name__, root, str(root)[:24]))
+        self.root = os.fspath(root) if not isinstance(root, str) else root
+        if not self.root.strip():
+            raise ValueError("KnowledgeStore(root=...) got an empty path")
         self.session = session
         os.makedirs(self.root, exist_ok=True)
         # THE JOURNAL LIVES IN THE CONTAINER (cp31 -- the migration cp20 flagged and two

@@ -1315,6 +1315,230 @@ class _UnifiedPart18:
             boot_substrate_keys)
         return boot_substrate_keys(weights, report=report)
 
+    def learning_compact(self, dry_run=False):
+        """Drop duplicate rows from the taught log -- repair for a partition that grew.
+
+        WHY THIS EXISTS. register_doctrine was not idempotent for a long time: every
+        boot, and every mount of a partition that already held doctrine, re-taught the
+        same 14 facts. Both paths are fixed now, but THE FIX STOPS THE GROWTH AND DOES
+        NOT RECLAIM WHAT WAS ALREADY WRITTEN. My own audit partition carried 381 rows
+        of which 73 were distinct -- the same four doctrine facts twenty-three times
+        each. Every partition that lived through the bug is permanently bloated and
+        there was NO REPAIR PATH, which makes the bug's cost outlive the bug.
+
+        Dedupe is by EXACT ROW CONTENT and keeps the FIRST occurrence, so the ordering
+        the recall path may depend on is preserved. Returns
+        {before, after, removed, distinct}. `dry_run=True` measures without changing
+        anything -- run that first on a partition you care about.
+
+        Call learning_save(root) afterwards to write the compacted store back; this
+        touches live state only, exactly like teach().
+        """
+        lad = self.zoo["ladder"]
+        log = list(getattr(lad, "taught_log", ()) or ())
+        seen, keep = set(), []
+        for row in log:
+            key = repr(row)
+            if key in seen:
+                continue
+            seen.add(key)
+            keep.append(row)
+        if not dry_run:
+            lad.taught_log = keep
+        return {"before": len(log), "after": len(keep),
+                "removed": len(log) - len(keep), "distinct": len(seen),
+                "dry_run": bool(dry_run)}
+
+    def unicron_edit_health(self, base_weights, edited_weights, keys=(),
+                            cond_budget=None):
+        """Is a sequence of weight edits degrading the model? PRUNE's diagnostic, measured.
+
+        THE PROBLEM THIS ANSWERS. An install is SEQUENTIAL KNOWLEDGE EDITING by
+        another name: registers, then the HRNN ladder, then the router, then the
+        memory index, then self-write, then state tracking -- each writing the same
+        tensors. The literature on sequential editing (Ma et al. 2024, PRUNE; Gu et
+        al. 2024, RECT; and the superimposed-noise-accumulation line) reports the
+        same failure every time: each edit is fine ALONE and the model degrades as
+        they compose, because the edited matrix's CONDITION NUMBER climbs and small
+        input differences start producing large output differences.
+        leCore's install already measures per-step perplexity and drift. Neither
+        sees this: perplexity can hold while the matrix becomes numerically fragile,
+        and drift measures HOW FAR the weights moved, not HOW BADLY CONDITIONED they
+        became. THE INSTALL REPORTED "no step improved perplexity without making
+        generation more repetitive" -- the exact symptom, with no instrument
+        pointing at the cause.
+
+        Returns per-tensor {cond_before, cond_after, ratio, rank_before, rank_after}
+        plus a `worst` summary and, when `cond_budget` is given, `over_budget`: the
+        tensors whose conditioning grew past it. PRUNE's own remedy is to CONSTRAIN
+        the condition number during editing; this is the measurement that has to
+        exist before any such constraint can be honest, and it is deliberately
+        diagnostic-only -- nothing here changes a weight.
+
+        NumPy only (np.linalg.svd), and it samples: full SVD of every tensor in a
+        24-layer model is minutes, so 2-D tensors are capped by `_COND_MAX_DIM` and
+        larger ones are measured on a deterministic slice.
+        """
+        import numpy as _np
+
+        _COND_MAX_DIM = 512
+        names = list(keys) or [k for k in base_weights
+                               if k in edited_weights
+                               and _np.asarray(base_weights[k]).ndim == 2]
+        out, worst = {}, None
+        for name in names:
+            a = _np.asarray(base_weights[name], dtype=_np.float64)
+            b = _np.asarray(edited_weights[name], dtype=_np.float64)
+            if a.ndim != 2 or a.shape != b.shape:
+                continue
+            if max(a.shape) > _COND_MAX_DIM:
+                # deterministic slice -- a seeded sample would make the diagnostic
+                # itself a source of run-to-run variation, which is the last thing
+                # a degradation check should have.
+                a = a[:_COND_MAX_DIM, :_COND_MAX_DIM]
+                b = b[:_COND_MAX_DIM, :_COND_MAX_DIM]
+            try:
+                sa = _np.linalg.svd(a, compute_uv=False)
+                sb = _np.linalg.svd(b, compute_uv=False)
+            except _np.linalg.LinAlgError:
+                continue
+            tol_a = max(a.shape) * (sa[0] if sa.size else 0.0) * 2.22e-16
+            tol_b = max(b.shape) * (sb[0] if sb.size else 0.0) * 2.22e-16
+            ca = float(sa[0] / sa[-1]) if sa.size and sa[-1] > 0 else float("inf")
+            cb = float(sb[0] / sb[-1]) if sb.size and sb[-1] > 0 else float("inf")
+            rec = {"cond_before": ca, "cond_after": cb,
+                   "ratio": (cb / ca) if ca not in (0.0, float("inf")) else float("inf"),
+                   "rank_before": int((sa > tol_a).sum()),
+                   "rank_after": int((sb > tol_b).sum())}
+            out[name] = rec
+            if worst is None or rec["ratio"] > out[worst]["ratio"]:
+                worst = name
+        rep = {"tensors": out, "worst": worst,
+               "worst_ratio": out[worst]["ratio"] if worst else 1.0}
+        if cond_budget is not None:
+            rep["over_budget"] = sorted(
+                n for n, r in out.items() if r["cond_after"] > float(cond_budget))
+        return rep
+
+    def table_vacuum(self, db, qualified, dry_run=False):
+        """Reclaim tombstoned rows in one table and rebuild its indexes.
+
+        UPDATE in this engine is TOMBSTONE-AND-REINSERT -- which is what keeps the
+        indexes correct without an update hook -- so a table that is written to
+        only ever GROWS. Measured: 400 rows became 1,260 after five updates, with
+        1,260 index entries, and every later SELECT scanned the dead ones.
+        The Table method existed only on the object; the catalog reflects the
+        MIND'S surface, so without this faculty "my table keeps growing" reached
+        mesh_repair and learning_compact. Same lesson as autoboot being dark.
+
+        Returns {before, after, removed}. `dry_run=True` measures without touching
+        anything. See holographic_query.UserTable.vacuum."""
+        return db.resolve(qualified).vacuum(dry_run=dry_run)
+
+    def db_vacuum_idle(self, db, threshold=0.25):
+        """Vacuum every table in a database whose tombstone share exceeds `threshold`.
+
+        Call when the database is IDLE, like cool_idle -- vacuum renumbers rows and
+        rebuilds indexes. NOT automatic on write, deliberately: a vacuum inside an
+        INSERT would renumber rows under a caller holding indices and make one
+        unlucky write pay for everyone else's churn.
+        The threshold exists because ORDINARY CHURN IS CHEAP -- measured, 5% dead
+        costs ~5% on a scan and nothing on an indexed lookup. What earns a vacuum
+        is repeated updates to the SAME rows, where tombstone-and-reinsert
+        compounds to 75% dead and a 3.5x scan slowdown.
+        Returns {tables, rows_removed}. See holographic_query.Database.vacuum_idle."""
+        return db.vacuum_idle(threshold=threshold)
+
+    def teach_about(self, question, answer, paths, root="."):
+        """Teach a fact AND record which files it describes, so it can go stale loudly.
+
+        THE PROBLEM. A partition accumulates facts about a codebase -- "vacuum
+        rebuilds every index", "the journal logs after the write succeeds" -- and
+        the codebase moves. Nothing connects the two, so a fact stays at tier T0
+        and confidently answers about code that changed months ago. STALE MEMORY
+        IS WORSE THAN NO MEMORY: it is indistinguishable from current memory right
+        up to the moment it is wrong.
+
+        Both halves already existed and were never joined: `teach` stores the fact,
+        and FileMap/ingest_files records size+mtime+hash per file with a
+        `changed()` that re-stats the disk. This records the file fingerprints
+        alongside the fact so `stale_facts()` can compare them later.
+
+        Fingerprints are (size, mtime, sha256-prefix) -- hashlib, not hash(), so
+        they are stable across processes. Returns the taught record plus the
+        fingerprints stored."""
+        import hashlib
+        import os
+
+        marks = {}
+        for rel in ([paths] if isinstance(paths, str) else list(paths)):
+            full = rel if os.path.isabs(rel) else os.path.join(root, rel)
+            try:
+                st = os.stat(full)
+                with open(full, "rb") as fh:
+                    dig = hashlib.sha256(fh.read()).hexdigest()[:16]
+                marks[rel] = {"size": st.st_size, "mtime": int(st.st_mtime),
+                              "sha": dig}
+            except OSError:
+                marks[rel] = None            # missing NOW is itself a finding
+        rec = self.teach(question, answer)
+        book = getattr(self, "_fact_files", None)
+        if book is None:
+            book = self._fact_files = {}
+        book[str(question)] = marks
+        return {"taught": rec, "files": marks}
+
+    def stale_facts(self, root="."):
+        """Which taught facts describe files that have CHANGED since they were taught.
+
+        Returns {stale, missing, fresh, unknown} -- lists of questions. `missing`
+        is separated from `stale` on purpose: a file that was DELETED is a
+        different problem from one that was EDITED, and lumping them together
+        makes the deletions invisible in a long list.
+        `unknown` counts facts taught without file references at all, which is the
+        honest report of how much of a partition this check cannot speak for."""
+        import hashlib
+        import os
+
+        book = getattr(self, "_fact_files", None) or {}
+        out = {"stale": [], "missing": [], "fresh": [], "unknown": 0}
+        for q, marks in book.items():
+            if not marks:
+                out["unknown"] += 1
+                continue
+            verdict = "fresh"
+            for rel, mark in marks.items():
+                full = rel if os.path.isabs(rel) else os.path.join(root, rel)
+                if mark is None or not os.path.exists(full):
+                    verdict = "missing"
+                    break
+                try:
+                    with open(full, "rb") as fh:
+                        dig = hashlib.sha256(fh.read()).hexdigest()[:16]
+                except OSError:
+                    verdict = "missing"
+                    break
+                # HASH, NOT MTIME. A checkout or a touch moves mtime without
+                # changing content, and reporting those as stale trains a reader
+                # to ignore the report -- which is how a staleness check dies.
+                if dig != mark.get("sha"):
+                    verdict = "stale"
+            out[verdict].append(q)
+        return out
+
+    def remote_llm(self, url=None, model=None, api_key=None, **kw):
+        """A `text -> text` callable for an LLM in ANOTHER PROCESS (OpenAI-compatible).
+
+        Every rung seam in this engine -- attach_llm, agent_bridge, autoboot's
+        llm= -- takes a LOCAL CALLABLE, which fits an in-process model and nothing
+        else. The common deployment is Claude or ChatGPT behind OpenWebUI,
+        openzoo, ollama or a vendor API, in a different process. This returns
+        exactly the callable those seams already accept, so nothing else changed.
+        Reads LECORE_LLM_URL / LECORE_LLM_MODEL / LECORE_LLM_KEY (OPENAI_* too).
+        See holographic_remotellm.remote_llm."""
+        from holographic.io_and_interop.holographic_remotellm import remote_llm
+        return remote_llm(url=url, model=model, api_key=api_key, **kw)
+
     def logic_encode_atom(self, pred, args=()):
         """Encode a ground atom into THIS mind's hypervector space (predicate bound with
         role-tagged arguments, via the engine's own derived_atom/bind/bundle -- one algebra,

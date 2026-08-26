@@ -761,6 +761,17 @@ class _UnifiedPart16:
         HONEST ABOUT DIRECTION: nothing here lets Ollama read the leCore format. It lets
         the leCore format be the ARCHIVE and produce a boring checkpoint on demand.
         See holographic_modelstore."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if weights is None:
+            raise ValueError(
+                "unicron_model_store needs weights= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.io_and_interop.holographic_modelstore import (
             save_model, load_model, materialize)
         if materialize_to is not None:
@@ -972,6 +983,17 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
         WHAT IT DOES NOT DO: the model does not DECIDE to search -- it computes the address
         on every token because that is what a channel does. Conditional retrieval is
         control flow, and a forward pass has none. See holographic_memsearch."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if runtime is None:
+            raise ValueError(
+                "unicron_memory_search needs runtime= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.agents_and_reasoning.holographic_memsearch import (
             build_index, search, install_index)
         if weights is not None and index is not None:
@@ -1005,6 +1027,18 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
         router was the only missing piece, because everything downstream was already
         built and measured. A router fitted on 18 examples scored 100% train and 61%
         held-out; the accuracy is reported for that reason. See holographic_router."""
+        # SAME `=None` LIE as the rest of the unicron family. Called with
+        # defaults this died as "'NoneType' object is not subscriptable"
+        # inside fit_router -- two modules away from the caller.
+        # NOTE FOR THE NEXT SWEEP: my one-line regex missed this because the
+        # signature WRAPS. A pattern that assumes a def fits on one line will
+        # silently skip every long signature, which is exactly the set most
+        # likely to have this bug.
+        if runtime is None or cfg is None:
+            raise ValueError(
+                "unicron_router needs runtime= and cfg= -- both have None\n"
+                "defaults so they can be passed by keyword, but the router\n"
+                "reads the model layout out of cfg and cannot invent one.")
         from holographic.agents_and_reasoning.holographic_router import (
             fit_router, route, install_routed)
         if weights is not None and operator is not None:
@@ -1134,6 +1168,17 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
         reservation must be ENFORCED -- orthogonalise() projects other keys off it and
         collision() measures the overlap (1.6e-16 after, 0.407 before) rather than
         assuming it. See holographic_keyreserve."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if dim is None:
+            raise ValueError(
+                "unicron_reserve_keys needs dim= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.caching_and_storage.holographic_keyreserve import (
             reserve, orthogonalise, collision)
         if keys is not None and reserved is not None:
@@ -1332,6 +1377,17 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
         THE COST: one operator PER POSITION, so a depth-k reader is k circuits. That is
         the price of leaving the abelian ideal, and the alternative is not a cheaper
         non-commutative bind -- it is not having order at all. See holographic_seqbake."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if dim is None:
+            raise ValueError(
+                "unicron_sequence needs dim= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.io_and_interop.holographic_seqbake import (
             permutation, store_sequence, read_position, unpermute_operator)
         if trace is not None and position is not None:
@@ -1399,6 +1455,17 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
         which hands out an ordinary safetensors directory. This is for leCore's OWN
         trained objects, which are hypervectors and therefore already in the format the
         container was built for. See holographic_modelvault."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if objects is None:
+            raise ValueError(
+                "unicron_model_vault needs objects= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.caching_and_storage.holographic_modelvault import (
             store, recall, store_drift, rebuild_drift, store_registers,
             rebuild_registers)

@@ -25,12 +25,6 @@
 ---
 
 
-
-> **Lost in the docs?** [docs/INDEX.md](docs/INDEX.md) maps everything by audience in
-> one page: trying it (5 min), evaluating it (30 min), operating openzoo, building on
-> the engine, or auditing the history. New features with one example each:
-> [docs/WHATS_NEW.md](docs/WHATS_NEW.md).
-
 ## Measured, not promised
 
 Every headline claim below is a number produced by a harness in this repository.

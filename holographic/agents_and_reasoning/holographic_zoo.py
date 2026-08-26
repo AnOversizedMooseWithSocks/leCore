@@ -294,7 +294,20 @@ class AnswerLadder:
                                                           # four call sites and missed
         if not hasattr(self, "_payloads"):
             self._payloads = {}
-        if question_text is not None:
+        # DO NOT CACHE A NON-ANSWER. cp47 below reasons about caching a MODEL's
+        # answer and decided provenance should make it visible rather than forbid
+        # it -- correct, but it assumes there IS an answer. With no model attached
+        # (llm=None, the memory-only boot a first-time user gets) the ladder
+        # abstains and answer_text is empty, and this cached the EMPTY STRING.
+        # MEASURED: asking "what is the capital of france" twice returned
+        # T4/via=main/answer='' then T0/via=reflex-exact/answer='' -- THE SAME
+        # BLANK, PROMOTED TO THE CONFIDENT TIER BY HAVING BEEN ASKED BEFORE.
+        # T0 is the contract that an answer came from memory. Serving a blank
+        # under it makes the tier lie, and every caller branching on
+        # tier == "T0" gets a false positive. An abstention must stay an
+        # abstention however many times it is asked.
+        _at = "" if answer_text is None else str(answer_text)
+        if question_text is not None and _at.strip():
             ex_ = getattr(self, "_exact", {})
             ex_[" ".join(str(question_text).lower().split())] = \
                 {"answer": str(answer_text), "pid": None,

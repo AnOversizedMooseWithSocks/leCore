@@ -100,13 +100,47 @@ DOCTRINE = [
 ]
 
 
-def register_doctrine(mind):
-    """Teach the pack through the normal gate. Returns the count taught."""
+def register_doctrine(mind, force=False):
+    """Teach the pack through the normal gate. Returns the count taught.
+
+    IDEMPOTENT, because boot() calls this and boot() is called more than once.
+    _remember APPENDS unconditionally, so every boot re-taught the same 14 facts:
+        boot 1 -> taught  14      boot 4 -> taught  56
+        boot 2 -> taught  28      boot 5 -> taught  70
+    A LONG-RUNNING SERVICE THAT RE-BOOTS GREW ITS TAUGHT STORE WITHOUT BOUND, 14
+    rows a time, all identical. Recall was unaffected (measured: the same answer
+    after 1 boot and after 10), so this is pure bloat rather than corruption --
+    which is exactly why nothing caught it: no test asked, and the wrong answer
+    never appeared.
+    A marker on the mind is enough; `force=True` re-teaches after a reset."""
+    # CHECK THE STORE, NOT JUST A MARKER. The marker stops a second boot on ONE
+    # mind; it does NOT stop a boot that MOUNTED a partition already containing
+    # doctrine -- and boot()'s order is POST -> mount -> doctrine, so the facts
+    # arrive and are then taught again on top. Measured across save/reboot
+    # cycles: taught 30 -> 100 -> 240 -> 520, all duplicates of the same 14.
+    # THE SAME BUG AS THE LAST SWEEP, ONE LAYER OUT: fixing it in memory did not
+    # fix it through the partition, because the second path never touched the
+    # marker. Ask the store whether it already knows the first fact.
+    if getattr(mind, "_doctrine_registered", False) and not force:
+        return 0
+    if not force and DOCTRINE:
+        try:
+            # `answer` is the ladder's read path (_recall does not exist -- I
+            # guessed the name once and it cost a round trip). A doctrine fact
+            # already present comes back at T0 with its [doctrine ...] tag.
+            got = mind.zoo["ladder"].answer(DOCTRINE[0][0])
+            txt = str(got.get("answer") if isinstance(got, dict) else got or "")
+            if "[doctrine" in txt:
+                mind._doctrine_registered = True
+                return 0
+        except Exception:
+            pass                       # no recall path -> fall through and teach
     lad = mind.zoo["ladder"]
     n = 0
     for q, a, prov in DOCTRINE:
         lad._remember(lad._qkey(q), "%s  [doctrine %s]" % (a, prov), q)
         n += 1
+    mind._doctrine_registered = True
     return n
 
 

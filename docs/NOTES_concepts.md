@@ -78956,3 +78956,2061 @@ called autoboot TWICE in one process, taught mind #1, and saved mind #2. THE
 ENGINE PERSISTED EXACTLY WHAT IT WAS ASKED TO. A second mind booting the same
 partition reads the first one's teaching at T0; checked that separately, and it
 does.
+
+## THE FAISS HARNESS NOW RUNS -- and it had three defects that made it unusable
+
+Moose is handing this to an independent researcher who asked for a harness over
+the full pipeline, 1k to 1M, no friendly samples. Ran it as they would.
+
+IT DID NOT RUN AT ALL. The anchor corpus was a bare absolute path,
+"/home/claude/realdata/wiki_vectors.npy", with no fetcher and no fallback --
+FileNotFoundError for everyone outside one machine. Now $LECORE_BENCH_VECTORS
+plus conventional locations, and when none resolves it prints exactly what to
+supply and REFUSES rather than substituting Gaussians.
+
+THE FRIENDLY-SAMPLE GATE COULD NOT FIRE, which is the serious one because it is
+the specific thing the researcher asked for. It measured corpus
+nearest-neighbour similarity AFTER offspring were mixed in -- and offspring are
+interpolants between an anchor and its own neighbour, so they MANUFACTURE
+near-duplicates whatever the anchors were. MEASURED: pure Gaussians 0.6866,
+clustered 0.6865. IDENTICAL TO THREE DECIMALS. The gate now tests the ANCHORS,
+before offspring, and the threshold is CALIBRATED rather than chosen:
+    pure gaussian 0.123 | 60 clusters sd .06 0.325 | anisotropic 0.413
+    60 clusters sd .03 0.627 | 400 clusters sd .01 0.927
+0.35 sits inside a wide gap. Verified both directions: Gaussians REFUSED at
+0.112, real-shaped anchors pass.
+
+AND THE CACHE WALKED AROUND THE GATE. The dataset cache was keyed on
+(n, dim, k, queries) and NOT on the anchor corpus, so switching anchor files
+silently reused the previous dataset and the gate never re-ran -- which is how a
+Gaussian corpus produced a full results table here even after the gate was
+correct. A BENCHMARK CACHE KEYED ON LESS THAN ITS INPUTS REPORTS THE WRONG
+EXPERIMENT. Now keyed on the anchor path, size and mtime.
+
+WITH faiss-cpu INSTALLED, the table is complete and CONTESTED -- which is the
+point. At N=100,000, real-shaped anchors, recall@10 vs exact float64 truth:
+    leCore exact    1.15 s build   46.1 ms   1.000
+    leCore fast     1.26 s         22.8 ms   1.000
+    HoloForest     52.46 s          5.7 ms   0.768
+    FAISS Flat      0.24 s         22.7 ms   1.000
+    FAISS IVF      16.05 s          3.9 ms   0.972
+    FAISS HNSW     29.23 s          0.4 ms   1.000
+HNSW IS 54x FASTER THAN leCore fast AT EQUAL RECALL, and FAISS Flat matches
+leCore fast on latency while building 5x quicker. HoloForest degrades with scale
+(0.980 at 1k, 0.627 at 10k, 0.768 at 100k). THOSE ARE THE NUMBERS; the harness
+was built to produce them honestly, and the honest result is that we lose on
+this workload.
+
+## SHOULD HNSW BE IN THE ADAPTIVE PIPELINE? Yes -- and the constitution allows it
+
+Moose asked the obvious question after the FAISS numbers. The answer is yes,
+with a distinction that decides everything.
+
+FAISS CANNOT BE A DEPENDENCY -- NumPy/Flask/stdlib/hashlib only. But HNSW IS AN
+ALGORITHM, NOT A LIBRARY, and the algorithm is implementable in NumPy.
+
+AND THE 54x IS ALGORITHMIC, NOT C++. This is the load-bearing read, from numbers
+already in hand at N=100,000:
+    FAISS Flat  (C++, EXHAUSTIVE)   22.7 ms
+    leCore fast (NumPy)             22.8 ms   <- DEAD EQUAL to C++ exhaustive
+    FAISS HNSW  (C++, GRAPH)         0.4 ms
+leCore is ALREADY at C++ exhaustive speed, because BLAS is BLAS. So the gap is
+not language, it is COMPLEXITY: a graph visits ~log(N) nodes, exhaustive visits
+N. THAT WIN IS LANGUAGE-INDEPENDENT and we are leaving it on the table.
+
+THE ARITHMETIC CONFIRMS THE HEADROOM IS REAL IN NUMPY. One query, d=128,
+comparing a full matvec against six graph rounds touching ef*M = 1,152 vectors:
+    N=   30,000   exhaustive  0.55 ms | graph rounds 0.06 ms |   8.8x
+    N=  100,000   exhaustive  1.94 ms | graph rounds 0.07 ms |  27.6x
+    N=1,000,000   exhaustive 20.58 ms | graph rounds 0.09 ms | 240.2x
+The graph cost is FLAT in N because it touches a fixed number of vectors, so the
+ratio grows with the corpus -- which is exactly why this matters more at 1M than
+at the scales we usually test.
+
+WHAT I DID NOT ACHIEVE, stated plainly: two prototype searches, recall 0.023 and
+0.133. The first used hash buckets and was not a proximity graph at all; the
+second built a real exact kNN graph (M=24) but my greedy descent did not
+converge -- too few seeds, no visited-set discipline, no layer hierarchy, which
+is precisely the machinery HNSW's paper spends its length on. THE SPEED WAS
+THERE IN BOTH (1.2x-3.9x even while broken); THE RECALL WAS NOT.
+SO THE HONEST STATE IS: the case for building it is now MEASURED rather than
+argued, and the build itself is a real piece of work -- layered graph,
+heuristic neighbour selection, proper candidate/visited sets. Not a hyperparameter
+away.
+
+AND THE ROUTING CONSEQUENCE IF IT LANDS: `leCore auto` already screens routes on
+measured recall (it printed "best fast route screens recall@10 lo 0.943 < budget
+0.95 -> exact" at 100k). A graph arm slots into that ladder as another candidate
+route -- the arbiter machinery exists, and it is what would keep a 0.97-recall
+graph from being chosen when the caller asked for exactness.
+
+## FULL AUDIT OF THE PERFORMANCE PIPELINE, BOTH ENDS ATTACHED
+
+Booted with a partition mounted and myself wired as the model rung, then audited
+the adaptive retrieval path THROUGH the running system. Four findings, two of
+them defects I fixed.
+
+THE ADAPTIVE STACK HAS THREE LAYERS and they are real: retrieval_dispatch (the
+exact-shortcircuit -> margin-gated dense -> BM25-denoise-over-shortlist
+cascade), retrieval_verdict (one passage / indistinguishable set / abstain), and
+build_index's route ladder. That is more machinery than the FAISS harness
+exercises.
+
+FINDING 1 -- TWO ARMS ARE NEVER BENCHMARKED. Index offers exact, forest, int8,
+sphere, ladder, screens; the harness runs sphere, auto, exact, fast. int8 and
+the ladder appear in NO benchmark. Ran them at N=60,000 d=128:
+    exact    0.19 s build   3.15 ms   1.000
+    forest   0.31 s         3.10 ms   1.000
+    int8     0.06 s        10.10 ms   1.000
+    sphere   0.11 s        25.84 ms   1.000
+int8 BUILDS 3x FASTER AND QUERIES 3x SLOWER; sphere is 8x slower at identical
+recall. NEITHER IS A LATENCY WIN AT THIS SCALE, which is worth knowing before
+anyone reaches for them -- and worth adding to the harness so the numbers are
+public rather than folklore.
+
+FINDING 2 -- THE auto THRESHOLD IS NOT MEASURED. forest_threshold=30000 is a
+constant, and measured over 3 seeds with variance:
+    N= 5,000  exact 0.32+-0.04  forest 0.30+-0.02  recall 1.000
+    N=30,000  exact 1.66+-0.16  forest 1.56+-0.19  recall 1.000
+    N=60,000  exact 3.18+-0.15  forest 3.12+-0.11  recall 1.000
+FOREST IS NEVER SLOWER AND ALREADY WINS AT 5,000 -- six times below the
+threshold -- at recall 1.000. The two arms are INDISTINGUISHABLE within
+variance, so the constant is choosing between equals and the crossover it
+encodes does not exist on this hardware. NOT CHANGED, because a threshold should
+move on a wider measurement than three seeds at one dimension; recorded so the
+next person measures instead of trusting it.
+
+FINDING 3 (FIXED) -- method="ladder" CRASHED. With no recall_budget it compared
+a float to None:
+    TypeError: '>=' not supported between float and NoneType
+several frames below the constructor, naming neither the caller nor the missing
+argument. The ladder escalates routes until MEASURED recall clears a bar; with
+no bar there is nothing to escalate toward. Now a ValueError that names the
+argument and shows the working call.
+
+FINDING 4 (FIXED) -- AND THE LADDER WAS UNREACHABLE ANYWAY. mind.build_index
+took (vectors, labels, method, seed) and DROPPED everything else Index accepts,
+recall_budget included -- so the one arm that needs it could never be selected
+through the faculty. THE SAME WRAPPER-DROPS-PARAMETERS BUG AS
+register_capability's consumes/produces, third occurrence this session. An arm
+that exists in the module and cannot be chosen through the mind does not exist.
+
+AND THE STANDING GAP, from the previous entry: no graph arm. The ladder can
+escalate forest beams and screens probes but has no ~log(N) route to escalate
+INTO, which is precisely where FAISS HNSW's 54x lives.
+
+## AUDIT WITH BOTH ENDS ATTACHED AND MEMORY IN USE: the dropped-parameter class
+
+Booted with a partition and myself as the rung, wrote the session's findings
+into external memory, rebooted, and confirmed T0 recall at ZERO llm calls before
+continuing. The memory end is now genuinely load-bearing for this work rather
+than demonstrated once.
+
+USED leCORE'S OWN TOOLS AND HIT A GOTCHA WORTH TEACHING IT: file_grep defaults
+to regex=False, so a regex pattern returns ZERO HITS RATHER THAN ERRORING. I
+read that as a broken tool for one step. A search that silently reinterprets its
+pattern is indistinguishable from a search that found nothing -- taught to the
+partition so the next session does not lose the same minute.
+
+THE HEADLINE FINDING, and it is bigger than the three instances I had:
+322 OF THE MIND'S DELEGATING FACULTIES FORWARD FEWER PARAMETERS THAN THEIR
+DELEGATE ACCEPTS. I had been treating register_capability's consumes/produces,
+build_index's recall_budget and the learning wrappers as three bugs. THEY ARE A
+CLASS. The mechanism is always the same: a thin faculty is written against the
+delegate's signature ON THE DAY, the delegate grows a parameter, and the faculty
+never does -- so the capability exists in the module and cannot be selected
+through the mind.
+
+TRIAGED RATHER THAN COUNTED, because most drops are cosmetic. Of the 322, 62
+drop something that SELECTS A MODE or GATES A REFUSAL -- those are lost
+capabilities; the rest tune defaults.
+
+FIXED THE MOST CONSEQUENTIAL: declare_explain dropped null_check. That flag
+CALIBRATES the ladder's hardcoded 0.85 coherence gate against a permutation null
+instead of trusting it -- the ladder's own comment says 0.85 "encodes an
+assumption ... a property of the caller's library rather than of the algorithm".
+AN ANTI-FALSE-ACTION GATE THAT CANNOT BE TURNED ON IS NOT A GATE. Now forwarded
+and reachable.
+MEASURED HONESTLY: on four probes the verdicts are IDENTICAL with the gate on
+and off, so this is a safety net for cases the registry already handles, not a
+correctness fix -- and no regression either. The value is that a caller who does
+not trust 0.85 on THEIR library can now check it.
+
+THE REMAINING 61 ARE NOT FIXED and should not be swept: each needs its delegate
+read to say whether the dropped flag is a mode or a default. Listing them
+without that reading would be the same mistake as budgeting a collision without
+reading both bodies.
+
+## SECOND SWEEP WITH MEMORY: three more mode-drops fixed, two with proofs
+
+Booted both ends against the same partition, recalled the previous sweep's
+findings at T0 with zero llm calls, added this sweep's, and continued. The
+memory is doing real work now -- I did not re-derive the 322 count.
+
+TRIAGED THE 62 MODE/GATE DROPS BY READING THE DELEGATE'S DOCSTRING, which is the
+mode-vs-default tell: 13 of 26 have a docstring that explains the flag. A flag
+the delegate bothered to document is a flag someone meant callers to reach.
+
+FIXED THREE, AND TWO OF THEM PROVE THEIR OWN VALUE:
+
+robust_accumulate(exact=). The delegate: "exact=True reduces through
+reduce_sum_exact ... float addition is not associative, so accumulating the SAME
+samples in a different ORDER" differs. MEASURED, 400 samples at 1e6, summed then
+permuted:
+    exact=False   order-invariant: False   diff 6.548e-11
+    exact=True    order-invariant: True    diff 0.000e+00
+THE DETERMINISM GUARANTEE OF THIS ENGINE WAS UNREACHABLE FROM THE MIND. In a
+codebase whose first constitutional constraint is deterministic output, that is
+the single most costly drop found so far.
+
+ntt_convolve(check_bound=). The delegate: it "verifies 2*n*max|a|*max|b| < q",
+default RAISE, "pass check_bound=False only if you have done the arithmetic
+yourself". MEASURED on a deliberately overflowing input:
+    check_bound=True  -> REFUSED: 2*n*max|a|*max|b| = 1.28e16 >= q
+    check_bound=False -> ran, returned 71953508
+A SILENT WRONG ANSWER OF 7.2e7 FOR A TRUE VALUE OF 1.28e16. The refusal existed,
+was on by default in the module, and the faculty could not pass it -- so the
+mind's callers got the unchecked path with no way to ask for the checked one.
+
+mesh_to_field(method=). "shell" is O(surface area) and APPROXIMATE; "scatter" is
+the original exact per-triangle path. Every caller through the mind was pinned
+to the approximation.
+
+THE PATTERN THIS SWEEP SHARPENS: the previous entry found the dropped-parameter
+CLASS; this one found what it COSTS. Two of three fixes restore a REFUSAL or a
+DETERMINISM guarantee -- not a tuning knob. A THIN WRAPPER DROPS WHATEVER THE
+DELEGATE ADDED AFTER THE WRAPPER WAS WRITTEN, and what a delegate adds later is
+disproportionately a SAFETY FLAG, because safety flags are what you add once you
+have been burned.
+
+## THIRD SWEEP: the documented call that cannot run
+
+Booted both ends, recalled two sweeps of findings at T0 with ZERO llm calls, and
+went looking for a class the previous sweeps had not covered.
+
+TRIED AND DISCARDED ONE HYPOTHESIS FIRST, which is worth recording: faculties
+that DISCARD part of the delegate's return. Exactly ONE exists (`define`, a
+legitimate top-k). The dropped-INPUT class does not have a dropped-OUTPUT twin,
+and looking was cheap.
+
+THE CLASS THAT PAID: A CATALOG EXAMPLE THAT PASSES A KWARG THE FACULTY DOES NOT
+ACCEPT. skill_lint RUNS examples, so a crashing one is normally caught -- but
+these were examples on OTHER capabilities that mention attach_llm in passing, so
+nothing executed them.
+    three capabilities document  m.attach_llm(fn, cache=True, batch_fn=...)
+    attach_llm's signature is    (llm, name='agent')
+Every one raised TypeError, and one of the three is literally titled "Batch the
+attached model (one round trip instead of K)". THE FEATURE IS REAL AND THE DOC
+POINTED AT THE WRONG LAYER: cache and batching live on MeteredLLM, which takes
+(fn, cache, batch_fn, budget, name, on_outcome). The working call is
+MeteredLLM(fn, cache=True) -> attach_llm(seam), VERIFIED: hit_rate 0.5 on a
+repeated prompt. Rewrote all three.
+
+AND MY FIRST DETECTOR WAS WRONG IN A WAY WORTH KEEPING. A regex over `word=` in
+the example text reported 541 hits -- it was matching LOCAL ASSIGNMENTS in the
+snippet body (img=..., dim=...). Parsing the AST and reading keywords only on
+the call to THAT capability's own method gave 7, of which 6 were **kwargs
+faculties and 1 was real. A REGEX OVER CODE MEASURES TEXT; ONLY A PARSE
+MEASURES THE CALL.
+The same mistake bit twice: my first AST version excluded **kwargs by a
+hardcoded NAME LIST and flagged texture_op(op, **inputs), because the name of a
+VAR_KEYWORD parameter is arbitrary. Now detected by inspect.Parameter.KIND.
+
+PINNED as tests/test_holographic_skill_lint.py::
+test_catalog_examples_do_not_pass_unknown_keywords, so a copy-pasteable example
+that cannot run fails CI rather than a user.
+
+## FOURTH SWEEP: two classes audited, both CLEAN -- and that is the result
+
+Booted both ends, recalled three sweeps at T0 with zero llm calls, and audited
+two new classes. NEITHER FOUND A BUG. Recording it because a sweep that finds
+nothing is evidence, and an unrecorded clean sweep gets re-run by the next
+session.
+
+CLASS 1 -- DOCSTRINGS PROMISING A REFUSAL THE CODE DOES NOT IMPLEMENT. This is
+the exact shape that let the FAISS hardness gate print a number while its
+docstring said it "aborts the run", so it was worth hunting. Narrowed 938 raw
+hits (the word "never", used descriptively) to 187 (explicit refuses/rejects/
+aborts) to 29 (no raise, no assert, no guard call) to ZERO.
+WHY ZERO IS CORRECT HERE: ABSTAIN IS A FIRST-CLASS RETURN in this engine.
+fit_deterministic "REFUSES (family=None) when no generator beats the noise" --
+and it does: MEASURED, pure noise -> family=None, a clean sine -> family='sine'.
+A refusal that returns a sentinel is not a missing refusal, and a detector that
+only looks for `raise` will mis-read this whole codebase.
+
+CLASS 2 -- SELFTESTS THAT ASSERT NOTHING. 24 modules have a _selftest with no
+assert and no raise. ALL OF THEM DELEGATE: the p-pages to check_part, the
+catalog pages to check_catalog_part, probesweep to _probe_a1, orchestrator to
+_optimize_selftest -- and those helpers carry 2, 2, 1 and 3 asserts
+respectively. Zero real cases.
+
+THE METHODOLOGICAL FINDING, which is the useful output of this round: A FLAT AST
+WALK OF ONE FUNCTION CANNOT SEE ASSERTIONS IN A HELPER IT CALLS. Both classes
+were false positives from exactly that blind spot, and both times my first
+number (938, 24) was alarming and wrong. THE PREVIOUS SWEEP'S LESSON GENERALISES
+-- a regex over code measures text, a flat parse measures one frame, and only
+FOLLOWING THE CALL measures behaviour. Each narrowing step here was cheap; the
+mistake would have been publishing the first number.
+
+## FIFTH SWEEP: stopped reading, started CALLING -- 11 faculties fixed
+
+The previous sweep's lesson was "follow the call", so this one did exactly that:
+INVOKE every zero-argument faculty and see what happens. No parsing.
+    391 zero-arg faculties called
+     22 raised
+     11 raised WITHOUT NAMING WHAT WAS MISSING
+The other 11 raised good errors ("audit_procedure needs steps=", "no LLM
+attached -- call mind.attach_llm(...)") -- those TEACH, and they are the bar.
+
+TEN OF THE ELEVEN WERE unicron_*, AND IT IS ONE PATTERN: `=None` ON A REQUIRED
+ARGUMENT. The signature says optional, the body assumes present, and the call
+dies as "'NoneType' object is not iterable" two modules away -- naming neither
+the faculty nor the argument. A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A
+SIGNATURE THAT LIES. All eleven now raise a ValueError that names the argument
+and says why there is no empty case.
+
+THREE MISTAKES OF MINE ON THE WAY, each worth the line:
+  MY GUARD TEMPLATE TESTED THE FACULTY NAME instead of the argument
+    (`if unicron_actr is None`) -- nine copies of a NameError. Generated code
+    needs the same "run it once" discipline as written code.
+  MY REGEX ASSUMED A def FITS ON ONE LINE. unicron_router's signature WRAPS, so
+    it was silently skipped -- and long signatures are exactly the set most
+    likely to carry this bug. A PATTERN THAT SKIPS THE HARD CASES REPORTS THE
+    EASY ONES AS THE WHOLE POPULATION.
+  I MOVED `denoise` TO THE MODEL PAGE to satisfy a line cap, which put a signal
+    faculty in the wrong family for a reason that had nothing to do with it.
+    Reverted; moved two five-line faculties instead.
+
+AND A REAL FINDING I ALMOST MISATTRIBUTED: test_unified_split has TWO failures
+-- p20_zoo at 3,946 lines against a 2,000 cap, and FOUR faculties defined in two
+parts (levers, explain, agent_loop, ask) where "MRO would pick one silently".
+I assumed my guards caused them. CHECKED THE LAST SHIPPED ZIP: it fails
+identically. THEY ARE PRE-EXISTING AND CAME IN WITH THE BIG MERGE, and I shipped
+them without noticing because I ran a sampled shard rather than this file.
+`levers` being defined twice matters most -- p18 and p19 both define it, and the
+MRO silently picks one.
+
+## SIXTH SWEEP: 2,116 examples that resolve and teach nothing
+
+Booted both ends, recalled five sweeps at T0 with zero llm calls, and chased the
+open finding memory handed me: four faculties defined in two parts.
+
+THE DUPLICATES ARE NOT COPIES -- THEY ARE DIFFERENT CAPABILITIES SHARING A NAME:
+    explain(x1, x2)            why are two things similar   [SHADOWED]
+    explain(topic)             docs-derived explanation     [MRO WINS]
+    ask(start_filler, *path)   a chain over the mind's memory [SHADOWED]
+    ask(query)                 the tiered question router    [MRO WINS]
+    agent_loop(task, llm=...)  in-process tool-use loop      [SHADOWED]
+    agent_loop(objective, ...) the zoo orchestrator          [MRO WINS]
+p20_zoo wins all four by MRO position. Two REAL capabilities per name, one
+reachable.
+
+AND THE PLACEHOLDER MADE IT INVISIBLE AT EXACTLY THE PLACE A READER LOOKS. Every
+one of these carried the example `mind.explain(...)`. That RESOLVES -- the name
+exists -- so skill_lint passed it, because the lint checks RESOLUTION, not
+RUNNABILITY. 2,116 OF 2,753 METHOD CAPABILITIES CARRIED THAT PLACEHOLDER.
+
+FIXED AT THE SOURCE, not one at a time: auto-registration now emits the REAL
+inspect.signature. `mind.ask(...)` becomes `mind.ask(query, est_llm_tokens=600)`.
+2,116 placeholders -> 2. Costs nothing (the signature is already the source of
+truth two lines away) and makes every auto-registered entry self-documenting --
+including which twin you get, which is the whole point here.
+
+AND IT IMMEDIATELY BROKE test_no_dark_method_capabilities, CORRECTLY. Seven
+bare-name capabilities (answer, do, learn, restore, capabilities, api_use,
+shape_of) fell out of the top-15 for their own names, because the search text
+around them changed. THE CAPABILITY DID NOT CHANGE; THE RANKING DID -- and the
+test's own message names the fix: aliases, not a shorter example. A one-word
+name has nothing for a stranger's phrasing to match on. Seven alias sets added,
+verified.
+
+THE STANDING LESSON, third form: a lint that checks RESOLUTION passes 2,116
+examples that teach nothing, the same way a check on the offspring passed a
+Gaussian corpus and a flat AST walk passed a delegating selftest. EACH GATE
+MEASURED SOMETHING TRUE AND ADJACENT TO WHAT IT CLAIMED.
+
+## SEVENTH SWEEP: the examples now have real signatures -- so RUN them
+
+Memory handed me the standing pattern (gates measuring something true and
+ADJACENT to their claim), so this sweep audited the gate itself: skill_lint says
+examples RESOLVE. Do they RUN? That question only became askable last sweep,
+when auto-registered examples gained real signatures.
+
+76 EXAMPLES USED `mind` WITHOUT EVER BINDING IT. They open `import numpy as np;
+...` and then call `mind.rolling_stats(...)` -- NameError on the first line of
+real work. skill_lint passed every one, because every symbol IT checks resolves
+and `mind` is not one of them. Fixed at the source by injecting the binding
+after the leading imports: 76 -> 0. Executed the first 200 examples end to end;
+FAILURES WENT 26 -> 3.
+
+AND MY FIRST PASS ONLY GOT 26 OF THE 76, for the reason memory had already
+recorded two sweeps ago: MY REGEX ASSUMED example=" ... " FITS ON ONE LINE. Half
+of them are implicit string concatenations across several lines. The blind spot
+was in my own notes and I walked into it again -- which is the argument for the
+memory being queried BEFORE writing the pattern, not just after.
+
+THEN THE THREE REMAINING FAILURES FOUND SOMETHING WORSE. Seven examples call a
+method that DOES NOT EXIST, and one of them is `prf_rank`: a full catalog entry
+for pseudo-relevance-feedback re-ranking, with aliases, a semantic tag, a KEPT
+NEGATIVE, and MEASURED BEIR RESULTS -- "NFCorpus nDCG@10 0.3371 -> 0.3442,
+ColBERTv2 range reached". No prf_rank, no prf_expand, nothing, anywhere in the
+tree.
+A MISSING CAPABILITY IS A GAP; A DOCUMENTED MISSING CAPABILITY THAT CITES
+MEASUREMENTS IS A FALSE CLAIM. It is discoverable, it reads as done, and it
+cannot be called. KEPT rather than deleted -- the description is the record of
+what was measured, and deleting it would lose that -- but now listed in a test
+with its reason, so it is a debt the build states rather than a claim the
+catalog makes.
+
+PINNED: two new tests -- examples must BIND the mind they use, and must not call
+methods that do not exist (with a KNOWN list, each entry carrying a reason).
+
+## EIGHTH SWEEP: ordering hid 58 failures, and two classes came back clean
+
+Queried memory BEFORE writing any detector this time -- the previous sweep's
+lesson was that my own blind-spot list was sitting unread while I walked into it
+again. Recorded the detector rules first: multi-line signatures, implicit string
+concatenation, delegating helpers, VAR_KEYWORD by kind, local assignments.
+
+TWO CLASSES CLEAN, recorded so nobody re-runs them:
+  MEASUREMENT-CITING ENTRIES. prf_rank proved a `does` can cite BEIR numbers for
+    code that does not exist, so I checked all 252. 251 ARE SOUND -- prf_rank is
+    the only ghost.
+  MULTI-WORD ALIASES. ZERO of them miss their own capability. My first cut
+    flagged 1,030, all one-word aliases landing on a topical hub, which is
+    CORRECT behaviour -- "index" reaching "Index (search)" is the system working.
+    Requiring four words, the same bar the ladder fixture uses for a meaningful
+    query, took it to zero.
+
+AND THE FINDING: I RAN THE FIRST 200 EXAMPLES LAST SWEEP AND CALLED IT DONE.
+There are 418.
+    examples   0-200   3 failures
+    examples 200-418  58 failures
+ORDERING HID THEM. The catalog is roughly oldest-first, so the well-worn entries
+sort early and the rarely-touched tail is where the rot is -- and every sampled
+check before this one drew from the same biased order. THE SAME MISTAKE AS
+SAMPLING A TENTH OF THE TEST SUITE, in a place I did not think of as sampling.
+
+100 OF 418 REFERENCE AN UNBOUND NAME. 28 were mechanical -- using `np.` without
+importing numpy -- and are fixed. THE OTHER 97 NEED A HUMAN TO INVENT A FIXTURE,
+and I did not invent one: `mind.apply(other, v)` shows the CALL SHAPE, and
+manufacturing an `other` would make an untested snippet LOOK like a verified
+program. Pinned as UNBOUND_EXAMPLE_BUDGET = 97, a budget that may shrink and
+must never grow, with the reasoning in the test.
+A SKETCH IS A LEGITIMATE KIND OF EXAMPLE; A SKETCH THAT LOOKS TESTED IS NOT.
+
+## NINTH SWEEP: turned the audit on the TEST SUITE -- and it is clean
+
+Applied the previous sweep's lesson (ordering bias) to the thing I had been
+sampling all along: the tests themselves.
+
+FIRST, A COVERAGE QUESTION WITH A GOOD ANSWER: does CI's fast 4-shard job
+actually reach every test file? ALL 674, none missed. The coverage gap was never
+WHICH FILES but WHICH TESTS INSIDE THEM.
+
+THEN THE REAL CLASS: A TEST THAT CALLS AND NEVER ASSERTS is a smoke test wearing
+a regression trap's name. Raw count 261. Narrowed:
+    261  no literal `assert` statement
+     19  ... and no pytest.raises / warns / skip (raises IS an assertion --
+         it fails when the exception does NOT occur)
+      5  ... and not a "does not crash / free after release" claim, which
+         asserts BY NOT RAISING and has nothing to compare
+      4  ... and not simplefilter('error') (promotes a warning to a failure)
+         or json.dumps (raises on an unsafe type)
+      0  ... and not delegating to a helper that asserts one frame down
+ALL FOUR SURVIVORS DELEGATE: _selftest carries 5 asserts, _probe_b2 carries 1.
+THE SUITE IS CLEAN.
+
+AND A DETECTOR RULE THIS ADDS, which memory now carries: MATCH ASSERTING
+HELPERS BY PREFIX, NOT BY A HARDCODED NAME LIST. test_variance calls
+`assert_robust(stats, 0.9)` -- an assertion by any reading -- and my HELPERS set
+listed _assert/_check/_verify and missed it. Same shape as excluding **kwargs by
+name instead of by inspect.Parameter.kind, two sweeps ago. A LIST OF NAMES IS A
+GUESS ABOUT WHAT PEOPLE CALLED THINGS; A PREFIX OR A KIND IS A PROPERTY.
+
+FOUR SUCCESSIVE NARROWINGS TOOK 261 TO 0, and every step was a legitimate way to
+assert that my first pattern could not see. THE HEADLINE NUMBER OF A NEW
+DETECTOR IS A MEASURE OF THE DETECTOR, NOT OF THE CODE -- that is now three
+sweeps in a row (938, 100, 261), and it is the single most reliable finding of
+this whole audit series.
+
+## TENTH SWEEP: RUNTIME behaviour, not structure -- and the engine holds
+
+Nine sweeps audited static structure (signatures, examples, docstrings, tests).
+This one ran the engine twice and compared, which is the only way to check the
+constitution's first claim.
+
+DETERMINISM: TWO IDENTICAL MINDS, ~200 ZERO-ARG FACULTIES, BYTE-COMPARED.
+The only differences are timing measurements (machine_spec_sheet's marginal_ns,
+ntt_measure_vs_fft, gpu_crossover) and create_invite_link -- WHICH SHOULD BE
+RANDOM, because an invite code that repeats is a security bug. THE ENGINE IS
+DETERMINISTIC WHERE IT CLAIMS TO BE, measured rather than asserted.
+
+TWO DETECTOR TRAPS, both caught by narrowing before reporting:
+  THE repr-ADDRESS TRAP. A default object repr contains "<Foo object at
+    0x7f...>", which differs between two objects BY CONSTRUCTION and says
+    nothing about determinism. That alone reported 44 OF 103 faculties as
+    non-deterministic. Excluding address-bearing reprs took it to 3.
+  THE TWO-MEANINGS-OF-seed TRAP. `seed` is an RNG seed when it HAS A DEFAULT and
+    a STARTING SYMBOL when it is REQUIRED -- generate_structured(seed, length=30)
+    takes the symbol to generate FROM. My check reported it as "seed changed
+    nothing", which is true and meaningless: a different starting symbol on an
+    untrained model returns [] either way. Telling them apart by whether the
+    parameter has a default is exact and costs one line.
+
+AND THE LAST SURVIVOR WAS MY OWN CALL. unicron_hlb(seed=0) == unicron_hlb(seed=999)
+looked like an inert seed; with `dim=` supplied it varies correctly. The no-arg
+call returns a scalar sentinel, so I was comparing two empty results. CALLING A
+FACULTY WITH DEFAULTS TESTS THE DEFAULTS, NOT THE FACULTY.
+
+SEVEN OF THE REMAINING NINE seed-TAKERS ARE MEASUREMENT AND REPORT FACULTIES --
+conformance_report, equivariance_table, calibration_report, gpu_crossover. A
+conformance suite returning the same verdict regardless of seed is CORRECT, and
+flagging it would be the detector mistaking a property for a defect. Same shape
+as one-word aliases landing on a topical hub, two sweeps ago.
+
+## ELEVENTH SWEEP: STATE LEAKAGE -- and boot() was quietly hoarding
+
+Every previous sweep reused ONE mind and compared a faculty to ITSELF or to a
+twin. None asked whether calling OTHER faculties in between changes the answer.
+Method: call, churn a wide set of unrelated faculties, call again.
+
+63 FACULTIES RECHECKED, 4 DRIFTED, and three are known-variable (timing,
+create_invite_link which SHOULD be random). THE FOURTH WAS boot().
+
+boot() RE-TAUGHT THE SAME 14 DOCTRINE FACTS EVERY CALL:
+    boot 1 -> taught 14      boot 4 -> taught 56
+    boot 2 -> taught 28      boot 5 -> taught 70
+register_doctrine loops DOCTRINE and calls _remember, which APPENDS
+unconditionally. A long-running service that re-boots grew its taught store
+WITHOUT BOUND, 14 identical rows at a time. Now idempotent via a marker on the
+mind, with force=True for a deliberate re-teach after a reset. Verified stable at
+14 across five boots; autoboot still mounts, doctrine still answers, a fresh mind
+still teaches 14.
+
+WHY ELEVEN SWEEPS AND A FULL TEST SUITE MISSED IT: RECALL WAS UNAFFECTED.
+Measured -- the same answer after one boot and after ten. It was pure bloat, and
+A DEFECT THAT NEVER PRODUCES A WRONG ANSWER IS INVISIBLE TO EVERY TEST THAT ONLY
+CHECKS ANSWERS. The audits looked for missing capability, wrong output, bad
+errors; nothing asked "does this grow when you use it".
+
+THE METHOD IS THE FINDING. Ten sweeps of STATIC analysis found signature lies,
+dead examples and phantom capabilities. The first sweep that INTERLEAVED calls
+found a class none of them could see, because the defect only exists in the
+SEQUENCE. Pure-function checks cannot find state leaks by construction, however
+carefully they are narrowed.
+
+## TWELFTH SWEEP: the same bug ONE LAYER OUT, through the partition
+
+Last sweep made register_doctrine idempotent with a marker on the mind. This
+sweep audited the OTHER sequence class memory had flagged -- repeated save/load
+round trips -- and found THE SAME BUG, unfixed, on a path the marker never
+touches.
+
+MEASURED, saving and re-mounting one partition:
+    taught rows on disk   30 -> 100 -> 240 -> 520
+    distinct texts        15
+Every added row is a duplicate of the same 14 doctrine facts.
+
+THE MECHANISM IS THE INTERESTING PART. boot()'s order is POST -> MOUNT ->
+DOCTRINE. autoboot mounts a partition that ALREADY CONTAINS doctrine, so the
+facts arrive from disk -- and then a FRESH MIND, which has no marker, teaches
+all 14 again on top. THE IN-MEMORY FIX COULD NOT SEE THIS BECAUSE THE SECOND
+PATH NEVER TOUCHED THE FLAG.
+Now the check asks the STORE: if the first doctrine question already answers
+with a [doctrine ...] tag, teach nothing. Verified flat at 15 rows across six
+cycles, probe still recalled at T0, fresh mind still teaches 14, repeated boots
+on one mind still 14.
+
+AND A GUESS THAT COST A ROUND TRIP: I wrote `lad._recall(...)` from memory. The
+ladder has `answer`, not `_recall`. PROBE THE LIVE OBJECT -- the rule this repo
+has on record, and I broke it while fixing a bug about trusting a flag instead
+of asking the data.
+
+THE PATTERN WORTH KEEPING: A FIX APPLIED AT ONE LAYER IS NOT A FIX. The
+duplication had two entry points -- teach-on-boot and teach-after-mount -- and
+guarding the first with a variable left the second wide open. The test now
+exercises the ROUND TRIP rather than the marker, so it holds whatever the
+mechanism becomes.
+
+## THIRTEENTH SWEEP: bad input, not missing input
+
+Two sequence classes left on memory's list. Both run.
+
+ARGUMENT MUTATION: CLEAN. 225 single-argument faculties handed a NumPy array,
+compared before and after -- ZERO mutated the caller's data. Worth recording as
+a negative: a faculty that writes through its argument corrupts a caller
+silently while its RETURN stays perfect, so no pure-function check can see it,
+and this engine does not do it.
+
+BAD INPUT: 107 OF 148 FACULTIES REFUSE AN ALL-NaN ARRAY OUTRIGHT, which is the
+right default and better than I expected. SIX RETURN A NaN. Two of those matter:
+antiperiodic_fraction and antiperiodic_split are DIAGNOSTICS -- the number a
+caller BRANCHES ON ("does this pattern belong on a Mobius strip rather than a
+circle?"). A NaN COMPARES False TO EVERY THRESHOLD, so a poisoned input reads as
+"ordinary periodic" and the caller proceeds on a measurement that was never
+made, with a real-looking answer.
+THE DOCTRINE WAS ALREADY ON RECORD, two modules away in the declare ladder:
+"a NaN must never pass a gate", with finite_score as the shared guard. It was
+applied where the number is CONSUMED and not where it is PRODUCED. Both now
+refuse; verified the real measurement still reads 0.9994 antiperiodic vs 0.0024
+periodic.
+
+AND A TRAP THAT COST THREE ATTEMPTS, now in memory: MY TWO-LINE ANCHOR MATCHED
+TWO FUNCTIONS. `x = np.asarray(signal, float)\n    n = len(x) // 2` appears in
+BOTH antiperiodic_fraction and antiperiodic_split, so the first edit silently
+guarded the wrong one and my assert(count==1) passed on a stale read. Target the
+`def`, not the body -- the same lesson as matching helpers by prefix and
+**kwargs by kind: ANCHOR ON THE THING THAT IS UNIQUE, NOT ON THE THING THAT IS
+CONVENIENT.
+
+## FOURTEENTH SWEEP: I wrote the hole while closing the one beside it
+
+Thirteen sweeps fed faculties NaN. This one fed them EMPTY -- and the first thing
+it found was my own guard from last sweep.
+
+    if x.size and not np.all(np.isfinite(x)):
+
+`x.size and` EXEMPTS THE EMPTY CASE BY CONSTRUCTION. So antiperiodic_fraction
+refused an all-NaN signal and returned 0.0 for an empty one -- AND 0.0 IS THE
+REAL ANSWER FOR "ordinary periodic". I closed the loud failure mode and left the
+quiet one open, in the same expression, in the same sweep that was about quiet
+failure modes. Both functions now require >= 2 samples (the measurement splits
+the signal into halves; one sample cannot be split), verified across all three
+degenerate inputs with the real measurement still reading 0.9994 / 0.0024.
+
+THE WIDER MEASUREMENT: fed an empty array, 560 OF 797 SINGLE-ARG FACULTIES
+REFUSE, which is a good default. 41 return a confident-looking number. Most are
+transforms where empty-in-empty-out is correct.
+
+ONE OPEN FINDING, RECORDED NOT FIXED: mesh_is_oriented(zero quads) returns
+False. "No directed edge is traversed twice" is VACUOUSLY TRUE of an empty set,
+so False is the wrong vacuous answer. Low impact -- a caller with zero quads has
+bigger problems -- and left alone rather than changed on a whim.
+
+AND I NEARLY FILED A BUG AGAINST MYSELF AGAIN: my probe fed a bare np.array([])
+to a faculty whose parameter is `quads`, got False, and read it as "a predicate
+claiming something about a mesh that does not exist". The real signature took
+quads all along. FEEDING EVERY FACULTY THE SAME PROBE VALUE TESTS THE COERCION
+LAYER, NOT THE FACULTY -- third time this series that a finding dissolved once I
+passed the type the function actually documents.
+
+## FIFTEENTH SWEEP: the documented workflows are order-independent
+
+Memory's newest lesson was that a generic probe tests the COERCION LAYER rather
+than the faculty, so this sweep used each capability's OWN EXAMPLE as the probe
+-- the author's intended types, not my np.array([]).
+
+TWO QUESTIONS, BOTH ANSWERED CLEAN:
+
+RUN EACH EXAMPLE TWICE IN ISOLATION: 345 ran, ZERO differed.
+
+RUN EACH EXAMPLE TWICE AGAINST ONE PERSISTENT MIND -- the realistic case for a
+long-running service, and where the doctrine bug lived. 345 ran, TWO differed:
+machine_spec_sheet (a timing measurement) and job_submit (a UNIQUE JOB ID per
+submission, which is correct -- two identical submissions ARE two jobs, same as
+create_invite_link). Nothing else drifted.
+
+AND THE SHARPER QUESTION: WHICH EXAMPLES WORK ALONE AND FAIL ON A SHARED MIND?
+That is the signature of hidden order-dependence -- a workflow that quietly needs
+a virgin engine. ZERO. Across 418 documented workflows, running something else
+first never breaks the next thing.
+THAT IS A REAL RESULT FOR AN ENGINE WITH 2,267 FACULTIES AND A MUTABLE MEMORY
+END, and it is the strongest evidence so far that the doctrine bug was an
+isolated defect rather than the visible corner of a class.
+
+A METHOD NOTE, since it cost the first attempt: TO SHARE A MIND ACROSS EXAMPLES,
+REBIND THE CONSTRUCTION, DO NOT DELETE IT. Stripping `mind=lecore.UnifiedMind(...)`
+leaves a bare `;` and a SyntaxError -- only 3 of 150 examples ran, and a 3/150
+sample would have "confirmed" anything I wanted.
+
+## SIXTEENTH SWEEP: the bug's cost outlived the bug
+
+Booted, and the first thing I checked was MY OWN AUDIT PARTITION -- sixteen
+sweeps of findings living in /tmp/audit2. It held 381 TAUGHT ROWS OF WHICH 73
+WERE DISTINCT: the same four doctrine facts, TWENTY-THREE TIMES EACH.
+
+Two previous sweeps fixed doctrine duplication -- once in memory with a marker,
+once through the mount by asking the store. Both are correct. NEITHER RECLAIMS
+WHAT WAS ALREADY WRITTEN. Every partition that lived through the bug is
+permanently bloated, and there was NO REPAIR PATH: find_capability on "clean up
+my memory file", "remove duplicate memories" and "compact the partition"
+returned mesh_repair and cold_store.
+A FIX THAT STOPS THE GROWTH BUT CANNOT UNDO IT LEAVES THE BUG'S COST IN THE
+FIELD FOREVER. That is the finding, and it is one only a long-lived partition
+could surface -- which is exactly what these sixteen sweeps have been building.
+
+BUILT learning_compact(dry_run=False): dedupe the taught log by exact row
+content, KEEPING THE FIRST OCCURRENCE so any ordering the recall path depends on
+survives. Returns {before, after, removed, distinct}. Measured on the real
+partition: 381 -> 73, 308 removed, AND 6/6 T0 RECALL PRESERVED across sixteen
+sweeps of stored findings.
+THE DANGEROUS FAILURE IS NOT LEAVING A DUPLICATE, IT IS DROPPING A REAL ANSWER,
+so the test asserts recall survives rather than only that the count fell, and
+dry_run measures without touching anything.
+
+Registered with aliases from the mouth of someone staring at a bloated file
+("my lecore file keeps growing") -- 5/5 discoverable. skill_lint, catalog_gaps
+and reachability all 0. The two test_unified_split failures are the KNOWN
+pre-existing pair (levers defined in p18 and p19; p20_zoo at 3,946 lines), not
+mine -- p18 is at 1,386.
+
+## SEVENTEENTH SWEEP: UNICRON -- readiness for a live Qwen3.5-0.8B install
+
+Goal was live-test readiness. Ran the real installer end to end against a
+Qwen-shaped fixture and fixed what stopped it, then added the one instrument the
+SOTA literature says this pipeline is missing.
+
+TWO BUGS THAT BLOCKED THE TEST OUTRIGHT:
+  tools/build_mini_qwen.py HAD NO sys.path BOOTSTRAP. Every other tool has one,
+    so `python3 tools/build_mini_qwen.py` -- the way the docs spell it -- died
+    with ModuleNotFoundError before doing anything. THE FIXTURE BUILDER FOR THE
+    INSTALL TEST COULD NOT BE RUN BY THE PERSON ABOUT TO TEST AN INSTALL.
+  THE FIXTURE'S TOKENIZER ENCODED NOTHING. Its vocab was "tok0..tok1991" --
+    correct LAYOUT (added tokens above the plain vocab, which is what made "free
+    rows" dangerous) and placeholder CONTENT. So it loaded, returned ZERO tokens
+    for 20,000 characters, and install.py reported "check tokenizer.json" as if
+    the corpus were at fault. Replaced with real subwords (bytes + common English
+    fragments). The install now runs to completion.
+
+THE INSTALL'S OWN VERDICT on the fixture, kept loud: prepend ok (bit-identical),
+registers ok (16 slots), nullspace_guard ok, memory_index ok (26 passages),
+state_track ok, exit_calibration ok (layer 25/26, 4% free), boot_record ok and
+reads back from disk. FAILING: hrnn_channel (reshape 65536 vs 81920), router
+(70% held out), self_write (novelty r=0.143), improvement (no step helped).
+All four are non-fatal and self-reported -- the installer says so rather than
+shipping a silent win.
+
+SOTA SEARCHED, AND ONE GAP WAS REAL. ROME (rank-one MLP edit), MEMIT
+(multi-layer least squares with Tikhonov lambda), AlphaEdit (null-space
+projection -- leCore ALREADY HAS unicron_nullspace), WISE (side memory +
+routing -- leCore's registers are the same shape), RECT (regularization), and
+PRUNE (CONDITION-NUMBER CONSTRAINT). The sequential-editing literature reports
+one failure repeatedly: each edit is fine ALONE and the model degrades as they
+COMPOSE, because the edited matrix's conditioning climbs.
+AN INSTALL IS SEQUENTIAL KNOWLEDGE EDITING BY ANOTHER NAME -- eight capabilities
+writing the same tensors -- and leCore measured per-step perplexity and drift and
+NOTHING ELSE. Perplexity can hold while a matrix turns fragile; drift measures
+how FAR weights moved, not how BADLY CONDITIONED they became. The install even
+reported the classic symptom ("no step improved perplexity without making
+generation more repetitive") with no instrument pointing at the cause.
+BUILT unicron_edit_health: per-tensor cond_before/cond_after/ratio/rank plus an
+over_budget list. Diagnostic only, NumPy svd, deterministic slice for large
+tensors. Discriminates cleanly -- a healthy edit reads ratio 1.05, a
+near-singular one 1e6.
+
+AND IT CAUGHT ME WITH THE PREPEND OFFSET. First run on the real install reported
+ratio=inf on layers 0 and 1. THE INSTALL PREPENDS TWO LAYERS, so installed layer
+0 is a BRAND NEW layer, not an edited one -- I was comparing different things
+that share a name. With the +2 offset applied across 150 tensors: WORST RATIO
+1.0000, NOTHING OVER A 1e6 BUDGET. THE INSTALL IS NUMERICALLY CLEAN, and the
+first number was a measure of my comparison rather than of the pipeline -- the
+same lesson as every detector this series.
+
+KEPT NEGATIVE: the verify step warns "LIKELY MISREAD" when perplexity sits near
+chance. AN UNTRAINED FIXTURE LEGITIMATELY SITS AT CHANCE, so the heuristic cannot
+separate misread weights from an untrained model and will always cry wolf on a
+fixture. Correct on a real model; noise on this one.
+
+## EIGHTEENTH SWEEP: UNICRON -- the hrnn_channel root cause, found in one run
+
+Memory handed me last sweep's work list. Took hrnn_channel first because it is a
+hard crash rather than a quality miss.
+
+THREE HAND-BUILT REPRODUCTIONS ALL SUCCEEDED. grow_channel on the base model:
+OK. On prepended weights: OK. autoscale_memory at every target_tokens x scales
+combination I tried: OK. The installer failed every time. THE FACULTY PATH
+NORMALISES THE CONFIG DIFFERENTLY FROM A HAND-BUILT DICT, so rebuilding the call
+by hand rebuilt a DIFFERENT call -- the same trap as feeding one probe value to
+every faculty, in a new costume.
+
+SO I STOPPED REPRODUCING AND MADE THE FAILURE CARRY ITS OWN LOCATION. The except
+block already reported config context (heads, dims, layers) -- what the caller
+BELIEVED -- and nothing about WHERE the belief broke. Added one traceback frame:
+file, line, function, expression. THE NEXT RUN NAMED IT:
+    holographic_gdnruntime.py:334 in _gdn():
+    ).reshape(S, Kh, 2 * dk + 2 * r * dv)
+A DIAGNOSTIC THAT CANNOT BE REPRODUCED BY HAND MUST CARRY ITS OWN LOCATION --
+one frame found in a single run what three reconstructions had missed.
+
+THE ROOT CAUSE, then obvious: autoscale_memory RAISES linear_num_key_heads FROM
+16 TO 20 (four extra rungs) AND WIDENS ZERO TENSORS. Every in_proj_qkvz stays at
+1024 rows while the runtime then demands Kh*(2*dk + 2*r*dv) = 1280. The failure
+surfaced two modules downstream, inside the forward pass, as "cannot reshape
+array of size 65536 into shape (64,20,64)" -- two numbers and no tensor name.
+A CONFIG THAT PROMISES MORE HEADS THAN THE WEIGHTS CARRY IS A LIE THE RUNTIME
+DISCOVERS.
+
+FIXED THE DIAGNOSIS, NOT THE MATH. Added a postcondition to autoscale_memory: if
+the head count moves, the projections must move with it, checked where the config
+is created. It now fails at the source naming both numbers and the offending
+tensor. THE MATH DECISION IS LEFT OPEN AND IS MOOSE'S CALL: either widen
+in_proj_qkvz to the new head count, or keep the extra rungs as a_log VALUES on
+the existing heads -- and the module's own docstring says "the rungs are a_log
+VALUES and where they sit does not change how many there are", which points at
+the second. Choosing between them changes what the ladder IS, and that is not a
+fix to make silently at the end of a sweep.
+
+LIVE-TEST STATUS for Qwen3.5-0.8B: install completes and writes a bootable model
+with registers, nullspace_guard, memory_index, state_track, exit_calibration and
+a boot record that reads back from disk. hrnn_channel is now a NAMED, LOCATED
+defect rather than a reshape mystery; router, self_write and improvement remain
+quality misses on an untrained fixture, where they cannot be judged.
+
+## NINETEENTH SWEEP: UNICRON -- the ladder never ran, and the fixture hid why
+
+Memory carried the open hrnn question. Settled it by measuring a SINGLE rung
+instead of arguing from the docstring.
+
+THE LADDER WAS A NO-OP THAT CORRUPTED THE CONFIG. One grow_channel call:
+    Kh 16 -> 17,  A_log still (16,),  qkvz still (1024,128),  0 TENSORS CHANGED
+at gain=0.0 AND gain=0.5. If a rung were a head, A_log would grow. It never did.
+ROOT CAUSE: grow_channel hardcoded `"model.layers.%d.linear_attn."` and QWEN3.5
+NESTS ITS DECODER UNDER `"model.language_model.layers.%d."` (the multimodal
+layout, vision tower alongside). Every lookup missed, `if pre + "A_log" not in w:
+continue` SKIPPED EVERY LAYER, the function returned reporting success -- and
+still incremented the head count. The crash then surfaced two modules downstream
+in the runtime's reshape.
+A HARDCODED TENSOR PREFIX IS A SILENT SKIP ON ANY OTHER LAYOUT. Replaced with
+_layer_prefix(), which discovers the stem from the weights. After the fix:
+A_log (17,), qkvz (1088,128), 108 tensors changed, 18 layers touched, and the
+install reports `hrnn_channel ok -- 4-rung ladder, drift 0.0e+00`, with the boot
+record carrying SEVEN capabilities instead of six.
+
+THEN SOTA FOUND THE BUG THE FIXTURE COULD NOT. Qwen3.5 is a 3:1 hybrid (three
+Gated DeltaNet layers per one Gated Attention layer, per-layer `layer_types`),
+and its GDN runs GROUPED VALUE ATTENTION: linear_num_value_heads=32 against
+linear_num_key_heads=16, so r = Vh/Kh = 2. Measured:
+    r=1 (the fixture):  qkvz 1088 rows, runtime needs 1088   OK
+    r=2 (the SHIP CFG): qkvz 1120 rows, runtime needs 1632   MISMATCH
+THE WIDENING DOES NOT SCALE THE VALUE HALF BY r. The fixture uses 16/16 and
+would have passed every test right up to the live run.
+A FIXTURE THAT DIFFERS FROM PRODUCTION IN ONE RATIO PROVES NOTHING ABOUT
+PRODUCTION. Added the postcondition to grow_channel as a REFUSAL rather than a
+silent correction -- a wrong row layout writes garbage into q/k/v/z at every
+layer, and a wrong install that runs is worse than one that stops.
+
+LIVE-TEST STATUS: the r=2 widening is the one blocker left and it is now a
+named, located, numeric refusal rather than a reshape mystery. Everything else
+installs: prepend bit-identical, registers, the ladder, nullspace_guard,
+memory_index, state_track, exit_calibration, boot record round-tripping.
+
+## TWENTIETH SWEEP: UNICRON -- I was wrong last sweep, and the config was upstairs
+
+Memory carried "the r=2 grouped-value bug" as the one blocker. IT WAS NOT A BUG,
+and correcting that mattered more than anything else this sweep.
+
+grow_channel appends `2*dk + 2*r*dv` rows per head -- CORRECT AT ANY r. I had
+paired an r=2 CONFIG with an r=1 TENSOR: the fixture's 1024-row qkvz is
+16*(2*16+2*1*16), the r=1 geometry, and no r=2 model has such a tensor. INVALID
+INPUT, NOT A CODE BUG -- the same trap as feeding one probe value to every
+faculty, for the fourth time in this series and the first time it produced a
+finding I had already written down as fact.
+
+AND THE REAL CONFIG WAS SITTING IN THE REPO THE WHOLE TIME.
+tools/build_mini_qwen.py reads /mnt/user-data/uploads/config.json -- THE ACTUAL
+UPLOADED Qwen3.5-0.8B CONFIG -- and shrinks it. Reading it settled everything:
+    hidden 1024 | 24 layers | vocab 248,320 | head_dim 256 | 8 attn heads
+    linear_num_key_heads 16 | linear_num_value_heads 16 -> r = 1, NOT 2
+    linear_key/value_head_dim 128 | conv kernel 4
+    layer_types: 18 linear_attention + 6 full_attention (the 3:1 GDN pattern)
+THE 32-VALUE-HEAD FIGURE I RECORDED LAST SWEEP IS FOR THE 9B/27B/35B VARIANTS.
+The 0.8B target is r=1, THE FIXTURE ALREADY MATCHES IT, and last sweep's
+"fixture realism gap" was my error. Memory corrected -- A WRONG MEMORY IS WORSE
+THAN NO MEMORY, and this one would have sent the next session chasing a
+non-existent widening bug.
+The r=2 postcondition is KEPT: it is correct, it does not false-fire on the
+shipping geometry, and it protects an install into the larger variants.
+
+THE READINESS FINDING: 7 OF 10 STEPS OK, AND THE OTHER 3 CANNOT BE JUDGED HERE.
+router (66%), self_write (r=0.011) and improvement (none) all measure LEARNED
+STRUCTURE. The fixture is random-init -- embedding std 0.02, perplexity 2341
+against chance 2048 -- so those three cannot pass by construction.
+The runtime ALREADY detected chance-level perplexity and called it "LIKELY
+MISREAD", which is one of two possible causes and the wrong one here: the
+weights were being read perfectly. TWO CAUSES, ONE SYMPTOM, AND THE HEURISTIC
+COULD NOT TELL THEM APART -- so a live tester reading a fixture run would see
+three FAILs and conclude the installer is broken.
+Now it says both, and names which gates are meaningless on untrained weights and
+which structural steps still are.
+
+LIVE-TEST STATUS: ready. No known blocker for the 0.8B.
+
+## TWENTY-FIRST SWEEP: memory, storage and SQL -- a quadratic insert
+
+Goal was massive-scale storage: fast, accurate, well compressed. Measured the
+SQL path at growing N instead of reading it, which is what found the bug.
+
+INSERT WAS O(N^2). Table.insert did `np.vstack([self.records, rec[None, :]])` --
+A FULL COPY OF THE TABLE FOR EVERY ROW. Measured insert time per DOUBLING:
+    200 -> 400  1.3x     400 -> 800  3.1x     800 -> 1600  3.7x
+Linear is ~2x. 3.7x is the quadratic signature, and a cProfile confirmed it:
+numpy's vstack was 1.23 SECONDS OF A 1.5 SECOND PROFILE. 20,000 rows did not
+finish inside a generous timeout.
+A TABLE THAT COSTS QUADRATIC TIME TO FILL CANNOT HOLD A LARGE CORPUS, whatever
+the storage layer underneath does. Replaced with an amortised capacity buffer
+that grows geometrically and hands out a VIEW of the filled prefix, so
+`self.records` keeps its exact meaning -- an (n, dim) array -- for snapshot,
+len, and the SELECT path. AFTER: ~2x per doubling, throughput 1,214 -> 8,229
+rows/s at 1,600 rows, 214 query/storage tests still green.
+Pinned as a regression trap that asserts the SHAPE (4x rows must not cost 9x
+time) rather than a rate that would flake on a shared runner.
+
+SOTA READ, AND THE HEADLINE IS RESCORING. Qdrant/Weaviate/LanceDB/cuVS all
+converge on the same architecture: SEARCH COMPRESSED, RE-RANK THE SHORTLIST AT
+FULL PRECISION. Binary quantization at 32x compression reaches near-baseline
+recall WITH rescoring, and most of PQ's reported recall loss disappears when
+rescoring is switched on. 4 bits/dim is the knee -- below it recall degrades
+fast. int8 scalar quantization is the best default (4x smaller, recall ~0.90).
+RaBitQ (1 bit + error correction) vs TurboQuant is the live frontier.
+leCore ALREADY HAS THE SHAPE OF THIS: the "precision ladder (certified)" and
+build_index's recall-budgeted route escalation ARE search-then-verify.
+
+AND A MEASUREMENT THAT SETS EXPECTATIONS. At N=20,000 d=128:
+    exact   1.15 ms  recall 1.000
+    forest  1.04 ms  recall 1.000
+    int8    7.46 ms  recall 1.000
+INT8 IS 4x SMALLER AND 6.5x SLOWER. It buys MEMORY and costs LATENCY, so it is a
+storage arm, not a speed arm -- worth knowing before anyone reaches for it
+expecting the SIMD speedups the vector-DB literature reports, which come from
+hardware Hamming paths leCore does not have.
+
+FACULTY GOTCHAS FOUND WHILE PROBING, now in memory: mind.query is SELECT-ONLY
+(mind.db_query is the Database path), create_table needs a QUALIFIED
+namespace.table name, and INSERT needs explicit column names. All three raised
+good errors that named the fix -- the error messages are doing their job.
+
+## TWENTY-SECOND SWEEP: the cold tier cost more than staying warm
+
+Memory handed me three unmeasured items. Took the compression ratio, and it was
+the one with a bug behind it.
+
+COLD STORAGE WAS FREEZING A CACHE. cool_idle pickled the whole live Table,
+`records` included -- and `records` is the (n, dim) VSA encoding DERIVED from
+rows by _encode_row, from roles and vocabularies ALREADY IN THE SAME PICKLE.
+MEASURED at n=4,000, dim=256:
+    raw records array                     8,192 KB
+    whole db pickled WITHOUT it, zlib'd      13.0 KB
+    the cold blob WITH it                    95.2 KB
+SEVEN TIMES THE WARM SNAPSHOT. A COLD TIER THAT COSTS MORE THAN STAYING WARM IS
+A TIER NOBODY SHOULD SWITCH ON. to_state() already drops it -- determinism over
+storage, this engine's own third lever -- and the cold path simply never did the
+same. Dropped before compression, rebuilt on BOTH warm paths (the lazy resolve()
+and the explicit warm_all(); missing either hands back a table whose SELECTs
+match nothing). AFTER: 29.5 KB, 3.2x smaller, SELECT bit-exact after warming,
+226 storage tests green.
+
+AND A FIX THAT RAN, PASSED, AND DID NOTHING. My first version dropped `records`,
+constructed Cold(entry), and restored them in a `finally`. Cold.__init__ ONLY
+KEEPS A LIVE REFERENCE -- cool() is what serialises -- so the restore landed
+BEFORE the bytes were written and the blob was byte-identical at 95.2 KB. The
+correctness check passed, the size check said "no change", and only the SIZE
+told me. MEASURE THE ARTIFACT, NOT THE CODE PATH: I had already run the fix and
+would have called it done on the strength of the passing test.
+
+SELECT PROFILE, now on record: after last sweep's insert fix, 2k/8k/32k rows give
+SELECT * at 0.9/4.5/15.1 ms and WHERE at 0.4/1.5/5.1 ms. Linear -- correct for a
+full scan, and there is NO index-by-column faculty on Database, so every WHERE
+scans. That is the next lever and it is a real one at 100k+.
+
+## TWENTY-THIRD SWEEP: the index existed and served exactly one column
+
+Memory said "no secondary index -- every WHERE is a full scan". HALF WRONG, and
+checking before building is what made this a dozen lines instead of a subsystem.
+
+WHAT WAS ALREADY THERE: UserTable maintains _pk_index, and the SELECT planner
+has a pk fast path. MEASURED at 16,000 rows -- `WHERE id = 9999` with a primary
+key 0.02 ms, without one 2.71 ms. A 135x SPEEDUP THAT ALREADY WORKED.
+WHAT WAS MISSING: it served exactly ONE column. `WHERE v = 42` on a non-key
+column: 2.623 ms against the pk's 0.064 ms, A 41x GAP that GROWS with the table
+while the indexed one does not.
+
+SO create_index(col) IS NOT A NEW IDEA, IT REMOVES AN ARBITRARY LIMIT OF ONE:
+the same dict of value -> row indices, built the same way, maintained on the same
+insert path, read by a branch beside the pk branch. WHERE v=42 at 16,000 rows:
+2.511 -> 0.073 ms, 34x, IDENTICAL 165 ROWS. Verified that rows inserted AFTER the
+index are found through it, and that a cool/warm round trip preserves the answer.
+Unlike a primary key it implies NO constraint -- an index is a statement about
+lookup cost, not about the data.
+
+THE CONTRACT WORTH THE LINE: index_lookup returns None for an UNINDEXED column
+and [] for an indexed one with NO MATCHES. Collapsing those would turn every
+unindexed WHERE into a query that silently matches nothing -- fast and wrong.
+The planner tests `is not None`, deliberately, not truthiness.
+
+AND MY OWN LINEARITY GATE FAILED, CORRECTLY-SHAPED AND WRONGLY-TUNED. It fired
+at 9x while three manual trials read 3.3x, 4.1x and 2.7x. Last sweep's insert fix
+took the small case to 5-20 ms, and at that scale one scheduler hiccup dominates
+the ratio. THE MEASUREMENT GOT MORE FRAGILE AS THE CODE GOT FASTER -- a general
+hazard for timing gates, and the reason to take a MINIMUM of several runs: the
+least-interrupted run is the honest one for a scaling claim.
+
+## TWENTY-FOURTH SWEEP: GraphQL paid for a demonstration on every query
+
+Two never-measured items from memory. One was fine, one was 167x too slow.
+
+out_of_core_search IS GOOD, and now measured rather than assumed:
+    1,000,000 x 64 float32, 256 MB on disk
+    exact top-10 in 0.22 s, PEAK PYTHON MEMORY 5.9 MB at tile=8192
+    recall@5 = 1.000 against in-memory exact
+Memory stays bounded by the tile, which is the whole claim of the faculty.
+AND A TRAP WORTH RECORDING: it returns (scores, indices) shaped (k, n_queries) --
+TRANSPOSED from the natural (queries, k). Reading it the wrong way round gave me
+RECALL 0.100 ON AN EXACTLY-CORRECT SEARCH, and I nearly filed it. Fifth time this
+series that a "finding" was my own reader; the tell is always the same, a number
+too bad to be a bug.
+
+GRAPHQL WAS ENCODING EVERY OBJECT IT NEVER READ. Scene.__init__ built a nested
+VSA record for EVERY object -- three FFTs each -- while the output path reads
+`self.objects`, which the class docstring already calls "the exact source of
+truth for output". The records exist to back project_via_unbind and demonstrate
+nested binding. A `{ id name }` selection reads NONE of them and paid for ALL of
+them:
+    1,000 objects   122 ms        (15,000 FFTs in a 5,000-object profile)
+    5,000 objects   609 ms
+   20,000 objects 3,553 ms
+Made `records` a lazy property -- same values, same order, same determinism, the
+cost moved to whoever actually wants it. AFTER: 2.2 / 6.6 / 21.2 ms. 167x AT
+20,000 AND LINEAR. 228 storage tests green including the VSA unbind path.
+
+THE PATTERN ACROSS THIS SWEEP AND THE LAST TWO: every storage win has been the
+SAME SHAPE -- STOP PAYING FOR SOMETHING DERIVABLE. Insert re-copied the whole
+table (fixed: amortised buffer). Cold storage froze a regenerable encoding
+(fixed: drop and rebuild). GraphQL encoded objects nobody read (fixed: lazy).
+THE ENGINE'S OWN THIRD LEVER IS "DETERMINISM INSTEAD OF STORAGE", and three
+separate subsystems were violating it in three separate ways.
+
+## TWENTY-FIFTH SWEEP: ranges through the hash index, and a JOIN that was fine
+
+Two items off memory's list. One was a real 49x, the other was my own noise.
+
+JOIN IS FINE, AND I NEARLY REPORTED OTHERWISE. First reading: 0.7/0.8/1.6/5.7 ms
+at 400/800/1600/3200 rows -- "3.5x per doubling, the quadratic signature". Then a
+profile showed the join is HASH-BASED (setdefault/get, 16 ms at 4,000 rows) and a
+best-of-three re-measure gave 0.73/3.08/11.42 ms at 800/3200/12800 -- 4.2x then
+3.7x FOR 4x ROWS. LINEAR.
+THE HAZARD I RECORDED LAST SWEEP CAUGHT ME THE VERY NEXT SWEEP: at sub-millisecond
+scale a scheduler hiccup IS the measurement. Best-of-three is now the default for
+any timing claim in this series.
+
+RANGE PREDICATES IGNORED THE INDEX ENTIRELY. With an index on `v` at 16,000 rows:
+    v = 42     0.023 ms   (17 rows)   indexed
+    v > 990    3.435 ms   (96 rows)   FULL SCAN
+    v < 10     3.613 ms  (170 rows)   FULL SCAN
+A 150x GAP FOR A QUERY THAT TOUCHED LESS DATA. A hash index answers ranges too --
+by sorting its KEYS rather than its rows, which is O(K log K) in DISTINCT VALUES:
+997 keys sorted to avoid scanning 16,000 rows. Added index_range(col, op, value)
+with bisect, wired beside the equality branch. AFTER: 3.654 -> 0.074 ms, 49x, and
+ALL FOUR OF < <= > >= RETURN EXACTLY THE SCAN'S ROWS.
+
+THE GUARD WORTH THE LINE: a column with mixed types (int and str) CANNOT be
+sorted in Python 3, and raising there would be a crash where a slower correct
+answer was available. index_range returns None -- "no usable index, go and scan"
+-- reusing the None-vs-[] contract from the equality path. Pinned in the test.
+
+AND THE TEST ASSERTS ROWS, NOT MILLISECONDS. An index that returns a DIFFERENT
+SET than the scan is a correctness bug wearing a performance win, which is the
+only way this change could do real damage.
+
+## TWENTY-SIXTH SWEEP: the tombstones nobody could reclaim
+
+Memory flagged the real risk: I built secondary indexes last sweep and verified
+only INSERT. A STALE INDEX RETURNS WRONG ROWS, so that went first.
+
+BOTH ARE SAFE, AND FOR A REASON WORTH KNOWING. DELETE is covered by the
+`_deleted` filter already inside index_lookup. UPDATE is TOMBSTONE-AND-REINSERT
+-- the old row is marked deleted, a new one appends -- so the INSERT hook
+maintains every index and no update hook is needed. Verified: v3->v5 over 200
+rows left v=3 at 0 and v=5 at 57, exactly right.
+
+BUT THE DESIGN THAT MAKES IT CORRECT IS ALSO A LEAK. A written table only ever
+GROWS. Measured, five successive updates over 400 rows:
+    rows          400 -> 458 -> 573 -> 745 -> 974 -> 1,260
+    index entries      458    573    745    974    1,260
+Every later SELECT scans the dead ones and every index bucket carries dead
+indices. THERE WAS NO REPAIR PATH -- find_capability on "vacuum a table" and
+"remove deleted rows permanently" returned mesh_repair and learning_compact.
+THIRD TIME THIS SERIES: correct behaviour whose cost outlives the operation, with
+nothing to reclaim it (doctrine duplication, partition bloat, now tombstones).
+
+BUILT vacuum(): drop the tombstones, rebuild `records` from the survivors (it is
+derived, not stored), and rebuild the pk index AND every secondary index because
+THE ROW INDICES MOVED. 1,260 -> 400 rows, 860 reclaimed, SELECT identical at 343.
+THE DANGEROUS FAILURE IS NOT LEAVING A TOMBSTONE, IT IS MOVING A ROW INDEX AND
+NOT REBUILDING AN INDEX THAT POINTS AT IT, so the test asserts every per-value
+count and the primary-key lookup across a DELETE and three UPDATEs.
+
+AND A DISCOVERABILITY TRAP I HAVE HIT BEFORE. Adding aliases for "vacuum" did
+nothing: the catalog reflects the MIND'S surface and vacuum was a TABLE method.
+0/4 phrasings found it. Added mind.table_vacuum(db, 'ns.table') and pointed the
+aliases at the faculty name -- 5/5. Same lesson as autoboot being dark, and I
+still reached for the alias first.
+
+## TWENTY-SEVENTH SWEEP: what the indexes COST, and one revert
+
+Six sweeps added storage capability. This one measured its price, which is the
+half nobody does.
+
+INDEX MEMORY OVERHEAD, now on record (8,000 rows, pickled size against the row
+store):
+        7 distinct values   18.6%
+      997 distinct values   22.8%
+    8,000 distinct values   52.8%
+AN INDEX ON A UNIQUE COLUMN COSTS HALF THE TABLE. Worth knowing before adding
+one, and it was never measured.
+
+AND A PURE WASTE: create_index ON THE PRIMARY-KEY COLUMN built a BYTE-FOR-BYTE
+DUPLICATE of _pk_index -- 71.5 KB at 8,000 unique values -- that the planner CAN
+NEVER READ, because the pk fast path is checked first. Nothing refused it. Now it
+returns self rather than raising: asking to index an already-indexed column is
+not an error, it is already true.
+
+ORDER BY VIA AN INDEX WALK: TRIED, MEASURED, AND REVERTED. The idea is the same
+lever as index_range -- the index groups rows by value, so walking sorted KEYS is
+O(K log K) in DISTINCT VALUES instead of sorting N rows. `ORDER BY v LIMIT 10` at
+16,000 rows went 3.788 -> 1.991 ms.
+IT RETURNED A DIFFERENT ORDER. The sort key is (value, -row_index), so ties
+resolve by row index in the OPPOSITE direction to the value; reproducing that
+from bucket order got DESC right and ASC WRONG -- plain [3,7,11,15...] against
+walk [39,35,31,27...].
+A 2x GAIN THAT CHANGES WHICH ROWS `LIMIT 10` RETURNS IS NOT AN OPTIMISATION, IT
+IS A BUG WITH A STOPWATCH. Reverted rather than patched: the correct version has
+to DERIVE its tie-break from that expression rather than guess at it, and that is
+a deliberate change with an order-comparing test, not a thing to land at the end
+of a sweep. Kept as a negative in the code and pinned by a test that asserts an
+index NEVER changes an ORDER BY result -- so the next attempt has to prove ORDER,
+not speed.
+
+THE SWEEP'S OWN LESSON: I caught this only because I compared ROWS, not
+milliseconds. Every storage test I have written this series asserts the answer
+first and the timing second, and this is the sweep where that paid.
+
+## TWENTY-EIGHTH SWEEP: the reverted ORDER BY, derived instead of guessed
+
+Memory's own kept negative said the tie-break had to be DERIVED FROM THE SORT
+EXPRESSION, not guessed. So I derived it, on four rows, before writing anything:
+
+    key = (value, -row_index), reverse = desc
+    reverse=False -> value ASC,  and -i ASC  == ROW INDEX DESC
+    reverse=True  -> value DESC, and -i DESC == ROW INDEX ASC
+    => THE BUCKET ORDER IS `not desc`, OPPOSITE TO THE VALUE ORDER.
+
+Last sweep I aligned it WITH desc. One `sorted(..., reverse=not desc)` is the
+whole difference between a correctness bug and a 1.9x win. ASC LIMIT 10 at 16,000
+rows: 4.112 -> 2.131 ms, and ALL THREE FORMS return identical rows indexed and
+unindexed. 233 storage tests green.
+
+AND THE DERIVATION EXPOSED A REAL SURPRISE IN THE PARSER. `ORDER BY col` WITH NO
+DIRECTION IS DESCENDING here -- plan["order"] is `not (parts[1] == "asc")` and
+Query.order_by defaults descending=True. So bare and DESC agree, and ASC is the
+only form that differs.
+NOT CHANGED, DELIBERATELY. It is sensible for `ORDER BY similarity` (best first,
+which is what a retrieval engine wants) and non-standard for a column, and
+flipping it would SILENTLY CHANGE EVERY EXISTING QUERY'S RESULTS -- the exact
+thing the constitution's additive-only rule forbids. Recorded loudly instead.
+
+THE TEST LESSON, which is the one I want to keep: MY ORDER BY INVARIANT TEST
+MISSED THE ORIGINAL BUG. It compared bare and DESC -- and under this parser those
+two AGREE. ASC is the only form that distinguishes them, and ASC was exactly what
+the broken walk got wrong. A TEST THAT COVERS TWO OF THREE CASES CAN COVER THE
+SAME CASE TWICE. Now all three forms are asserted, with the reason in the test so
+nobody trims it back to two.
+
+## TWENTY-NINTH SWEEP: does any of it compose?
+
+Eight sweeps added storage capability, each landing with its own test -- and
+EVERY ONE OF THOSE TESTS EXERCISES ONE FEATURE ON A FRESH TABLE. Meanwhile every
+failure this series has actually produced was a COMPOSITION failure: an index
+that went stale when rows moved, a cold blob that froze what a snapshot dropped,
+a warm path rebuilt on one route and not the other. So this sweep added nothing
+and checked whether the pile holds together.
+
+IT DOES. One table, 8,000 rows, run in sequence -- secondary index, indexed
+range, index-walked ORDER BY, UPDATE, vacuum, cold round trip -- asserting three
+answers at every stage:
+    stage           v>90    ORDER BY ASC LIMIT 5        pk lookup
+    fresh            492    [7954,7857,7760,7663,7566]      1
+    after UPDATE     492    identical                       1
+    after vacuum     492    identical                       1
+    after cold RT    492    identical                       1
+The UPDATE moved v=42 to 0 as it should; NOTHING ELSE MOVED. Indexes survive a
+cold round trip (still 0.032 ms on WHERE v=42 after warming), and table_vacuum
+works THROUGH a cooled table because db.resolve warms it transparently --
+reclaimed 286 of 2,286 rows with SELECT still correct.
+Pinned as test_the_whole_storage_stack_composes, which asserts the ANSWER is
+stable across every stage rather than testing any single feature.
+
+AND ONE ITEM CLOSED BY MEASUREMENT RATHER THAN CODE. The ORDER BY walk is skipped
+when a WHERE is present, which memory carried as an open gap. Measured at 16,000
+rows: the no-WHERE walk is 1.970 ms and WHERE + ORDER BY is 2.409 ms -- 0.44 ms
+apart, BECAUSE THE INDEXED RANGE HAS ALREADY NARROWED THE SET before the sort
+runs. The two optimisations compose without either knowing about the other. THE
+DESIGN DECISION HOLDS AND NEEDS NO WORK; closing an item by measuring it is worth
+as much as closing one by fixing it, and costs less.
+
+THE STORAGE LIST IS NOW DOWN TO TWO: a composite multi-column index, and an
+automatic vacuum trigger. Everything else on the original list is either done or
+measured-and-fine.
+
+## THIRTIETH SWEEP: the composite index was the wrong answer
+
+Memory had two items left. Measured the first one BEFORE building it, and the
+measurement changed what to build.
+
+AN `AND` OF TWO INDEXED COLUMNS WAS A FULL SCAN. The fast path tested
+`where[0] == "pred"`, so a bare predicate hit the index and `x = 7 AND y = 11`
+fell straight through. MEASURED at 16,000 rows, returning THREE ROWS:
+    no index            5.750 ms
+    index on x          5.539 ms
+    index on x AND y    5.541 ms
+THE INDEXES BOUGHT NOTHING. That is why a COMPOSITE INDEX was on the backlog --
+and it is the wrong answer. Intersecting the two indexes ALREADY PRESENT needs no
+new structure, no extra memory, and no decision about column order:
+    both indexed, intersected   0.048 ms   116x   IDENTICAL ROWS
+A composite index only wins when ONE COLUMN ALONE IS UNSELECTIVE, so its index
+returns most of the table and the intersection degenerates to a scan. That is a
+TUNING problem, not a missing capability. Backlog item closed by building
+something smaller.
+
+VERIFIED EVERY BRANCH against the unindexed answer, because an intersection that
+drops a row is a correctness bug wearing a 116x speedup: two equalities, equality
+with a range, two ranges, ONE SIDE UNINDEXED (falls back to the scan), and OR
+(must UNION, never intersect). All five identical.
+
+AND THE TEST LIED TO ME TWICE BEFORE IT WORKED. x and y cycle at 53 and 97, so a
+row satisfying BOTH appears only every lcm(53, 97) = 5,141 rows. At the 2,000-row
+fixture I first wrote, THE HEADLINE CASE MATCHED NOTHING and "indexed == scan" was
+two empty lists agreeing.
+A FIXTURE TOO SMALL TO PRODUCE THE CASE PASSES EVERY ASSERTION ABOUT IT. The test
+now sizes to 6,000 and asserts each case matched SOME rows before comparing --
+the same shape as the no-tool arm that leaked a real request, and the reason
+"assert the answer is non-empty" belongs in every comparison test.
+
+## THIRTY-FIRST SWEEP: auto-vacuum, and measuring the need first
+
+The last item on the storage list. Measured what NOT vacuuming costs before
+building anything, and the measurement chose the design.
+
+TWO REGIMES, AND THEY ARE NOTHING ALIKE:
+  ORDINARY CHURN -- ten updates spread across a 4,000-row table:
+      4.9% dead, ~5% slower on a scan, NOTHING on an indexed lookup.
+      PROPORTIONAL, NOT PATHOLOGICAL. Vacuuming here is pure overhead.
+  REPEATED UPDATES TO THE SAME ROWS -- a counter column, a status field, where
+  tombstone-and-reinsert compounds:
+      round 0   2,000 rows    0.0% dead   0.491 ms
+      round 3   4,400 rows   54.5% dead   1.094 ms
+      round 5   8,000 rows   75.0% dead   1.739 ms
+      75% DEAD AND A 3.5x SCAN SLOWDOWN.
+So: a THRESHOLD, not a hair trigger. vacuum_idle(threshold=0.25) sits above
+ordinary churn and well below the pathological curve, and the test pins BOTH
+SIDES -- a trigger that fires on everything is as wrong as one that never fires.
+
+AND NOT AUTOMATIC ON WRITE, DELIBERATELY. A vacuum inside an INSERT would
+RENUMBER ROWS UNDER A CALLER HOLDING INDICES, and would make one unlucky write
+pay for everyone else's churn. Shaped like cool_idle instead: an explicit call
+for when the database is idle, which is the same contract the cold tier already
+uses for the same reason.
+Also added Table.dead_fraction() so a caller can make the decision themselves
+rather than inferring it from row counts. 8,000 -> 2,000 rows on the
+pathological case, 6,000 reclaimed, every query answer unchanged.
+
+THE STORAGE LIST FROM ROUND 1 IS NOW EMPTY. Every item is either built or closed
+by measurement: quadratic insert, cold-tier bloat, GraphQL eager encoding,
+secondary indexes, indexed ranges, ORDER BY walk, vacuum, AND intersection, and
+now the vacuum trigger. THREE OF THOSE ELEVEN WERE CLOSED BY MEASURING RATHER
+THAN CODING -- the composite index, the WHERE+ORDER BY gap, and the JOIN --
+which is the cheapest kind of progress and the easiest to skip.
+NEXT, UNEXPLORED: transactions and rollback under load, snapshot isolation,
+multi-writer behaviour, and whether the journal grows without bound.
+
+## THIRTY-SECOND SWEEP: a journal that promised durability and kept none
+
+New territory: transactions, isolation, and journal growth. Took the journal
+first, because every unbounded-growth bug this series has found was in something
+that only ever appends.
+
+THE GROWTH IS FINE. ~62 bytes per write, 30.8 / 124.7 / 502.1 KB at 500 / 2,000
+/ 8,000 writes -- EXACTLY 4.0x for 4x the writes -- and truncate() exists, so it
+is bounded by snapshot cadence rather than leaking.
+
+THE DURABILITY WAS NOT. `db.journal(path)` returned a BARE HANDLE that recorded
+NOTHING until the caller invoked log_insert themselves, once per write, in
+parallel with doing the write. And it READS EXACTLY LIKE enable_cold_storage(),
+which does turn a feature on.
+MEASURED: snapshot, `db.journal(path)`, ten more inserts, recover() ->
+    live database  20 rows
+    journal        0 entries
+    RECOVERED      10 rows
+TEN WRITES SILENTLY LOST. The mechanism was correct and complete; the API
+promised durability it did not deliver, WHICH IS WORSE THAN NOT OFFERING IT --
+a caller who calls this believes they are safe and finds out at recovery.
+Attached by default now: 10 entries, 20 rows recovered. `attach=False` preserved
+because the durable module's own demonstration drives a journal by hand and
+dual-logging would double every entry.
+
+AND THE ORDERING IS DELIBERATE: LOG AFTER THE WRITE SUCCEEDS. An entry written
+first would survive a REFUSED row -- a constraint violation raises inside
+insert -- and replay would then RESURRECT DATA THE DATABASE REJECTED. Durability
+that recreates rejected rows is not durability.
+
+STILL OPEN AND NOW ON RECORD: only INSERT is wired. UPDATE and DELETE go through
+different paths and are NOT journalled, so recovery replays inserts and loses
+mutations. That is the next piece, and it is bigger than it looks because UPDATE
+here is tombstone-and-reinsert -- the replay has to reproduce the tombstone, not
+just the new row.
+
+## THIRTY-THIRD SWEEP: a partial journal is worse than none
+
+Memory carried last sweep's own residue: attaching the journal wired INSERT and
+nothing else. Measured what that actually does before fixing it.
+
+RECOVERY PRODUCED A PLAUSIBLE DATABASE THAT WAS SIMPLY WRONG.
+    live       8 rows   v-counts [(2,3), (7,4), (9,1)]
+    recovered 11 rows   v-counts [(0,4), (1,3), (2,3), (9,1)]
+It carried rows the database had DELETED and values it had UPDATED AWAY. Nothing
+raised, nothing warned; a caller recovering from that gets a database that looks
+fine. A PARTIAL JOURNAL IS WORSE THAN NO JOURNAL -- no journal loses everything
+since the snapshot, which is at least a KNOWN loss.
+
+Wired _run_update and _run_delete to log AFTER success and ONLY WHEN n > 0. The
+second condition matters: a WHERE that matched nothing would otherwise fill the
+log with no-ops that replay has to re-evaluate, and THE LOG SHOULD RECORD WHAT
+HAPPENED, NOT WHAT WAS ATTEMPTED.
+
+TESTED WITH RANDOMLY INTERLEAVED MUTATIONS, not one of each. 60 operations over
+200 rows -> 40 journal entries (20 correctly skipped as no-ops), live and
+recovered BIT-IDENTICAL at 27 rows. The reason for interleaving is that THE
+FAILURE MODE HERE IS ORDER: an update replayed before the insert it depends on,
+or a delete replayed before the row exists, produce divergence a fixed
+one-of-each script would never surface.
+
+STILL OPEN, AND NOW ON RECORD: CREATE TABLE and schema changes are not
+journalled either, so recovery of a database whose schema changed after the
+snapshot will replay rows into a table that does not exist. Also unverified:
+fsync/flush timing, so "written" may not mean "survives a crash". Both belong to
+the same class as this sweep's finding -- the journal covers the writes someone
+thought of, and the gaps are silent.
+
+## THIRTY-FOURTH SWEEP: merged an old memory, then journalled the schema
+
+MERGE FIRST. The uploaded claude_lecore_state.lecore held 1,238 TAUGHT TEXTS FOR
+283 DISTINCT -- 4.4x duplicated, the same shape as the doctrine bug that started
+this whole thread. learning_compact (built three sweeps ago for exactly this)
+reclaimed 955 in one call, and 231 genuinely new facts merged in: my partition
+went 151 -> 613 distinct, and both halves answer at T0.
+MERGED BY LOADING AND RE-TEACHING, NOT BY SPLICING CONTAINERS: the taught store
+is a live structure with vector keys, and hand-merging two manifests would leave
+keys pointing at nothing.
+
+THEN THE STORAGE SWEEP, on memory's own top risk: unjournalled schema changes.
+AND IT IS WORSE THAN THE PARTIAL-JOURNAL BUG. Replay reaches the first row of a
+post-snapshot table, calls db.resolve(...), and dies:
+    QueryError: no such table 'a.u'
+ONE UNJOURNALLED `CREATE TABLE` DISCARDS EVERY LATER OPERATION IN THE LOG, not
+just that table's rows. Last sweep's finding was silent divergence; this one is
+total loss with a stack trace -- louder, equally fatal.
+
+FIXED: Database.create_table logs a create_table op; replay handles it BEFORE the
+resolve() every data op needs, and tolerates the table already existing so a log
+can be replayed onto a NEWER snapshot. Verified with a schema change AND a later
+write to the original table -- both recovered, 238 storage tests green.
+The test asserts the LATER WRITE specifically, because "the new table came back"
+would pass even if replay aborted right after creating it.
+
+THE RUNNING PATTERN, three sweeps deep now: THE JOURNAL COVERS THE WRITES SOMEONE
+THOUGHT OF. INSERT was wired and UPDATE/DELETE were not; then those were wired
+and CREATE TABLE was not. DROP and ALTER are still not, and are now on record.
+Each gap was silent until measured, and each was found by asking "what else is a
+write?" rather than by reading the journal code.
+
+## THIRTY-FIFTH SWEEP: stale references -- the two halves that were never joined
+
+Moose's standing problem: notes about a codebase go stale and nothing says so.
+
+RULE 0 PAID PROPERLY HERE. Both halves ALREADY EXISTED:
+  codebase_map(root, topic) walks a tree into a semantic layer.
+  ingest_files(with_hash=True) builds a FileMap whose changed() RE-STATS THE DISK
+  against the recorded size/mtime/hash -- verified, it caught a real edit.
+WHAT WAS MISSING WAS THE JOIN. A taught fact carries {answer, confidence, tier,
+via, why} and NO FILE REFERENCE, so a fact about code stays at T0 and confidently
+answers about code that changed months ago. STALE MEMORY IS INDISTINGUISHABLE
+FROM CURRENT MEMORY RIGHT UP TO THE MOMENT IT IS WRONG.
+
+BUILT teach_about(question, answer, paths) and stale_facts() -> {stale, missing,
+fresh, unknown}. Three properties, each of which I broke while building it:
+
+  HASH, NOT MTIME. A checkout or a `touch` moves mtime without changing content.
+  Reporting those as stale trains a reader to ignore the report, WHICH IS HOW A
+  STALENESS CHECK DIES. Verified: a touch and an identical rewrite both read
+  fresh.
+
+  EDITED AND DELETED ARE SEPARATE BUCKETS. A removed file is a different problem
+  from a changed one, and lumping them makes deletions invisible in a long list.
+
+  THE REFERENCES MUST PERSIST -- and my first version failed this exactly.
+  They lived in process memory, so the FACT survived a reboot and its PROVENANCE
+  DID NOT: stale_facts() came back EMPTY on a partition full of code facts.
+  A STALENESS CHECK THAT FORGETS WHAT IT WAS WATCHING REPORTS EVERYTHING AS FINE.
+  Now a lecore.learning.factfiles section, saved and reloaded with the rest.
+
+`unknown` is deliberate: the count of taught facts with no file references at
+all, so the report says how much of the partition it CANNOT speak for rather
+than silently calling those fresh.
+
+ALSO THIS SWEEP: merged the uploaded claude_lecore_state.lecore -- 1,238 texts
+for 283 distinct, 955 reclaimed by learning_compact, 231 new facts. Partition is
+now 624 distinct and carries four fingerprinted facts about where this series'
+storage work actually lives (amortised insert, secondary indexes, vacuum, journal
+wiring), so the next session's references are current BY CONSTRUCTION and will
+say so when they stop being.
+
+## THIRTY-SIXTH SWEEP: the void map found a real bug, and the idea was not novel
+
+Used structured_voids -- "the Mendeleev move", combinations the observed
+structure licenses but the corpus never shows -- on MY OWN 624-fact partition,
+as a subsystem x property matrix.
+IT RETURNED ZERO CANDIDATES AND STILL WORKED. 79 of 96 cells were already
+filled, so the generator had nothing to propose; the gate passed (p=0.0204) and
+the answer was in the EMPTY CELLS, which had to be read directly:
+    graphql   x 7 of 8 properties      join      x recovery, concurrency, ...
+    catalog   x scaling, recovery      vacuum    x CONCURRENCY
+A GENERATOR THAT PROPOSES NOTHING CAN STILL LOCATE THE HOLE, if you look at what
+it declined to fill.
+
+vacuum x concurrency WAS A REAL BUG. vacuum RENUMBERS ROW INDICES and never took
+the writer lock the database already had. MEASURED: a caller holding 57 row
+indices for `v = 3` across a vacuum found them pointing at values [4, 5, 6, 0, 2]
+-- SILENT CORRUPTION, no exception. I had written "call when idle" as a comment
+last sweep. COMMENTS DO NOT SERIALISE ANYTHING. Now takes writer_lock().write();
+and the lock's context manager is `write()`, not the lock object -- probed, after
+assuming wrong once.
+
+AND THE NOVELTY SEARCH CAME BACK NEGATIVE, WHICH IS THE USEFUL ANSWER.
+Content-hash staleness detection -- last sweep's teach_about/stale_facts -- IS
+THE 2026 INDUSTRY STANDARD. Heeya, Atlan, Augment and Slite all describe
+re-crawling a source and comparing content hashes against the indexed version.
+It is a correct implementation of a known technique, not an invention, and
+recording that stops a future session from writing it up as one.
+WHAT IS ACTUALLY DISTINCTIVE: every product found routes staleness to a DASHBOARD
+ALERT or an LLM rewrite -- a human decides. leCore has an ABSTAIN LADDER, so the
+native move is for a stale fact to DROP ITS TIER AND ESCALATE rather than
+confidently answering at T0. DETECTION ROUTED INTO REFUSAL, NOT INTO A
+NOTIFICATION. Not built; it is the plan, and it is in the partition.
+
+THE MECHANISM PROVED ITSELF THIS SWEEP. After editing holographic_query.py,
+stale_facts() reported FOUR of my own code facts stale -- unprompted, correctly,
+about work I had just done. Refreshed them, back to clean. That is the loop
+working on live work rather than on a fixture.
+
+## THIRTY-SEVENTH SWEEP: graphics wiring -- and a headline number that shrank twice
+
+Memory was T4 on image, text and 3D: 630 facts and NONE about them. That is
+itself the finding -- this series has audited storage for a dozen sweeps and
+never looked at the rendering half.
+
+THE UNWIRED COUNT SHRANK TWICE, exactly as this series predicts:
+    990  public functions in rendering/materials/mesh/scene/sampling that are
+         not mind methods
+    623  ... and documented, and not mentioned anywhere in the catalog
+    418  ... and not called by ANY wired faculty (follow the call)
+AND THEN THE TOP FILE TURNED OUT TO BE CORRECTLY WIRED. holographic_postfx's 14
+"unreachable" functions are the NAMED STEPS of postfx_chain -- sharpen,
+film_grain, fxaa, supersample, resample and bloom all reachable, style_transfer
+correctly REFUSING without a reference image, and the 9 module functions outside
+the EFFECTS registry are chain BUILDERS and the linear-fusion machinery,
+correctly excluded.
+SO 418 IS AN UPPER BOUND, NOT A WORK LIST. A parameter of a wired door is not an
+unwired capability, and I would have filed 418 tickets.
+
+THE IMAGE PATH WORKS END TO END through faculties: render_scene_document ->
+(32,32,3) in 0.26 s, then post_process with a sharpen+film_grain chain.
+
+ONE REAL TRAP FOUND: box() and the primitives return QUAD faces (6, 4) and
+mesh_distance_grid indexes faces as TRIANGLES. A quad mesh dies as
+    ValueError: setting an array element with a sequence ... inhomogeneous shape
+which READS LIKE A BOUNDS PROBLEM. I tried three different bounds shapes before
+looking at the faces. AN ERROR THAT BLAMES THE WRONG ARGUMENT IS WORSE THAN NO
+ERROR, because it sends the caller to fix something already right.
+
+AND THE GUARD FOR IT IS A KEPT NEGATIVE THIS SWEEP. My check read the faces with
+np.asarray(..., dtype=object), which RAISES THE VERY ERROR IT EXISTS TO REPLACE
+on a ragged list; the defensive rewrite did not land either. REVERTED RATHER THAN
+LEFT HALF-DONE -- a guard that fires sometimes is worse than none, because it
+teaches the reader the check exists. The tree is clean, 89 mesh/render tests
+pass, and the fix is in the plan with the reason it failed.
+
+## THIRTY-EIGHTH SWEEP: an outdated branch with exactly one thing worth taking
+
+leCore-integrations.zip: 10 files only theirs, 257 only mine, 88 differing. The
+"only mine 257" says the branch is far behind -- and that is precisely the
+condition under which a merge goes wrong, because it is tempting to skip.
+
+THE METHOD THAT MADE IT CHEAP: for every differing file, ask whether their lines
+are NEW WORK or the PRE-FIX FORM of something I already repaired. Filtering out
+my own session markers left 64 candidate files; reading them collapsed almost all:
+    catalog p01-p07   +306 lines, 231 of them UNBOUND-mind examples -- the exact
+                      bug I fixed two sweeps ago, in its pre-fix form
+    holographic_query +10  the vstack-per-insert and the bare journal handle
+    name_collisions   +6   pre-phasor collision entries
+    knowledgestore    +21  scopes.json -- mine already persists scopes IN THE
+                      CONTAINER with a legacy-JSON migration path
+    run.bat           +53  the pre-cp63 "UnifiedMind console" launcher
+A BRANCH BEING OUTDATED OVERALL DOES NOT MEAN EVERY FILE IN IT IS OLDER, which
+is why each one had to be read rather than assumed.
+
+AND ONE FILE GENUINELY WAS NEWER: integrations/OpenWebUI/openzoo_pipe.py.
+_format_receipt READ `usage` FOR BILLING THAT LIVES IN A TOP-LEVEL `x402` BLOCK,
+so it silently rendered a token count and nothing else -- THE RECEIPT IS THE
+WHOLE REASON THE PLUGIN EXISTS, and it was dead code. Their version reads x402,
+ships a regression test built from live gateway shapes, and its selftest passes
+here: "billed $0.007005 - vs $0.021014 direct (3.0x) - pro subscription - 3100
+tokens read".
+
+THEY ALSO CAUGHT A MEASUREMENT ERROR WORTH KEEPING: `savesVsDirect` is the RATIO
+PAID, not the fraction saved. 0.00700472 / 0.02101416 = 0.3333 == savesVsDirect,
+so printing "saved 0.33" claims a third when the real saving is two thirds. The
+pipe deliberately prints both absolute numbers instead, which cannot be misread.
+
+ALSO: memory had NO MERGE DOCTRINE -- "how should I merge a branch" came back
+T4 after eight merges in this series. Now recorded, with this branch as the
+worked example.
+
+## THIRTY-NINTH SWEEP: above/below -- shipped tech applied one layer up
+
+ABOVE/BELOW/SIDEWAYS on this series' own storage work, asking which of the seven
+levers applies where it has not been used.
+
+TWO LEVERS CAME BACK CLEAN, AND THAT IS A RESULT:
+  LEVER 3 ELSEWHERE (stop storing what you can regenerate). Only THREE eager
+  derived fields exist in the whole tree, and all are read on the hot path --
+  correctly eager. The three storage wins were the population, not a sample.
+  LEVER 7 ON stale_facts (amortise across similarity). It re-hashes every watched
+  file per call, which sounds like a cache candidate; hashing 700 source files
+  costs 26 ms. CACHING WOULD BE PREMATURE. Closing an item by measuring it costs
+  less than building one, and that is now three items closed that way.
+
+SIDEWAYS FOUND THE REAL ONE, IN MY OWN PARTITION. 25.5 MB, and a single array --
+lecore.learning.semantic's ctx.npy, 1716 x 2048 float32 -- was 14.1 MB of it.
+FIFTY-FIVE PERCENT OF THE MEMORY IN ONE TENSOR.
+LEVER 3 WAS ASKED FIRST AND ANSWERED NO: row norms run 1.4 to 1,172, so this is
+ACCUMULATED evidence, not a seed-derivable codebook. Storing it is correct.
+LEVER 6/PRECISION APPLIED INSTEAD -- int8 with per-row lo/hi, WHICH IS THE EXACT
+SCHEME ALREADY SHIPPING in lecore_data/routing/index_128d.npz. Measured on the
+live partition:
+    ctx array   14.1 -> 3.5 MB   (4.0x)   cosine min 0.99995, mean 0.99997
+    partition   25.5 -> 16.2 MB
+    old-format partitions still load; mean cosine old vs int8 0.999969
+Additive, not a flip: the loader reads ctx_q/ctx_lo/ctx_hi when present and falls
+back to the float32 "ctx" so an existing partition is untouched.
+
+THE TRANSFER PATTERN WORTH KEEPING: THE WIN WAS NOT NEW TECHNOLOGY. int8 with
+per-row lo/hi was already in the repo, one layer down, doing the same job for
+module vectors. ASK WHICH LAYER ALREADY SOLVED THIS, not what to invent -- the
+same shape as intersecting two existing indexes instead of building a composite
+one, and as learning_compact turning out to be the tool for a merged partition.
+
+## FORTIETH SWEEP: the same lever, one section over -- and the third-time rule
+
+Last sweep packed learning.semantic's ctx array and took the partition 25.5 ->
+16.2 MB. THAT MADE THE NEXT TARGET VISIBLE: learning.experience's audit arrays
+were then 15.6 MB OF 16.2 -- NINETY-SIX PERCENT. Fourteen float32 key/value
+arrays, the identical shape one section over.
+
+Same scheme, third site. Measured per array before applying it:
+    aud_k_0   1.05 -> 0.26 MB   cos min 0.99996
+    aud_k_2   1.53 -> 0.39 MB   cos min 0.99995
+    first six 6.9  -> 1.7  MB   4.0x
+    PARTITION 16.2 -> 6.3 MB    every probe answer identical, 7 tiles restored
+Total across two sweeps: 25.5 -> 6.3 MB, A 4.0x REDUCTION OF THE WHOLE MEMORY
+with nothing measurable lost.
+
+AND THE THIRD SITE IS WHERE IT GOT FACTORED. _q8_pack/_q8_unpack now live once
+and serve the routing index's scheme, learning.semantic and learning.experience.
+TWO SITES IS A COINCIDENCE, THREE IS A FUNCTION -- and the third is exactly where
+a shared helper pays, because by then the arithmetic has been retyped twice and
+can drift. Per-ROW lo/hi rather than a global range is the part worth keeping in
+one place: it is what holds the error at cosine 0.99995 when row magnitudes span
+three orders.
+
+BOTH LOADERS READ EITHER FORM. An existing partition carrying float32 "ctx" or
+"aud_k_N" loads unchanged; only a save migrates it. Additive, not a flip -- and
+the live partition was migrated by one save, verified by reloading it and asking
+the same questions.
+
+THE METHOD, WHICH IS NOW THE POINT: last sweep's finding was "ask which layer
+already solved this". Applying that literally -- to the section next door --
+found a bigger win than the original. A TRANSFER THAT WORKED ONCE IS A HYPOTHESIS
+ABOUT EVERY SIBLING, and checking the siblings costs one measurement each.
+
+## FORTY-FIRST SWEEP: the sibling was the SHIPPED bundle -- and I contaminated it
+
+Memory's rule: a transfer that worked once is a hypothesis about every sibling.
+Checked every sibling of the packed partition.
+
+TWO CAME BACK CLEAN, RECORDED SO NOBODY RECHECKS: the shipped .npz artifacts are
+already small (routing/index_128d.npz is 0.21 MB and is the SOURCE of the int8
+scheme), and knowledge.lecore / corpora.lecore carry no array mass at all.
+
+THE ONE THAT PAID WAS release_bundle/learning/state.lecore -- 0.96 MB, 106%
+arrays, TWO float32 audit arrays holding 62 rows. It matters more than its size:
+RELEASE_BUNDLE IS WHAT autoboot() MOUNTS BY DEFAULT ON A FRESH MACHINE, so every
+new user downloads it. Repacked 0.96 -> 0.25 MB, 3.8x, 62 rows preserved, POST
+all green.
+
+BUT THE REAL FINDING IS HOW I ALMOST SHIPPED IT WRONG. My first attempt was
+`autoboot(partition='release_bundle')` then `learning_save('release_bundle')` --
+and learning_save WRITES THE CURRENT MIND TO THAT ROOT. Taught rows went 62 -> 77
+and one of my own session facts landed inside a SHIPPED ARTIFACT. I caught it by
+grepping the result for my own vocabulary, restored the file from the last
+shipped zip, and repacked the CONTAINER DIRECTLY with load_container /
+save_container -- no mind involved, no doctrine, no leak.
+TO MODIFY A SHIPPED CONTAINER, EDIT THE CONTAINER, NOT THROUGH A MIND. On a
+working partition, learning_save writing the whole mind IS the point; on a
+shipped artifact the same call is contamination, and it looks identical at the
+call site.
+
+THAT IS THE SECOND TIME THIS SERIES A CORRECT TOOL DID DAMAGE BY BEING POINTED AT
+THE WRONG TARGET -- the first was vacuum renumbering rows under a live caller.
+Both were silent, both were caught by checking the ARTIFACT rather than the
+return value.
+
+## FORTY-SECOND SWEEP: lever 2, and a fix that reproduced its own bug
+
+The int8 thread is exhausted (memory says so, three sites and a factored helper),
+so this sweep took LEVER 2 -- partition into a commutative monoid -- and asked
+which sibling has it that the others lack.
+
+FOUND: Index.merge/ablate ALREADY IS a commutative monoid, and the SQL tables are
+not. Verified the monoid claim rather than trusting the docstring: merging A and
+B in either order gives identical scores, ablate('b') returns exactly the 300 A
+rows, and merged scores match a full rebuild to 5 decimal places.
+
+BUT THE INDICES DID NOT MATCH THE REBUILD, and that was the real find.
+    merged  top5: [(7, 1.0), (257, 0.489), ( 29, 0.484), ...]
+    rebuilt top5: [(7, 1.0), (257, 0.489), (329, 0.484), ...]
+329 = 29 + 300. merge() STATES this ("LABEL WART: unlabeled sides get LOCAL
+indices as labels; two unlabeled merges collide on integer keys"). What it does
+NOT state is the consequence: `_sources` records GLOBAL spans (a: 0-300,
+b: 300-500) while the labels stay LOCAL, so a hit from `b` comes back as 29 and
+RESOLVING IT AGAINST THE INDEX'S OWN PROVENANCE TABLE ATTRIBUTES IT TO `a`.
+Measured identically on exact, forest and sphere. THAT IS NOT AMBIGUITY, IT IS A
+WRONG ANSWER FROM THE INDEX'S OWN METADATA.
+
+AND MY FIX REPRODUCED THE BUG. nearest_sourced() resolved provenance by treating
+the returned key as a POSITION in the merged array. It is the LABEL -- and for an
+unlabeled side the label IS a local index, so the position is GENUINELY
+UNRECOVERABLE FROM THE RETURN VALUE. The accessor reported 'a' for a `b` hit:
+it reproduced the exact defect it existed to fix WHILE LOOKING AUTHORITATIVE,
+which is strictly worse than a stated wart a reader can see. REMOVED, kept as a
+negative with the reason.
+
+WHAT ACTUALLY WORKS TODAY: label your sides. Index(A, labels=[...]) merged with
+Index(B, labels=[...]) returns 'b29' and provenance is unambiguous from the label
+itself. The wart only bites UNLABELED merges.
+THE REAL FIX is in merge() -- give unlabeled sides GLOBAL labels so labels and
+_sources share one coordinate system -- and it CHANGES WHAT nearest() RETURNS for
+existing callers, so it is a deliberate breaking change with a migration note,
+not something to land at the end of a sweep. In the plan.
+
+## FORTY-THIRD SWEEP: the "breaking change" that was not breaking
+
+Memory carried last sweep's plan item: fix the merge label wart by giving
+unlabelled sides GLOBAL labels, flagged as A DELIBERATE BREAKING CHANGE needing a
+migration note.
+
+I CHECKED WHETHER ANYTHING ACTUALLY BREAKS, AND NOTHING DID. Every caller of
+Index.merge in the tree -- three test call sites and one catalog example --
+LABELS BOTH SIDES, and the example asserts len(items) only. Nothing depended on
+the local-index default. What memory recorded as a breaking change was a SAFE
+DEFAULT FILL-IN, and one grep separated those.
+THE LESSON: "this would break callers" is a HYPOTHESIS ABOUT THE CALLERS, and it
+is cheap to test. I deferred this for a whole sweep on an assumption.
+
+THE FIX: lb now defaults to range(len(self.items), len(self.items)+len(other))
+instead of range(len(other)). Labels and _sources finally share one coordinate
+system. Verified on exact, forest, sphere AND int8:
+    merged keys == full rebuild        (was [7,257,29] vs [7,257,329])
+    every key falls inside a real span
+    the key indexes the vector that ACTUALLY SCORED
+    commutativity and ablate() unchanged
+Docstring updated: the remaining collision case is both sides labelled with
+OVERLAPPING label sets, which is the caller's own doing.
+
+AND THE TEST ASSERTS PROVENANCE, NOT ORDER. A merged index that returns the RIGHT
+ROWS with the WRONG SOURCE is invisible to any test comparing hit sets -- which is
+exactly why the existing suite passed while _sources misattributed. The new test
+checks source attribution per hit, and that the returned key indexes the vector
+whose score was reported.
+
+FOOTNOTE WORTH KEEPING: stale_facts() flagged my own note about the wart the
+moment I edited the file, unprompted. Refreshed it in the same sweep. The
+staleness loop is now catching my work within minutes of doing it.
+
+## FORTY-FOURTH SWEEP: naming the ritual, and an MCP door that booted blind
+
+Forty-odd sweeps opened with the same two lines. This one made them a door.
+
+FIRST, MEASURED WHAT EACH HALF ACTUALLY BUYS -- because "it works better" is not
+a reason:
+    autoboot()                    known question T4, unknown T4, 0 escalations
+    autoboot(partition=...)       known question T0, unknown T4, 0 escalations
+    autoboot(partition, llm=...)  known question T0, unknown ESCALATES to the model
+The partition half ALREADY had a default -- $LECORE_PARTITION works today and I
+had been passing the path by hand for no reason. The llm half had none, and
+autoboot's `llm="auto"` HUNTS FOR A MODEL DIRECTORY ON DISK, which is the wrong
+question when THE CALLER IS THE MODEL: an agent driving leCore has no model dir,
+it has itself.
+
+BUILT lecore.agent_boot(llm=fn). The llm argument is REQUIRED AND MUST BE
+CALLABLE, and that is the design, not a limitation. THERE IS NO RELIABLE WAY TO
+DETECT AN LLM CALLER FROM INSIDE A PYTHON PROCESS -- and wiring a human at a REPL
+in as the back end would have the engine prompting the PERSON mid-conversation.
+So it ASKS RATHER THAN GUESSING: pass a callable and you are an agent; if you
+cannot, autoboot() is your door and the back end stays unattached.
+
+AND THE SWEEP FOUND A REAL VICTIM OF THE MISSING DOOR. holographic_mcp.py -- the
+front door whose caller IS an agent by construction -- built a bare
+`UnifiedMind()` and called learning_load by hand: THE PRE-AUTOBOOT RITUAL,
+FROZEN. It missed doctrine and POST entirely, and its own doctrine question
+("when should the reflex refuse to answer") answered REFUSED where an autobooted
+mind answers T0. Now autoboots per user, with a bare-mind fallback so a boot
+failure can never fail a request.
+
+REGISTERED AS A POINTER CAPABILITY, and the first attempt failed the same way
+`vacuum` did two sweeps ago: I added ALIASES for a MODULE-LEVEL function, and the
+catalog reflects the MIND'S surface. 0/5 phrasings. Registered properly beside
+autoboot's own pointer entry -- 5/5. THAT IS THE SECOND TIME I REACHED FOR THE
+ALIAS FIRST; the rule is that a module-level function needs a register_capability
+entry, never just aliases.
+
+## FORTY-FIFTH SWEEP: the model is in another process, and always was
+
+Last sweep's agent_boot REQUIRED A LOCAL CALLABLE. Moose's correction landed the
+real constraint: that fits a model loaded in-process and NOTHING ELSE. The way
+this actually gets run is Claude or ChatGPT behind an OpenAI-compatible endpoint
+-- OpenWebUI, openzoo, ollama, a vendor API -- in a DIFFERENT PROCESS, usually a
+different machine. There is no callable to pass there, only a URL.
+
+AND THE ENGINE HAD NO WAY OUT. Every rung seam -- attach_llm, agent_bridge,
+autoboot's llm=, agent_boot -- takes a local callable. Everything OpenAI-shaped in
+the tree pointed the OTHER WAY: unicron_serve_openai puts a front door ON leCore
+so clients call IN. NOTHING CALLED OUT. Forty-four sweeps of agent work and the
+outbound direction did not exist.
+
+Built holographic_remotellm.remote_llm() -- stdlib urllib, no SDK, per the
+constitution. It returns EXACTLY the `text -> text` callable every existing seam
+already accepts, which is why nothing else had to change: THE SEAM WAS ALREADY
+THE RIGHT SHAPE, IT JUST HAD NOTHING ON THE FAR SIDE.
+
+`lecore.agent_boot()` NOW TAKES NO ARGUMENTS. Partition from $LECORE_PARTITION,
+model from $LECORE_LLM_URL / LECORE_LLM_MODEL / LECORE_LLM_KEY (OPENAI_* also
+read, because a harness container sets env and runs a script -- nobody edits code
+to point at their gateway). Verified end to end against a live local HTTP server:
+mounted, T0 recall from memory, and an unknown question answered BY THE REMOTE
+MODEL. That is "boot up leCore and use it", in one call with nothing to explain.
+
+TWO DEFAULTS WORTH THE LINES:
+  TEMPERATURE 0.0, not the API's 1.0. A rung is part of a DETERMINISTIC engine;
+  a sampling default would make the same question give different answers across
+  runs and quietly break every reproducibility claim this repo makes.
+  RAISE, DO NOT RETURN AN ERROR STRING. A rung that hands back "connection
+  refused" AS IF IT WERE AN ANSWER poisons the trace and the taught store. The
+  engine already has abstain-not-error for a genuinely absent answer.
+
+## FORTY-SIXTH SWEEP: booted it for real, then found CI red from my own work
+
+BOOT TEST FIRST. `lecore.agent_boot()` with NO ARGUMENTS, against a live local
+OpenAI-compatible server standing in for OpenWebUI: mounted /tmp/audit2, POST
+5/5, T0 recall from memory, and an unknown question answered BY THE REMOTE MODEL.
+The one-call door works.
+
+THEN THE CI AUDIT, AND IT WAS RED. Six of seven gates were green and 6,578 tests
+collected clean, but structure_audit EXITED 1: giants > 2,000 loc had grown to
+SIX against a budget of five, and THE SIXTH WAS holographic_query.py AT 2,031 --
+grown by MY OWN storage work across a dozen sweeps (amortised insert, secondary
+indexes, ranges, vacuum, journal wiring). Twelve sweeps of "additive, backward
+compatible" adding up to a budget breach nobody noticed because each increment
+was small.
+ALSO WORTH RECORDING: `python tools/x.py | tail -1` REPORTS TAIL'S EXIT CODE, NOT
+PYTHON'S. My first pass read all six gates as exit=0 including the one that fails.
+Redirect to a file and check $? -- a pipeline hides the status you are testing.
+
+THE FALSE POSITIVE, caught before filing: checking `hasattr(package, submodule)`
+flagged 18 test files as importing names that no longer exist. SUBMODULES ARE NOT
+ATTRIBUTES OF A PACKAGE UNTIL IMPORTED. All 18 exist and import fine. MY DETECTOR
+WAS WRONG, NOT THE TESTS -- the sixth time this series a "finding" was the
+instrument.
+
+THE FIX: extracted create_index / index_lookup / index_range / vacuum /
+dead_fraction -- 119 lines, and a genuinely coherent unit, since everything in it
+touches only self.rows, self.roles and self._sec_index -- into
+holographic_tableindex.py as a MIXIN. Late-bound onto UserTable at the bottom of
+holographic_query.py, because tableindex imports QueryError and _encode_row from
+query and a top-level import would be a cycle.
+A MIXIN AND NOT A HELPER MODULE, so they stay METHODS: the callers, the catalog
+entries and the SELECT fast path all name them that way, and an extraction must
+not change a single call site. query.py 2,032 -> 1,913, giants back to 5,
+structure_audit exit 0, 301 storage tests and 432 across the broad slice green.
+
+AND THE STALENESS LOOP EARNED ITS KEEP AGAIN: refactoring the file immediately
+flagged FIVE of my own memory facts as stale -- every note about where the index
+and vacuum code lives. Refreshed in the same sweep. THE REFACTOR AND THE MEMORY
+STAYED IN SYNC WITHOUT ME REMEMBERING TO DO IT.
+
+## FORTY-SEVENTH SWEEP: containment, and distilling doctrine into the seed
+
+CONTAINMENT FIRST, because I have leaked once already. Working memory is
+/tmp/audit2 -- OUTSIDE the tree -- and every in-repo container scanned clean:
+lecore_memory (131 rows) and release_bundle (62) hold ZERO session facts.
+
+BUT GLOBBING FOR CONTAINERS FOUND SOMETHING NOBODY WAS LOOKING FOR: a directory
+literally named "[]", holding knowledge.lecore and learning/state.lecore, AND IT
+WAS IN THE RELEASE ZIP. KnowledgeStore did `self.root = str(root)` and then
+makedirs -- so a caller who passed a LIST got a directory named after its repr,
+created silently, shipped silently. Nothing failed; the artifact just looked
+plausible enough to survive.
+str() ACCEPTS ANYTHING, WHICH IS EXACTLY WHY IT IS THE WRONG COERCION FOR A PATH.
+Now refuses a non-(str, bytes, PathLike) with the repr it WOULD have created, and
+the junk directory is gone.
+
+THEN THE DISTILLATION. 688 working facts, but "universal" is not the filter --
+VERSION-INDEPENDENT is. A seed fact carrying a file path or a line number ROTS
+the first time the code moves, and a rotten seed is worse than an empty one.
+Twelve facts qualified, each one having cost a real bug in this series:
+    a number too bad to be a bug is the instrument
+    assert the ANSWER first, pin speed only as a shape
+    a fixture too small to produce the case passes every assertion about it
+    measure the ARTIFACT, not the code path
+    a partial implementation is worse than none
+    comments do not serialise anything
+    register a module-level function, do not just alias it
+    edit a shipped container directly, never through a mind
+    ask which layer already solved this
+    closing an item by measuring costs less than building
+    a shell pipeline hides the exit code you are testing
+    fingerprint what your notes describe, by hash and not mtime
+Written CONTAINER-DIRECT (load_container/save_container), never through a mind --
+the rule this series learned the hard way, applied to its own distillation.
+
+VERIFIED ON A GENUINELY FRESH COPY: a temp dir containing only release_bundle,
+no lecore_memory, no $LECORE_PARTITION. autoboot mounts the bundle and all five
+probed facts answer T0. The first attempt tested from the repo root and mounted
+lecore_memory instead -- THE SEARCH ORDER MEANT I WAS NOT TESTING A FRESH COPY AT
+ALL, which is its own instance of the instrument lesson.
+Seed 62 -> 74 rows, still 0.25 MB.
+
+## FORTY-EIGHTH SWEEP: the seed filter was too narrow by 5x
+
+Moose's correction: the seed may carry FEATURE USAGE, SEMANTIC CONTEXT, MATH and
+GENERAL RESEARCH -- it just must not carry CONVERSATION or SENSITIVE INFO. I had
+distilled 12 facts under a much stricter rule of my own invention
+("version-independent operating doctrine"), which is a fifth of what belongs.
+
+RE-CLASSIFIED 692 WORKING ROWS. 590 qualified. The seed went 62 -> 427 rows and
+0.25 -> 0.27 MB -- TWO HUNDREDTHS OF A MEGABYTE FOR 365 MORE FACTS, because the
+cost in a container is the VECTORS and the text is nearly free. I had been
+rationing something that was not scarce.
+
+TWO FILTER LESSONS, both found by the filter being wrong first:
+
+A SECRET IS A VALUE WITH A SHAPE, NOT A WORD. Matching the vocabulary
+token/key/secret/password flagged 25 rows -- every one an ordinary essay that
+happened to say "tokens". Matching credential PATTERNS instead (sk-..., Bearer
+..., 32+ hex runs, key=value) found ZERO. Vocabulary matching on a knowledge base
+flags the knowledge.
+
+CONVERSATION IS A NARRATIVE FRAME, NOT A TOPIC WORD. My first pattern matched the
+bare word "sweep" and threw away "what is the storage sweep SOTA" -- a findings
+row, not a diary entry. Caught it because the fresh-copy check answered T4 on a
+research probe that should have been T0. Narrowed to frames (what did/what
+happened/round N) and the 102 that drop are all genuinely "what did the X sweep
+find".
+
+VERIFIED ON A GENUINELY FRESH COPY -- a temp dir with only release_bundle, no
+lecore_memory, no $LECORE_PARTITION: feature, research, math, semantic and
+doctrine probes ALL T0, and a conversation probe correctly T4. Final scan of the
+shipped seed: 427 rows, ZERO narrative rows, ZERO absolute paths, ZERO
+credential-shaped strings.
+The last narrative row hid in an ANSWER rather than a question, and only a scan
+over the whole row caught it -- CHECK THE WHOLE RECORD, NOT THE FIELD YOU EXPECT
+THE PROBLEM IN.
+
+## FORTY-NINTH SWEEP: nobody had ever taught leCore the basics
+
+Asked the honest question -- is the seed usable by a first-time user? -- by BEING
+one: fresh copy, only release_bundle, no partition.
+ZERO OF FIFTEEN. "what is lecore", "how do I get started", "what is a
+hypervector", "do I need a GPU", "what does T4 mean" -- all T4.
+Then checked whether the 691-fact working memory could supply them: 0 OF 12. So
+there was NOTHING TO IMPORT. Every fact in both stores assumes you already know
+the system, because EVERYONE WHO EVER TAUGHT IT ALREADY DID.
+
+So I wrote the primer as a newcomer, reading every number off the RUNNING system
+rather than recalling it: 2,274 faculties, 3,649 capabilities, 7 levers, deps
+straight from requirements.txt, and bind/unbind MEASURED -- one round trip at dim
+1024 recovers the filler at cosine 0.69, CLOSE NOT EXACT, which is exactly why a
+cleanup step follows and is the kind of thing a newcomer is never told.
+16 facts. Fresh copy went 0/15 -> 16/16.
+
+AND THEN THE 16/16 TURNED OUT TO MEASURE MY OWN WORDING. Nine stranger phrasings
+("what does this library actually do", "does it need pytorch", "why does it say
+T4") scored 0/9. RECALL HERE IS CLOSER TO EXACT-MATCH THAN SEMANTIC, so ONE
+PHRASING PER FACT REACHES ONLY THE PERSON WHO GUESSES MINE. Added 54 aliases from
+a stranger's mouth -- the catalog's own alias rule applied to taught memory --
+and the untaught set went 0/9 -> 9/9. Seed 427 -> 497 rows, 0.28 MB.
+
+THE REAL BUG FOUND ALONG THE WAY. My pass/fail counter disagreed with the lines
+it printed, because I called ask() twice. Chasing that:
+    ask("what is the capital of france")  -> T4, via=main,          answer=''
+    ask it AGAIN                          -> T0, via=reflex-exact,  answer=''
+THE SAME BLANK, PROMOTED TO THE CONFIDENT TIER BY HAVING BEEN ASKED BEFORE. T0 is
+the contract that an answer came from memory; serving a cached abstention under
+it makes the tier LIE, and every caller branching on tier == "T0" gets a false
+positive. The cp47 note above that cache reasons carefully about caching a
+MODEL's answer -- and assumes there IS one; with llm=None there is not.
+Fixed at the WRITE site (never cache an empty answer). 142 ladder tests green.
+HONEST STATUS: PARTIAL. One probe now correctly stays T4/T4; two others still
+flip, so a SECOND cache path serves abstentions. Recorded as open work rather
+than called done -- a half-fixed honesty bug is worse than a known one.
+
+## FIFTIETH SWEEP: selective export/import already existed, and leaked half the payload
+
+RULE 0 PAID AGAIN. memory_export(dest, query=, sessions=, provenance=) and
+memory_import(src, on_conflict=) ALREADY EXIST, with exactly the filters this
+asked for. I had hand-merged a partition twice this series without finding them --
+the third time is where I finally looked.
+
+MEASURED THE WHOLE ROUND TRIP:
+    whole memory      443 facts   1,684 KB
+    one topic          20 facts      81 KB
+    a narrow topic      2 facts      10 KB
+each self-verified on write, imported into a fresh mind with provenance intact.
+
+BUT IMPORT WAS WITHHOLDING HALF THE PAYLOAD. It tested `q in mine`, which is TRUE
+for a question the receiver holds a BLANK for -- an abstention that reached the
+taught store (the same class as last sweep's cached-abstention bug, one layer up).
+Incoming knowledge was then flagged as a CONFLICT and, under the default
+on_conflict="flag", SILENTLY NOT IMPORTED.
+MEASURED: 8 conflicts reported, FOUR of them against questions that answered T4
+with answer='' locally. HALF THE SHARED KNOWLEDGE WAS WITHHELD FOR DISAGREEING
+WITH NOTHING -- which is precisely the failure that would make a global shared
+memory useless. Fixed: blank-here means absent, accept theirs.
+    imported 11 -> 15 | conflicts 8 -> 4 | the withheld facts now answer T0
+The remaining 4 are GENUINE disagreements (my refactor moved vacuum to another
+module), and both policies still behave: "flag" keeps mine, "theirs" overwrites.
+
+AND A MEASUREMENT ERROR THAT ALMOST BECAME A BUG REPORT. All four bundles read
+4.1 KB regardless of holding 443 facts or 2, which looked like the filters not
+filtering. A .lecorepack IS A DIRECTORY, not a file, so os.path.getsize returned
+the 4,096-byte inode every time. Walking the tree gave 1,684 / 81 / 10 KB. THE
+EXPORT WAS RIGHT AND MY MEASUREMENT WAS WRONG -- seventh time this series, and the
+tell was the same as always: a number that does not move when the input does.
+
+## FIFTY-FIRST SWEEP: the file agents read first told them to boot wrong
+
+THREE ASKS, AND THE FIRST TWO WERE DOCUMENTATION BUGS IN THE AGENT-FACING SURFACE.
+
+AGENTS.md -- the file whose own header says "IMPORTANT for AI assistants" -- told
+every agent to run `lecore.UnifiedMind()`. A BARE MIND: no memory, no rung, and
+its own doctrine answers "refused". Replaced with agent_boot() and the MEASURED
+difference, so the reason is on the page rather than asserted:
+    UnifiedMind()   no memory at all -- even doctrine refuses
+    autoboot()      memory in front: known questions at T0
+    agent_boot()    ...and unknown ones ESCALATE instead of stopping at T4
+plus the env vars, and the note that YOUR MODEL IS USUALLY IN ANOTHER PROCESS.
+Also added the teach-as-you-go line, which is the second ask.
+
+THE MCP INSTRUCTIONS SAID MEMORY EXISTS AND NEVER SAID WHEN TO WRITE. That is the
+whole reason a session catalogs nothing: an agent reads the memory at the start,
+sees no instruction to write, and writes nothing for the rest of the session.
+Now it names the moments -- after any measurement, any bug located, any decision
+settled, ANY APPROACH RULED OUT, any answer that cost more than one tool call --
+and says to phrase the question as a stranger would, because recall here matches
+wording closely and one phrasing reaches only whoever guesses yours.
+
+THE THIRD ASK ALREADY EXISTED AND HAD NEVER BEEN CALLED. unicron_early_exit is
+exactly "figure out where the answer is and skip ahead", with the hard part
+already solved in its docstring: a raw mid-layer confidence read CANNOT tell (the
+final head was trained on the LAST layer's scale, so every token reads 0.007-0.026),
+and ONE TEMPERATURE PER LAYER fitted offline fixes it.
+BUT THERE WAS NO CALLER ANYWHERE IN THE TREE, and the config keys it needs
+(n_layers, rms_eps) are NOT what a HuggingFace config.json provides -- passing
+text_config straight in dies three modules deep, one KeyError at a time.
+load_runtime()/load_weights_dir() build the normalized pair and nothing else does.
+Ran it end to end: fraction 0.0, compute_saved 0.0 on the untrained fixture --
+CORRECT, because no token is confidently decided in random weights, and the
+documented 29/44/78/88% need trained ones. Recorded the working invocation in the
+catalog next to the aliases, so the next caller does not repeat the KeyError walk.
+
+## FIFTY-SECOND SWEEP: the seed fix never reached the working memory
+
+Switched to the main partition as the only memory going forward, and the first
+thing it showed was that LAST SWEEP'S FIX HAD NOT TRAVELLED. The newcomer primer
+went into the SEED (release_bundle); the working partition still answered T4 to
+"what is lecore". THE SEED AND THE WORKING PARTITION ARE SEPARATE STORES, and
+fixing one does not reach the other -- obvious in hindsight, invisible while
+testing each on its own.
+Fixed by dogfooding the sharing path built two sweeps ago: export the seed,
+import into the partition. 96 new facts, 704 -> 804, basics at T0.
+
+AND THAT EXPORT REPORTED verified=False. One miss in 497 -- the self-check doing
+exactly its job. But it reported a COUNT AND NOTHING ELSE, so finding the row
+meant reloading the bundle and diffing 497 rows by hand.
+A VERIFICATION THAT CANNOT NAME WHAT FAILED IS A SMOKE ALARM WITH NO LOCATION:
+it is right, and useless. memory_export now returns `missed` alongside `misses`.
+
+THE MISS ITSELF, MEASURED AND HONESTLY UNFINISHED. The row is "how do I begin".
+    it IS in the exported bundle, with the correct answer
+    it recalls T0 from the source partition
+    it recalls T0 from a NARROW export of the same row
+    it fails only after loading the FULL 497-row bundle
+    NOT capacity: 1,200 synthetic rows round-trip at 100%
+    NOT collision: all four "getting started" siblings recall together at T0
+496/497 = 99.8% fidelity. LOCALIZED, NOT ROOT-CAUSED, and written down that way
+rather than dressed up -- the failing row is now named by the tool, which is what
+the next attempt needs.
+
+Confirmed last sweep's agent-surface fixes all held: AGENTS.md boots with
+agent_boot and no bare UnifiedMind, the MCP instructions still carry WRITE AS YOU
+GO, and the early-exit invocation is still documented in the catalog.
+
+## FIFTY-THIRD SWEEP: openzoo had 17 docs pointing the wrong way
+
+ALL SEVENTEEN files in integrations/ point a CLIENT AT openzoo -- OpenWebUI,
+LibreChat, Cursor, aider and the rest, each configuring an app to use openzoo as
+a model provider. Exactly ONE mentioned running leCore, and only to FORBID it
+("never import lecore" -- correct, and the right rule for a client-side folder).
+NOTHING TOLD OPENZOO, THE HOST, HOW TO RUN THE ENGINE IN ITS OWN PROCESS. The
+folder was complete in one direction and empty in the other, which is invisible
+if you only ever read it as a client.
+
+MEASURED THE ONE NUMBER A HOSTED INFERENCE PLATFORM ACTUALLY CARES ABOUT --
+upstream model calls, every one counted:
+    boot (agent_boot)                    2   a one-time POST self-check
+    a question memory KNOWS  (T0)        0
+    a question memory does not (T4)      1
+Eight consecutive primer questions cost ZERO UPSTREAM CALLS. For a platform that
+bills per token, every T0 is an inference nobody buys, and the answer still
+carries via/why so it is auditable.
+THE TWO BOOT CALLS ARE PER MIND, NOT PER REQUEST -- which makes "cache the mind"
+the single highest-value line in the guide, and a per-request boot the most
+expensive mistake available.
+Chased a phantom first: an early probe showed 2 calls on a T0 answer, which would
+have meant the whole cost story was a lie. Splitting boot from query showed the
+calls were the POST probe, and a T0 ask really is free. MEASURE THE PHASE, NOT
+THE TOTAL.
+
+WROTE integrations/openzoo/PLATFORM_GUIDE.md: booting with both ends and the env
+vars, per-user partitions (a directory is a fact, a namespace prefix is a
+convention a bug can cross), /tools + /invoke, teach/teach_about/stale_facts,
+memory_export/import with the verified/missed check, and the early-exit loader
+with the warning that a HuggingFace config.json does NOT carry n_layers or
+rms_eps.
+EVERY SNIPPET WAS RUN BEFORE SHIPPING -- §2, §3, §5, §6 and §7 all executed, and
+the §1 cost table was re-measured after writing it. An unrun example is a rotting
+example, and this one is going to an external team who cannot ask me what I meant.
+Marked the early-exit percentages as NOT MEASURED HERE, because they need trained
+weights and the fixture correctly reports 0.0.
+
+Linked from integrations/README.md with the reason the no-import rule does not
+bind openzoo: IT IS THE HOST, NOT A CLIENT.

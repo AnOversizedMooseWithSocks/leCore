@@ -375,6 +375,16 @@ class _UnifiedPart19:
         return self.lean_export(["total", ["policy"]], rules, theorem_name=theorem_name)
 
     # -- doctrine ---------------------------------------------------------------------------------
+    def realize(self, recipe):
+        """Replay a StructureRecipe to its output vector(s) -- the single realize path for any structure."""
+        outs = recipe.outputs()
+        return outs[0] if len(outs) == 1 else outs
+
+    def scene_scaling(self, s):
+        """A 4x4 scale transform (uniform scalar or per-axis length-3) for scene_graph nodes."""
+        from holographic.scene_and_pipeline.holographic_scenegraph import scaling
+        return scaling(s)
+
     def levers(self, problem=None, measured=None):
         """THE SEVEN LEVERS: what to do when you hit a measured wall, in cost order. Extends the
         six exact levers with the one lever that is NOT exact -- spend accumulated experience.

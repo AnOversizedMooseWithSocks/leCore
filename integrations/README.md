@@ -12,6 +12,13 @@ One subfolder per target application, named after the app:
 ```
 integrations/
 ├── README.md                      ← this file
+├── openzoo/                       ← THE OTHER DIRECTION: how openzoo, as the HOST,
+│   └── PLATFORM_GUIDE.md            runs leCore server-side — booting with both ends,
+│                                    per-user partitions, /tools + /invoke, teaching,
+│                                    sharing, early exit. Every other folder here points
+│                                    a CLIENT AT openzoo; this one is openzoo USING
+│                                    leCore, so rule 3 (no engine imports) does not
+│                                    apply to it: openzoo is the host, not a client.
 ├── OpenWebUI/                     ← self-hosted AI chat harness (plugin: Pipe function)
 │   ├── README.md
 │   └── openzoo_pipe.py            ← manifold Pipe: openzoo as a model provider

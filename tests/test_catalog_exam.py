@@ -60,3 +60,39 @@ def test_bm25_does_not_beat_the_baseline(mind):
     base, bm = res["token (BASELINE)"], res["bm25"]
     assert bm["top1"] - base["top1"] < 5, (
         "BM25 now beats the token baseline decisively -- re-open S4 and consider shipping the hybrid", base, bm)
+
+
+def test_agent_boot_attaches_both_ends_and_refuses_a_human():
+    """**Both ends in one call, and never a human as the back end.**
+
+    MEASURED what each half buys, on a live partition:
+        autoboot()                    known question T4, unknown T4, 0 escalations
+        autoboot(partition=...)       known question T0, unknown T4, 0 escalations
+        autoboot(partition, llm=...)  known question T0, unknown ESCALATES
+    The partition half already had a default ($LECORE_PARTITION). The llm half had
+    none -- and autoboot's `llm="auto"` hunts for a MODEL DIRECTORY, which is the
+    wrong question when THE CALLER IS THE MODEL.
+    The llm argument is REQUIRED and must be callable BY DESIGN: there is no
+    reliable way to detect an LLM caller from inside a Python process, and wiring a
+    human at a REPL in as the back end would have the engine prompting the person
+    mid-conversation. IT ASKS RATHER THAN GUESSING."""
+    import lecore
+    import pytest
+
+    calls = []
+
+    def fake_llm(prompt, **kw):
+        calls.append(prompt)
+        return "escalated answer"
+
+    m = lecore.agent_boot(llm=fake_llm)
+    assert m._autoboot_report["rung"], "agent_boot left the back end unattached"
+
+    before = len(calls)
+    m.ask("what is the airspeed velocity of an unladen swallow")
+    assert len(calls) > before, (
+        "an unanswerable question did not escalate to the attached model")
+
+    for bad in (None, "auto", 42):
+        with pytest.raises(TypeError):
+            lecore.agent_boot(llm=bad)

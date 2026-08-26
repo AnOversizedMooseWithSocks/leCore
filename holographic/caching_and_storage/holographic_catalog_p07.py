@@ -232,7 +232,7 @@ def register_p07(c):
         "honesty, container round-trip, calibration, Unicron spectral read), partition "
         "mount, doctrine load, machine inventory -- then os_prompt() hands the attached "
         "LLM its generated operating screen (syscalls, rules, contract).",
-        example="rep = mind.boot(partition='/data/p1'); print(mind.os_prompt(rep))",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rep = mind.boot(partition='/data/p1'); print(mind.os_prompt(rep))",
         aliases=("boot the mind", "bios", "power on self test", "operating prompt",
                  "os for the llm"), module="holographic_bios")
     c.register_capability(
@@ -241,7 +241,7 @@ def register_p07(c):
         "provenance-tagged lessons (ladder use, agent loops, storage law, honest "
         "benchmarks) taught through the normal reflex gate. Opt-in so cold state "
         "stays honest.",
-        example="mind.doctrine_load()",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.doctrine_load()",
         aliases=("seed doctrine", "load the doctrine pack", "boot with lessons",
                  "teach the operating doctrine"), module="holographic_seedpack")
     c.register_capability(
@@ -249,7 +249,7 @@ def register_p07(c):
         "Seat the expert panel in the swarm realm: each member a named resident with its "
         "own scope in one SHARED store; deliberation follows the swarm's contrast law -- "
         "consensus is silent, only disagreement is recorded, authored per-expert.",
-        example="mind.panel_seat(); mind.panel_deliberate(q, {\'widrow\': \'a\', \'bau\': \'b\'})",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.panel_seat(); mind.panel_deliberate(q, {\'widrow\': \'a\', \'bau\': \'b\'})",
         aliases=("seat the panel", "panel swarm", "expert realm", "council realm"),
         module="holographic_unified_p20_zoo")
     c.register_capability(
@@ -258,7 +258,7 @@ def register_p07(c):
         "provenance, observe/suggest/habits (procedures mined from what the user actually "
         "does), a capability preflight, and save/load. Each (app, user) is a separate "
         "partition, so no user can appear in another's memory.",
-        example="app = mind.app_substrate(\'lestudio\', user=\'ana\'); app.suggest(\'retouch a portrait\')",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); app = mind.app_substrate(\'lestudio\', user=\'ana\'); app.suggest(\'retouch a portrait\')",
         aliases=("build on lecore", "app memory", "per user memory", "adapt to the user"),
         module="holographic_appkit")
     c.register_capability(
@@ -269,7 +269,7 @@ def register_p07(c):
         "task), redshift (off established behaviour), blueshift (too little work), plus "
         "loop detection. teach_check() turns redshift into an IMPLICIT-CONFLICT "
         "candidate with the nearest established answers attached.",
-        example="mind.teach_check(\'where does the deployment run\', \'it was decommissioned\')",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.teach_check(\'where does the deployment run\', \'it was decommissioned\')",
         aliases=("drift detection", "echo detection", "conflict candidate",
                  "stale memory", "loop detection"),
         module="holographic_drift")

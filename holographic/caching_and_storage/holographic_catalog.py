@@ -17,6 +17,7 @@ This PROMOTES two shipped things into one home: the auto-listing of the mind's p
 is the richer home (does/example/native + find); `seed_from_mind` reuses the faculty walk so every faculty is
 findable, and `to_rows` can still hand the entries to the SQL table path. NumPy-free, stdlib only.
 """
+import inspect
 import re
 
 # small stop-word list so a problem sentence matches on its CONTENT words, not "how do I ..." scaffolding
@@ -751,7 +752,16 @@ _METHOD_ALIASES = {
                              "what should go in memory",
                              "pick the important parts of a passage",
                              "which tokens surprised the model"),
+    # THE WORKING INVOCATION, because there was no caller anywhere in the tree and
+    # the config keys it needs (n_layers, rms_eps) are NOT what a HuggingFace
+    # config.json provides -- passing text_config straight in dies three modules
+    # deep on KeyError. load_runtime()/load_weights_dir() build the normalized
+    # pair; nothing else does.
     "unicron_early_exit": ("skip layers when the answer is already decided",
+                           "speed up inference by exiting early",
+                           "how do I make the model faster",
+                           "stop climbing the layers",
+                           "where in the model is the answer already known",
                            "make the model faster without changing it",
                            "shortcut through the layers",
                            "which tokens need the whole model"),
@@ -967,6 +977,70 @@ _METHOD_ALIASES = {
               "tell lecore something to remember",
               "add knowledge by hand",
               "pin an established answer"),
+    # BARE GENERIC NAMES ARE SHADOWED BY DESCRIPTIVELY-TITLED SIBLINGS, and the
+    # buried audit catches them the moment ranking shifts -- which is what
+    # happened when auto-registered examples grew from "mind.x(...)" to the real
+    # signature. The capability did not change; the search text around it did.
+    # THE FIX THE TEST ASKS FOR IS ALIASES, not a shorter example: a one-word
+    # name has nothing for a stranger's phrasing to match on.
+    "answer": ("just answer my question",
+               "route a question to the right place",
+               "who should handle this question"),
+    "api_use": ("call an endpoint I taught it",
+                "use a learned api",
+                "invoke a remembered service"),
+    "capabilities": ("what can this mind do",
+                     "list everything available",
+                     "introspect the capability registry"),
+    "do": ("just do this task",
+           "one call to get a job done",
+           "orchestrate this for me"),
+    "learn": ("teach it one labelled example",
+              "show it a training pair",
+              "the base learning verb"),
+    "restore": ("clean up a degraded measurement",
+                "denoise and deblur together",
+                "plug and play restoration"),
+    "shape_of": ("what does this return",
+                 "how do I actually call this",
+                 "show me the return shape"),
+    # REPAIR FOR A PARTITION THAT GREW. The doctrine-duplication fix stops new
+    # growth; it cannot reclaim rows already written, and there was no faculty
+    # that could. Aliases from the mouth of someone staring at a bloated file.
+    "learning_compact": ("clean up my memory file",
+                         "remove duplicate memories",
+                         "compact the partition",
+                         "my lecore file keeps growing",
+                         "dedupe the taught store"),
+    # PRUNE's diagnostic for sequential editing. An install writes the same
+    # tensors eight times over; perplexity and drift both miss a matrix that is
+    # holding its accuracy while becoming numerically fragile.
+    "unicron_edit_health": ("is my install degrading the model",
+                            "condition number of an edited matrix",
+                            "did sequential edits make the weights fragile",
+                            "check weight health after installing",
+                            "prune condition number check"),
+    # Tombstone reclamation. UPDATE is tombstone-and-reinsert, so a table that is
+    # written to only ever grows -- 400 rows became 1,260 after five updates.
+    # Aliases from the mouth of someone watching a table bloat.
+    "table_vacuum": ("my table keeps growing",
+               "remove deleted rows permanently",
+               "reclaim tombstones",
+               "vacuum a table",
+               "compact a table after updates"),
+    "db_vacuum_idle": ("clean up dead rows automatically",
+                       "vacuum every bloated table",
+                       "my database is full of dead rows",
+                       "sweep tombstones across a database"),
+    # THE STALE-REFERENCE PROBLEM. A fact about code stays at T0 while the code
+    # moves; nothing connected a memory to the file it describes.
+    "teach_about": ("remember this about a file",
+                    "teach a fact tied to source code",
+                    "record what this module does"),
+    "stale_facts": ("which of my notes are out of date",
+                    "what did I write about code that has changed",
+                    "find stale references in memory",
+                    "is my memory still current with the codebase"),
     "unicron_bios": ("what kind of model is this",
                      "probe a checkpoint before touching it",
                      "will this fit in my model", "enumerate a model's layout",
@@ -1625,7 +1699,21 @@ def seed_from_mind(catalog, mind):
         # dark method names (D1). infer_semantic ABSTAINS rather than guess -- a wrong branch files a capability
         # under a verb nobody will look for and, unlike a missing one, looks done.
         from holographic.caching_and_storage.holographic_semantictag import infer_semantic
-        catalog.register_capability(name, doc or name, example="mind.%s(...)" % name, native=True,
+        # THE EXAMPLE SHOWS THE REAL SIGNATURE, not "(...)". 2,116 of 2,753
+        # method capabilities carried `mind.<name>(...)`, which RESOLVES (so
+        # skill_lint passes it) and tells a caller nothing -- not the argument
+        # names, not which are required, and CRUCIALLY not which implementation
+        # they get when a name is defined in two parts. explain, ask, agent_loop
+        # and levers are each defined twice and the MRO silently picks one; the
+        # placeholder made that invisible at the exact place a reader would look.
+        # inspect.signature is already the source of truth here; printing it
+        # costs nothing and makes the entry self-documenting.
+        try:
+            _sig = str(inspect.signature(getattr(mind, name))).replace("self, ", "")
+            _ex = "mind.%s%s" % (name, _sig)
+        except (TypeError, ValueError):
+            _ex = "mind.%s(...)" % name
+        catalog.register_capability(name, doc or name, example=_ex, native=True,
                                     consumes=cons, produces=prod,
                                     semantic=_SEMANTIC_OVERRIDES.get(name) or infer_semantic(name, doc),
                                     aliases=_METHOD_ALIASES.get(name, ()))   # D1: bare method-names were dark w/o these

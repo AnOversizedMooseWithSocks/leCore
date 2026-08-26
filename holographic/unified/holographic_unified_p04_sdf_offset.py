@@ -99,6 +99,14 @@ class _UnifiedPart04:
         """MAP binding: elementwise product. Commutative AND self-inverse (bind(x, x) is the all-ones vector),
         which is what makes stable factorization possible -- and what makes the recoverable object a multiset
         modulo cancelling pairs. See holographic_resonator.map_bind."""
+        # A VARIADIC WITH NO ARGUMENTS IS STILL A CALL THAT CANNOT BE SERVED.
+        # map_bind() died as "tuple index out of range" inside the reduce --
+        # true, and useless to the caller. Binding is a fold over vectors;
+        # there is no identity to return for an empty fold here.
+        if not vectors:
+            raise ValueError(
+                "map_bind needs at least one vector -- it is a fold over\n"
+                "elementwise products, and an empty fold has no answer.")
         from holographic.misc.holographic_resonator import map_bind as _mb
         return _mb(*[np.asarray(v, float) for v in vectors])
 

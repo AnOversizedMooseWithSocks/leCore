@@ -37,7 +37,13 @@ with your task in plain words. It almost always already exists -- tested, determ
 cheaper than your hand-rolled version (every call returns measured cost). Hand-roll only after
 lecore_find returns nothing relevant. You also HAVE PERSISTENT MEMORY: memory_write stores
 facts/decisions to your external partition; memory_search finds them across sessions --
-check it before saying you don't remember. Results are exact JSON; bytes come as
+check it before saying you don't remember. WRITE AS YOU GO, NOT AT THE END: after any
+measurement, any bug you locate, any decision you settle, any approach you RULE OUT, and any
+answer that cost more than one tool call. One memory_write is far cheaper than rediscovering
+it next session, and a REFUTED approach is worth as much as a working one -- it stops the
+next agent repeating it. Phrase the question the way a stranger would ask it, not the way you
+already know the answer; recall matches wording closely, so one phrasing reaches only whoever
+guesses yours. Before starting a task, memory_search it: the work may already be done. Results are exact JSON; bytes come as
 {'__bytes_b64__': ...}."""
 
 # The territory map the model gets in ONE call. CURATED, but un-rottable: the selftest runs
@@ -520,11 +526,23 @@ class MCPServer:
             import lecore
             root = os.path.join(self._memory_root, "users", key)
             os.makedirs(root, exist_ok=True)
-            m = lecore.UnifiedMind()
+            # AUTOBOOT, NOT A BARE MIND. This built UnifiedMind() and called
+            # learning_load by hand -- the pre-autoboot ritual, missing the parts
+            # autoboot does: DOCTRINE (14 facts the reflex answers from), the POST
+            # line, and the archive root. An MCP caller IS an agent by
+            # construction, so the full boot is the right default here in a way it
+            # is not for a human at a REPL.
+            # llm=None deliberately: the AGENT ON THE OTHER END OF MCP IS THE
+            # MODEL. Attaching a second one would put a model behind a model, and
+            # there is no model directory on this box anyway.
             try:
-                m.learning_load(root)
+                m = lecore.autoboot(partition=root, llm=None)
             except Exception:
-                pass
+                m = lecore.UnifiedMind()          # never fail a request over boot
+                try:
+                    m.learning_load(root)
+                except Exception:
+                    pass
             cache[key] = {"mind": m, "root": root}
         return cache[key]
 

@@ -5,6 +5,36 @@ only runs when there is THINKING to do."""
 import numpy as np
 
 
+
+def _q8_pack(a):
+    """float32 (n, d) -> (uint8 codes, lo, hi) with a PER-ROW range.
+
+    THE SAME SCHEME lecore_data/routing/index_128d.npz already ships, factored out
+    the third time it was needed: the routing index, then learning.semantic's ctx,
+    now learning.experience's audit arrays. Per-ROW lo/hi rather than a global
+    range is what keeps the error small when row magnitudes differ by orders --
+    measured cosine min 0.99995 on both the semantic and the audit arrays."""
+    a = np.asarray(a, np.float64)
+    if a.size == 0:
+        return (np.zeros(a.shape, np.uint8), np.zeros((len(a), 1)),
+                np.zeros((len(a), 1)))
+    lo = a.min(1, keepdims=True)
+    hi = a.max(1, keepdims=True)
+    q = np.round((a - lo) / np.maximum(hi - lo, 1e-12) * 255.0).astype(np.uint8)
+    return q, lo, hi
+
+
+def _q8_unpack(q, lo, hi):
+    """Inverse of _q8_pack. Reads float32 straight through when handed one, so a
+    partition written before the change loads unchanged -- additive, not a flip."""
+    q = np.asarray(q)
+    if q.dtype != np.uint8:
+        return np.asarray(q, float)
+    lo = np.asarray(lo, float)
+    hi = np.asarray(hi, float)
+    return lo + q.astype(np.float64) * (hi - lo) / 255.0
+
+
 class _UnifiedPart20:
 
     @property
@@ -954,13 +984,21 @@ class _UnifiedPart20:
                 return bool(got.strip())        # promote rebuilds canonical
                                                 # serve-text; require presence
             return got == a_                    # plain taught: exact
-        misses = sum(0 if _row_ok(q, a, _p) else 1 for q, a, _p in rows)
+        # NAME THE MISSES, DO NOT JUST COUNT THEM. This reported misses=1 out of
+        # 497 and nothing else, so "verified: False" told the caller their bundle
+        # was imperfect and gave them no way to act -- I had to reload the bundle
+        # and diff 497 rows by hand to learn WHICH question did not survive.
+        # A verification that cannot name what failed is a smoke alarm with no
+        # location: it is right, and useless.
+        _missed = [q for q, a, _p in rows if not _row_ok(q, a, _p)]
+        misses = len(_missed)
         byp = {}
         for _q, _a, prov in rows:
             byp[prov] = byp.get(prov, 0) + 1
         return {"exported": len(rows), "by_provenance": byp,
                 "vetoes": len(vet), "dest": dest,
-                "verified": misses == 0, "misses": misses}
+                "verified": misses == 0, "misses": misses,
+                "missed": _missed[:20]}
 
     def memory_import(self, src, on_conflict="flag"):
         """IMPORT / MERGE (cp69): bring a shared bundle INTO this memory -- the
@@ -993,7 +1031,20 @@ class _UnifiedPart20:
             q, a, prov = str(t[0]), str(t[1]), str(t[3])
             if a == "carried tombstone":
                 continue
-            if q in mine:
+            # AN EMPTY LOCAL ANSWER IS NOT A CONFLICTING ANSWER. `q in mine` was
+            # true for questions this memory holds a BLANK for -- an abstention
+            # that got written to the taught store -- so incoming knowledge was
+            # flagged as a conflict and, under the default on_conflict="flag",
+            # SILENTLY NOT IMPORTED.
+            # MEASURED on a real bundle: 8 conflicts reported, FOUR of them
+            # against questions that answered T4 with answer='' here. Half the
+            # shared knowledge was withheld on the grounds of disagreeing with
+            # nothing -- which is precisely the failure mode that makes sharing
+            # research between memories useless.
+            # Treat blank-here as absent: accept theirs, and count it as an
+            # import rather than a conflict.
+            _mine = str(mine.get(q, "") or "")
+            if q in mine and _mine.strip():
                 if mine[q] == a:
                     skipped += 1
                     continue
@@ -2453,12 +2504,28 @@ class _UnifiedPart20:
             med = float(np.median(list(norms.values()) or [0]))
             words = [w for w in words
                      if norms[w] > 1.35 * med or w in taught_txt]
+            _ctx = (np.stack([te.context[w] for w in words])
+                    if words else np.zeros((0, te.dim)))
+            _ctx = np.asarray(_ctx, np.float64)
+            _lo = _ctx.min(1, keepdims=True) if len(_ctx) else np.zeros((0, 1))
+            _hi = _ctx.max(1, keepdims=True) if len(_ctx) else np.zeros((0, 1))
+            _q8 = (np.round((_ctx - _lo) / np.maximum(_hi - _lo, 1e-12) * 255.0)
+                   .astype(np.uint8) if len(_ctx) else np.zeros((0, te.dim), np.uint8))
             secs.append({"kind": "lecore.learning.semantic", "id": "v1",
                          "meta": {"words": words,
                                   "ingest_stats": getattr(self, "_semantic_ingest_stats",
                                                           None)},
-                         "arrays": {"ctx": (np.stack([te.context[w] for w in words])
-                               if words else np.zeros((0, te.dim)))
+                         # INT8 WITH PER-ROW lo/hi -- the SAME SCHEME ALREADY
+                         # SHIPPING in lecore_data/routing/index_128d.npz, applied
+                         # one layer up. This array was 14.1 MB of a 25.5 MB
+                         # partition (55%), stored as float32.
+                         # MEASURED on the live partition: 14.1 -> 3.5 MB, 4.0x,
+                         # cosine to the original min 0.99995 / mean 0.99997.
+                         # NOT seed-derivable (lever 3 does not apply -- row norms
+                         # run 1.4 to 1172, so this is ACCUMULATED evidence, not a
+                         # regenerable codebook). Lever 3's question was asked and
+                         # answered NO; this is the precision lever instead.
+                         "arrays": {"ctx_q": _q8, "ctx_lo": _lo, "ctx_hi": _hi
                        # cp32: a VIRGIN mind must save cleanly -- np.stack on an empty
                        # vocabulary crashed here; the full-record suite exposed it
                                     .astype(np.float32)}})
@@ -2556,8 +2623,17 @@ class _UnifiedPart20:
             if aud:
                 ks = np.stack([np.asarray(k, np.float32) for k, _ in aud])
                 vs = np.stack([np.asarray(v, np.float32) for _, v in aud])
-                aud_arrays["aud_k_%d" % ti] = ks
-                aud_arrays["aud_v_%d" % ti] = vs
+                # int8 PER ROW -- the audit arrays were 15.6 MB of a 16.2 MB
+                # partition (96%) once the semantic array was packed. Same
+                # scheme, third site. Measured 4.0x at cosine min 0.99996.
+                _kq, _klo, _khi = _q8_pack(ks)
+                _vq, _vlo, _vhi = _q8_pack(vs)
+                aud_arrays["aud_kq_%d" % ti] = _kq
+                aud_arrays["aud_klo_%d" % ti] = _klo
+                aud_arrays["aud_khi_%d" % ti] = _khi
+                aud_arrays["aud_vq_%d" % ti] = _vq
+                aud_arrays["aud_vlo_%d" % ti] = _vlo
+                aud_arrays["aud_vhi_%d" % ti] = _vhi
                 st["audit_in_arrays"] = True
             else:
                 st["audit"] = []                          # an EMPTY journal keeps its key
@@ -2566,6 +2642,16 @@ class _UnifiedPart20:
             tiles.append(st)
         secs.append({"kind": "lecore.learning.experience", "id": "v1",
                      "meta": {"tiles": tiles}, "arrays": aud_arrays})
+        # FILE REFERENCES TRAVEL WITH THE FACTS THEY BELONG TO. teach_about
+        # records which files a fact describes; without this section they lived in
+        # process memory only, so a fact survived a reboot and its provenance did
+        # not -- and stale_facts() came back empty on a partition full of facts
+        # about code. A STALENESS CHECK THAT FORGETS WHAT IT WAS WATCHING REPORTS
+        # EVERYTHING AS FINE.
+        _ff = getattr(self, "_fact_files", None)
+        if _ff:
+            secs.append({"kind": "lecore.learning.factfiles", "id": "v1",
+                         "meta": {"refs": _ff}})
         prev_fp = None
         path = os.path.join(d, "state.lecore")
         if os.path.exists(path):
@@ -2634,7 +2720,17 @@ class _UnifiedPart20:
             if sem and sem["meta"].get("words"):
                 from holographic.io_and_interop.holographic_encoders import TextEncoder
                 te = TextEncoder(dim=2048, seed=0)
-                M = sem["arrays"]["ctx"]
+                # READ EITHER FORM. Partitions written before the int8 change
+                # carry a float32 "ctx"; new ones carry ctx_q/ctx_lo/ctx_hi.
+                # ADDITIVE, NOT A FLIP -- an old partition must still load.
+                _a = sem["arrays"]
+                if "ctx_q" in _a:
+                    _q = np.asarray(_a["ctx_q"], np.float64)
+                    _l = np.asarray(_a["ctx_lo"], np.float64)
+                    _h = np.asarray(_a["ctx_hi"], np.float64)
+                    M = _l + _q * (_h - _l) / 255.0
+                else:
+                    M = _a["ctx"]
                 for i, w in enumerate(sem["meta"]["words"]):
                     te.index.get(w)
                     te.context[w] = M[i].copy()
@@ -2723,13 +2819,26 @@ class _UnifiedPart20:
                                   if sec["kind"] == "lecore.memory.image"]
             self._sequence_memory = [sec for sec in got["sections"]
                                      if sec["kind"] == "lecore.memory.sequence"]
+            _ff = by.get("lecore.learning.factfiles")
+            if _ff and _ff["meta"].get("refs"):
+                self._fact_files = dict(_ff["meta"]["refs"])
             exp = by.get("lecore.learning.experience")
             if exp and exp["meta"].get("tiles"):
                 tls = exp["meta"]["tiles"]
                 for ti, st in enumerate(tls):
                     if st.pop("audit_in_arrays", False):
-                        ks = np.asarray(exp["arrays"]["aud_k_%d" % ti], float)
-                        vs = np.asarray(exp["arrays"]["aud_v_%d" % ti], float)
+                        # READ EITHER FORM: new partitions carry aud_kq/klo/khi,
+                        # older ones the float32 aud_k. An existing partition must
+                        # keep loading.
+                        _A = exp["arrays"]
+                        if ("aud_kq_%d" % ti) in _A:
+                            ks = _q8_unpack(_A["aud_kq_%d" % ti], _A["aud_klo_%d" % ti],
+                                            _A["aud_khi_%d" % ti])
+                            vs = _q8_unpack(_A["aud_vq_%d" % ti], _A["aud_vlo_%d" % ti],
+                                            _A["aud_vhi_%d" % ti])
+                        else:
+                            ks = np.asarray(_A["aud_k_%d" % ti], float)
+                            vs = np.asarray(_A["aud_v_%d" % ti], float)
                         st["audit"] = [(k, v) for k, v in zip(ks, vs)]
                 self.experience_from_state({"tiles": tls})
             # taught replay runs AFTER the experience restore (cp21 ordering bug, caught by
