@@ -25,6 +25,11 @@
 ---
 
 
+
+> **Lost in the docs?** [docs/INDEX.md](docs/INDEX.md) maps everything by audience in
+> one page. New features with one copy-paste example each: [docs/WHATS_NEW.md](docs/WHATS_NEW.md).
+> Operating a hosted deployment: [docs/OPENZOO_OPERATIONS.md](docs/OPENZOO_OPERATIONS.md).
+
 ## Measured, not promised
 
 Every headline claim below is a number produced by a harness in this repository.

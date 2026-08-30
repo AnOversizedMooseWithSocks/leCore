@@ -271,7 +271,7 @@ def paired_benchmark(n=25, seed=0, z_min=0.8, k=3, stranger=False, closest=False
             "stranger": bool(stranger), "closest": bool(closest), "seed": int(seed)}
 
 
-def alias_gaps(n=60, seed=0, z_min=0.8, k=3):
+def alias_gaps(n=60, seed=0, fixture=None, z_min=0.8, k=3):
     """BENCH-2 read as a WORK LIST, not a score: which capabilities cannot survive losing one phrasing.
 
     WHY THIS IS THE RIGHT OUTPUT. The 0.878 false-abstain floor has now survived two independent attacks,
@@ -294,7 +294,16 @@ def alias_gaps(n=60, seed=0, z_min=0.8, k=3):
     DIFFERENTIATING the descriptions), 'abstained' means thin coverage (fix by ADDING aliases). Those are
     different repairs and conflating them wastes the signal."""
     rows = []
-    for task, name in build_paraphrase_fixture(n=n, seed=seed):
+    if fixture is not None:
+        # FROZEN-FIXTURE MODE (sweep 91): catalog edits change the sampling pool (new
+        # aliases become new removable held-outs), so rerun deltas compare DIFFERENT
+        # probe populations -- measured in sweep 90 when six repairs read as abstained
+        # 6 -> 8. Pass the previous run's [(held_out, capability)] pairs to measure the
+        # SAME population before and after.
+        pairs = [(str(t), str(nm)) for t, nm in fixture]
+    else:
+        pairs = list(build_paraphrase_fixture(n=n, seed=seed))
+    for task, name in pairs:
         reduced = catalog_without_alias(name, task)
         outcome, verdict = _paraphrase_verdict(reduced, task, name, z_min, seed, k)
         if outcome == "recovered":

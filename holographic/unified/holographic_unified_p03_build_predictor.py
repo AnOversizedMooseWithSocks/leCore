@@ -382,7 +382,11 @@ class _UnifiedPart03:
             raise RuntimeError("no LLM attached -- call mind.attach_llm(callable) first, or pass llm=")
         return expand_query(self, query, fn, min_faithfulness=min_faithfulness, z_min=z_min, seed=seed)
 
-    def agent_loop(self, task, llm=None, max_steps=6, z_min=0.8, k_tools=6, seed=0):
+    def tool_loop(self, task, llm=None, max_steps=6, z_min=0.8, k_tools=6, seed=0):
+        # RENAMED from agent_loop() in sweep 63: p20's cp28 gather/act/reflect
+        # agent_loop had silently shadowed this in-process tool-use loop
+        # (LOOP-1). Live name stays with the live body; this one returns as
+        # tool_loop -- which is what it always was.
         """THE IN-PROCESS TOOL-USE LOOP (holographic_agentloop, LOOP-1). Hands a model the RELEVANT slice of
         the manifest, parses a tool call from its reply, dispatches through invoke(), feeds the result back
         and iterates. Over HTTP this already worked (/tools + /invoke); in process there was no loop, so
@@ -404,6 +408,63 @@ class _UnifiedPart03:
         if fn is None:
             raise RuntimeError("no LLM attached -- call mind.attach_llm(callable) first, or pass llm=")
         return AgentLoop(self, fn, max_steps=max_steps, z_min=z_min, k_tools=k_tools, seed=seed).run(task)
+
+    def delegate(self, task, llm=None, model=None, url=None, max_steps=8, z_min=0.8,
+                 k_tools=6, seed=0, require_answer=True):
+        """THE BOSS VERB (agent architecture v2, first door): delegate a task THROUGH the
+        substrate to a back-side agent and get an END RESULT back -- the orchestrator
+        shape where the front side commands, the engine gates and meters, and the agent
+        works the task with leCore's own tools.
+        Composition, not new machinery: resolves the agent (explicit llm= callable >
+        attach_llm'd model > remote_llm(url=, model=) from env -- the openzoo door),
+        runs tool_loop (route_or_abstain gate BELOW the model: below the floor the
+        agent is never consulted), then wraps the outcome with what a boss needs to
+        file it: which agent ran, elapsed_ms, and a sha256 receipt over
+        (task, steps digest, answer) -- wall-clock stays OUT of the receipt because
+        time is the one thing an honest re-run will not reproduce.
+        THE END-RESULT CONTRACT (require_answer=True): an agent that exhausts its steps
+        or 'completes' without a DONE answer comes back done=False with why= naming it
+        -- a delegation that returns tool chatter instead of a result is not done, and
+        measurably models do NOT hold that line for themselves.
+        Returns {done, refused, answer, why, steps, gate, agent, elapsed_ms, receipt}."""
+        import time as _time
+        import json as _json
+        import hashlib as _hl
+        t0 = _time.perf_counter()
+        if llm is not None:
+            fn, agent = llm, "explicit"
+        elif getattr(self, "_llm", None) is not None:
+            fn, agent = self._llm, "attached"
+        else:
+            # MEASURED: remote_llm() BUILDS its callable lazily and never checks
+            # reachability, so an unconfigured remote would fail deep in the loop as a
+            # network error. Fall back to remote only when the caller MEANT it: an
+            # explicit url=/model= here, or the env vars remote_llm documents.
+            import os as _os
+            configured = url or model or any(
+                _os.environ.get(k) for k in ("LECORE_LLM_URL", "LECORE_LLM_MODEL",
+                                             "OPENAI_BASE_URL", "OPENAI_API_BASE"))
+            if not configured:
+                raise RuntimeError(
+                    "delegate found no agent: pass llm= (a text->text callable), "
+                    "attach_llm() one first, or configure the remote door (url=/model= "
+                    "here, or LECORE_LLM_URL / LECORE_LLM_MODEL / OPENAI_* env vars)")
+            fn = self.remote_llm(url=url, model=model)
+            agent = "remote:%s" % (model or "env-default")
+        out = dict(self.tool_loop(task, llm=fn, max_steps=max_steps, z_min=z_min,
+                                  k_tools=k_tools, seed=seed))
+        if require_answer and out.get("done") and out.get("answer") in (None, ""):
+            out["done"] = False
+            out["why"] = ("the agent finished without a final answer -- the end-result "
+                          "contract requires 'DONE: <answer>', not tool chatter")
+        digest = _hl.sha256(_json.dumps(
+            {"task": str(task),
+             "steps": [s.get("tool") for s in out.get("steps", []) if isinstance(s, dict)],
+             "answer": out.get("answer")},
+            sort_keys=True, default=str).encode()).hexdigest()
+        out.update({"agent": agent, "receipt": digest,
+                    "elapsed_ms": round((_time.perf_counter() - t0) * 1e3, 3)})
+        return out
 
     def llm_tool(self, name="llm", description="", in_type="text", out_type="text", on_error="raise",
                  llm=None):
@@ -1964,6 +2025,8 @@ class _UnifiedPart03:
         raise ValueError(f"unknown denoise method: {method!r}")
 
 
+
+
 def _selftest():
     """Delegates to holographic.unified.check_part -- one home for the shared contract."""
     n = check_part("holographic.unified.holographic_unified_p03_build_predictor", "_UnifiedPart03")
@@ -1973,23 +2036,3 @@ def _selftest():
 if __name__ == "__main__":
     _selftest()
 
-    def manifold_chart(self, vectors, dim=2, method="isomap", k=10, sublinear=False):
-        """Flatten a CURVED hypervector manifold to a low-D coordinate chart -- the nonlinear extension of
-        `consolidation` (which is a LINEAR SVD chart and folds a curved manifold) (reverse-transfer RT-II1; UV
-        unwrapping mapped onto the concept/state manifold). `method='isomap'` is the geodesic-preserving chart
-        (recommended -- unrolls the manifold); 'spectral' is Laplacian Eigenmaps (local cluster structure, the
-        graph-spectral cousin of `graph_denoise`'s Laplacian). Use it to SEE the concept space / a brain's state
-        space, or as a tighter storage coordinate where the manifold is curved.
-
-        Measured: on a swiss roll lifted into high-D, Isomap beats the linear SVD chart on geodesic-distance
-        fidelity and class separation 5/5 seeds. SCOPE: a chart assumes disk topology -- a CLOSED manifold (a
-        torus, genus>0) needs a cut first (the `topology` faculty finds the genus); a flat manifold is better
-        served by the linear `consolidation`. `sublinear=True` finds neighbours via a HoloForest (RT-III1's
-        index reuse); the geodesic step is otherwise O(N^3), so subsample for very large sets."""
-        from holographic.misc.holographic_chart import manifold_chart
-        forest = None
-        if sublinear:
-            from holographic.misc.holographic_tree import HoloForest
-            V = np.asarray(vectors, float)
-            forest = HoloForest(V.shape[1], seed=self.seed).build(V)
-        return manifold_chart(vectors, dim=dim, method=method, k=k, forest=forest)

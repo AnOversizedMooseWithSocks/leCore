@@ -22,7 +22,7 @@ def register_p04(c):
                           example="import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; b=box(); V=np.asarray(b.vertices,float); uv=(V[:,:2]-V[:,:2].min(0)); uv=uv/(uv.max(0)+1e-9); shell=m.make_uv_shell(b, uv, offset=0.1); puv,res=m.project_uv_from_shell(b, shell); (puv.shape==uv.shape, float(res.mean())<0.2)",
                           native=True, aliases=("uv shell", "texture shell", "cage bake uvs", "keep texture through a remesh",
                                                 "project texture onto new topology", "reproject uvs after decimation",
-                                                "envelope to carry a texture map"))
+                                                "envelope to carry a texture map", "reproject uvs after decimation", "keep textures through mesh simplification"))
     c.register_capability("Depth from a hazy/foggy image (haze + defocus)", "RELATIVE DEPTH from a single HAZY/shallow-DoF photo -- the NO-WEIGHTS fix for scenes where shape-from-shading INVERTS depth (fog reads as near). Fuses HAZE (atmospheric scattering, Tarel-Hautiere veil; m.haze_depth) + DEPTH-OF-FIELD (local sharpness; m.sharpness_depth) via a guided filter; hand to photo_to_3d. Returns depth (H,W) in [0,1], 1=nearest. MEASURED: on the foggy forest photo it more than DOUBLED near/far separation vs SfS (+0.13 vs +0.06), fixing the inversion. KEPT NEG: relative not metric; needs real haze or DoF (else use shape_from_shading); sky-guard clamps bright sky to far.",
                           example="import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.zeros((60,90,3)); yy,xx=np.mgrid[0:60,0:90]; img[:]=0.3+0.5*(yy/59.0)[...,None]; d=m.fuse_depth(img); (d.shape==(60,90), float(d[40:].mean())>=0.0)",
                           native=True, aliases=("depth from a foggy image", "haze depth", "depth from fog", "dehaze depth",
@@ -1427,7 +1427,8 @@ def register_p04(c):
                                                 "variance limited or margin limited", "double the dimension test",
                                                 "pick a scaling lever", "diagnose a bottleneck", "scaling diagnosis",
                                                 "is this a wall or a scaling problem", "detect what needs scaling",
-                                                "rank scaling knobs", "capacity or resolution limited"))
+                                                "rank scaling knobs", "capacity or resolution limited",
+                             "should i scale dimensions or tile", "scale up or tile the domain"))
     c.register_capability("auto_scale", "automatic scaling (holographic_scalinglaw): repeatedly diagnose from the "
                           "current operating point and double the most responsive knob until the target error is "
                           "met, a WALL is diagnosed (no knob helps -- stop and say so), or the round budget is "

@@ -113,3 +113,34 @@ def test_import_does_not_treat_a_blank_local_answer_as_a_conflict(tmp_path):
                for c in (rep2.get("conflicts") or [])), rep2
     assert "MY OWN" in str(other.ask("shared fact alpha").get("answer")), \
         "on_conflict='flag' must keep the local answer"
+
+
+def test_an_abstention_stays_an_abstention_however_often_it_is_asked():
+    """**T0 is the contract that an answer came from memory. A blank must not wear it.**
+
+    TWO separate paths served a cached empty answer at the confident tier:
+        via="reflex-exact" -- the exact-question cache, fixed at its WRITE site
+        via="reflex"       -- recovered from the trace, `if payload is not None`
+                              lets "" through, so fixed at its READ site
+    MEASURED before: asking an unknown question twice gave T4/answer='' then
+    T0/answer='' -- the same blank, promoted by having been asked before. Every
+    caller that branches on tier == "T0" got a false positive, which is the whole
+    point of the tier.
+    Asks three times because the first fix made ONE probe stay T4 while two others
+    still flipped on the second call -- a single repeat was not enough to see it."""
+    import lecore
+
+    m = lecore.autoboot(llm=None)
+
+    for unknown in ("what is the capital of luxembourg", "what colour is a quark"):
+        tiers = [m.ask(unknown).get("tier") for _ in range(3)]
+        assert tiers == ["T4"] * 3, (
+            "%r escalated to a confident tier on repeat: %r" % (unknown, tiers))
+
+    # and a genuine answer must still be served, or the guard is too broad
+    known = "what is lecore"
+    tiers = [m.ask(known).get("tier") for _ in range(3)]
+    if tiers[0] == "T0":
+        assert tiers == ["T0"] * 3, tiers
+        assert str(m.ask(known).get("answer") or "").strip(), \
+            "a T0 answer must be non-empty"

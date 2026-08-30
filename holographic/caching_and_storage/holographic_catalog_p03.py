@@ -262,7 +262,8 @@ def register_p03(c):
                                                 "post event drift measurement",
                                                 "superposed epoch analysis",
                                                 "does my trigger predict anything",
-                                                "pre event trend check"),
+                                                "pre event trend check", "post event drift measurement",
+                                                "what happens after the signal fires"),
                           semantic="analyze/measure", consumes=(), produces=())
 
     c.register_capability("Rolling / streaming statistics (causal by construction, exact by default)",
@@ -382,7 +383,8 @@ def register_p03(c):
                                                 "veto committee", "build a committee of detectors",
                                                 "combine signals with survival gates",
                                                 "majority vote of gated signals",
-                                                "empty committee as a result"),
+                                                "empty committee as a result", "multiple comparisons across a detector family",
+                                                "battery screening with honesty gates"),
                           semantic="analyze/measure", consumes=(), produces=())
 
     c.register_capability("Re-clock a series (sample when it moves, not when time passes)",
@@ -535,7 +537,8 @@ def register_p03(c):
                                                 "test the pipeline not just the statistic",
                                                 "baseline for a multi step analysis",
                                                 "did the preprocessing invent this", "surrogate through the same steps",
-                                                "am I fooling myself with resampling"),
+                                                "am I fooling myself with resampling", "baseline for a multi step analysis",
+                                                "did my pipeline invent the structure"),
                           semantic="analyze/measure", consumes=(), produces=())
     c.register_capability("Detection floor (no effect above X)", "mind.min_detectable_effect(test_fn, x, "
                           "effect_grid, surrogate, power): turn 'we found nothing' into 'nothing here above X' "

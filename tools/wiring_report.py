@@ -50,6 +50,10 @@ EXEMPT = {
     # audit-improve loop) but was never added here -- the cp27 CI simulation caught the
     # gate failing on a module that loads every boot. Registry body, same status.
     "holographic_catalog_p07": "the discoverability registry itself, part 7 of 7",
+    "holographic_catalog_p08": "the discoverability registry itself, part 8 -- code-tools cards; "
+                               "registered exactly like p05-p07 at holographic_catalog.py:1763 "
+                               "via a lazy import the scanner cannot see, so it is listed here "
+                               "for the same reason its siblings are",
     "holographic_reference": "definitional reference implementations, used by the conformance harness (tests)",
     "benchmark_holographic": "a benchmark entry point",
     "stress_holographic": "an adversarial benchmark entry point",

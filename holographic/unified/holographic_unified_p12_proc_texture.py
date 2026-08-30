@@ -1672,6 +1672,42 @@ class _UnifiedPart12:
         return {"hit_rate": exact, "prefix_reuse": pre, "verdict": verdict,
                 "recommend_prefix_backend": bool(exact < 0.5 and pre >= 0.5)}
 
+    def llm_prefix_route(self, upstreams, min_reuse=0.35):
+        """Pick an upstream for THIS session from its MEASURED prefix reuse, not from price alone
+        (holographic_llmseam.MeteredLLM.prefix_route -- the openzoo decision). `upstreams` is
+        [{"name", "prefix_cache": bool, "cost_per_1k": float}, ...]: the caller's own fleet, because
+        leCore cannot know which providers cache prefixes and guessing would be worse than not routing.
+        Falls back to price when reuse is below `min_reuse` or nothing advertises caching. Returns None
+        when no metered LLM is attached (the sibling contract: never a fabricated zero row).
+        KEPT NEG: saving_estimate is an UPPER BOUND -- providers discount cached prefixes, not exempt them.
+        WHY THIS LANDED TWICE: sweep 72's raw-write phantom put the CARD in the catalog while this method
+        silently never landed -- the card's example was the only caller, and it crashed. Wired here, next
+        to llm_prefix_advice, via the disciplined editor."""
+        llm = getattr(self, "_llm", None)
+        return llm.prefix_route(upstreams, min_reuse=min_reuse) if hasattr(llm, "prefix_route") else None
+
+    def transcript_prefix_route(self, prompts, upstreams=None, min_reuse=0.35):
+        """Measure prefix reuse over a TRANSCRIPT the caller already holds and (optionally) pick the
+        upstream (holographic_llmseam.prefix_reuse_of + prefix_route_decision). The stateless twin of
+        llm_prefix_route -- BIT-IDENTICAL accounting to the live seam, pinned in the module selftest --
+        for gateways whose prompts never pass through a Python object (openzoo's proxy owns the
+        request log; the measurement comes TO the transcript). `prompts` is the list of prompt strings
+        in send order; serialize each request body however you like, just stably. With upstreams=None
+        returns the measurement alone ({prefix_reuse, chars_total, chars_reusable, turns, per_turn});
+        with upstreams=[{"name","prefix_cache","cost_per_1k"},...] adds the routing decision under
+        "route". A one-shot JSON-in/JSON-out call: POST the transcript, read the choice.
+        KEPT NEG: saving_estimate is an UPPER BOUND -- providers discount cached prefixes, not exempt
+        them; hit_rate is reported 0.0 here because a raw transcript carries no replay table."""
+        from holographic.agents_and_reasoning.holographic_llmseam import (
+            prefix_reuse_of, prefix_route_decision)
+        out = prefix_reuse_of(prompts)
+        if upstreams is not None:
+            # hit_rate 0.0: a transcript cannot know what a replay cache would have served; the
+            # decision arithmetic treats that honestly (exact-cache arm simply never wins here).
+            out["route"] = prefix_route_decision(out["prefix_reuse"], 0.0, upstreams,
+                                                 min_reuse=min_reuse)
+        return out
+
     def llm_tell(self, prompt, reply, verdict, detail=None):
         """Tell the attached model what happened to its output (holographic_llmseam.MeteredLLM.tell).
         `verdict` is a short label the CALLER owns -- "routed" / "abstained" / "smuggled" / "refused" --

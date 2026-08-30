@@ -126,6 +126,152 @@ class _UnifiedPart19:
         returns [] -- refusal is a result, and the caller falls through to the full registry."""
         return self.tool_usage.predict(task_vec, k)
 
+    def orient(self, topic=None):
+        """THE FRONT DOOR (sweep 109 -- the anti-hand-roll compass): one screen that
+        gives ANY model full capability access at its fingertips, better than a static
+        skill file because it is generated LIVE from the catalog and the partition.
+        Returns the agentic workflow (the five moves), live counts, and -- when topic=
+        is given -- the top capability pointers for that topic so the model is DIRECTED
+        to an existing door instead of hand-rolling. The workflow IS the contract:
+        (1) ASK FIRST: serve(query) -- memory or a learned tool may already answer;
+        (2) FIND, don't build: find_capability('your goal in your words');
+        (3) READ the skill card: describe_skill(name) for the real signature;
+        (4) DO: call the method / api_use / lecore_invoke over MCP;
+        (5) CLOSE THE LOOP: teach() what you learned, answer_feedback() outcomes,
+        bequeath() lessons worth outliving you. Rule 0 in one line: a capability
+        find_capability cannot surface does not exist -- and one YOU hand-roll
+        without asking first is a gap you just dug."""
+        cat = self._capability_catalog()
+        out = {
+            "workflow": ["serve(query) -- ask before anything; escalation is honest",
+                         "find_capability('goal in your own words') -- never hand-roll unasked",
+                         "describe_skill(name) -- the real signature and contract",
+                         "do it: the method itself, api_use, or lecore_invoke over MCP",
+                         "close the loop: teach / answer_feedback / bequeath"],
+            "rule_0": "a capability find_capability cannot surface does not exist",
+            "counts": {"capabilities": len(cat.all()),
+                       "taught_rows": len(getattr(self.zoo["ladder"], "taught_log", []) or []),
+                       "wisdom_authors": self.wisdom().get("authors", []),
+                       "learned_apis": sorted(getattr(self.api_toolbox(), "services", {}))},
+        }
+        if topic:
+            hits = self.find_capability(str(topic))[:3]
+            out["directed_to"] = [{"name": h.name,
+                                   "does": str(getattr(h, "does", ""))[:140]}
+                                  for h in hits]
+            out["advice"] = ("use one of directed_to (describe_skill for the "
+                             "contract) before writing anything new")
+        return out
+
+    def tool_reflex_teach(self, pattern, service, endpoint, params=None,
+                          extract_numbers=None):
+        """Teach the substrate HOW a tool answers a question shape (sweep 104): pattern
+        is an example question; service/endpoint name an api_learn'd (or faculty) tool;
+        params are fixed arguments; extract_numbers optionally names params to fill
+        from the NUMBERS IN THE QUERY, in order -- a declared, deterministic argument
+        rule (no LLM guesses arguments; what cannot be extracted honestly is not
+        served). The reflex is stored on the mind AND noted into the usage trace so
+        tool_predict ranks it for similar tasks from day one."""
+        if not hasattr(self, "_tool_reflexes"):
+            self._tool_reflexes = []
+        entry = {"pattern": str(pattern), "service": str(service),
+                 "endpoint": str(endpoint), "params": dict(params or {}),
+                 "extract_numbers": list(extract_numbers or []),
+                 "uses": 0, "hits": 0}
+        self._tool_reflexes.append(entry)
+        # PERSISTENCE FOR FREE (the wisdom-door move): the reflex ALSO lands as a
+        # taught row with provenance 'toolreflex' -- it rides every existing rail
+        # (save, load, regen, rollover, export/import) and serve() rebuilds the live
+        # list lazily from those rows after a restart. No new save/load surgery.
+        import json as _json
+        r = self.teach("toolreflex: %s" % str(pattern),
+                       _json.dumps({"service": str(service), "endpoint": str(endpoint),
+                                    "params": dict(params or {}),
+                                    "extract_numbers": list(extract_numbers or [])}))
+        if r.get("taught"):
+            _lg = getattr(self.zoo["ladder"], "taught_log", [])
+            if _lg and len(_lg[-1]) > 3:
+                _lg[-1] = [_lg[-1][0], _lg[-1][1], _lg[-1][2], "toolreflex"]
+        try:
+            tv = self.semantic_key(str(pattern))["vec"]
+            self.tool_note(tv, "%s.%s" % (service, endpoint), success=True)
+        except Exception:
+            pass
+        return {"taught": True, "reflexes": len(self._tool_reflexes)}
+
+    def serve(self, query, k=3):
+        """PREEMPTIVE SERVE (sweep 104 -- the openzoo division of labor, complete): try
+        MEMORY first (T0 taught recall); then the USAGE-LEARNED TOOL REFLEX -- when a
+        taught tool's pattern shares >= 2 content words with the query, extract the
+        declared arguments (numbers in order for extract_numbers params), CALL the tool
+        (api_use), and return its live result with provenance 'tool-reflex' and the
+        tool named -- NO LLM IN THE LOOP; then ABSTAIN honestly upward ('escalate') so
+        the next level (a model, a human, a bigger harness) knows the substrate could
+        not serve this alone. Every successful reflex serve strengthens the usage trace
+        (tool_note), so routing sharpens WITH USE. KEPT NEG: argument extraction is
+        deterministic and declared -- a query whose arguments cannot be extracted is
+        escalated, never guessed."""
+        import re
+        r = self.ask(str(query))
+        if r.get("tier") == "T0" and str(r.get("answer") or "").strip():
+            return {"served": True, "via": "memory", "tier": "T0",
+                    "answer": r.get("answer")}
+        if not getattr(self, "_tool_reflexes", None):
+            # lazy rebuild from the durable rows (survives restarts on every rail)
+            import json as _json
+            self._tool_reflexes = []
+            for row in getattr(self.zoo["ladder"], "taught_log", []) or []:
+                if len(row) > 3 and str(row[3]) == "toolreflex":
+                    try:
+                        spec = _json.loads(str(row[1]))
+                    except ValueError:
+                        continue
+                    self._tool_reflexes.append(
+                        {"pattern": str(row[0])[len("toolreflex: "):],
+                         "service": spec["service"], "endpoint": spec["endpoint"],
+                         "params": spec.get("params", {}),
+                         "extract_numbers": spec.get("extract_numbers", []),
+                         "uses": 0, "hits": 0})
+        qw = {w for w in re.findall(r"[a-z]{4,}", str(query).lower())}
+        best, best_shared = None, 0
+        for e in getattr(self, "_tool_reflexes", []) or []:
+            pw = {w for w in re.findall(r"[a-z]{4,}", e["pattern"].lower())}
+            shared = len(qw & pw)
+            if shared > best_shared:
+                best, best_shared = e, shared
+        if best is not None and best_shared >= 2:
+            params = dict(best["params"])
+            if best["extract_numbers"]:
+                nums = [float(x) if "." in x else int(x)
+                        for x in re.findall(r"-?\d+\.?\d*", str(query))]
+                if len(nums) < len(best["extract_numbers"]):
+                    return {"served": False, "via": "escalate",
+                            "reason": "reflex matched %r but the query carries %d of "
+                                      "the %d declared numeric arguments -- not "
+                                      "guessing" % (best["pattern"][:40], len(nums),
+                                                    len(best["extract_numbers"]))}
+                for name, val in zip(best["extract_numbers"], nums):
+                    params[name] = val
+            out = self.api_use(best["service"], best["endpoint"], params=params)
+            best["uses"] += 1
+            if isinstance(out, dict) and out.get("ok"):
+                best["hits"] += 1
+                try:
+                    tv = self.semantic_key(str(query))["vec"]
+                    self.tool_note(tv, "%s.%s" % (best["service"], best["endpoint"]),
+                                   success=True)
+                except Exception:
+                    pass
+                return {"served": True, "via": "tool-reflex",
+                        "tool": "%s.%s" % (best["service"], best["endpoint"]),
+                        "matched_pattern": best["pattern"], "result": out.get("data"),
+                        "uses": best["uses"], "hits": best["hits"]}
+            return {"served": False, "via": "escalate",
+                    "reason": "reflex tool call failed: %s" % str(out)[:120]}
+        return {"served": False, "via": "escalate",
+                "reason": "no memory hit and no confident tool reflex -- the next "
+                          "level up decides"}
+
     # -- warm-started factoring (E3.1) ------------------------------------------------------------
     def factor_warm(self, composite, context_vec, resonator, solutions, gate=0.55,
                     iters=100, blend=0.75):
@@ -389,7 +535,10 @@ class _UnifiedPart19:
         """THE SEVEN LEVERS: what to do when you hit a measured wall, in cost order. Extends the
         six exact levers with the one lever that is NOT exact -- spend accumulated experience.
         See _UnifiedPart18.levers for the six; entry 7 is installed here (Part 19)."""
-        base = super().levers(problem=problem, measured=measured)
+        # sweep 63: the six-lever base moved to a PRIVATE name -- two parts
+        # defining public levers() is the silent-shadow hazard; delegation is
+        # now explicit rather than riding the MRO.
+        base = self._levers_base(problem=problem, measured=measured)
         entry7 = {
             "n": 7,
             "name": "spend accumulated experience -- amortize across SIMILARITY, not identity, "

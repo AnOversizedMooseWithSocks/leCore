@@ -1219,6 +1219,40 @@ def best_portable(weights, cfg, out_path, eval_tokens=None, filter_model=True,
 
 # ------------------------------------------------------------------- wrappers
 
+def pack_notes_to_portfolio(pack_dir, out_dir):
+    """PACKS ARE PORTFOLIO CITIZENS (cp83, coverage item 6): export a pack
+    manifest's memory notes as a leCore memory portfolio, so what a Galvatron
+    learned can travel to any mind via memory_import. Returns the export count."""
+    import lecore
+    man = json.load(open(os.path.join(pack_dir, MANIFEST)))
+    notes = []
+    for sp in man.get("residents", []):
+        for n_ in sp.get("notes", []) or []:
+            notes.append((n_.get("title", ""), n_.get("text", "")))
+    m = lecore.UnifiedMind()
+    m.zoo_attach(lambda p_: "")
+    for t, x in notes:
+        if t and x:
+            m.teach(t, x)
+    rep = m.memory_export(out_dir)
+    rep["from_pack_notes"] = len(notes)
+    return rep
+
+
+def portfolio_to_memory_spec(portfolio_dir, layer, gain=1.0, dim=1024):
+    """The reverse door: a memory portfolio becomes a pack memory-resident spec,
+    so an exported mind can ride into any Galvatron at build time."""
+    import lecore
+    m = lecore.UnifiedMind()
+    m.zoo_attach(lambda p_: "")
+    m.memory_import(portfolio_dir)
+    lad = m.zoo["ladder"]
+    notes = [{"title": str(t[0]), "text": str(t[1]), "author": "portfolio"}
+             for t in lad.taught_log if len(t) > 3][:400]
+    return {"kind": "memory", "layer": int(layer), "gain": float(gain),
+            "dim": int(dim), "snapshot": None, "notes": notes}
+
+
 class HFCompatWrapper:
     """The shape transformers callers expect: .generate(input_ids, max_new_tokens).
     Accepts a list, 1-D array, or (1, T) array and returns (1, T+n) -- so harness

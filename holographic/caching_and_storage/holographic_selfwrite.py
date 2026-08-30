@@ -37,6 +37,74 @@ are not the same thing.
 import numpy as np
 
 
+def fit_novelty_chunked(runtime, weights, cfg, ids, layer=None, ridge=1e-2,
+                        mode="entropy", chunk=1400):
+    """fit_novelty's estimator, but with ROWS decoupled from FORWARD LENGTH.
+
+    WHY THIS EXISTS. The readout fits one coefficient per hidden dimension on
+    HALF the tokens, so a flat token budget silently goes underdetermined as
+    models get wider: at hidden=1024 a 1400-token budget is 699 rows for 1024
+    features (0.68 rows/feature) and the held-out score reports the fit rather
+    than the truth. Measured on a matched synthetic (planted r=0.55, identical
+    estimator): 0.68 rows/feature recovers r=0.166 / 15% top decile, 2.0x
+    recovers 0.347 / 25%, 4.0x recovers 0.430 / 30%.
+
+    AND WHY IT CHUNKS. The obvious fix -- one longer forward -- does not fit in
+    memory. A forward returns T x vocab logits, and at vocab=248,320 that is
+    8.1 GB in float32 for 8k tokens before the softmax copy. So the forward
+    stays short and the ROWS accumulate across several of them: each chunk
+    materialises only its own logits, contributes (hidden-sized) rows, and is
+    freed. Peak memory is one chunk, not one corpus -- and computing the
+    softmax in float32 makes the peak LOWER than the single-shot path it
+    replaces, while the ridge solve itself stays in float64 where it matters.
+
+    Chunks are drawn from different text, so the train/test split across
+    accumulated rows is a genuinely held-out one.
+    """
+    A_key = next(k for k in weights if k.endswith("embed_tokens.weight"))
+    _ = weights[A_key]  # same precondition as fit_novelty: the head must exist
+    L = int(int(cfg["n_layers"]) - 1 if layer is None else layer)
+    ids = list(ids)
+    step = max(64, int(chunk))
+    Xs, ys = [], []
+    for start in range(0, len(ids), step):
+        piece = ids[start:start + step]
+        if len(piece) < 8:
+            break
+        cap = {}
+        lg = np.asarray(runtime.forward(
+            piece, hooks={L: lambda h: cap.__setitem__("h", h.copy()) or None}),
+            np.float32)
+        Hs = cap["h"]
+        P = np.exp(lg - lg.max(-1, keepdims=True))
+        P /= P.sum(-1, keepdims=True)
+        tgt = np.asarray(piece[1:], np.int64)
+        nll = -np.log(P[np.arange(len(tgt)), tgt] + 1e-30)
+        ent = -(P * np.log(P + 1e-30)).sum(-1)[:-1]
+        del lg, P
+        if mode == "entropy":
+            Xs.append(np.asarray(Hs[:-1], np.float64))
+            ys.append(np.asarray(ent, np.float64))
+        else:
+            Xs.append(np.asarray(Hs[1:], np.float64))
+            ys.append(np.asarray(nll, np.float64))
+    X = np.concatenate(Xs, 0)
+    y = np.concatenate(ys, 0)
+    n = len(X) // 2
+    lam = float(ridge) * float(np.trace(X[:n].T @ X[:n])) / X.shape[1]
+    wv = np.linalg.solve(X[:n].T @ X[:n] + lam * np.eye(X.shape[1]),
+                         X[:n].T @ y[:n])
+    pred, true = X[n:] @ wv, y[n:]
+    hi = true > np.percentile(true, 90)
+    order = np.argsort(pred)[::-1][:max(1, int(0.1 * len(pred)))]
+    return {"direction": wv, "mode": mode, "state_mean": X.mean(0),
+            "correlation": float(np.corrcoef(pred, true)[0, 1]),
+            "top_decile_hit": float(hi[order].mean()),
+            "threshold": float(np.percentile(X @ wv, 90)),
+            "rows": int(len(X)), "chunks": len(Xs),
+            "rows_per_feature": float(n) / float(X.shape[1])}
+
+
 def fit_novelty(runtime, weights, cfg, ids, layer=None, ridge=1e-2, mode="entropy"):
     """Learn to read 'this is worth keeping' off the hidden state.
 

@@ -235,7 +235,8 @@ def register_p06(c):
                                                 "make my render look like a painting", "match the colors of a reference image",
                                                 "stylize an image", "transfer the look of a photo", "neural style transfer",
                                                 "post process with a style", "color grade toward a reference",
-                                                "match a movie look", "consistent grade across frames"))
+                                                "match a movie look", "consistent grade across frames",
+                             "make my render look like a painting", "match the look of a reference image"))
     c.register_capability("Textured object render (paint composed maps)", "paint a COMPOSED texture or material "
                           "(CMP1 graph / CMP2-3 material) onto an object and render it: "
                           "mind.render_textured(scene, {object_name: texture_graph}) marches the scene, UV-wraps each "
@@ -424,7 +425,7 @@ def register_p06(c):
     c.register_capability("Polarized light (Stokes state)", "the STATE of polarized light as a Stokes vector [S0,S1,S2,S3] (holographic_stokes): total intensity plus linear (Q,U) and CIRCULAR (V / handedness) polarization. Field-native (a whole image is (...,4)); reports degree-of-polarization, e-vector angle and handedness; scalar radiance lifts/round-trips byte-identically. The circular channel is the one the mantis shrimp uniquely sees",
                           example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.stokes_report(m.stokes_circular(1.0, handedness=1))['docp'])",
                           native=True, aliases=("polarization", "polarisation", "stokes vector", "degree of polarization", "e-vector angle", "circular polarization", "linearly polarized light", "unpolarized light", "handedness of light", "polarized reflection", "polarized light state"), semantic="create/emit", consumes=("spectrum",), produces=("spectrum",))
-    c.register_capability("Identify an element by its properties", "IDENTIFY the element(s) whose categorical fingerprint {category, state} matches given properties (holographic_elements.identify_element) -- the REVERSE of element() (which looks up BY name). m.identify_element({'category':'noble_gas','state':'gas'}) -> the noble gases, ranked by match_record over all 43 element records, gated by decide_or_abstain. confident is False when several elements share the fingerprint (honest under-determined answer; narrow with more fields). KEPT NEG: categorical only -- atomic number/mass excluded.", example="import lecore; m=lecore.UnifiedMind(); r=m.identify_element({'category':'noble_gas','state':'gas'}); print([s for s,sc in r['ranked'][:3]], r['confident'])", native=True, module="elements", aliases=("which element is this", "identify an element from its properties", "find the element that is an inert gas", "reverse periodic table lookup", "classify an element by category", "what element has these properties"), semantic="analyze/match", consumes=("scalar",), produces=("selection",))
+    c.register_capability("Identify an element by its properties", "IDENTIFY the element(s) whose categorical fingerprint {category, state} matches given properties (holographic_elements.identify_element) -- the REVERSE of element() (which looks up BY name). m.identify_element({'category':'noble_gas','state':'gas'}) -> the noble gases, ranked by match_record over all 43 element records, gated by decide_or_abstain. confident is False when several elements share the fingerprint (honest under-determined answer; narrow with more fields). KEPT NEG: categorical only -- atomic number/mass excluded.", example="import lecore; m=lecore.UnifiedMind(); r=m.identify_element({'category':'noble_gas','state':'gas'}); print([s for s,sc in r['ranked'][:3]], r['confident'])", native=True, module="elements", aliases=("which element is this", "identify an element from its properties", "find the element that is an inert gas", "reverse periodic table lookup", "classify an element by category", "what element has these properties", "reverse periodic table lookup", "which element matches these properties"), semantic="analyze/match", consumes=("scalar",), produces=("selection",))
     c.register_capability("Optical elements (Mueller matrices)", "how optical elements TRANSFORM polarized light, as real 4x4 Mueller matrices (holographic_mueller): polarizer, wave plate / retarder (a quarter-wave plate converts linear<->circular -- the mantis R8 mechanism), optical ROTATOR (= Faraday rotation), depolarizer, and polarizing dielectric (Fresnel) reflection. Elements COMPOSE (a light path folds to one matrix) and apply to a Stokes vector or a whole field",
                           example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.stokes_report(m.apply_mueller(m.mueller_matrix('quarter_wave', angle=np.pi/4), m.stokes_linear(1.0, 0.0)))['docp'])",
                           native=True, aliases=("mueller matrix", "polarizer", "wave plate", "quarter wave plate", "half wave plate", "retarder", "optical rotator", "faraday rotation", "fresnel polarization", "birefringence", "transform polarized light", "polarizing filter"), semantic="transform/warp", consumes=("spectrum",), produces=("spectrum",))
@@ -453,7 +454,8 @@ def register_p06(c):
     c.register_capability("Trimmed surface", "a surface restricted to trim loops in parameter space (K3): inside an outer loop and outside holes -- how Rhino represents a trimmed face. Robust point-in-trim (exact orient2d), trim-respecting tessellation, and a bridge that projects a 3-D SSI curve to a (u,v) trim loop. See holographic_trimsurf.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); flat=lambda u,v: np.array([u,v,0.0]); ts=m.trimmed_surface(flat, [[0,0],[1,0],[1,1],[0,1]]); ts.is_inside(0.5,0.5)", native=True, aliases=("trimmed surface", "trim a surface", "surface with a hole", "trimmed nurbs face", "cut a region from a surface", "trim loop", "bounded surface patch"))
     c.register_capability("2D region boolean + curve offset", "union/difference/intersection of two closed polygonal regions by exact even-odd membership (K4, the SketchUp-face/drafting layer), plus parallel-curve OFFSET with the folded loops a concave offset makes cleaned up via self-intersection removal. See holographic_region2d.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); A=np.array([[0,0],[1,0],[1,1],[0,1]]); B=np.array([[0.5,0],[1.5,0],[1.5,1],[0.5,1]]); round(m.region_boolean_area(A,B,'intersection'),2)", native=True, aliases=("2d boolean", "region boolean", "union of two polygons", "polygon difference", "clip polygons", "offset a curve", "parallel curve", "inset a polygon", "curve offset", "2d region union"))
     c.register_capability("2D constraint sketch solver", "a parametric 2-D sketch solved by ITERATED PROJECTION (K8, the SketchUp-inference / dimensioned-drawing engine): add points, declare constraints (fix/coincident/horizontal/vertical/distance/parallel/perpendicular/point-on-line), solve to a fixed point (Gauss-Seidel relaxation, the same iterate-a-projection pattern as IK/PBD/resonator), and read under/well/over-constrained. See holographic_sketch2d.", example="import lecore; m=lecore.UnifiedMind(); s=m.sketch2d(); a=s.add_point(0,0); b=s.add_point(3,0.3); s.fix(a); s.horizontal(a,b); s.distance(a,b,4.0); s.solve()['satisfied']", native=True, aliases=("2d constraint solver", "sketch constraint solver", "parametric sketch", "solve a dimensioned drawing", "make lines parallel or perpendicular", "constrain distance between points", "coincident constraint", "geometric constraint solver", "under or over constrained sketch"))
-    c.register_capability("CAD export: STL + DXF", "write geometry OUT in the two open exchange formats a modeler needs (K7): mesh_to_stl (ASCII STL for 3-D meshes, tris/quads/ngons, per-facet normals) and polylines_to_dxf (minimal DXF R12 for 2-D drawings, POLYLINE/VERTEX, closed loops flagged -- the format Rhino/AutoCAD read). Pure strings; the caller writes the file. See holographic_cadexport.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); m.mesh_to_stl(np.array([[0.,0,0],[1,0,0],[0,1,0]]), [(0,1,2)])[:5]", native=True, aliases=("export STL", "write STL file", "export DXF", "write a 2d drawing", "save mesh for 3d printing", "dxf export", "stl export", "export a drawing to autocad", "write geometry to a file"))
+    c.register_capability("CAD export: STL + DXF", "write geometry OUT in the two open exchange formats a modeler needs (K7): mesh_to_stl (ASCII STL for 3-D meshes, tris/quads/ngons, per-facet normals) and polylines_to_dxf (minimal DXF R12 for 2-D drawings, POLYLINE/VERTEX, closed loops flagged -- the format Rhino/AutoCAD read). Pure strings; the caller writes the file. See holographic_cadexport.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); m.mesh_to_stl(np.array([[0.,0,0],[1,0,0],[0,1,0]]), [(0,1,2)])[:5]", native=True, aliases=("export STL", "write STL file", "export DXF", "write a 2d drawing", "save mesh for 3d printing", "dxf export", "stl export", "export a drawing to autocad", "write geometry to a file",
+                             "save mesh for 3d printing", "export for a 3d printer"))
     c.register_capability("Parametric surface analysis (curvature + draft)", "curvature ON a parametric surface (K9), not sampled off a mesh: Gaussian/mean/principal curvature at (u,v) via the first and second fundamental forms (sphere K=1/R^2, cylinder K=0, saddle K<0), plus the moldability DRAFT ANGLE for a pull direction (positive drafts, ~0 vertical wall, negative undercut) and a developable test. See holographic_surfanalysis.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); sph=lambda u,v: np.array([2*np.cos(u)*np.sin(v),2*np.sin(u)*np.sin(v),2*np.cos(v)]); round(m.surface_curvature(sph,0.7,1.0)['gaussian'],3)", native=True, aliases=("surface curvature", "gaussian curvature of a surface", "mean curvature", "principal curvatures", "draft angle", "moldability analysis", "is a surface developable", "curvature of a nurbs surface", "fundamental forms", "undercut detection"))
     c.register_capability("Object snap: midpoint + intersection", "modeling object-snaps (K10) on top of the existing vertex/edge/grid snap: snap a dragged point to the nearest EDGE MIDPOINT, or to the nearest INTERSECTION of 2-D polylines (crossings found by the robust curve intersector). Returns hit records for the picking layer. See holographic_snap.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); V=np.array([[0.,0,0],[5,0,0]]); m.snap_to_midpoints([2.4,0.2,0], V, [[0,1]])['position'][0]", native=True, aliases=("midpoint snap", "snap to midpoint", "intersection snap", "snap to intersection", "object snap", "osnap", "snap to where lines cross", "snap to edge midpoint"))
     c.register_capability("Edge fillet + chamfer (exact radius)", "round or bevel the crease where two implicit surfaces meet (K5), the field-native fillet: fillet_union/intersection/difference give an EXACT constant-radius circular arc at the edge (iq rounded booleans) -- a true dimensioned radius, unlike smooth_union whose k is a soft blend, not a radius; chamfer_union gives the flat 45-degree bevel. Result is an SDF that raymarches/meshes/emits. KEPT NEGATIVE: a 3-way vertex is only approximately r. See holographic_fillet.", example="import numpy as np, lecore; m=lecore.UnifiedMind(); px=lambda P: np.asarray(P,float)[:,0]; py=lambda P: np.asarray(P,float)[:,1]; f=m.fillet_union(px,py,0.3); float(f(np.array([[0.,0.3,0]]))[0])", native=True, aliases=("fillet an edge", "round an edge", "constant radius fillet", "chamfer an edge", "bevel an edge", "round the corner between two surfaces", "edge blend", "rolling ball fillet", "fillet between two solids"))
@@ -587,7 +589,7 @@ def register_p06(c):
         "floor the loop refuses and the MODEL IS NEVER CONSULTED. Measured with a stub that always claims "
         "done: has-tool 20/20, no-tool 0/20 -- FALSE-ACTION RATE 0%. Refuses non-finite args and off-manifest "
         "tools; never guesses an unparsed reply",
-        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.attach_llm(my_fn); mind.agent_loop('smooth a bumpy mesh')",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.attach_llm(my_fn); mind.tool_loop('smooth a bumpy mesh')",
         native=True, aliases=("let a model use my tools", "in process tool use loop",
                               "run an agent against the catalog", "agent loop",
                               "refuse a step when no tool fits", "model picks tools and i run them",
@@ -673,7 +675,8 @@ def register_p06(c):
         "is using it on a guess. Indices resolve by lowest index on both paths, so ties cannot move",
         example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); idx, scores = mind.cleanup_batch(codebook, queries)   # backend='wgsl' to try a device",
         native=True, aliases=("clean up many cues at once", "batch cleanup", "recall many vectors at once",
-                              "nearest atom for a stack of queries", "batched nearest neighbour"))
+                              "nearest atom for a stack of queries", "batched nearest neighbour",
+                              "batch cleanup of noisy cues", "denoise a whole stack of vectors"))
 
     c.register_capability(
         "Decision-safe quantization (does the ARGMAX survive?)", "measure the top-1 FLIP RATE when an index "
@@ -1378,7 +1381,7 @@ def register_p06(c):
         "Pinned end-to-end: routed members converge in the workspace loop.",
         example="import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(); [r for r,_ in m.dispatch_roles(['leave a map of the target direction','adjust the texture gains'], {'target_params': np.ones(3)})]",
         native=True, aliases=("route tasks to swarm roles", "staff the swarm", "assign agent roles",
-                              "texture the scene routes to texturer", "role dispatch"))
+                              "texture the scene routes to texturer", "role dispatch", "texture the scene routes to texturer", "route each request to the right specialist"))
 
     c.register_capability("Shared workspace for swarm roles (coordinate through slots, not chatter)",
         "mind.shared_workspace() + render_critique_loop(workspace=): named slots the roles read and "
@@ -1819,7 +1822,8 @@ def register_p06(c):
                               "recurrent model with provenance", "route a stream to the right model",
                               "should I fit a generator or a memory", "sequence engine",
                               "rnn that measures first", "adaptive sequence architecture",
-                              "trajectory classifier with signatures"))
+                              "trajectory classifier with signatures",
+                             "should I fit a generator or a memory", "generator versus memory decision"))
 
     c.register_capability("Stream sentinel (regime watch + change events + priced recorder)",
         "mind.stream_sentinel().watch(x) slides the HRNN ladder along a stream, segments it by regime, and "
@@ -1953,7 +1957,7 @@ def register_p06(c):
         native=True, aliases=("is my creature actually learning", "wrong habit alarm",
                               "agent learning progress meter", "did the policy crystallise wrong",
                               "creature behavior formation", "reinforcement learning sanity check",
-                              "behavior entropy meter", "policy formation vs correctness"))
+                              "behavior entropy meter", "policy formation vs correctness", "reinforcement learning sanity check", "is my agent learning the wrong habit"))
 
     c.register_capability("Dynamic model synthesis (emit the pipeline as an inspectable recipe)",
         "mind.synthesize_model(data, labels=...) measures the data and EMITS the pipeline as a JSON recipe "
@@ -2624,7 +2628,8 @@ def register_p06(c):
                               "hidden influences across many series", "is this residual real or noise",
                               "am I outside anything the model has seen", "market state never seen before",
                               "common driver behind correlated moves", "unexplained co-movement",
-                              "external factor influencing my data"))
+                              "external factor influencing my data",
+                             "am I outside anything the model has seen", "is this input out of distribution"))
 
 
     c.register_capability(
@@ -2837,7 +2842,7 @@ def register_p06(c):
                               "shrink this point cloud for storage",
                               "store distribution not samples", "distributional codec",
                               "summarize samples as a density model",
-                              "replace a sample bank with a model",
+                              "replace a sample bank with a model", "compress samples as a distribution",
                               "ship the moments not the points", "moment based compression"))
 
     c.register_capability(
@@ -3194,7 +3199,9 @@ def register_p06(c):
         "gets read as the CALL SHAPE (route_or_abstain yields (Capability,score) TUPLES; expand_query's "
         "expanded is a BOOL; fit_camera returns a DICT not a camera). Errors are REPORTED, not raised.",
         example="import lecore; m=lecore.UnifiedMind(); print(m.shape_of(m.quadruped_spec)['returns'][:80])",
-        native=True, aliases=("what shape does this return", "what does this function give back",
+        native=True, aliases=("probe a method before calling it", "probe a faculty signature",
+                             "inspect a function safely", "check the call shape first",
+                             "what shape does this return", "what does this function give back",
                              "how do i call this faculty", "what arguments does this take",
                              "inspect a return value", "why is this returning the wrong thing",
                              "attribute error on a returned object", "is this a dict or an object"))
@@ -3278,6 +3285,325 @@ def register_p06(c):
                              "two paths share the same memory", "weights instead of a winner"))
 
     c.register_capability(
+        "Delegate (the boss verb: task -> gated agent loop -> end result + receipt)",
+        "mind.delegate(task): the orchestrator shape in one door -- the boss commands, the "
+        "substrate gates and meters, a back-side agent works the task with leCore's tools. "
+        "Thin over tool_loop: resolves the agent (llm= > attached > remote_llm, remote only "
+        "when INTENTIONALLY configured), keeps route_or_abstain BELOW the model, returns "
+        "agent identity, elapsed_ms, and a REPRODUCIBLE sha256 receipt. END-RESULT "
+        "CONTRACT: done without a DONE answer flips to done=False -- tool chatter is not "
+        "a result. Full mechanics in the delegate docstring.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256, seed=0); r=m.delegate('smooth a bumpy mesh', llm=lambda p: 'DONE: smooth'); print(r['done'], r['agent'], r['receipt'][:8])",
+        native=True, aliases=("delegate a task to an agent", "boss verb for the substrate",
+                             "orchestrate a worker llm", "run an agent and collect the result",
+                             "hand a job to the attached model", "delegate to openzoo"))
+
+    c.register_capability(
+        "Sims you can SEE (drop, particles, smoke -> frames and GIFs, one call each)",
+        "Composed doors close the 'sim was write-only' gap (sweeps 80-82): scene.animate() "
+        "renders semantic simulate() frames; particle_animation (emit+advance+splat); "
+        "smoke_animation (mixture contract owned); body_animation steps ANY .step/.x body "
+        "-- rope, rigid, cloth3d, MPM snow -- with AUTO-FRAMING (solvers live in different "
+        "coordinate spaces) and per-body substeps= for stiff solvers; "
+        "run_simulation('smoke'); fem_simulate(record_every=k) returns POSITIONAL frames "
+        "(history is the energy curve). gif= writes GIF89a everywhere.",
+        example="import lecore; m=lecore.UnifiedMind(); f=m.smoke_animation(steps=8, shape=(32,32)); print(len(f), f[0].shape)",
+        native=True, aliases=("animate a physics drop", "particle system you can see",
+                             "smoke simulation gif", "render a simulation as animation",
+                             "watch the simulation", "sim to pixels",
+                             "animate soft and rigid bodies", "rope and cube physics gif",
+                             "procedural pattern as pixels", "watch the snow pile up",
+                             "animate a jelly tet mesh", "auto frame the simulation camera"))
+
+    c.register_capability(
+        "Physical material lookup (116 real materials with measured properties + units)",
+        "mind.material_data: the LOOKUP door for holographic_materialdata's physics DB. "
+        "material_data('copper') -> density 8960 kg/m^3, Young's modulus, sound speed, "
+        "thermal properties, melting point, each with UNITS; material_data(category='metal') "
+        "-> the category roster; material_data() -> all 12 categories with counts. Typos "
+        "return difflib near misses, never a KeyError (measured: a prefix rule missed "
+        "'coper' -> 'copper' on the double letter). NOT the materials() roster door -- that "
+        "lists RENDER libraries, a different question.",
+        example="import lecore; m=lecore.UnifiedMind(); print(m.material_data('copper')['density'], m.material_data('coper')['near'][0])",
+        native=True, aliases=("look up a real material by name", "density of a material",
+                             "physical properties of copper", "what materials are there",
+                             "material database", "youngs modulus lookup"))
+
+    c.register_capability(
+        "Orient (the front door: full capability access at a model's fingertips)",
+        "mind.orient(topic=) -- the anti-hand-roll compass, generated LIVE from the "
+        "catalog and partition (beats a static skill file by construction): the "
+        "five-move agentic workflow (serve -> find_capability -> describe_skill -> do "
+        "-> teach/feedback/bequeath), Rule 0 for agents, live counts (capabilities, "
+        "taught rows, wisdom authors, learned APIs), and topic= returns the top "
+        "capability pointers so the model is DIRECTED to an existing door before "
+        "writing anything new. The MCP initialize banner carries the same contract "
+        "to every connected model plus the newer doors (study, wisdom, reflexes).",
+        example="import lecore; m=lecore.UnifiedMind(); print(m.orient(topic='forecast a series')['directed_to'][0]['name'])",
+        native=True, aliases=("how do I use lecore", "getting started with lecore",
+                             "list your capabilities", "which capability should I use",
+                             "direct me to the right tool", "agentic workflow for lecore"))
+
+    c.register_capability(
+        "Tool reflex + preemptive serve (the substrate answers before the model)",
+        "mind.tool_reflex_teach(pattern, service, endpoint, params=, extract_numbers=) "
+        "teaches HOW a tool answers a question shape; mind.serve(query) tries MEMORY "
+        "(T0), then the usage-learned TOOL REFLEX (deterministic argument extraction, "
+        "live api_use call, result returned with the tool named -- NO LLM), then "
+        "honest ESCALATION upward. Successful serves strengthen the usage trace "
+        "(tool_note/tool_predict). Reflexes ride the taught rails (toolreflex "
+        "provenance) and survive restarts. Arguments are never guessed.",
+        example="import lecore; m=lecore.UnifiedMind(); m.teach('capital of x','Y'); print(m.serve('capital of x')['via'])",
+        native=True, aliases=("answer with a tool before calling the model", "preemptive tool call",
+                             "teach the substrate how a tool works", "skip the llm when a tool serves",
+                             "learn tool routing from usage", "serve results without a model"))
+
+    c.register_capability(
+        "openzoo supercharge doors (limitless context + citations over MCP)",
+        "Four MCP tools (sweep 102, wire-pinned): study(root) digests a server-side "
+        "tree into a persistent content-derived handle -- bake once, ask forever, the "
+        "limitless-context door (hardware is the only ceiling). study_ask(handle, "
+        "query) answers with a declared lexical verdict, honest off-corpus refusal, "
+        "and CITATIONS naming source file and symbol. wisdom_record / wisdom_ask carry "
+        "the testament rails over the wire with authorship. Coding/math/physics ride "
+        "lecore_invoke (2,293 faculties), math_eval, fact_check, sims.",
+        example="import lecore; m=lecore.UnifiedMind(); st=m.study('docs'); a=st['ask']('what is leCore'); print(a['citations'][:1])",
+        native=True, aliases=("limitless context window over mcp", "cite sources from studied files",
+                             "supercharge openzoo", "study a tree over the wire",
+                             "grounded answers with citations", "zoo models share wisdom"))
+
+    c.register_capability(
+        "Commons doors (opt-in pooled knowledge across all users and models)",
+        "mind.contribute(dest, author=) screens SHARED taught rows through a privacy "
+        "gate (session-salted rows never leave; path / email / digit-run / key shapes "
+        "rejected, each with its reason on the review sheet) and exports a "
+        "commons:<author> bundle. mind.commons_pool(bundles, root) merges many users' "
+        "bundles, conflicts FLAGGED, wisdom attribution preserved; any contributor "
+        "imports the commons back with memory_import(root). Opt-out honored "
+        "(_commons_optout). KEPT NEG: the lexical screen is a FLOOR not an anonymity "
+        "proof -- the review sheet is the real gate. All who contribute may draw.",
+        example="import lecore, tempfile, os; m=lecore.UnifiedMind(); m.teach('2+2','4'); print(m.contribute(os.path.join(tempfile.mkdtemp(),'b'), author='u')['kept'])",
+        native=True, aliases=("pool knowledge from many users", "contribute to shared memory",
+                             "opt out of shared memory", "sanitize memory before sharing",
+                             "combine many memory bundles into one", "collective learning pool",
+                             "federated knowledge commons"))
+
+    c.register_capability(
+        "Wisdom doors (a model's testament outlives the model)",
+        "mind.bequeath(lesson, author, topic=) records a lesson on the durable taught "
+        "rails with provenance wisdom:<author> -- attribution IS the immortality. "
+        "mind.wisdom(query=, author=) inherits lessons WITH authorship in the author's "
+        "own words. memory_export(provenance=('wisdom:NAME',)) bundles one model's "
+        "legacy for any other mind or model to import; both ends of the cp69 pipe now "
+        "carry provenance (sweep 99 fixed symmetric flattening at export AND import -- "
+        "a stranger recalled the lesson at T0 while wisdom() showed no authors). The "
+        "leOS mission as a door: sparks are not lost to time.",
+        example="import lecore; m=lecore.UnifiedMind(); m.bequeath('measure before building', author='model-a'); print(m.wisdom()['authors'])",
+        native=True, aliases=("pass wisdom between models", "record a lesson for future sessions",
+                             "a model's legacy after shutdown", "immortalize what I learned",
+                             "share knowledge between agents", "who taught this lesson",
+                             "inherit wisdom from past models"))
+
+    c.register_capability(
+        "Merge two branches of a tree (census + triage + safe apply)",
+        "mind.merge_trees(ours, theirs, base=None, apply=False) -- the branch-merge "
+        "decision sheet: sha256 census, buckets, and BOTH-DIRECTION unique-line triage "
+        "per differing file. Verdicts: theirs_is_base (ours wins), ours_is_base, "
+        "append_extension (the NOTES case), both_changed (TRUE collision -- never "
+        "auto-decided). apply=True executes only unambiguous verdicts; .lecore memory "
+        "files always refused with the memory_import reason. Born from sweep 97: "
+        "memory-based triage stomped three sweep-old edits; run against the same trees "
+        "this door flags all three as both_changed. Measurement over memory.",
+        example="import lecore, tempfile, os; m=lecore.UnifiedMind(); a=tempfile.mkdtemp(); b=tempfile.mkdtemp(); open(os.path.join(a,'f.py'),'w').write('x=1'); open(os.path.join(b,'f.py'),'w').write('x=2'); print(m.merge_trees(a,b)['n_both_changed'])",
+        native=True, aliases=("merge a branch upload into the working tree", "compare two directory trees",
+                             "which files changed between two folders", "diff two repos",
+                             "three way merge decision sheet", "safe branch merge"))
+
+    c.register_capability(
+        "Regenerable audit (store the text, regenerate the vectors)",
+        "learning_save(root, audit='regen') -- lever 3 (sweeps 96+101): when every audit "
+        "K/V row is taught-attributable, the experience section is dropped and the "
+        "loader replays taught TEXT (195x, 3,816 -> 20 B/fact, 120/120 T0). Sweep 101 "
+        "wired it EVERYWHERE the engine saves pure-taught minds: export / contribute / "
+        "commons_pool bundles (60-fact bundle 229KB -> 1.4KB) plus rollover and "
+        "checkpoints, where the guard falls back gracefully on lived-in minds and "
+        "audit_regen_reason SAYS WHY (measured: ~13 non-taught writes per 40 facts). "
+        "Default 'store' unchanged. Next rung: per-row attribution.",
+        example="import lecore; m=lecore.UnifiedMind(); m.teach('q','the answer'); r=m.learning_save('/tmp/rg', audit='regen'); print(r['audit_regen'], r['bytes'])",
+        native=True, aliases=("shrink my saved memory", "regenerate vectors from text",
+                             "store text not vectors", "make the partition small",
+                             "middle out memory compression", "diminishing file growth"))
+
+    c.register_capability(
+        "Partition byte census (where does my memory file's size GO)",
+        "mind.partition_report(root) -- per-section compressed/raw census of a .lecore "
+        "partition, fattest sections named with shares, bytes-per-fact when the taught "
+        "count is recoverable, and the measured remedy. Built on the sweep-95 diagnosis: "
+        "growth was LINEAR (~3.8KB/fact), 99% = lever7 audit K/V hypervector rows, "
+        "already int8-packed; the codec atlas certified further codecs DO NOT PAY "
+        "(high-entropy by construction -- that IS VSA). KEPT NEG: the middle-out fix is "
+        "lever 3, regenerate audit from taught text on load -- not more compressors.",
+        example="import lecore; m=lecore.UnifiedMind(); m.teach('q','a'); m.learning_save('/tmp/pr'); r=m.partition_report('/tmp/pr'); print(r['sections'][0]['name'], r.get('bytes_per_fact'))",
+        native=True, aliases=("where do the partition bytes go", "why is my memory file so big",
+                             "middle out compression", "memory growth rate diagnosis",
+                             "per section size census", "compress my saved memory"))
+
+    c.register_capability(
+        "Study a directory (macro comprehension: the substrate orchestrates)",
+        "mind.study(root) -- ONE call comprehends a large tree, no per-step LLM "
+        "orchestration: ingest_files map, repo_map (symbols, dep graph, PageRank, budgeted "
+        "skeleton), document_digest per doc, CODE DOCSTRINGS harvested into the corpus "
+        "(sweep 94: a pure-code tree refused everything), an ask() closure (idf-weighted "
+        "lexical retrieval, declared verdict, refuses off-corpus), ladder=True climbs the "
+        "material MDL-gated (tower size set by GAIN not corpus size -- massive behaves "
+        "like small; a flat terminal is a loud RESULT), caps DECLARED in 'truncation'. "
+        "794 modules in 8.7s, measured.",
+        example="import lecore; m=lecore.UnifiedMind(); st=m.study('docs'); print(st['tree']['n_files'], st['ask']('recipe for banana bread')['answerable'])",
+        native=True, aliases=("understand a whole directory in one call", "study a codebase",
+                             "digest a large folder for an agent", "macro level code comprehension",
+                             "answer questions from my files", "substrate handles the steps"))
+
+    c.register_capability(
+        "Table-to-analyst bridge (a column IS a series)",
+        "mind.table_analyze(table, column, tasks=...) runs the analyst stack on a database "
+        "column in one call: regimes, drift, envelope forecast, demux, formula -- same task "
+        "contract as the MCP series_analyze door. Accepts a UserTable (db.resolve), a "
+        "Table, or a bare list of row dicts; non-numeric columns fail AT the door naming "
+        "the offending value. KEPT NEG: UserTable.rows is the dict list while .records is "
+        "the (n,dim) hypervector MATRIX -- the names invite exactly the wrong guess "
+        "(measured, sweep 89).",
+        example="import lecore; m=lecore.UnifiedMind(); r=m.table_analyze([{'v': float(i%9)} for i in range(40)], 'v', tasks=('regimes',)); print(r['regimes']['n_segments'])",
+        native=True, aliases=("analyze a table column", "regimes in a database column",
+                             "forecast from a table", "run analytics on my table",
+                             "table column as a time series", "detect drift in a column"))
+
+    c.register_capability(
+        "Self-learning MCP surface (persistent memory + deterministic tool memo)",
+        "Both halves of 'the model improves as leCore learns' (sweeps 86-87): ACCURACY -- "
+        "memory_write/memory_search/zoo_teach persist and survive restarts (pinned); "
+        "corpus_delta keeps sources current. SPEED -- the deterministic tool memo cashes in "
+        "the receipt's proof: pure tools return stored content byte-identically (452x RAM "
+        "hits), in ONE toolmemo/store.lecore (compact, 512-cap; old "
+        "shards fold in and self-delete), disk "
+        "hits on restart (0.2ms, cache:'hit-disk'), ledger in zoo_report.tool_memo. Stateful"
+        "/zoo tools never memo; LECORE_MCP_MEMO=0 kills. Repeat work pays once -- across "
+        "SESSIONS.",
+        example="from holographic_mcp import MCPServer; import tempfile; s=MCPServer(memory_root=tempfile.mkdtemp()); r=[s.handle({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'math_eval','arguments':{'text':'2+2 == 4'}}}) for _ in (0,1)]; print(r[1]['result']['_meta']['lecore.cost']['cache'])",
+        native=True, aliases=("does the mcp server cache results", "get faster on repeated calls",
+                             "persistent agent memory over mcp", "teach the server a fact",
+                             "deterministic tool memo", "why was the second call instant"))
+
+    c.register_capability(
+        "Analyst doors on the MCP server (series analysis + fact checking)",
+        "Three curated tools bring the math/analysis stack to openzoo hosts (sweeps 83-84): "
+        "series_analyze (demux + regimes + envelope forecast + a 'formula' task recovering "
+        "the generating LAW); dataset_decompose (1-D -> MDL-gated formula with residual + "
+        "bit cost; 2-D -> scaffold discovery, per-channel decomposition, structured/noise "
+        "verdict -- the inverse problem as a tool call); fact_check (arithmetic COMPUTED, "
+        "corpus-gated support CERTIFIED, unsupported claims NAMED, math-only mode says so). "
+        "lecore_invoke accepts kwargs=. Doors add transport, never algorithms.",
+        example="from holographic_mcp import MCPServer; import tempfile, json; s=MCPServer(memory_root=tempfile.mkdtemp()); r=s.handle({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'fact_check','arguments':{'text':'2+2 == 4'}}}); print(json.loads(r['result']['content'][0]['text'])['math']['ok'])",
+        native=True, aliases=("fact check a claim over mcp", "verify claims against sources",
+                             "market analysis for agents", "regime detection over the wire",
+                             "decompose a series for a host model", "check the math in this text",
+                             "find the formula behind a dataset", "take unlabeled data apart",
+                             "detect drift in a market series", "separate mixed signals into components"))
+
+    c.register_capability(
+        "Studio doors on the MCP server (text->3D->render, image edit, math, charts)",
+        "Six curated tools bring the modeling/image/math/chart stack to Blender-MCP ergonomics: "
+        "scene_create (plain words -> live named-object scene -> PNG image block), scene_adjust "
+        "('make the sphere bigger' -> re-render), scene_export (ASCII STL out), image_tool "
+        "(pattern/sharpen/recolor/blend, base64 PNG in, image blocks out), math_eval (claims "
+        "COMPUTED, wrong ones named), chart_make (deterministic SVG via mind.chart_svg). Any "
+        "ndarray image in ANY tool result ships as a real MCP image block with honest "
+        "payload_bytes. The deep stack stays one lecore_find + lecore_invoke away.",
+        example="from holographic_mcp import MCPServer; import tempfile, json; s=MCPServer(memory_root=tempfile.mkdtemp()); r=s.handle({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'chart_make','arguments':{'kind':'bar','series':[3,1,4]}}}); print(json.loads(r['result']['content'][0]['text'])['svg'][:5])",
+        native=True, aliases=("render a scene for an mcp host", "3d modeling over mcp",
+                             "blender mcp level tools", "edit an image over the wire",
+                             "chart tool for agents", "give the model studio tools"))
+
+    c.register_capability(
+        "Deterministic data charts (numbers -> SVG a human reads)",
+        "mind.chart_svg(kind, series): LINE | BAR | SCATTER with axes, ticks, a colorblind-safe "
+        "fixed palette, bars anchored at ZERO by convention (an unanchored bar chart "
+        "exaggerates). Pure string assembly, stdlib only -- the cadexport contract: the caller "
+        "writes the file or ships it over a wire; byte-identical output for identical input. "
+        "NOT svg_canvas (a hypervector CODEC for vector art -- different costume, audited "
+        "apart). KEPT NEG: non-finite values are REFUSED loudly -- a chart that silently drops "
+        "a NaN lies about the data it claims to show.",
+        example="import lecore; m=lecore.UnifiedMind(); print(m.chart_svg('bar', [3,1,4], title='digits')[:5])",
+        native=True, aliases=("plot a chart", "bar chart from numbers", "line plot of a series",
+                             "draw a graph of data", "make a figure from data",
+                             "scatter plot as svg"))
+
+    c.register_capability(
+        "Generational memory rollover (every boot gathers all memory into one file)",
+        "mind.learning_rollover(root), default-ON at autoboot mount: consolidate every "
+        "learning-state file under <root>/learning into ONE fresh state-<UTC>Z.lecore -- "
+        "full-load the newest, union veto tombstones FIRST (cp54), replay older generations' "
+        "taught rows (newest teaching wins, question-identity supersede -- gate firing alone "
+        "false-hits on crosstalk, measured), save, VERIFY, only then delete priors. Read-only "
+        "dirs and the shipped release_bundle refuse; LECORE_MEMORY_ROLLOVER=0 opts out. "
+        "KEPT NEG: older generations contribute their durable record; hot structures come "
+        "from the newest load only.",
+        example="import lecore, tempfile, os; r=tempfile.mkdtemp(); a=lecore.UnifiedMind(dim=256, seed=0); a.teach('q1','a1'); a.learning_save(r); b=lecore.UnifiedMind(dim=256, seed=0); print(b.learning_rollover(r)['rolled'], b.ask('q1')['answer'])",
+        native=True, aliases=("consolidate memory files on boot",
+                             "one memory file per restart",
+                             "merge old memory into current",
+                             "timestamped memory generations",
+                             "clean up prior memory files",
+                             "import prior memory and keep one file"))
+
+    c.register_capability(
+        "Chunk-level delta bind (one edited file re-ships one chunk, not megabytes)",
+        "MCP tool corpus_delta -- the rsync move. PROBE with chunk_hashes=[sha256,...] to learn "
+        "{missing, known}; FILL with chunks={hash: text} shipping only those. A complete fill "
+        "assembles under THE SAME handle corpus_bind gives the identical corpus (pinned) -- delta "
+        "and whole binds are indistinguishable downstream. Mis-keyed chunks refused per-chunk; "
+        "chunk store survives restart (pinned). KEPT NEG: the CLIENT owns the chunking -- hashes "
+        "must cover exactly what ships.",
+        example="from holographic_mcp import MCPServer; import tempfile, json, hashlib; s=MCPServer(memory_root=tempfile.mkdtemp()); h=hashlib.sha256(b'one chunk').hexdigest(); r=s.handle({'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'corpus_delta','arguments':{'chunk_hashes':[h],'chunks':{h:'one chunk'}}}}); print(json.loads(r['result']['content'][0]['text'])['n_chunks'])",
+        native=True, aliases=("upload only the chunks that changed",
+                             "delta bind a corpus", "rsync style ingest",
+                             "which chunks are already stored",
+                             "rebinding a repo after one file changed",
+                             "incremental corpus upload"))
+
+    c.register_capability(
+        "Pre-payment corpus gate (answerable, or certified abstain, before the 402)",
+        "mind.corpus_gate(query, docs): run the adaptive cascade over a bound corpus and return "
+        "one flat gateway verdict -- {answerable, stage, margin, ranked, advice}. answerable=False "
+        "is a CERTIFIED abstain: refuse pre-402 or downgrade and say so in the receipt. Also on "
+        "the MCP server: corpus_ask(gate='dispatch'), default-off, classic BM25 path unchanged. "
+        "KEPT NEG: abstain says the CORPUS cannot answer; the model still might from its own "
+        "knowledge -- gate the corpus-grounded price tier, never the model.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256, seed=0); print(m.corpus_gate('quantum entanglement', ['wallet address prints via npx openzoo address'])['answerable'])",
+        native=True, aliases=("can the corpus answer this question",
+                             "check answerability before paying",
+                             "refuse before quoting money",
+                             "payment gate for retrieval",
+                             "certified abstain before the 402",
+                             "should the gateway forward this ask"))
+
+    c.register_capability(
+        "Prefix decision from a raw transcript (JSON in, choice out)",
+        "mind.transcript_prefix_route(prompts, upstreams=None): measure prefix reuse over a list of "
+        "prompt strings the caller already holds -- BIT-IDENTICAL to the live seam's accounting "
+        "(pinned) -- and with upstreams= add the routing decision under 'route'. Built for gateways "
+        "whose prompts never pass through a Python object (openzoo's proxy owns the request log): "
+        "one POST of the transcript, one choice back. per_turn shows WHERE reuse collapsed (a "
+        "mid-session edit is one small entry). KEPT NEG: hit_rate reads 0.0 -- a raw transcript "
+        "carries no replay table; saving_estimate stays an upper bound.",
+        example="import lecore; m=lecore.UnifiedMind(); r=m.transcript_prefix_route(['aa','aab','aabc'], upstreams=[{'name':'x','prefix_cache':True,'cost_per_1k':1.0}]); print(r['route']['choice'])",
+        native=True, aliases=("prefix reuse from a list of prompts",
+                             "measure reuse from my request log",
+                             "route a transcript to an upstream",
+                             "prefix caching decision without attaching a model",
+                             "how much of my session prompts repeat",
+                             "gateway prefix routing one call"))
+
+    c.register_capability(
         "Route a session to a prefix-caching upstream (the openzoo decision)",
         "mind.llm_prefix_route(upstreams): picks an upstream from MEASURED prefix reuse, not from price "
         "alone. On a 12-turn agent transcript with a mid-session edit, hit_rate is 0.000 while "
@@ -3286,7 +3612,7 @@ def register_p06(c):
         "to price when reuse is low or no upstream advertises caching. DISTINCT from unicron_prefix_cache "
         "(a token radix tree for a LOCAL runtime). KEPT NEG: saving_estimate is an UPPER BOUND -- real "
         "providers discount, not exempt.",
-        example="import lecore; m=lecore.UnifiedMind(); m.attach_llm(lambda p:'ok'); m._llm('aa'); m._llm('aab'); print(m.llm_prefix_route([{'name':'x','prefix_cache':True,'cost_per_1k':1.0}]))",
+        example="import lecore; from holographic.agents_and_reasoning.holographic_llmseam import MeteredLLM; m=lecore.UnifiedMind(); m.attach_llm(MeteredLLM(lambda p:'ok')); m._llm('aa'); m._llm('aab'); print(m.llm_prefix_route([{'name':'x','prefix_cache':True,'cost_per_1k':1.0}])['choice'])",
         native=True, aliases=("which provider should this session go to",
                              "route by prompt caching support", "pick an upstream for an agent session",
                              "is prompt caching worth it for this workload",
@@ -3324,12 +3650,11 @@ def register_p06(c):
 
     c.register_capability(
         "Metered LLM seam (what the attached model costs, and replay for the deterministic ones)",
-        "attach_llm now wraps your callable in MeteredLLM (holographic_llmseam): counters always on, exact "
-        "sha256 hash-replay opt-in, hard call budget that FAILS CLOSED. The seam was self._llm=llm and nothing "
-        "else -- the priciest unit in the engine, outside every measured tier. mind.llm_report() gives asked/"
-        "calls/hits/hit_rate/chars/seconds. MEASURED on a 3-branch swarm workload: 360 asked -> 40 real calls, "
-        "hit_rate 0.889. "
-        "KEPT NEG: cache=False by default -- caching a SAMPLING model collapses N branches to one and "
+        "Wrap your callable, then attach: attach_llm(MeteredLLM(fn)) (holographic_llmseam) -- attach_llm "
+        "itself never wraps (pinned: llm_tool's rationale depends on it). Counters always on, exact sha256 "
+        "hash-replay opt-in, hard call budget that FAILS CLOSED. mind.llm_report() gives asked/calls/hits/"
+        "hit_rate/chars/seconds. MEASURED on a 3-branch swarm workload: 360 asked -> 40 real calls, hit_rate "
+        "0.889. KEPT NEG: cache=False by default -- caching a SAMPLING model collapses N branches to one and "
         "manufactures a false consensus (pinned in the selftest).",
         example="import lecore; from holographic.agents_and_reasoning.holographic_llmseam import MeteredLLM; m=lecore.UnifiedMind(); m.attach_llm(MeteredLLM(lambda p:'hi', cache=True)); m._llm('q'); m._llm('q'); print(m.llm_report()['hit_rate'])",
         native=True, aliases=("how much is my llm costing me", "cache model responses",
@@ -3433,8 +3758,9 @@ def register_p06(c):
         "majority; take top-k, or add a DISTINCTIVE alias). ABSTAINED = thin coverage. MISROUTE = crowded "
         "neighbourhood. Three attacks on the floor are refuted at matched false-action: BM25 scorer, "
         "self-null gate, margin rescue. KEPT NEG: a row cannot tell a thin alias set from a hard one.",
-        example="import lecore; m=lecore.UnifiedMind(); r=m.alias_gaps(n=20); print(r['n_gaps'], r['gaps'][0]['fix'])",
+        example="import lecore; m=lecore.UnifiedMind(); r=m.alias_gaps(n=20); fix=[(g['held_out'], g['capability']) for g in r['gaps']]; print(r['n_gaps'], m.alias_gaps(fixture=fix)['n_gaps'])",
         native=True, aliases=("which capabilities are hard to find",
+                             "frozen fixture for before after deltas",
                              "why cant users find my feature", "what aliases should i add",
                              "find weak spots in the catalog", "capability discoverability report",
                              "which entries need better wording", "audit my capability descriptions"))
@@ -3479,6 +3805,27 @@ def register_p06(c):
                  "load doctrine and memory and a model", "autoboot"),
     )
 
+    # THE GROUNDING CORPUS, REGISTERED. It is a data file plus a build script,
+    # so nothing auto-registers it -- and "what text does the install use" found
+    # attach_llm and set_embedder before this entry existed.
+    c.register_capability(
+        "Default grounding corpus for an install (general reference, not leCore docs)",
+        "With no --doc, install.py grounds in lecore_data/knowledge/corpus.txt.xz "
+        "-- six layers against named model weaknesses: RELATIONS (Webster 1913 "
+        "closed-class, which WordNet omits by design), ORDER, SYNTAX, MATH, "
+        "PLANNING, SEMANTICS. 420 KB because install fits calibration on "
+        "text[:20000] and mines vocabulary from text[:400000]. Grounding on our "
+        "OWN docs makes a documentation chatbot instead of a better reasoner, so "
+        "that is now the last fallback. Rebuild: tools/build_corpus.py --fetch.",
+        example="import lzma; t = lzma.open('lecore_data/knowledge/corpus.txt.xz').read().decode(); t[:60]",
+        aliases=("what text does the install use",
+                 "change the grounding corpus",
+                 "rebuild the corpus",
+                 "default corpus",
+                 "what does unicron read",
+                 "stop it answering only about lecore"),
+    )
+
     # BOTH ENDS, IN ONE CALL. autoboot's `llm="auto"` hunts for a MODEL DIRECTORY
     # on disk, which is the wrong question when THE CALLER IS THE MODEL -- an
     # agent driving leCore has no model dir, it has itself. Measured on a live
@@ -3488,17 +3835,13 @@ def register_p06(c):
     # autoboot above -- module-level, so nothing auto-registers it.
     c.register_capability(
         "Boot leCore with BOTH ENDS (agent_boot: memory in front, your LLM behind)",
-        "lecore.agent_boot(llm=fn) is autoboot plus a required model rung: memory "
-        "answers what it knows at T0, and anything it cannot answer escalates to "
-        "your callable instead of stopping at T4. The llm argument is REQUIRED and "
-        "must be callable -- a human at a REPL must never be wired in as the back "
-        "end, and there is no reliable way to detect an LLM caller from inside the "
-        "process, so it asks rather than guesses. Use lecore.autoboot() for the "
-        "memory end only. THE MODEL IS USUALLY IN ANOTHER PROCESS -- Claude or "
-        "ChatGPT behind OpenWebUI, openzoo, ollama or a vendor API -- so llm "
-        "defaults to \"remote\": an OpenAI-compatible /chat/completions client "
-        "built from LECORE_LLM_URL / LECORE_LLM_MODEL / LECORE_LLM_KEY (OPENAI_* "
-        "also read). Pass a base URL directly, or a callable for a local model.",
+        "autoboot plus a model rung: memory answers what it knows at T0, and what "
+        "it cannot answer escalates to your model instead of stopping at T4. The "
+        "model is usually in ANOTHER process, so llm defaults to \"remote\" -- an "
+        "OpenAI-compatible client from LECORE_LLM_URL / _MODEL / _KEY (OPENAI_* "
+        "read too). Pass a base URL, or a callable for a local model. Use "
+        "lecore.autoboot() when a human is at the keyboard: agent_boot requires a "
+        "model and would otherwise wire the person in as the back end.",
         example="import lecore; m = lecore.agent_boot(llm=lambda p, **k: 'answer'); m._autoboot_report['rung']",
         aliases=("attach an llm to both ends of lecore",
                  "boot lecore with memory and a model",

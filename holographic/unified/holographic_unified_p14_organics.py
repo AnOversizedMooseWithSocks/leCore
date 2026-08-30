@@ -318,6 +318,20 @@ class _UnifiedPart14:
         import holographic.mesh_and_geometry.holographic_creatureparts as _cp
         return _cp.PartLibrary(dim=dim, seed=seed, expect_sockets=expect_sockets, alpha=alpha)
 
+    def stocked_part_library(self, sockets, dim=None, seed=0, params=None):
+        """Build geometry for every part the `sockets` ask for and DEFINE it into a fresh library
+        (holographic_creaturepartlib.stock_for_sockets) -- the missing half of the render path.
+        part_library() returns an EMPTY codebook by design (define(name, geometry=) is how geometry
+        gets in), so place_parts against an unstocked library places NOTHING and reports missed: []
+        -- placement succeeded; there was nothing to place. `sockets` is
+        build_creature(..., parts=True)['sockets']. Postchecks each part: a 0-vertex build is
+        reported in 'empty', an unknown name in 'missed' (never raised -- one exotic socket must not
+        cost the creature its feet). Returns {"library", "stocked", "missed", "empty"}.
+        KEPT NEG: stocking the WHOLE palette for a 3-part creature pays ~10x the geometry build for
+        vectors that sit unread; the sockets are the demand signal."""
+        import holographic.mesh_and_geometry.holographic_creaturepartlib as _pl
+        return _pl.stock_for_sockets(sockets, dim=dim, seed=seed, params=params)
+
     def attach_part(self, assembly, socket, part_name, library, symmetry=None, n=2):
         """ATTACH A PART to a socket, holographically: the layout becomes ONE vector,
         bundle_bind(socket_roles, part_atoms), so it is queryable (what_is_at), comparable (cosine

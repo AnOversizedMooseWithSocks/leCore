@@ -90,6 +90,15 @@ _KNOWN_INFRASTRUCTURE = {
     "holographic_objectref",
     "holographic_catalog_p01", "holographic_catalog_p02", "holographic_catalog_p03",
     "holographic_catalog_p04", "holographic_catalog_p05", "holographic_catalog_p06",
+    "holographic_bpe",   # restored in the sweep-97 branch merge (was declared on our line)
+    "holographic_brdf",   # restored in the sweep-97 branch merge (was declared on our line)
+    "holographic_catalog_p07",   # restored in the sweep-97 branch merge (was declared on our line)
+    "holographic_lexicon",   # restored in the sweep-97 branch merge (was declared on our line)
+    "holographic_lightcache",   # restored in the sweep-97 branch merge (was declared on our line)
+    "holographic_mcp",   # restored in the sweep-97 branch merge (was declared on our line)
+    "holographic_reasoning",   # restored in the sweep-97 branch merge (was declared on our line)
+    "holographic_tableindex",   # restored in the sweep-97 branch merge (was declared on our line)
+    "holographic_testkit",   # restored in the sweep-97 branch merge (was declared on our line)
 }
 
 

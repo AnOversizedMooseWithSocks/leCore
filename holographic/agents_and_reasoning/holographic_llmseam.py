@@ -259,48 +259,12 @@ class MeteredLLM:
         return "\n".join(lines)
 
     def prefix_route(self, upstreams, min_reuse=0.35):
-        """Which upstream should this session go to, given its MEASURED prefix reuse? (F2'/F6)
-
-        `upstreams` is [{"name", "prefix_cache": bool, "cost_per_1k": float}, ...] -- the caller's own
-        fleet, because leCore cannot know which providers cache prefixes and guessing would be worse than
-        not routing.
-
-        THE DECISION THIS MAKES POSSIBLE. `hit_rate` and `prefix_reuse` disagree on exactly the workload
-        openzoo runs: MEASURED on a 12-turn coding-agent transcript with one mid-session edit, hit_rate
-        0.000 while prefix_reuse was 0.832. A router reading hit_rate alone concludes "caching does not
-        help here" and sends the session anywhere; reading BOTH says "send it to an upstream that caches
-        prefixes, where 83% of the prompt is already paid for". Neither number decides alone.
-
-        NOT the same thing as `unicron_prefix_cache`, which is a RADIX TREE OVER TOKENS for a LOCAL
-        runtime -- it reuses computation we perform ourselves. This routes to a REMOTE backend that will
-        do that reuse for us. Different layers; both real; audited so the next session does not merge them.
-
-        KEPT NEGATIVE: `saving_estimate` is an UPPER BOUND. It assumes a backend charges nothing for a
-        cached prefix, and real providers discount rather than exempt. Treat it as "is this worth routing
-        for", never as a bill."""
+        # DELEGATES to prefix_route_decision below -- the arithmetic exists ONCE, because the
+        # same decision now also serves callers holding a raw transcript instead of a seam
+        # (openzoo's proxy owns the prompts; a MeteredLLM was never in its path). See F2'/F6.
         rep = self.report()
-        reuse = float(rep["prefix_reuse"])
-        exact = float(rep["hit_rate"])
-        ups = list(upstreams or [])
-        if not ups:
-            return {"choice": None, "why": "no upstreams offered", "prefix_reuse": reuse}
-        cachers = [u for u in ups if u.get("prefix_cache")]
-        cheapest = min(ups, key=lambda u: float(u.get("cost_per_1k", 0.0)))
-        if reuse < min_reuse or not cachers:
-            why = ("reuse %.3f below the %.2f floor" % (reuse, min_reuse) if reuse < min_reuse
-                   else "no upstream advertises prefix caching")
-            return {"choice": cheapest["name"], "why": why + " -- routing on price",
-                    "prefix_reuse": reuse, "hit_rate": exact, "saving_estimate": 0.0}
-        # Among prefix-cachers, the effective price is what you pay for the NEW text only.
-        best = min(cachers, key=lambda u: float(u.get("cost_per_1k", 0.0)) * (1.0 - reuse))
-        eff = float(best.get("cost_per_1k", 0.0)) * (1.0 - reuse)
-        base = float(cheapest.get("cost_per_1k", 0.0))
-        return {"choice": best["name"],
-                "why": "prefix_reuse %.3f with hit_rate %.3f -- an exact cache is blind here"
-                       % (reuse, exact),
-                "prefix_reuse": reuse, "hit_rate": exact,
-                "effective_cost_per_1k": round(eff, 6),
-                "saving_estimate": round(max(0.0, (base - eff) / base), 4) if base > 0 else 0.0}
+        return prefix_route_decision(float(rep["prefix_reuse"]), float(rep["hit_rate"]),
+                                     upstreams, min_reuse=min_reuse)
 
     def report(self):
         """Plain data (it crosses an HTTP boundary): counters plus the two derived numbers that matter
@@ -330,6 +294,89 @@ class MeteredLLM:
         self.seconds = 0.0
         self.round_trips = 0
         return self
+
+
+def prefix_route_decision(prefix_reuse, hit_rate, upstreams, min_reuse=0.35):
+    """Which upstream should this session go to, given its MEASURED prefix reuse? (F2'/F6)
+
+    `upstreams` is [{"name", "prefix_cache": bool, "cost_per_1k": float}, ...] -- the caller's own
+    fleet, because leCore cannot know which providers cache prefixes and guessing would be worse than
+    not routing. Module-level ON PURPOSE: the same arithmetic serves BOTH a live MeteredLLM
+    (prefix_route above) and a caller holding only a raw transcript (openzoo's proxy owns the
+    prompts; a Python seam was never in its request path) -- one decision, two doors.
+
+    THE DECISION THIS MAKES POSSIBLE. `hit_rate` and `prefix_reuse` disagree on exactly the workload
+    openzoo runs: MEASURED on a 12-turn coding-agent transcript with one mid-session edit, hit_rate
+    0.000 while prefix_reuse was 0.832. A router reading hit_rate alone concludes "caching does not
+    help here" and sends the session anywhere; reading BOTH says "send it to an upstream that caches
+    prefixes, where 83% of the prompt is already paid for". Neither number decides alone.
+
+    NOT the same thing as `unicron_prefix_cache`, which is a RADIX TREE OVER TOKENS for a LOCAL
+    runtime -- it reuses computation we perform ourselves. This routes to a REMOTE backend that will
+    do that reuse for us. Different layers; both real; audited so the next session does not merge them.
+
+    KEPT NEGATIVE: `saving_estimate` is an UPPER BOUND. It assumes a backend charges nothing for a
+    cached prefix, and real providers discount rather than exempt. Treat it as "is this worth routing
+    for", never as a bill."""
+    reuse = float(prefix_reuse)
+    exact = float(hit_rate)
+    ups = list(upstreams or [])
+    if not ups:
+        return {"choice": None, "why": "no upstreams offered", "prefix_reuse": reuse}
+    cachers = [u for u in ups if u.get("prefix_cache")]
+    cheapest = min(ups, key=lambda u: float(u.get("cost_per_1k", 0.0)))
+    if reuse < min_reuse or not cachers:
+        why = ("reuse %.3f below the %.2f floor" % (reuse, min_reuse) if reuse < min_reuse
+               else "no upstream advertises prefix caching")
+        return {"choice": cheapest["name"], "why": why + " -- routing on price",
+                "prefix_reuse": reuse, "hit_rate": exact, "saving_estimate": 0.0}
+    # Among prefix-cachers, the effective price is what you pay for the NEW text only.
+    best = min(cachers, key=lambda u: float(u.get("cost_per_1k", 0.0)) * (1.0 - reuse))
+    eff = float(best.get("cost_per_1k", 0.0)) * (1.0 - reuse)
+    base = float(cheapest.get("cost_per_1k", 0.0))
+    return {"choice": best["name"],
+            "why": "prefix_reuse %.3f with hit_rate %.3f -- an exact cache is blind here"
+                   % (reuse, exact),
+            "prefix_reuse": reuse, "hit_rate": exact,
+            "effective_cost_per_1k": round(eff, 6),
+            "saving_estimate": round(max(0.0, (base - eff) / base), 4) if base > 0 else 0.0}
+
+
+def prefix_reuse_of(prompts, window=512):
+    """Measure prefix reuse over a TRANSCRIPT the caller already holds -- the stateless twin of
+    MeteredLLM's live accounting, and BIT-IDENTICAL to it by construction (pinned in _selftest):
+    both walk the same longest-identical-head scan over the same bounded window, so a gateway
+    replaying its request log gets the number the seam would have measured.
+
+    `prompts` is the list of prompt strings IN SEND ORDER (a proxy serializes each request body
+    however it likes -- what matters is that the serialization is stable across turns, because
+    reuse is measured on the text as sent). Returns {"prefix_reuse", "chars_total",
+    "chars_reusable", "turns", "per_turn": [reusable chars per prompt]} -- per_turn so a gateway
+    can see WHERE the reuse collapsed (a mid-session edit shows as one small entry).
+
+    WHY THIS EXISTS: openzoo's proxy holds the prompts; a Python MeteredLLM was never in its
+    request path. Meeting that workflow means the measurement must come to the transcript."""
+    hist, per_turn = [], []
+    reusable = total = 0
+    for p in prompts or []:
+        text = "" if p is None else str(p)
+        best = 0
+        for prev in hist:
+            n = min(len(prev), len(text))
+            i = 0
+            while i < n and prev[i] == text[i]:
+                i += 1
+            if i > best:
+                best = i
+        hist.append(text)
+        if len(hist) > int(window):              # same bound as the seam: a session, not a corpus
+            hist.pop(0)
+        per_turn.append(best)
+        reusable += best
+        total += len(text)
+    return {"prefix_reuse": (reusable / total) if total else 0.0,
+            "chars_total": total, "chars_reusable": reusable,
+            "turns": len(per_turn), "per_turn": per_turn}
 
 
 def _selftest_batch():
@@ -396,6 +443,31 @@ def _selftest_batch():
 
 
 def _selftest():
+    # STATELESS TWIN, pinned bit-identical to the live seam: same transcript through
+    # MeteredLLM's accounting and through prefix_reuse_of must agree on BOTH the ratio and the
+    # raw reusable-char count -- if they ever drift, a gateway replaying its log measures a
+    # different workload than the seam it is standing in for.
+    _tp = ["S: a\nU: fix bug\n", "S: a\nU: fix bug\nA: reading\n",
+           "S: a\nU: rename fn\n", "S: a\nU: rename fn\nA: done\nU: test\n"]
+    _sw = prefix_reuse_of(_tp)
+    _lm = MeteredLLM(lambda p: "ok")
+    for _p in _tp:
+        _lm(_p)
+    _rp = _lm.report()
+    assert (_rp["prefix_reuse"] == _sw["prefix_reuse"] and
+            _rp["prefix_chars_reusable"] == _sw["chars_reusable"]), (_rp, _sw)
+    # and the decision built on it routes a high-reuse transcript to the prefix-cacher even
+    # when a cheaper plain upstream exists -- the whole point of measuring both numbers
+    _d = prefix_route_decision(0.832, 0.0, [
+        {"name": "cacher", "prefix_cache": True, "cost_per_1k": 1.2},
+        {"name": "plain", "prefix_cache": False, "cost_per_1k": 1.0}])
+    assert _d["choice"] == "cacher" and _d["effective_cost_per_1k"] < 1.0, _d
+    # KEPT NEG pinned: below the reuse floor the decision falls back to PRICE, loudly
+    _d0 = prefix_route_decision(0.1, 0.0, [
+        {"name": "cacher", "prefix_cache": True, "cost_per_1k": 1.2},
+        {"name": "plain", "prefix_cache": False, "cost_per_1k": 1.0}])
+    assert _d0["choice"] == "plain" and "floor" in _d0["why"], _d0
+
     seen = []
 
     def fake(p):

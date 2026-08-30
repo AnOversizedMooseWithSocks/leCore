@@ -447,7 +447,12 @@ class _UnifiedPart02:
         est = bind(self._class_vec(label), involution(self.encoder._roles.get(str(role))))
         return self._clean_filler(est, role)
 
-    def ask(self, start_filler, *path):
+    def ask_chain(self, start_filler, *path):
+        # RENAMED from ask() in sweep 63: p20's session-aware one-call ask()
+        # had silently shadowed this multi-hop chain walk for its whole life
+        # (the MRO picked p20; test_unified_split caught the collision). The
+        # LIVE name keeps the name; the shadowed body returns under one a
+        # stranger can find ("chain over memory", "multi-hop question").
         """A CHAIN over the mind's own memory: ask('paris', ('capital',
         'currency'), ('currency', 'language')) -> the language of the country
         with the currency of the country whose capital is paris. Each hop is
@@ -508,7 +513,11 @@ class _UnifiedPart02:
                 return None, throughput, confidences
         return filler, throughput, confidences
 
-    def explain(self, x1, x2):
+    def explain_similarity(self, x1, x2):
+        # RENAMED from explain() in sweep 63: p20's docs-derived explain(topic)
+        # had silently shadowed this per-role WHY-similar comparison. Same
+        # collision resolution as ask_chain above: live name stays, shadowed
+        # body gets a discoverable one.
         """WHY are two things similar -- not just a cosine, but the per-role
         verdict. Takes either two record DICTS (encoded fresh, candidates drawn
         from the inputs) or two LEARNED LABELS (decoded from the mind's own

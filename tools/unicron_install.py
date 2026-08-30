@@ -104,9 +104,29 @@ def _keys(tensors, root, layer, toks, emb):
     return np.stack(out, axis=1) if out else np.zeros((Wg.shape[0], 0), np.float32)
 
 
+def install_facts_forward(weights_dir, pairs):
+    """THE FORWARD-KEY PATH (cp83, closes the cp70 kept negative): keys derived
+    from the model's OWN forward pass via holographic_factbake, so installed
+    facts surface DURING generation. Validated on the real mini this pass:
+    fact recall 0/6 -> 6/6, guards 40/40 unchanged, original untouched.
+    pairs are (prompt_token_ids, answer_token_id). Returns (new_weights, report)
+    or (None, report) on the gate's refusal -- a refusal is a result."""
+    from holographic.io_and_interop.holographic_gdnruntime import (
+        GDNRuntime, load_runtime, load_weights_dir)
+    import holographic.io_and_interop.holographic_factbake as _FB
+    rt, cfg = load_runtime(weights_dir)
+    w = load_weights_dir(weights_dir)
+    w2, rep = _FB.install_facts(w, cfg, rt, list(pairs), margin=1.0)
+    return (None, rep) if rep.get("refused") else (w2, rep)
+
+
 def install_facts(tensors, root, layer, pairs, emb, margin=0.3, ridge=0.1,
                   n_locality=50, seed=0, preserve_k=None):
-    """Batched Kohonen/MEMIT solve for N (subject_token -> answer_token) pairs."""
+    """Batched Kohonen/MEMIT solve for N (subject_token -> answer_token) pairs.
+    NOTE (cp83): these keys are EMBEDDING-derived -- fast and layer-local, but
+    facts installed this way do not surface through the runtime's forward pass
+    (the cp70 kept negative). For generation-plane facts use
+    install_facts_forward above."""
     L = root + "layers.%d.mlp.down_proj.weight" % layer
     Wd = np.asarray(tensors[L], np.float32)
     K = _keys(tensors, root, layer, [p[0] for p in pairs], emb)

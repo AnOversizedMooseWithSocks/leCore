@@ -62,11 +62,21 @@ def harden(weights, cfg, seed="leCore", facts=(), program=None, machine=None,
     _c("boots_from_weights",
        lambda: (boot(weights)["record"].seed == seed, boot(weights)["record"].seed),
        "a record can be written where nothing reads it and nothing raises")
-    _c("expansion_deterministic",
-       lambda: (np.array_equal(boot(weights)["codebook"][
-                    sorted(boot(weights)["codebook"])[0]],
-                boot(weights)["codebook"][sorted(boot(weights)["codebook"])[0]]),
-                "%d symbols" % len(boot(weights)["codebook"])),
+    def _expansion():
+        # FIELD-CAUGHT (first live install, split layout, no passages): the old
+        # form indexed sorted(codebook)[0] and CRASHED with IndexError on an
+        # EMPTY codebook -- the verifier failing on the input class it exists
+        # to judge, the exact lesson _recall below already records. Now the
+        # WHOLE codebook is compared across two boots, and empty is vacuously
+        # deterministic (and says so).
+        c1 = boot(weights)["codebook"]
+        c2 = boot(weights)["codebook"]
+        if set(c1) != set(c2):
+            return False, "symbol sets differ across boots"
+        same = all(np.array_equal(c1[k], c2[k]) for k in c1)
+        note = "%d symbols" % len(c1) + ("" if c1 else " (empty: vacuously deterministic)")
+        return same, note
+    _c("expansion_deterministic", _expansion,
        "hashlib not hash(): a layer booted in another process must agree")
 
     # ---- ADDRESSED, not merely hidden ----

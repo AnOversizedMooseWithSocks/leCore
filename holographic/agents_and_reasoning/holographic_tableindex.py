@@ -20,7 +20,11 @@ MEASURED, and kept with the code that earns it:
 
 import numpy as np
 
-from holographic.agents_and_reasoning.holographic_query import QueryError, _encode_row
+# The query imports live INSIDE the two methods that need them, not at module top:
+# holographic_query line ~1919 imports TableIndexMixin from THIS module, so a top-level
+# import back into query is a circle -- measured: standalone `import holographic_tableindex`
+# crashed with "partially initialized module" while working whenever query loaded first,
+# which is exactly the kind of order-dependent bug that hides until a selftest runs alone.
 
 
 class TableIndexMixin:
@@ -49,6 +53,7 @@ class TableIndexMixin:
         if dry_run or rep["removed"] == 0:
             return rep
         self.rows = [dict(r) for r in live]
+        from holographic.agents_and_reasoning.holographic_query import _encode_row
         self.records = (np.vstack([
             _encode_row(r, self.roles, self.role_vocab, self.value_vocab,
                         self.dim)[None, :] for r in self.rows])
@@ -87,6 +92,7 @@ class TableIndexMixin:
         Rebuilt from `rows` here, so it is correct on an already-populated table.
         """
         if col not in self.roles:
+            from holographic.agents_and_reasoning.holographic_query import QueryError
             raise QueryError("cannot index %r: not a column" % col)
         # DO NOT SHADOW THE PRIMARY KEY. The pk already has an identical hash
         # index and the planner checks the pk fast path FIRST, so a secondary

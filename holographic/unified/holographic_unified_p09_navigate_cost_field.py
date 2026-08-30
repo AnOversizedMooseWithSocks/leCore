@@ -570,6 +570,140 @@ class _UnifiedPart09:
         from holographic.misc.holographic_backwardwarp import backward_gather
         return backward_gather(values, positions, query_source_positions)
 
+    def body_animation(self, bodies, steps=30, camera=None, width=200, height=150,
+                       dt=1.0 / 40.0, step_kwargs=None, colors=None, radius_px=3.5,
+                       gif=None, fps=15.0):
+        """STEP any mix of bodies and SEE them -- softbody ropes/cloth, shape-matched
+        rigids, anything with .step(dt, **kw) and a live state .x. The third appearance
+        of the same 12-line glue (drop, fountain, now bodies -- sweep 80/81) unified into
+        one door: per body, pass its own step kwargs (gravity is DIMENSION-DEPENDENT:
+        a 2D rope wants (gx, gy), a 3D rigid wants (gx, gy, gz) -- measured); 2D states
+        are z=0-padded for the camera (rope.x is (N,2), undocumented until now); each
+        body gets a distinct palette colour unless colors= overrides. Returns frames;
+        gif= writes GIF89a. KEPT NEG: RigidBody's live state is .x -- .rest is the rest
+        POSE and splatting it animates nothing (measured: a static cube, two probes)."""
+        import numpy as np
+        from holographic.rendering.holographic_render import Camera, save_gif
+        bodies = list(bodies)
+        kws = [dict(k) for k in (step_kwargs or [{}] * len(bodies))]
+        if len(kws) != len(bodies):
+            raise ValueError("step_kwargs must match bodies (%d vs %d)"
+                             % (len(kws), len(bodies)))
+        # per-body SUBSTEPS, popped before .step sees the kwargs: stiff solvers (MPM snow,
+        # dt~2e-3) move sub-pixel per step -- measured 0.02 grid units over 10 steps --
+        # so a frame is `substeps` solver steps, not one
+        subs = [max(1, int(k.pop("substeps", 1))) for k in kws]
+        if camera is None:
+            # AUTO-FRAME (sweep 82, paying the 'cameras aimed blind' P0 for this door):
+            # solvers live in DIFFERENT coordinate spaces -- softbodies near the origin,
+            # MPM snow in GRID units (x~19..29, measured) -- so one fixed default camera
+            # silently frames empty space for half of them. Bound the initial states and
+            # look at what is actually there.
+            pts0 = []
+            for b in bodies:
+                x = np.asarray(b.x, float)
+                if x.shape[1] == 2:
+                    x = np.concatenate([x, np.zeros((len(x), 1))], axis=1)
+                pts0.append(x)
+            P0 = np.vstack(pts0)
+            c = P0.mean(axis=0)
+            r = float(np.linalg.norm(P0 - c, axis=1).max()) + 1e-6
+            # leave headroom below for falls: aim slightly under centre, back off ~3 radii
+            camera = Camera(eye=(c[0] + 0.4 * r, c[1] + 0.6 * r, c[2] + 3.0 * r),
+                            target=(c[0], c[1] - 0.5 * r, c[2]), fov_deg=42.0)
+        palette = np.array([[1.0, 0.55, 0.2], [0.3, 0.7, 1.0], [0.4, 0.9, 0.45],
+                            [0.9, 0.4, 0.75], [0.95, 0.85, 0.3]])
+        frames = []
+        for _ in range(int(steps)):
+            pts, cols = [], []
+            for j, (b, kw) in enumerate(zip(bodies, kws)):
+                for _s in range(subs[j]):
+                    b.step(dt=float(dt), **kw)
+                x = np.asarray(b.x, float)
+                if x.shape[1] == 2:                      # 2D solver -> z=0 plane
+                    x = np.concatenate([x, np.zeros((len(x), 1))], axis=1)
+                pts.append(x)
+                cols.append(np.tile(palette[j % len(palette)], (len(x), 1)))
+            P = np.vstack(pts)
+            C = np.vstack(cols) if colors is None else colors
+            img, _alpha = self.splat_points(P, camera, int(width), int(height),
+                                            colors=C, radius_px=float(radius_px))
+            frames.append(np.asarray(img, float))
+        if gif:
+            save_gif(gif, frames, fps=float(fps))
+        return frames
+
+    def particle_animation(self, emitter_sdf=None, n=500, steps=20, camera=None,
+                           width=200, height=150, dt=0.05, speed=2.0, gravity=(0.0, -4.5, 0.0),
+                           damping=0.05, radius_px=2.5, colors=None, bounds=None,
+                           gif=None, fps=12.0, seed=0):
+        """A PARTICLE SYSTEM you can SEE, in one call: emit from a surface (emitter_sdf,
+        default a small sphere), integrate under gravity, splat every frame, return the
+        (H,W,3) frames and optionally write a GIF. Composes emit_from_surface + advance +
+        splat_points + save_gif -- the ~14 lines of glue every fountain needed (measured,
+        sweep 80), with the two tuple contracts honoured so nobody re-trips on them:
+        emit returns (pos, vel, normals) and splat returns (image, alpha). Deterministic
+        for a fixed seed."""
+        import numpy as np
+        from holographic.simulation_and_physics.holographic_emitter import (
+            emit_from_surface, advance)
+        from holographic.rendering.holographic_render import Camera, save_gif
+        if emitter_sdf is None:
+            emitter_sdf = lambda P: (np.linalg.norm(
+                np.asarray(P, float) - np.array([0.0, 1.0, 0.0]), axis=-1) - 0.4)
+        if bounds is None:
+            bounds = ((-1.5, 0.0, -1.5), (1.5, 2.5, 1.5))
+        if camera is None:
+            camera = Camera(eye=(0.0, 1.4, 5.0), target=(0.0, 0.9, 0.0), fov_deg=40.0)
+        pos, vel, _normals = emit_from_surface(emitter_sdf, int(n), bounds=bounds,
+                                               speed=float(speed), seed=int(seed))
+        if colors is None:
+            colors = 0.55 + 0.45 * np.random.default_rng(int(seed)).random((int(n), 3))
+        g = np.asarray(gravity, float)
+        frames = []
+        for _ in range(int(steps)):
+            pos, vel = advance(pos, vel, force=np.broadcast_to(g, pos.shape),
+                               dt=float(dt), damping=float(damping))
+            img, _alpha = self.splat_points(pos, camera, int(width), int(height),
+                                            colors=colors, radius_px=float(radius_px))
+            frames.append(np.asarray(img, float))
+        if gif:
+            save_gif(gif, frames, fps=float(fps))
+        return frames
+
+    def smoke_animation(self, steps=30, shape=(64, 64), buoyancy=1.6, smoke_density=0.25,
+                        dt=0.12, seed_region=None, tint=(0.92, 0.92, 1.0), gif=None,
+                        fps=12.0):
+        """SMOKE you can SEE, in one call: seed a light component in the mixture model,
+        step the shared incompressible flow, colormap the density each frame, return the
+        (H,W,3) frames and optionally a GIF. Composes make_mixture + matter_step +
+        save_gif and OWNS the state contract that took five probes to discover (measured,
+        sweep 80): the FIELD lives in mix.channels[name] (mix.comp holds constants),
+        buoyancy needs component density < 1, and vx/vy must be threaded between steps.
+        seed_region=(r0, r1, c0, c1) places the initial puff; default sits low-centre so
+        the rise is visible."""
+        import numpy as np
+        from holographic.rendering.holographic_render import save_gif
+        h, w = int(shape[0]), int(shape[1])
+        mix = self.make_mixture((h, w), buoyancy=float(buoyancy))
+        r0, r1, c0, c1 = seed_region or (int(h * 0.78), int(h * 0.9),
+                                         int(w * 0.42), int(w * 0.58))
+        blob = np.zeros((h, w)); blob[r0:r1, c0:c1] = 1.0
+        mix.add("smoke", blob, density=float(smoke_density))
+        vx, vy = np.zeros((h, w)), np.zeros((h, w))
+        tint = np.asarray(tint, float)
+        frames = []
+        for _ in range(int(steps)):
+            r = self.matter_step(mix, vx, vy, dt=float(dt))
+            if isinstance(r, tuple) and len(r) >= 2:
+                vx, vy = r[-2], r[-1]
+            d = np.array(mix.channels["smoke"], float)
+            d = d / (d.max() + 1e-9)
+            frames.append(np.clip(d[:, :, None] * tint[None, None, :], 0.0, 1.0))
+        if gif:
+            save_gif(gif, frames, fps=float(fps))
+        return frames
+
     def splat_points(self, points, camera, width, height, colors=None, radius_px=2.0, intensity=1.0,
                      depth_fade=None, background=(0.0, 0.0, 0.0)):
         """IMAGE GENERATION from geometry: render an (N,3) point cloud to an (image (H,W,3), alpha (H,W)) by
@@ -939,6 +1073,21 @@ class _UnifiedPart09:
         .solve(); .dof() reports under/well/over-constrained. See holographic_sketch2d.Sketch2D."""
         from holographic.mesh_and_geometry.holographic_sketch2d import Sketch2D
         return Sketch2D(tol=tol)
+
+    def chart_svg(self, kind, series, labels=None, title=None, x=None,
+                  width=640, height=400, colors=None):
+        """Render a LINE, BAR, or SCATTER chart of numeric series to a deterministic SVG string
+        (holographic_chartsvg.chart_svg) -- the missing door from "here are numbers" to "here is
+        a chart a human reads", with axes, ticks, a colorblind-safe fixed palette, and bars
+        anchored at zero by convention. Pure string assembly, stdlib only (the cadexport
+        contract: the caller writes the file or ships it over a wire); byte-identical output
+        for identical input. `series` is one list or a list of lists; scatter takes (x, y)
+        pairs. KEPT NEG: non-finite values are REFUSED loudly -- a chart that silently drops a
+        NaN lies about the data it claims to show. NOT svg_canvas, which is a hypervector
+        CODEC for vector art -- a different costume; audited so nobody merges them."""
+        from holographic.io_and_interop.holographic_chartsvg import chart_svg as _cs
+        return _cs(kind, series, labels=labels, title=title, x=x,
+                   width=width, height=height, colors=colors)
 
     def mesh_to_stl(self, vertices, faces, name="lecore"):
         """CAD EXPORT (K7): an ASCII STL string for a mesh (tris/quads/ngons; per-facet normals from the winding).
@@ -1432,13 +1581,30 @@ class _UnifiedPart09:
             fluid.density[lo_i:lo_i + max(g // 4, 1), 1:max(g // 3, 2), lo_i:lo_i + max(g // 4, 1)] = 1.0
             fluid.vel[1, :, :max(g // 6, 1), :] = 1.0                # a little upward flow so something happens
             sim = Simulation.for_fluid(fluid, lo=lo, hi=hi)
+        elif k == "smoke":
+            # the mixture matter model as a REGISTERED kind (the card advertised smoke;
+            # the roster served fluid/automaton only -- sweep 81). 2D: returns the final
+            # (grid, grid) smoke density after `steps` buoyant flow steps.
+            import numpy as np
+            mix = self.make_mixture((g, g), buoyancy=float(solver_kwargs.pop("buoyancy", 1.6)))
+            blob = np.zeros((g, g))
+            blob[int(g * 0.78):int(g * 0.9), int(g * 0.42):int(g * 0.58)] = 1.0
+            mix.add("smoke", blob, density=float(solver_kwargs.pop("smoke_density", 0.25)))
+            vx, vy = np.zeros((g, g)), np.zeros((g, g))
+            for _ in range(int(steps)):
+                r = self.matter_step(mix, vx, vy, dt=float(dt) if dt != 1.0 / 60.0 else 0.12)
+                if isinstance(r, tuple) and len(r) >= 2:
+                    vx, vy = r[-2], r[-1]
+            return np.array(mix.channels["smoke"])
         elif k == "automaton":
             from holographic.misc.holographic_automaton import HyperCA
             sim = Simulation.for_automaton(HyperCA(size=g, seed=seed, **solver_kwargs), lo=lo, hi=hi)
         else:
             from holographic.misc.holographic_simulationhome import known_solver_strategies
+            known = sorted(set([x.replace("for_", "") for x in known_solver_strategies()]
+                               + ["smoke"]))               # smoke dispatches here, not via the registry
             raise ValueError("run_simulation: unknown kind %r; known: %s (or use mind.simulation() with your own "
-                             "step/field closures)" % (kind, [x.replace("for_", "") for x in known_solver_strategies()]))
+                             "step/field closures)" % (kind, known))
         return sim.run(int(steps), dt).grid()
 
     def simulate_snow(self, cx=24, cy=12, w=10, h=8, n=400, grid=48, gravity=9.81, dt=2e-3, steps=600, seed=0):

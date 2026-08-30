@@ -143,7 +143,7 @@ class _UnifiedPart19:
         from holographic.agents_and_reasoning.holographic_agentbench import paired_benchmark
         return paired_benchmark(n=n, seed=seed, z_min=z_min, k=k, stranger=stranger, closest=closest)
 
-    def alias_gaps(self, n=60, seed=0, z_min=0.8, k=3):
+    def alias_gaps(self, n=60, seed=0, fixture=None, z_min=0.8, k=3):
         """BENCH-2 read as a WORK LIST: which capabilities cannot survive losing one phrasing
         (holographic_agentbench.alias_gaps). Each row names a capability, the alias held out, the outcome,
         its z, how many aliases it has left, and the REPAIR -- 'add aliases' for an abstain (thin
@@ -159,7 +159,7 @@ class _UnifiedPart19:
         Returns {n_probed, n_gaps, abstained, misrouted, worst, gaps}. See agent_paraphrase_benchmark for
         the scalar metric this decomposes."""
         from holographic.agents_and_reasoning.holographic_agentbench import alias_gaps
-        return alias_gaps(n=n, seed=seed, z_min=z_min, k=k)
+        return alias_gaps(n=n, seed=seed, fixture=fixture, z_min=z_min, k=k)
 
     def catalog_without_alias(self, name, alias):
         """A Catalog holding EVERY capability, with ONE alias removed from ONE of them (holographic_agentbench)

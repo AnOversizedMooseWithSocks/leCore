@@ -51,6 +51,12 @@ except Exception:
 # remove the entry, or accept it as a benign homonym / pinned divergence and leave it -- WITH the reason on the
 # line. Never add an entry just to make the test pass without reading. The budget may shrink, never grow.
 KNOWN_COLLISIONS = {
+    # sweep-97 merge, bodies read: mathcheck.check/evaluate are arithmetic verifiers;
+    # proglib.check and navigator.evaluate are program/route scorers -- same verb,
+    # different domains, both public on purpose.
+    "check": frozenset({"mathcheck", "proglib"}),
+    "evaluate": frozenset({"mathcheck", "navigator"}),
+
     # ---- REVIEWED IN THE CREATURE/ANATOMY MERGE. Both bodies read for each; reasons below. ----
     # A real ARCHITECTURAL TRANSITION, not a homonym: two implementations of "the creature's skin as a
     # field" -- the shipped metaball route and the new grouped-convolution route (bulge-free joints,

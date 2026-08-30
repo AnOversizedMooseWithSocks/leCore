@@ -353,6 +353,67 @@ class BM25:
         return ranked
 
 
+def prf_expand(query, docs, top_f=3, top_t=8, k1=1.5, b=0.75, bm=None):
+    """Harvest expansion terms by PSEUDO-RELEVANCE FEEDBACK (Rocchio 1971 / RM3): run BM25 once,
+    treat the top `top_f` docs AS IF relevant, and pick their best `top_t` terms by
+    count-in-feedback x idf -- query terms excluded, because re-adding what the query already said
+    only re-weights it (the benchmark's phase-8 rule, lifted verbatim). Deterministic term order:
+    ties break alphabetically, the same (-weight, term) sort the measured 0.3442 nDCG run used.
+    Returns {"terms": [...], "feedback": [doc indices], "ranked": bm25 first-pass ranking} so the
+    caller can rescore without a second fit. `bm` lets a caller reuse a fitted BM25 (a corpus fit
+    is the expensive half); passing docs alone fits one here.
+    KEPT NEG: PRF cannot rescue gold OUTSIDE the first pass -- feedback docs are the horizon."""
+    bm = bm if bm is not None else BM25(docs, k1=k1, b=b)
+    ranked = bm.rank(query, top=None)
+    # A doc scoring ZERO shares no term with the query: the first pass says nothing about it,
+    # so "pseudo-relevant" cannot stretch to cover it. On the measured benchmark shape (200+
+    # docs, small F) this filter is a no-op -- it exists for small corpora, where top_f would
+    # otherwise sweep off-topic docs into feedback and amplify them.
+    fb = [i for i, sc in ranked[:int(top_f)] if sc > 0.0]
+    q_terms = set(tokenize_once(query))
+    cnt = {}
+    for i in fb:
+        for t in bm.docs_tokens[i]:
+            if t not in q_terms:
+                cnt[t] = cnt.get(t, 0) + 1
+    idf = getattr(bm, "idf", {})
+    terms = sorted(cnt, key=lambda t: (-cnt[t] * float(idf.get(t, 0.0)), t))[:int(top_t)]
+    return {"terms": terms, "feedback": fb, "ranked": ranked}
+
+
+def prf_rank(query, docs, alpha=0.3, top_f=3, top_t=8, k1=1.5, b=0.75, top=None):
+    """PSEUDO-RELEVANCE FEEDBACK re-ranking (Rocchio 1971 / RM3): a second bounce where the first
+    pass's top docs relight the query. Pure counting, zero learned weights, zero model calls.
+    MEASURED (benchmarks/beir phase 8, test-once): NFCorpus nDCG@10 0.3371 -> 0.3442.
+
+    ALPHA=0 IS BIT-IDENTICAL to BM25(docs).rank(query) BY CONSTRUCTION: the second pass is never
+    run, the first-pass ranking is returned unchanged -- opt-in, not a silent default shift.
+    alpha>0 min-normalizes both passes and interpolates (1-alpha)*first + alpha*second, the exact
+    phase-8 formula, with the deterministic topk tie rule riding through BM25.rank.
+
+    Returns {"ranked": [(doc_index, score)...], "expansion": [terms], "alpha", "feedback"}.
+    KEPT NEG: cannot rescue gold OUTSIDE the first pass; a corpus where the top-F docs are all
+    off-topic makes the expansion off-topic too -- PRF amplifies the first pass, right or wrong."""
+    a = float(alpha)
+    bm = BM25(docs, k1=k1, b=b)
+    if a <= 0.0:
+        # The identity contract: no second scoring pass exists to perturb ties or floats.
+        return {"ranked": bm.rank(query, top=top), "expansion": [], "alpha": 0.0, "feedback": []}
+    ex = prf_expand(query, docs, top_f=top_f, top_t=top_t, k1=k1, b=b, bm=bm)
+    s1 = np.array([sc for _, sc in sorted(ex["ranked"], key=lambda p: p[0])], dtype=np.float64)
+    # Second pass: the expanded query is original terms + harvested terms (token-level, so the
+    # non-idempotent tokenize trap pinned in _selftest cannot bite -- we never re-join to a string).
+    q2 = tokenize_once(query) + list(ex["terms"])
+    s2 = np.asarray(bm.scores(q2), dtype=np.float64)
+    r1 = float(s1.max() - s1.min()); r2 = float(s2.max() - s2.min())
+    s = (1.0 - a) * (s1 - s1.min()) / (r1 if r1 > 0 else 1.0) \
+        + a * (s2 - s2.min()) / (r2 if r2 > 0 else 1.0)
+    from holographic.misc.holographic_determinism import topk_det
+    order = topk_det(s, top) if top else np.lexsort((np.arange(len(s)), -s))
+    ranked = [(int(i), float(s[i])) for i in order]
+    return {"ranked": ranked, "expansion": ex["terms"], "alpha": a, "feedback": ex["feedback"]}
+
+
 def reciprocal_rank_fusion(ranked_lists, k=60, top=None, weights=None):
     """Fuse several ranked lists into one by Reciprocal Rank Fusion (Cormack et al. 2009). Each list is a
     sequence of item ids in rank order (best first); an item's fused score is sum over lists of w_l/(k + rank),
@@ -394,6 +455,25 @@ def reciprocal_rank_fusion(ranked_lists, k=60, top=None, weights=None):
 def _selftest():
     """Assert the REAL contract: BM25 exact-matches a query term the way dense embeddings cannot, and RRF fuses
     two lists so an item ranked well by BOTH rises above one ranked well by only one. Numeric, fails loudly."""
+
+    # PRF, three planted truths.
+    _pd = ["laplacian mesh smoothing averages vertex positions",
+           "taubin smoothing for meshes without shrinkage",
+           "fluid solver pressure projection on a grid",
+           "smoothing kernels and mesh fairing energies"]
+    # 1) ALPHA=0 IDENTITY, bit-for-bit: no second pass may exist to perturb a float or a tie.
+    _r0 = prf_rank("mesh smoothing", _pd, alpha=0.0)
+    assert _r0["ranked"] == BM25(_pd).rank("mesh smoothing") and _r0["expansion"] == [], \
+        "alpha=0 must be BIT-IDENTICAL to bm25 rank -- PRF is opt-in by construction"
+    # 2) Expansion harvests from FEEDBACK docs only, zero-score docs excluded: the off-topic
+    #    fluid doc scores 0.0 on this query, so its vocabulary must not leak into the expansion.
+    _rx = prf_rank("mesh smoothing", _pd, alpha=0.5, top_f=3)
+    assert _rx["expansion"] and all(t not in ("fluid", "solver", "pressure") for t in _rx["expansion"]), \
+        "zero-score docs leaked into feedback: %r" % (_rx["expansion"],)
+    # 3) KEPT NEGATIVE pinned: gold OUTSIDE the first pass is not rescued. A doc sharing no term
+    #    with query OR expansion stays at score 0 whatever alpha does.
+    assert all(sc == 0.0 for i, sc in _rx["ranked"] if _pd[i].startswith("fluid")), \
+        "PRF must not invent relevance for a doc the first pass never touched"
 
     # SHARDING, pinned in both directions. Shards fitted WITH the corpus statistics must be
     # BIT-IDENTICAL to a single index -- that is what makes merging their top-k lists exact, which

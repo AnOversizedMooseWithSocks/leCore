@@ -384,6 +384,48 @@ class Galvatron:
     Residents compose in list order; the composed stack is what the selftest
     certifies, not the residents in isolation."""
 
+    def teach(self, title, text, author="user"):
+        """LIVE TEACH ON A RUNNING PACK (cp83, coverage item 4): find the
+        memory-carrying resident and write a note into its database while
+        serving -- the database resident was built writable ("A Galvatron with
+        a corpus frozen at build time cannot LEARN"); this is the door. Returns
+        {taught, resident} or an honest miss when no memory resident is loaded."""
+        for r in self.residents:
+            db = getattr(r, "db", None) or getattr(r, "memory", None)
+            if db is not None and hasattr(db, "note"):
+                # THE DRIFT SENTINEL RIDES LIVE TEACH (cp85): a note that
+                # contradicts what the pack already holds is stored but FLAGGED
+                # -- the same advisory contract as the engine's teach_check;
+                # silent contradiction is how a memory drifts.
+                warn = None
+                try:
+                    prior = self.ask(str(title))
+                    if prior.get("answer") and \
+                            str(prior["answer"]).strip() != str(text).strip():
+                        warn = ("conflicts with existing pack answer: %r"
+                                % str(prior["answer"])[:80])
+                except Exception:
+                    pass
+                db.note(str(title), str(text), author=str(author))
+                out = {"taught": True, "resident": type(r).__name__}
+                if warn:
+                    out["drift_warning"] = warn
+                return out
+        return {"taught": False, "why": "no memory resident in this pack"}
+
+    def veto(self, token_ids):
+        """LIVE VETO ON A RUNNING PACK (cp83): extend the ward's banned set at
+        serve time -- vetoes are the part of leCore that must never wait for a
+        rebuild. Returns the new banned count or an honest miss."""
+        import numpy as _np
+        ids = sorted(set(int(t) for t in token_ids))
+        for r in list(getattr(self, "guards", ())) + list(self.residents):
+            if hasattr(r, "banned") and hasattr(r, "guard"):
+                r.banned = _np.asarray(
+                    sorted(set(r.banned.tolist()) | set(ids)), _np.int64)
+                return {"vetoed": len(ids), "banned_total": int(r.banned.size)}
+        return {"vetoed": 0, "why": "no ward resident in this pack"}
+
     def __init__(self, runtime, residents=(), guards=()):
         self.rt = runtime
         self.residents = list(residents)
@@ -410,6 +452,93 @@ class Galvatron:
         for g in self.guards:
             logits = g.guard(logits)
         return logits
+
+    def post_check(self, healthy_path=None, rel_threshold=0.7):
+        """DRIFT DETECTION AT SERVE TIME (cp85): run the POST probe ids through
+        the CURRENT runtime and compare hidden states against the model's own
+        HEALTHY BASELINE (galvatron_profile.npz: 39 probes + healthy hiddens,
+        written at install). The trigger is RELATIVE -- the selfheal lesson,
+        measured: at 90,000 interfering writes an absolute 0.35 threshold called
+        a collapsing register file fine while the relative check caught it.
+        Returns {margin, healthy_margin, ratio, drifted}. When drifted, the
+        serving policy is the caller's -- ask() below refuses the model arm."""
+        import numpy as np
+        import os
+        path = healthy_path
+        if path is None:
+            md = getattr(self.rt, "model_dir", None) or ""
+            for cand in (os.path.join(md, "galvatron_profile.npz"),
+                         "galvatron_profile.npz"):
+                if os.path.exists(cand):
+                    path = cand
+                    break
+        if path is None or not os.path.exists(path):
+            return {"drifted": None,
+                    "why": "no healthy baseline (galvatron_profile.npz) found"}
+        z = np.load(path)
+        ids = [int(t) for t in z["probe_ids"]]
+        healthy = np.asarray(z["healthy"], np.float64)
+        cur = []
+        for i, t in enumerate(ids):
+            h = np.asarray(self.rt.forward([t]), np.float64)
+            cur.append(h[-1] if h.ndim > 1 else h)
+        cur = np.stack(cur)[:, :healthy.shape[1]]
+        num = (cur * healthy).sum(1)
+        den = (np.linalg.norm(cur, axis=1) *
+               np.linalg.norm(healthy, axis=1) + 1e-12)
+        margin = float((num / den).mean())
+        healthy_margin = 1.0
+        ratio = margin / healthy_margin
+        self._post = {"margin": round(margin, 4),
+                      "healthy_margin": healthy_margin,
+                      "ratio": round(ratio, 4),
+                      "drifted": bool(ratio < rel_threshold)}
+        return dict(self._post)
+
+    def ask(self, question, min_margin=0.15):
+        """CONFIDENT ANSWERS OR HONEST SILENCE (cp85): the pack's question door.
+        Order: (1) the memory resident's database -- an answer must clear
+        min_margin or it is not served; (2) if the last post_check flagged
+        drift, the model arm is REFUSED outright and the caller is told why;
+        (3) otherwise the caller may fall through to generation knowing the
+        answer is model-tier. Never serves a below-margin answer as if it were
+        knowledge -- uncertainty is stated, not smoothed."""
+        for r in self.residents:
+            db = getattr(r, "db", None) or getattr(r, "memory", None)
+            if db is None:
+                continue
+            hit = None
+            for fn_name in ("recall", "search", "lookup"):
+                fn = getattr(db, fn_name, None)
+                if fn is None:
+                    continue
+                try:
+                    hit = fn(str(question))
+                    break
+                except TypeError:
+                    continue
+            if not hit:
+                continue
+            rows = hit if isinstance(hit, list) else [hit]
+            best = rows[0]
+            margin = float(best.get("score", best.get("margin", 1.0))) \
+                if isinstance(best, dict) else 1.0
+            text = best.get("text", best.get("answer", "")) \
+                if isinstance(best, dict) else str(best)
+            if text and margin >= float(min_margin):
+                return {"answer": str(text), "provenance": "pack-memory",
+                        "margin": round(margin, 4), "escalate": False}
+            if text:
+                return {"answer": None, "escalate": True,
+                        "why": "below confidence margin (%.3f < %.3f) -- "
+                               "not served" % (margin, float(min_margin))}
+        if getattr(self, "_post", {}).get("drifted"):
+            return {"answer": None, "escalate": True,
+                    "why": "model arm REFUSED: post_check reports drift "
+                           "(ratio %.3f)" % self._post.get("ratio", 0.0)}
+        return {"answer": None, "escalate": True,
+                "why": "no grounded answer in the pack; model-tier generation "
+                       "is the caller's explicit choice"}
 
     def generate(self, token_ids, n_new=16, state=None):
         hooks = self._hooks()

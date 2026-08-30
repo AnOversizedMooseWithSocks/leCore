@@ -191,6 +191,21 @@ class AnswerLadder:
                     self.ledger.by_tier.get("feedback_veto", 0) + 1
                 payload = None
             if payload is not None and stored_q is not None:
+                # SESSION GUARD (sweep 109, the P0 fix): the '[s:name]' salt is ONE token
+                # among many -- a semantic whisper the 0.75 geometric gate and the 0.75
+                # jaccard both sail past (measured: cross-session reads at T0, 9/9 on a
+                # 15-row partition; interference merely MASKED it at 3k). Sessions are a
+                # privacy boundary, not a similarity hint: the session token must match
+                # EXACTLY, absent-vs-absent included, or the reflex refuses and falls
+                # through to rungs that key properly. Text equality, zero new state.
+                def _sess_tok(t):
+                    t = str(t)
+                    return t.split("]", 1)[0] + "]" if t.startswith("[s:") else ""
+                if _sess_tok(query) != _sess_tok(stored_q):
+                    self.ledger.by_tier["session_veto"] = \
+                        self.ledger.by_tier.get("session_veto", 0) + 1
+                    payload = None
+            if payload is not None and stored_q is not None:
                 # VERIFY-ON-HIT (cp21): the geometric gate passed; now the stored QUESTION
                 # must share content words with the query (deterministic jaccard). Belt and
                 # braces: geometry proposes, text disposes. A veto falls through to T1+.

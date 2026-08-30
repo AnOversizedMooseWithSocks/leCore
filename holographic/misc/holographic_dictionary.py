@@ -73,7 +73,40 @@ def _load():
             raise FileNotFoundError("vendored dictionary not found at %s -- is data/knowledge/ present?" % _DATA_PATH)
         with _open_compressed(_DATA_PATH) as f:
             _DICT = json.load(f)
+        _merge_function_words(_DICT)
     return _DICT
+
+
+def _merge_function_words(into):
+    """Fold in the closed-class supplement, WITHOUT overwriting anything.
+
+    The main dictionary is WordNet-derived, and WordNet covers only the OPEN
+    classes (noun, verb, adjective, adverb) BY DESIGN. Every word that carries
+    logical structure rather than content is therefore structurally absent.
+    MEASURED against the shipped file: 5 of 12 causal/logical probes missing
+    (because, since, unless, although, whereas) and 5 of 8 conditional ones
+    (if, else, when, whether, provided). lookup("because") returned None.
+    Those are exactly the cause-and-effect and ordering vocabulary a model is
+    asked to reason with, and their definitions are RELATIONAL -- "because" is
+    "by or for the cause that", "unless" is "upon any less condition than" --
+    which is the part that teaches the relation rather than naming a thing.
+    Source is Webster's Unabridged 1913, PUBLIC DOMAIN, so nothing travels with
+    it. setdefault, never overwrite: where WordNet already has a sense it is the
+    better structured entry, and this only fills holes."""
+    path = os.path.join(os.path.dirname(_DATA_PATH), "function_words.json.xz")
+    if not os.path.exists(path):
+        return 0
+    try:
+        with _open_compressed(path) as f:
+            blob = json.load(f)
+    except Exception:
+        return 0                      # a missing supplement is not a failure
+    added = 0
+    for word, text in (blob.get("words") or {}).items():
+        if word not in into:
+            into[word] = {"d": text, "p": "closed-class", "src": "webster1913"}
+            added += 1
+    return added
 
 
 # -- lazy-load control (the language layer is OPT-IN) -------------------------------------------------------

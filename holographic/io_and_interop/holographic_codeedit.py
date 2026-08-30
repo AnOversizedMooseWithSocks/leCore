@@ -25,8 +25,61 @@ import shutil
 import time
 
 
+def _locate_near_miss(relpath, text, old):
+    """Build the not-found message WITH a location: find the file's closest window of the
+    same line count as `old` (difflib ratio over stripped lines -- whitespace and line
+    continuations are exactly what drift between source and renderings), and name the
+    line plus the first differing character. Kept cheap: windows step by line, ratio on
+    joined stripped text, best one wins; a 2 MB file scans in tens of ms."""
+    import difflib
+    want = [ln.strip() for ln in old.splitlines() if ln.strip()]
+    if not want:
+        return "old text not found in %r (old was empty/whitespace)" % relpath
+    lines = text.splitlines()
+    W = len(want)
+    best, best_i = 0.0, -1
+    probe = "\n".join(want)
+    for i in range(0, max(1, len(lines) - W + 1)):
+        cand = "\n".join(ln.strip() for ln in lines[i:i + W] if ln.strip())
+        r = difflib.SequenceMatcher(None, probe, cand).ratio()
+        if r > best:
+            best, best_i = r, i
+    if best < 0.6:
+        return ("old text not found in %r and nothing similar either (best window ratio "
+                "%.2f) -- wrong file, or the text was rewritten" % (relpath, best))
+    got = "\n".join(ln.strip() for ln in lines[best_i:best_i + W] if ln.strip())
+    k = next((j for j, (a, b) in enumerate(zip(probe, got)) if a != b),
+             min(len(probe), len(got)))
+    return ("old text not found in %r -- closest match at line %d (ratio %.2f), first "
+            "difference at char %d: expected %r, file has %r. Whitespace and "
+            "line-continuations drift between SOURCE and rendered output; grep the true "
+            "anchor or copy from file_view." % (relpath, best_i + 1, best, k,
+                                               probe[max(0, k - 12):k + 12],
+                                               got[max(0, k - 12):k + 12]))
+
+
 class EditError(Exception):
     """A file edit could not be performed safely (path escaped the root, target not found, ambiguous replace, ...)."""
+
+
+class Hits(list):
+    """A grep result that knows whether it is COMPLETE.
+
+    grep returned exactly `max_hits` with no marker, so a truncated tree-wide
+    search was indistinguishable from an exhaustive one. Filtering such a result
+    for a particular file then finds nothing -- and reads as a clean bill of
+    health for a file the search never reached. That mistake cost a false
+    all-clear on the GPU runtime one sweep after fixing that very class of bug
+    inside it.
+    A list SUBCLASS because len(), iteration, indexing and truthiness stay
+    IDENTICAL for every existing caller -- additive, per the never-flip rule --
+    while anyone who asks gets `.truncated`."""
+
+    truncated = False
+
+    def __init__(self, items=(), truncated=False):
+        list.__init__(self, items)
+        self.truncated = bool(truncated)
 
 
 class Editor:
@@ -89,6 +142,20 @@ class Editor:
         lines = text.splitlines()
         s = max(1, int(start))
         e = len(lines) if end is None else min(len(lines), int(end))
+        # AN IMPOSSIBLE RANGE MUST NOT LOOK LIKE A BLANK ONE. Clamping alone
+        # turned view(f, 99000, 99010) on a 1,200-line file and view(f, 50, 10)
+        # into the SAME empty string a genuinely blank region returns -- so a
+        # caller who mistyped a line number saw "" and concluded the region was
+        # empty. Same class as grep silently widening its scope: AN ABSENT RESULT
+        # THAT LOOKS LIKE AN ANSWER, which is the one nobody double-checks.
+        # Raising names the file's real length, which is what the caller needs to
+        # fix the call.
+        if s > len(lines):
+            raise EditError("view(%r, start=%d): file has only %d lines"
+                            % (relpath, int(start), len(lines)))
+        if e < s:
+            raise EditError("view(%r, %d, %d): end is before start (file has %d "
+                            "lines)" % (relpath, int(start), int(end), len(lines)))
         width = len(str(e))
         return "\n".join("%*d\t%s" % (width, i, lines[i - 1]) for i in range(s, e + 1))
 
@@ -149,11 +216,24 @@ class Editor:
         if regex:
             import re as _re
             matches = _re.compile(pattern).search        # compiled ONCE, and an invalid pattern raises here
+        # A FILE PATH MEANS THAT FILE. This widened a file to its DIRECTORY, so
+        # `grep(pat, relpath="a/b/mod.py")` searched all of a/b -- scoping to one
+        # 31-match file returned 500 hits from 53 OTHER files. A caller who then
+        # filters the result for their file finds nothing (their matches were
+        # truncated away by the others) and concludes the file is clean.
+        # THAT IS HOW I CONCLUDED THE RUNTIME HAD NO HOST ALLOCATIONS LEFT, one
+        # sweep after fixing exactly that class of bug inside it.
+        one_file = os.path.isfile(base)
         walk_root = base if os.path.isdir(base) else os.path.dirname(base)
         for dp, dns, fns in os.walk(walk_root):
             dns[:] = [d for d in dns if d != "__pycache__" and not d.startswith(".")]
             for fn in fns:
-                if suffix and not fn.endswith(suffix):
+                if one_file:
+                    # an explicit file makes `suffix` moot -- the caller already
+                    # named exactly what they want searched
+                    if os.path.abspath(os.path.join(dp, fn)) != os.path.abspath(base):
+                        continue
+                elif suffix and not fn.endswith(suffix):
                     continue
                 full = os.path.join(dp, fn)
                 try:
@@ -162,10 +242,10 @@ class Editor:
                             if (matches(line) if matches else (pattern in line)):
                                 hits.append({"file": self._rel(full), "line": i, "text": line.rstrip("\n")[:300]})
                                 if len(hits) >= max_hits:
-                                    return hits
+                                    return Hits(hits, truncated=True)
                 except OSError:
                     continue
-        return hits
+        return Hits(hits, truncated=False)
 
     # -- write / create -------------------------------------------------------------------------------------
     def _atomic_write(self, full, text):
@@ -221,6 +301,14 @@ class Editor:
         self._atomic_write(full, text)
         return {"path": relpath, "bytes": len(text.encode("utf-8")), "created": not existed}
 
+    # -- near-miss diagnostics for replace() ------------------------------------------
+    # MEASURED PAIN, twice in one arc: an agent copies `old` from TEST OUTPUT or a
+    # transcript, where line-continuations and wrapped whitespace differ from the SOURCE
+    # bytes, gets "old text not found", and burns a grep round trip relocating text it
+    # was already looking at. The miss message now does the locating: difflib finds the
+    # closest same-length line window and the message names the line and the first
+    # differing character, so the fix is one glance instead of one more tool call.
+
     def replace(self, relpath, old, new, count=1):
         """Replace EXACT text `old` with `new` in a file. By default `old` must occur EXACTLY ONCE (count=1) so the
         edit is unambiguous; pass count=0 to replace ALL occurrences, or count=N to require exactly N. Returns
@@ -231,7 +319,7 @@ class Editor:
         text = self.read(relpath, max_bytes=None)
         n = text.count(old)
         if n == 0:
-            raise EditError("old text not found in %r" % relpath)
+            raise EditError(_locate_near_miss(relpath, text, old))
         if count and n != count:
             raise EditError("old text occurs %d times in %r but count=%d was required (make it unique or set count)"
                             % (n, relpath, count))

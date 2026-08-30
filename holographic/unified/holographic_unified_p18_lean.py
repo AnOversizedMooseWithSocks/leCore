@@ -383,7 +383,7 @@ class _UnifiedPart18:
 
     def fem_simulate(self, positions, tets, steps=200, mu=1.0, lam=10.0, fibers=None,
                      rest_lengths=None, activation=1.0, k_muscle=10.0, gravity=0.0,
-                     pinned=None, rest=None):
+                     pinned=None, rest=None, record_every=0):
         """F4: quasistatic STABLE NEO-HOOKEAN solve over a tet mesh, with optional muscle
         fibers. Uses Smith/De Goes/Kim 2018 rather than the classical log-J neo-Hookean
         because log J is UNDEFINED for inverted elements and generated meshes DO invert --
@@ -398,7 +398,7 @@ class _UnifiedPart18:
                            steps=int(steps), mu=float(mu), lam=float(lam), fibers=fibers,
                            rest_lengths=rest_lengths, activation=activation,
                            k_muscle=float(k_muscle), gravity=float(gravity),
-                           pinned=pinned, rest=rest)
+                           pinned=pinned, rest=rest, record_every=int(record_every))
 
     def fem_select_fibers(self, positions, tets, axis=0, fraction=0.25):
         """Choose muscle fibers as the tet edges best ALIGNED with an axis (deterministic).
@@ -1157,7 +1157,7 @@ class _UnifiedPart18:
         return make_corrective(mesh, source_vertex, radius, direction,
                                amplitude, self, **kw)
 
-    def levers(self, problem=None, measured=None):
+    def _levers_base(self, problem=None, measured=None):
         """THE SIX LEVERS: what to do when you hit a measured wall, in cost order.
         The most reused idea in this engine lived only as PRACTICE -- named in NOTES, applied correctly by
         whoever had read them, findable by nobody else. Asked five ways a stranger would ask ("what do I do
@@ -1165,6 +1165,10 @@ class _UnifiedPart18:
         advise_scale, crystal_habit and time_of_impact. THE MOST GENERALISABLE THING IN THE ENGINE WAS THE
         LEAST DISCOVERABLE, and an LLM driving leCore has exactly the problem the levers solve with no way
         to learn them: it hits a limit, concludes "impossible", and stops.
+        RENAMED from levers() in sweep 63: part 19's seven-lever levers() EXTENDS this
+        body via delegation, and two parts defining one public name is exactly the
+        silent-shadow hazard test_unified_split guards. Composition now goes through
+        this private base; the ONE public levers() lives in p19_lever7.
             1 cache locality -- bake once, sample O(1)      (prefix cache: 61x)
             2 partition into a commutative monoid            (bundling IS one)
             3 determinism instead of storage                 (registers from a seed)
@@ -1525,6 +1529,47 @@ class _UnifiedPart18:
                     verdict = "stale"
             out[verdict].append(q)
         return out
+
+    def explain_pair(self, x1, x2):
+        """WHY two things are similar -- the per-role verdict, not just a cosine.
+
+        CONVERGENT FIX, RECONCILED (merge sweep 2): upstream and this line both
+        cured the explain-name collision independently -- upstream added
+        explain_pair (delegating to the shadowed p02 body), this line RENAMED
+        that body to explain_similarity. One body stands (p02's
+        explain_similarity); this is upstream's canonical name delegating to
+        it, and explain_similarity remains callable. `explain` still resolves
+        to the topic form -- no existing caller changes."""
+        return self.explain_similarity(x1, x2)
+
+    def check_math(self, text, tolerance=1e-9):
+        """Verify every arithmetic claim in `text` by ACTUALLY COMPUTING it.
+
+        A model produces the token most likely to follow "137 * 4 = ", which is
+        not multiplication. It is right often enough to be trusted and wrong
+        often enough to matter, and NOTHING IN THE OUTPUT TELLS THE TWO APART --
+        a wrong sum is written with the confidence of a right one.
+        This finds `expression = result` claims, evaluates them over an ast that
+        permits arithmetic and refuses names, calls and attributes (so model text
+        is never eval'd), and reports what disagrees.
+
+        Returns {ok, checked, wrong, unverifiable, claims}. UNVERIFIABLE IS NOT
+        WRONG and is counted separately: "I could not check this" and "this is
+        false" are different results, and a checker that conflates them is
+        untrustworthy in both directions.
+        See holographic_mathcheck."""
+        from holographic.agents_and_reasoning.holographic_mathcheck import check
+        return check(text, tolerance=tolerance)
+
+    def do_math(self, expr):
+        """Evaluate ONE arithmetic expression here, rather than asking a model.
+
+        The cheapest way to stop a model doing arithmetic badly is to not ask it.
+        Use the model (or the substrate) to find WHICH expression to compute, and
+        then compute it. Raises Unverifiable rather than guessing.
+        See holographic_mathcheck.evaluate."""
+        from holographic.agents_and_reasoning.holographic_mathcheck import evaluate
+        return evaluate(expr)
 
     def remote_llm(self, url=None, model=None, api_key=None, **kw):
         """A `text -> text` callable for an LLM in ANOTHER PROCESS (OpenAI-compatible).

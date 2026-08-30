@@ -281,35 +281,7 @@ class Catalog:
             hit = [self._by_name[n] for n in self._fc_memo[mk] if n in self._by_name]
             if len(hit) == len(self._fc_memo[mk]):
                 return hit
-        q_phrase = " ".join((problem or "").lower().split())        # normalised whole query, for exact-alias hits
-        # FILLER-STRIPPED FORM, restored: the split kept q_phrase but dropped this and the alias comparison
-        # that used it, silently deleting the fix. BOTH forms are tested, never just the stripped one --
-        # four shipped aliases THEMSELVES begin with a filler ("how do I get from points to a mesh"), so
-        # stripping the query alone would destroy the very +5.0 bonus this exists to protect. Testing both
-        # can only ADD a match, never remove one.
-        q_stripped = _strip_filler(problem)
-        scored = []
-        for cap in self._by_name.values():
-            # S3 pre-filter: skip a capability whose declared shape is incompatible. Untagged (empty) = always shown.
-            if accepts is not None and cap.consumes and accepts not in cap.consumes:
-                continue
-            if produces is not None and cap.produces and produces not in cap.produces:
-                continue
-            name_words = cap._nw
-            hay = cap._hay
-            overlap = len(q & hay)
-            if overlap == 0:
-                continue
-            score = overlap + 0.5 * len(q & name_words)              # a name-word hit counts extra
-            # EXACT-ALIAS bonus: if the whole query IS one of this cap's aliases, that is the strongest possible
-            # signal -- a stranger typed the exact phrase we anticipated. Without this, a cap with the exact alias
-            # ties with siblings that merely scatter the same words across their prose, and the alphabetical
-            # tie-break can bury it below k (measured: ascii_view, exact alias 'render image to terminal', lost to
-            # ascii_animate/field/sdf all tied at 3.0). Additive -- only raises exact matches, never demotes.
-            if any(q_phrase == a or q_stripped == a for a in cap._al):
-                score += 5.0
-            scored.append((score, cap.name, cap))
-        scored.sort(key=lambda s: (-s[0], s[1]))                     # best score first, then name (stable)
+        scored = self._score_all(problem, q, accepts=accepts, produces=produces)
         out = [cap for _, _, cap in scored[:k]]
         self._fc_memo[mk] = [c.name for c in out]
         if len(self._fc_memo) % 32 == 1:                             # amortised, atomic-enough
@@ -418,6 +390,43 @@ class Catalog:
                 "hits": real, "reason": "top score clears the noise floor (z=%.1f)" % z}
 
 
+    def _score_all(self, problem, q, accepts=None, produces=None):
+        """THE ONE SCORER (dedup sweep): every ranking read -- find_capability,
+        find_scored, and anything future -- delegates here. Promoted because
+        the twin loops drifted TWICE (the +5 exact-alias bonus landed in one
+        and not the other; then the graded bonus had to be mirrored by hand)
+        and the lockstep test only catches drift after it ships.
+
+        Scoring: word overlap with the cap's hay + 0.5 per NAME-word hit
+        (a strong signal), then the GRADED exact-alias bonus -- +5.0 when the
+        RAW normalised query IS an alias (the anticipated-phrase signal),
+        +4.0 when only the FILLER-STRIPPED residue is ('how do I start'
+        strips to 'start', which collided with a bare 'start' alias and the
+        name-word bonus outranked the card that anticipated the whole phrase;
+        measured 6.5 vs 6.0). Both query forms are tested because four
+        shipped aliases THEMSELVES begin with a filler. accepts/produces are
+        the S3 io-shape pre-filter (untagged is never filtered).
+        Returns [(score, name, cap)] best first, ties by name."""
+        q_phrase = " ".join((problem or "").lower().split())
+        q_stripped = _strip_filler(problem)
+        scored = []
+        for cap in self._by_name.values():
+            if accepts is not None and cap.consumes and accepts not in cap.consumes:
+                continue
+            if produces is not None and cap.produces and produces not in cap.produces:
+                continue
+            overlap = len(q & cap._hay)
+            if overlap == 0:
+                continue
+            score = overlap + 0.5 * len(q & cap._nw)
+            if any(q_phrase == a for a in cap._al):
+                score += 5.0
+            elif any(q_stripped == a for a in cap._al):
+                score += 4.0
+            scored.append((score, cap.name, cap))
+        scored.sort(key=lambda s: (-s[0], s[1]))
+        return scored
+
     def find_scored(self, problem, k=3):
         """Like find_capability, but returns [(capability, score)] best-first -- so an agentic layer can turn the raw
         match scores into a CONFIDENCE (how dominant the top hit is). Same scoring, same deterministic tie-break."""
@@ -425,25 +434,10 @@ class Catalog:
         q = set(_tokens(problem))
         if not q:
             return []
-        q_phrase = " ".join((problem or "").lower().split())        # normalised whole query, for exact-alias hits
-        # FILLER-STRIPPED FORM, restored: the split kept q_phrase but dropped this and the alias comparison
-        # that used it, silently deleting the fix. BOTH forms are tested, never just the stripped one --
-        # four shipped aliases THEMSELVES begin with a filler ("how do I get from points to a mesh"), so
-        # stripping the query alone would destroy the very +5.0 bonus this exists to protect. Testing both
-        # can only ADD a match, never remove one.
-        q_stripped = _strip_filler(problem)
-        scored = []
-        for cap in self._by_name.values():
-            name_words = cap._nw
-            hay = cap._hay
-            overlap = len(q & hay)
-            if overlap == 0:
-                continue
-            score = overlap + 0.5 * len(q & name_words)
-            if any(q_phrase == a.lower() or q_stripped == a.lower() for a in cap.aliases):  # see find_capability
-                score += 5.0
-            scored.append((score, cap.name, cap))
-        scored.sort(key=lambda s: (-s[0], s[1]))
+        # ONE SCORER (dedup sweep): the twin of this loop in find_capability
+        # drifted twice and each fix had to be mirrored BY HAND ("a fix lands
+        # in BOTH or neither"). It now cannot drift: both delegate.
+        scored = self._score_all(problem, q)
         return [(cap, float(sc)) for sc, _, cap in scored[:k]]
 
     def suggest_pipeline(self, start_kind, goal_kind, max_len=4, require_step=False):
@@ -988,7 +982,13 @@ _METHOD_ALIASES = {
                "who should handle this question"),
     "api_use": ("call an endpoint I taught it",
                 "use a learned api",
-                "invoke a remembered service"),
+                "invoke a remembered service",
+                # sweep 103 merge: the duplicate-key audit caught a second api_use entry
+                # SHADOWING this one (dict literal: later key wins) -- phrasings merged
+                # here, duplicate deleted. An alias map is a dict; grep before adding.
+                "call a learned api endpoint", "source data from an api",
+                "query an external service", "call the forecasting service",
+                "robotics service call"),
     "capabilities": ("what can this mind do",
                      "list everything available",
                      "introspect the capability registry"),
@@ -1023,6 +1023,22 @@ _METHOD_ALIASES = {
     # Tombstone reclamation. UPDATE is tombstone-and-reinsert, so a table that is
     # written to only ever grows -- 400 rows became 1,260 after five updates.
     # Aliases from the mouth of someone watching a table bloat.
+    # DO NOT ASK A MODEL TO MULTIPLY -- it emits the likeliest next token, which
+    # is not arithmetic. check_math computes the claims instead.
+    "explain_pair": ("why are these two similar",
+                     "compare two records role by role",
+                     "what do these two have in common"),
+    "manifold_chart": ("flatten curved data to a chart",
+                       "my embedding is curved not flat",
+                       "isomap",
+                       "laplacian eigenmaps"),
+    "check_math": ("check the math in an answer",
+                   "did the model do the arithmetic right",
+                   "verify a calculation",
+                   "the numbers look wrong"),
+    "do_math": ("actually calculate this",
+                "evaluate an arithmetic expression",
+                "compute it instead of guessing"),
     "table_vacuum": ("my table keeps growing",
                "remove deleted rows permanently",
                "reclaim tombstones",
@@ -1442,6 +1458,17 @@ _METHOD_ALIASES = {
     "is_deterministic": ('is this function deterministic', 'does it return the same result every time', 'check determinism', 'bit-identical repeatability', 'is the output reproducible'),
     "light": ('add a light to a scene', 'directional or point light', 'sun light source', 'scene lighting object', 'place a light'),
     "make_cloud": ('render a volumetric cloud', 'make a cloud image', 'volumetric cloud in one call', 'draw a cloud', 'cloud render'),
+    "serve": ('serve this query preemptively', 'answer from memory or a tool first',
+              'try the substrate before the model', 'preemptive answer without an llm',
+              'serve results from a learned tool'),
+    "api_learn": ('learn an api from its spec', 'hook up a non llm model', 'connect a timesfm style forecaster',
+                  'teach lecore a new web service', 'register an external service', 'learn an openapi spec'),
+    "api_toolbox": ('list learned apis', 'which external services do I know', 'learned api roster',
+                    'what apis can I call', 'show my learned services'),
+    "lookup": ('look up a word in the dictionary', 'define this word', 'word definition and synonyms',
+               'english dictionary lookup', 'what does this word mean'),
+    "study": ('comprehend a directory in one call', 'walk and digest a tree', 'study this folder',
+              'one call code and doc comprehension', 'macro study of a repository'),
     "make_observer": ('custom sensor from sensitivity curves', 'build an observer', 'spectral sensor with channels', 'define a camera response', 'per-channel sensor'),
     "make_scene": ('build a scene from nested objects', 'assemble a scene from a list', 'scene from objects', 'construct a nested scene', 'scene builder from parts'),
     "make_table": ('ingest tabular data', 'load a table of records', 'rows into a vsa table', 'tabular data to vectors', 'make a table from dicts'),
@@ -1750,6 +1777,8 @@ def default_catalog():
     # simulation caught it: the gate reported p07 dark while it was loaded every boot).
     import holographic.caching_and_storage.holographic_catalog_p07 as holographic_catalog_p07
     holographic_catalog_p07.register_p07(c)
+    import holographic.caching_and_storage.holographic_catalog_p08 as holographic_catalog_p08
+    holographic_catalog_p08.register_p08(c)
     return c
 
 

@@ -1154,6 +1154,26 @@ class SemanticScene:
             kw["backdrop"] = self.environment["backdrop_color"]
         return render_scene(objs, camera, width=width, height=height, sun=sun, sky=sky, **kw)
 
+    def animate(self, steps=24, camera=None, width=200, height=150, quality="fast",
+                fps=12.0, gif=None, sim=None, every=1, **render_kw):
+        """SIMULATE the scene and RENDER the motion -- the loop the simulate() docstring
+        promised ('a trajectory you can animate') but nothing closed: simulate returned
+        {name: (x,y,z)} frames and NO renderer accepted positions, so the sim was
+        write-only (measured, sweep 80). One call now: run simulate(steps) (or take a
+        precomputed `sim` trajectory), render every `every`-th frame with the positions
+        override, return the list of (H,W,3) frames; `gif='path.gif'` also writes a
+        deterministic GIF89a via save_gif. All render kwargs (quality, lighting, ss,
+        spp, ...) pass straight through to render()."""
+        frames = sim if sim is not None else self.simulate(steps=steps)
+        out = []
+        for f in frames[::max(1, int(every))]:
+            out.append(self.render(camera=camera, width=width, height=height,
+                                   quality=quality, positions=dict(f), **render_kw))
+        if gif:
+            from holographic.rendering.holographic_render import save_gif
+            save_gif(gif, out, fps=float(fps))
+        return out
+
     def simulate(self, steps=40, dt=0.05, gravity=9.8, start_height=3.0, spacing=2.7, base_radius=0.7):
         """A deliberately SIMPLE rigid-body drop of the scene's objects: each object is a point mass that starts above
         its layout position and falls under gravity until it rests on the ground (y = its radius). Returns a list of

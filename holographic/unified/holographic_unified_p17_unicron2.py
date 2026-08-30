@@ -55,17 +55,24 @@ class _UnifiedPart17:
         # argument -- the caller sees a crash in someone else's code. Found by
         # CALLING every zero-argument faculty rather than reading them: 391
         # called, 22 raised, 11 raised without saying what was missing.
+        from holographic.agents_and_reasoning.holographic_actr import (
+            rank, forget, fit_rung_weights, base_level)
+        # FIT-ONLY MODE FIRST (cp97, field-caught by audit.bat): calling with
+        # half_lives= and no items is the DOCUMENTED weight-fitting mode --
+        # the install audit's R^2 0.99858 pin comes from exactly this call.
+        # The no-lying-defaults guard (right in spirit) was inserted ABOVE
+        # this branch and made it unreachable; a guard that blocks a
+        # documented mode is itself a signature that lies.
+        if items is None and half_lives is not None and forget_below is None:
+            return fit_rung_weights(half_lives)
         if items is None:
             raise ValueError(
                 "unicron_actr needs items= -- it has a None default so it can be\n"
                 "passed positionally or by keyword, but there is no\n"
-                "meaningful empty case to fall back to.")
-        from holographic.agents_and_reasoning.holographic_actr import (
-            rank, forget, fit_rung_weights, base_level)
+                "meaningful empty case to fall back to (or pass half_lives= "
+                "alone\nfor the weight-fitting mode).")
         if forget_below is not None:
             return forget(items, now, forget_below)
-        if items is None and half_lives is not None:
-            return fit_rung_weights(half_lives)
         return rank(items, now, half_lives=half_lives, threshold=threshold)
 
     def unicron_nullspace(self, runtime=None, ids=None, layer=None, delta=None,

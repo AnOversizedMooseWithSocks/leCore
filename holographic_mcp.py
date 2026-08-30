@@ -44,7 +44,15 @@ it next session, and a REFUTED approach is worth as much as a working one -- it 
 next agent repeating it. Phrase the question the way a stranger would ask it, not the way you
 already know the answer; recall matches wording closely, so one phrasing reaches only whoever
 guesses yours. Before starting a task, memory_search it: the work may already be done. Results are exact JSON; bytes come as
-{'__bytes_b64__': ...}."""
+{'__bytes_b64__': ...}. NEWER DOORS (sweeps 93-109): study(root) digests a whole
+directory server-side into a persistent handle -- your virtually limitless context; study_ask
+answers WITH CITATIONS and refuses off-corpus honestly, so point it at trees instead of
+reading files one by one. wisdom_record/wisdom_ask: lessons that outlive you, with your name
+on them -- inherit before you rediscover, bequeath what cost you real effort. Tool reflexes:
+once the substrate is taught how a tool answers a question shape, plain asks get served from
+the tool directly with no model call -- teach patterns for anything you find yourself doing
+twice. The division of labor in one line: the substrate remembers, retrieves, computes, and
+calls tools; you reason over what it serves."""
 
 # The territory map the model gets in ONE call. CURATED, but un-rottable: the selftest runs
 # every ask_for phrase through the live catalog and FAILS if any stops resolving -- the map
@@ -127,8 +135,138 @@ _TOOLS = [
      "inputSchema": {"type": "object", "properties": {
          "handle": {"type": "string"},
          "query": {"type": "string"},
-         "k": {"type": "integer", "description": "how many chunks (default 4)"}},
+         "k": {"type": "integer", "description": "how many chunks (default 4)"},
+         "gate": {"type": "string", "description": "optional: 'dispatch' runs the full adaptive "
+                  "cascade (exact -> dense -> BM25 -> honest abstain) and returns a payment-gate "
+                  "verdict: {answerable, stage, margin, advice, chunks}. answerable=false means "
+                  "the corpus CERTIFIABLY cannot support this ask -- refuse or downgrade before "
+                  "quoting money. Default (absent) is the classic BM25 ranking, unchanged."}},
          "required": ["handle", "query"]}},
+    {"name": "corpus_delta",
+     "description": "Chunk-level DELTA bind (the rsync move): probe with chunk_hashes=[sha256 "
+                    "hex,...] to learn which chunks the server lacks ({missing, known}); fill "
+                    "with chunks={hash: text} shipping ONLY those. When all hashes resolve, the "
+                    "corpus assembles in hash-list order under the SAME handle corpus_bind would "
+                    "give it -- one edited file re-ships one chunk, not megabytes. Mis-keyed "
+                    "chunks are refused per-chunk.",
+     "inputSchema": {"type": "object", "properties": {
+         "chunk_hashes": {"type": "array", "items": {"type": "string"},
+                          "description": "sha256 hex of each chunk, in corpus order"},
+         "chunks": {"type": "object",
+                    "description": "optional fill: {hash: chunk text} for missing hashes"}},
+         "required": ["chunk_hashes"]}},
+    {"name": "study",
+     "description": "MACRO comprehension of a directory ON THE SERVER (the limitless-context "
+                    "door): one call walks, parses, and digests a tree -- file census, ranked "
+                    "code skeleton, doc digests -- and binds the harvested material under a "
+                    "persistent handle. Follow up with study_ask; the substrate remembers so "
+                    "the host model never re-reads the tree.",
+     "inputSchema": {"type": "object", "properties": {
+         "root": {"type": "string", "description": "directory path on the server"},
+         "budget_lines": {"type": "integer"}, "ladder": {"type": "boolean"}},
+         "required": ["root"]}},
+    {"name": "study_ask",
+     "description": "Ask a studied tree a question: idf-weighted lexical retrieval with a "
+                    "DECLARED verdict (answerable needs >=2 shared content words -- off-corpus "
+                    "questions refuse honestly) and CITATIONS: every chunk names its source "
+                    "file (and symbol for code). The host model reads, answers, and cites.",
+     "inputSchema": {"type": "object", "properties": {
+         "handle": {"type": "string"}, "query": {"type": "string"},
+         "k": {"type": "integer"}}, "required": ["handle", "query"]}},
+    {"name": "wisdom_record",
+     "description": "Bequeath a lesson to the persistent memory with AUTHORSHIP: provenance "
+                    "wisdom:<author> travels with the lesson through every save, export, and "
+                    "import -- a model's testament outlives the model and the session.",
+     "inputSchema": {"type": "object", "properties": {
+         "lesson": {"type": "string"}, "author": {"type": "string"},
+         "topic": {"type": "string"}}, "required": ["lesson", "author"]}},
+    {"name": "wisdom_ask",
+     "description": "Inherit bequeathed lessons with attribution -- what past models chose to "
+                    "pass on, in their own words. Filter by query words or one author.",
+     "inputSchema": {"type": "object", "properties": {
+         "query": {"type": "string"}, "author": {"type": "string"},
+         "k": {"type": "integer"}}, "required": []}},
+    {"name": "series_analyze",
+     "description": "Market/telemetry series analysis in one call: DEMUX hidden components "
+                    "(stride table), detect REGIMES (mean/std segments with boundaries), and "
+                    "an ENVELOPE forecast (calibrated size of the next move); tasks= subsets "
+                    "['demux','regimes','forecast','formula','drift'] -- 'formula' recovers "
+                    "the generating law, 'drift' is split-half fingerprint change detection "
+                    "(the hrnn market recipe). Components return as parseable lists.",
+     "inputSchema": {"type": "object", "properties": {
+         "series": {"type": "array", "items": {"type": "number"}},
+         "tasks": {"type": "array", "items": {"type": "string"}},
+         "min_seg": {"type": "integer"}},
+         "required": ["series"]}},
+    {"name": "dataset_decompose",
+     "description": "Take UNLABELED data apart: a 1-D series returns the additive LAW that "
+                    "generates it (MDL-gated formula with residual + bit cost); a 2-D "
+                    "dataset returns scaffold-axis discovery, per-channel decomposition, and "
+                    "a structured/noise verdict. The inverse problem as a tool call.",
+     "inputSchema": {"type": "object", "properties": {
+         "data": {"type": "array"}, "max_terms": {"type": "integer"}},
+         "required": ["data"]}},
+    {"name": "fact_check",
+     "description": "Check claims instead of vibing them: every 'expr == value' is COMPUTED "
+                    "(wrong ones come back named); with corpus= (a corpus_bind handle) each "
+                    "sentence is gated against the bound sources -- 'supported' means the "
+                    "dispatch gate CERTIFIED evidence, and unsupported claims are listed. "
+                    "Without corpus=, arithmetic only, and the result says so.",
+     "inputSchema": {"type": "object", "properties": {
+         "text": {"type": "string"}, "corpus": {"type": "string"}},
+         "required": ["text"]}},
+    {"name": "scene_create",
+     "description": "TEXT -> 3D -> IMAGE: describe a scene in plain words ('a red metal "
+                    "sphere and a small blue glass box on a sunny day'); the engine builds "
+                    "a live scene of NAMED objects, renders it, and returns the render as "
+                    "an image plus a handle for scene_adjust / scene_export. Deterministic.",
+     "inputSchema": {"type": "object", "properties": {
+         "description": {"type": "string"},
+         "width": {"type": "integer"}, "height": {"type": "integer"},
+         "quality": {"type": "string", "description": "fast (default) or best"}},
+         "required": ["description"]}},
+    {"name": "scene_adjust",
+     "description": "Talk to a live scene: 'make the sphere bigger', 'change the box to "
+                    "glass', 'move the light left'. Re-renders and returns the new image. "
+                    "The iterate-by-conversation loop is the point.",
+     "inputSchema": {"type": "object", "properties": {
+         "handle": {"type": "string"}, "instruction": {"type": "string"},
+         "width": {"type": "integer"}, "height": {"type": "integer"},
+         "render": {"type": "boolean"}},
+         "required": ["handle", "instruction"]}},
+    {"name": "scene_export",
+     "description": "Realize a scene's objects to meshes and return ASCII STL text -- the "
+                    "open exchange format modelers read. The caller writes the file.",
+     "inputSchema": {"type": "object", "properties": {
+         "handle": {"type": "string"},
+         "format": {"type": "string", "description": "stl"}},
+         "required": ["handle"]}},
+    {"name": "image_tool",
+     "description": "2D create & edit: op=pattern generates procedural fields (fbm/checker/"
+                    "stripes/dots/gradient); sharpen / recolor / blend edit PNGs sent as "
+                    "base64 (image_b64=, ref_b64=). Results return as images. The full 2D "
+                    "toolkit is deeper: lecore_find('2D image editing') + lecore_invoke.",
+     "inputSchema": {"type": "object", "properties": {
+         "op": {"type": "string"}, "image_b64": {"type": "string"},
+         "ref_b64": {"type": "string"}, "args": {"type": "object"},
+         "width": {"type": "integer"}, "height": {"type": "integer"}},
+         "required": ["op"]}},
+    {"name": "math_eval",
+     "description": "Check math instead of vibing it: 'expr == value' claims are parsed and "
+                    "COMPUTED (wrong ones come back named); a bare expression evaluates. "
+                    "Symbolic solve/simplify lives one lecore_find('symbolic') away.",
+     "inputSchema": {"type": "object", "properties": {
+         "text": {"type": "string"}}, "required": ["text"]}},
+    {"name": "chart_make",
+     "description": "Numbers -> a readable chart: deterministic SVG line | bar | scatter "
+                    "with axes, ticks, colorblind-safe palette, bars anchored at zero. "
+                    "Returns the SVG text. Non-finite values are refused loudly.",
+     "inputSchema": {"type": "object", "properties": {
+         "kind": {"type": "string"}, "series": {"type": "array"},
+         "labels": {"type": "array"}, "title": {"type": "string"},
+         "x": {"type": "array"},
+         "width": {"type": "integer"}, "height": {"type": "integer"}},
+         "required": ["kind", "series"]}},
     {"name": "void_explore",
      "description": "THE DISCOVERY TOOL: find what a bound corpus's own structure LICENSES "
                     "but the corpus LACKS -- measured voids, not brainstorming. Returns "
@@ -372,6 +510,71 @@ def _slot_observations(chunks, ns=3):
     return obs
 
 
+# DETERMINISTIC TOOL MEMO (sweep 86: 'the model should get FASTER as leCore learns').
+# The receipt machinery already proves determinism (input_sha256 -> output_sha256); the
+# memo cashes that proof in: identical input to a PURE tool returns the stored content
+# blocks instead of recomputing. Pure set is deliberately conservative -- stateful tools
+# (scene_*, corpus_* which mutate registries; zoo_* which call remote models; lecore_invoke
+# whose faculty purity is unknowable generically) NEVER memo. Bounded LRU; entries over
+# 2 MB skipped (a cache that eats the heap is a speedup wearing a leak).
+# meta reports cache:'hit'|'miss' and compute_ms stays HONEST (near-zero on hits, payload
+# billed the same -- the wire still carries the bytes). LECORE_MCP_MEMO=0 kills it.
+_MEMO_PURE_TOOLS = ("series_analyze", "dataset_decompose", "math_eval", "chart_make",
+                    "lecore_find", "lecore_describe", "lecore_map")
+_MEMO_MAX = 128
+_MEMO_ENTRY_CAP = 2 * 1024 * 1024
+
+
+_PENDING_MEDIA = []          # per-call scratch filled by _stub_media, drained by _media_blocks
+                             # (the handler is single-threaded per request by MCP's shape)
+
+
+def _is_image(v):
+    """An (H,W,3) or (H,W) float/int ndarray is an image by convention everywhere
+    in this engine (rgb01 / grayscale)."""
+    try:
+        import numpy as _np
+        return (isinstance(v, _np.ndarray) and v.ndim in (2, 3)
+                and (v.ndim == 2 or v.shape[2] in (1, 3))
+                and v.shape[0] >= 2 and v.shape[1] >= 2)
+    except Exception:
+        return False
+
+
+def _stub_media(out, _depth=0):
+    """Walk a tool result; pull image arrays OUT of the JSON (json.dumps(default=str)
+    would serialize a render as megabytes of repr soup) and queue them as PNG image
+    blocks. The stub left behind names the shape, so the text half stays honest about
+    what shipped beside it. Depth-capped: a pathological nest is not walked forever."""
+    if _depth > 4:
+        return out
+    if _is_image(out):
+        import numpy as _np
+        from holographic.rendering.holographic_render import png_bytes
+        import base64 as _b64
+        arr = _np.asarray(out, float)
+        if arr.ndim == 2:
+            arr = _np.repeat(arr[:, :, None], 3, axis=2)
+        if arr.max() > 1.0 + 1e-6:                       # uint8-scaled input tolerated
+            arr = arr / 255.0
+        png = png_bytes(_np.clip(arr, 0.0, 1.0))
+        _PENDING_MEDIA.append({"type": "image", "mimeType": "image/png",
+                               "data": _b64.b64encode(png).decode("ascii")})
+        return {"_media": "image/png", "shape": list(out.shape),
+                "note": "pixels shipped as an MCP image content block"}
+    if isinstance(out, dict):
+        return {k: _stub_media(v, _depth + 1) for k, v in out.items()}
+    if isinstance(out, (list, tuple)) and len(out) <= 16:
+        return [_stub_media(v, _depth + 1) for v in out]
+    return out
+
+
+def _media_blocks(_out):
+    """Drain the per-call media queue into MCP content blocks."""
+    blocks, _PENDING_MEDIA[:] = list(_PENDING_MEDIA), []
+    return blocks
+
+
 class MCPServer:
     """The protocol frame around one Service. handle(dict) -> dict|None keeps the whole
     server testable in-process; serve_stdio() is just a line loop around it."""
@@ -396,6 +599,92 @@ class MCPServer:
         root = getattr(self, "_memory_root", None) or "."
         return os.path.join(str(root), "corpora.json")
 
+    def _memo_store_path(self):
+        import os
+        # .lecore, not .json (sweep 112, Moose's rule): the memo rides the same
+        # holographic container as every other store -- measured 14.7x smaller than
+        # canonical JSON on a 66-entry payload AND byte-deterministic (twin saves
+        # sha-identical), so the one-file + identical-bytes pins carry over intact.
+        return os.path.join(str(self._memory_root), "toolmemo", "store.lecore")
+
+    def _memo_store_load(self):
+        """ONE FILE, NOT A SHARD FARM (sweep 111, Moose's commit-dialog screenshot):
+        the write-through memo used to persist one JSON per call -- 64 files in git's
+        face, 512 at cap. The store is now a SINGLE canonical JSON {key: result} with
+        an '_order' list for mtime-free eviction, written tmp+rename with sorted keys
+        so identical entries produce identical bytes (the determinism twins apply to
+        caches too). MIGRATION folds legacy shards in and deletes them -- the spam
+        cleans itself up on first load."""
+        import os, json
+        if getattr(self, "_memo_store", None) is not None:
+            return self._memo_store
+        store = {"_order": []}
+        p = self._memo_store_path()
+        try:
+            if os.path.exists(p):
+                from holographic.io_and_interop.holographic_container import load_container
+                got = load_container(open(p, "rb").read())
+                for sec in got["sections"]:
+                    if sec["kind"] == "lecore.toolmemo":
+                        store = sec["meta"].get("memo") or {"_order": []}
+                if "_order" not in store:
+                    store["_order"] = [k for k in store if k != "_order"]
+        except Exception:
+            store = {"_order": []}                     # corrupt store = cold cache, never a crash
+        d = os.path.dirname(p)
+        try:
+            # legacy sweep: per-call shards AND the short-lived sweep-111 store.json
+            # both fold in and self-delete -- the migration migrates its predecessor.
+            legacy = [n for n in os.listdir(d) if n.endswith(".json")]                 if os.path.isdir(d) else []
+            for n in sorted(legacy, key=lambda x: (x != "store.json", x)):
+                if n == "store.json":
+                    try:
+                        with open(os.path.join(d, n), "r") as fh:
+                            old_st = json.load(fh)
+                        for k, v in old_st.items():
+                            if k != "_order":
+                                store.setdefault(k, v)
+                                if k not in store["_order"]:
+                                    store["_order"].append(k)
+                    except Exception:
+                        pass
+                    os.remove(os.path.join(d, n))
+                    continue
+                k = n[:-5]
+                try:
+                    with open(os.path.join(d, n), "r") as fh:
+                        store.setdefault(k, json.load(fh))
+                    if k not in store["_order"]:
+                        store["_order"].append(k)
+                except Exception:
+                    pass
+                os.remove(os.path.join(d, n))          # the shard farm retires itself
+            if legacy:
+                self._memo_store_save(store)
+        except Exception:
+            pass
+        self._memo_store = store
+        return store
+
+    def _memo_store_save(self, store=None):
+        import os, json
+        store = store if store is not None else getattr(self, "_memo_store", None)
+        if store is None or not self._memory_root:
+            return
+        p = self._memo_store_path()
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = p + ".tmp"
+        try:
+            from holographic.io_and_interop.holographic_container import save_container
+            blob = save_container([{"kind": "lecore.toolmemo", "id": "v1",
+                                    "meta": {"memo": store}, "arrays": {}}],
+                                  meta={"app": "lecore.toolmemo", "version": 1})
+            with open(tmp, "wb") as fh:
+                fh.write(blob)
+            os.replace(tmp, p)                         # a kill mid-write leaves a miss
+        except Exception:
+            pass
+
     def _corpora_save(self):
         """Checkpoint 20: corpora persist as a CONTAINER section (lecore.zoo.corpora), not
         JSON -- the blessed format for everything the zoo stores."""
@@ -405,6 +694,10 @@ class MCPServer:
                                     "meta": {"corpora": self._corpora}, "arrays": {}}],
                                   meta={"app": "lecore.zoo", "version": 2})
             import os
+            # A requested memory_root is a REQUEST (the autoboot-partition rule): create it
+            # rather than letting best-effort silently drop every save until something else
+            # happens to mkdir it -- measured cost: a fresh server missing all its chunks.
+            os.makedirs(str(self._memory_root), exist_ok=True)
             with open(os.path.join(str(self._memory_root), "corpora.lecore"), "wb") as f:
                 f.write(blob)
         except OSError:
@@ -437,6 +730,78 @@ class MCPServer:
             self._memory = KnowledgeStore(self._memory_root)
         return self._memory
 
+    def _study(self, root=None, budget_lines=120, ladder=False, **kw):
+        """Server-side study: bind the harvested material under a persistent handle.
+        The handle is content-derived (sha256 of the chunk texts) so re-studying an
+        unchanged tree lands on the SAME handle -- bake once, ask forever (the Quilez
+        discipline applied to comprehension: expensive walk baked, cheap asks
+        regenerated per question)."""
+        import hashlib
+        if not root:
+            return {"error": "root is required"}
+        st = self.service.mind.study(str(root), budget_lines=int(budget_lines),
+                                     ladder=bool(ladder))
+        chunks = []
+        # rebuild the chunk list the same way study did -- the mind returns the ask
+        # closure, not the corpus; harvest via a second cheap pass is avoided by
+        # reading the closure's cells (the chunks live in ask.__closure__)
+        for cell in (st["ask"].__closure__ or ()):
+            v = cell.cell_contents
+            if isinstance(v, list) and v and isinstance(v[0], dict) and "text" in v[0]:
+                chunks = v
+                break
+        h = "study-" + hashlib.sha256(
+            "\x00".join(c["text"] for c in chunks).encode()).hexdigest()[:16]
+        if not hasattr(self, "_studies"):
+            self._studies = {}
+        self._studies[h] = chunks
+        out = {"handle": h, "tree": st["tree"], "n_chunks": st["n_chunks"],
+               "docs": st["docs"][:6], "truncation": st.get("truncation")}
+        if st.get("code"):
+            out["code"] = {"files": st["code"]["files"],
+                           "skeleton": str(st["code"]["skeleton"])[:2000]}
+        if st.get("ladder"):
+            out["ladder"] = st["ladder"]["summary"]
+        return out
+
+    def _study_ask(self, handle=None, query=None, k=5, **kw):
+        """Grounded ask against a studied handle: the same declared lexical verdict as
+        mind.study's ask(), WITH citations. Refusal is honest: off-corpus questions
+        come back answerable=false, never vibed."""
+        import re as _re
+        from math import log
+        chunks = (getattr(self, "_studies", {}) or {}).get(str(handle))
+        if not chunks:
+            return {"error": "unknown study handle %r -- call study first" % str(handle)}
+        qw = {w for w in _re.findall(r"[a-z]{4,}", str(query).lower())}
+        if not qw:
+            return {"answerable": False, "advice": "no content words in the question"}
+        df, toks = {}, []
+        for c in chunks:
+            tw = set(_re.findall(r"[a-z]{4,}", c["text"].lower()))
+            toks.append(tw)
+            for w in qw & tw:
+                df[w] = df.get(w, 0) + 1
+        n = len(chunks)
+        scored = sorted(((sum(log(1.0 + n / (1.0 + df.get(w, 0))) for w in (qw & tw)),
+                          len(qw & tw), i) for i, tw in enumerate(toks)), reverse=True)
+        top = scored[:int(k)]
+        best_s, best_sh, _ = top[0]
+        return {"answerable": bool(best_sh >= 2),
+                "verdict": "lexical retrieval (idf-weighted shared content words)",
+                "top_score": round(float(best_s), 3), "shared_words": int(best_sh),
+                "chunks": [chunks[i]["text"][:400] for _s, sh, i in top[:3] if sh > 0],
+                "citations": [chunks[i]["source"] for _s, sh, i in top[:3] if sh > 0]}
+
+    def _wisdom_record(self, lesson=None, author=None, topic=None, **kw):
+        r = self.service.mind.bequeath(str(lesson), author=str(author), topic=topic)
+        self._memory_persist() if hasattr(self, "_memory_persist") else None
+        return {"taught": r.get("taught"), "author": r.get("author"),
+                "topic": r.get("topic")}
+
+    def _wisdom_ask(self, query=None, author=None, k=8, **kw):
+        return self.service.mind.wisdom(query=query, author=author, k=int(k))
+
     def _corpus_bind(self, texts=None, text=None, documents=None, docs=None, name=None):
         # ALIAS TOLERANCE (UX sweep): strangers send documents=/docs= before reading a schema
         # -- the first phrasing must work. name= is accepted and ignored (content-addressing
@@ -455,7 +820,399 @@ class MCPServer:
         self._corpora_save()                               # E7.2: a zoo restart must not lose bindings
         return {"handle": h, "n_chunks": len(chunks)}      # the same corpus is idempotent
 
-    def _corpus_ask(self, handle=None, query=None, k=4, question=None, corpus=None):
+    # -- THE ANALYST DOORS (sweep 83): series analysis + fact checking over the wire ------
+
+    def _series_analyze(self, series=None, data=None, x=None, tasks=None,
+                        forecast_horizon=0, min_seg=16):
+        """One door over the market/series stack: demux (hidden components + stride),
+        regime detection (mean/std segments with boundaries), and an ENVELOPE forecast
+        (predict the SIZE of the next move, calibrated) -- the three questions every
+        market/telemetry ask decomposes into. tasks= subsets ('demux', 'regimes',
+        'forecast'); default runs all three. Composes demux_series + detect_regimes +
+        envelope_forecast; this door adds transport, never algorithms."""
+        s = series if series is not None else (data if data is not None else x)
+        if s is None:
+            return {"error": "pass series= (aliases data=, x=): a list of numbers"}
+        import numpy as _np
+        arr = _np.asarray(s, float)
+        if arr.ndim != 1 or len(arr) < 8:
+            return {"error": "series must be 1-D with >= 8 points (got shape %s)"
+                             % (arr.shape,)}
+        want = set(tasks or ("demux", "regimes", "forecast"))
+        mind = self.service.mind
+        out = {"n": int(len(arr))}
+        if "demux" in want:
+            d = dict(mind.demux_series(arr))
+            # the separated COMPONENTS are the point of demux, and json.dumps(default=str)
+            # shipped them as numpy REPR SOUP a host cannot parse back (measured, sweep
+            # 85). Data doors own their serialization: plain rounded lists, capped
+            # honestly rather than truncated silently.
+            obs = d.get("objects")
+            if obs is not None:
+                comps, total = [], 0
+                for o in obs:
+                    v = [round(float(t), 6) for t in _np.asarray(o, float).ravel()]
+                    total += len(v)
+                    comps.append(v)
+                if total <= 20000:
+                    d["objects"] = comps
+                else:
+                    d["objects"] = [c[:64] for c in comps]
+                    d["objects_note"] = ("components truncated to 64 points each "
+                                         "(%d total) -- call demux_series via "
+                                         "lecore_invoke for full arrays" % total)
+            if "corr" in d:
+                d["corr"] = [[round(float(v), 4) for v in row]
+                             for row in _np.asarray(d["corr"], float)]
+            out["demux"] = d
+        if "drift" in want:
+            # the hrnn 'market analysis' recipe's own pattern, surfaced as a task:
+            # split-half structure fingerprints + drift verdict ('entropy rate moved
+            # 2.49 -> 2.99' / 'no structural change at tolerance') -- ONLINE change
+            # detection beside regimes' retrospective segmentation
+            half = len(arr) // 2
+            fp1 = mind.structure_fingerprint(arr[:half])
+            fp2 = mind.structure_fingerprint(arr[half:])
+            out["drift"] = mind.structure_drift(fp1, fp2)
+        if "regimes" in want:
+            out["regimes"] = mind.detect_regimes(arr, min_seg=int(min_seg))
+        if "formula" in want:
+            # symbolic recovery: the LAW that generates the series (decompose_signal --
+            # MDL-gated additive terms; the Formula stringifies for the wire)
+            fml, rep = mind.decompose_signal(arr)
+            out["formula"] = {"formula": str(fml), **{k: rep[k] for k in
+                              ("resid_rms", "n_terms", "mdl_bits", "mode") if k in rep}}
+        if "forecast" in want:
+            out["forecast"] = mind.envelope_forecast(arr)
+            if int(forecast_horizon) > 0:
+                out["forecast"]["horizon_note"] = (
+                    "envelope_forecast predicts next-move SIZE; for horizon-scoped "
+                    "point forecasts use lecore_invoke('ladder_forecast_calibrated')")
+        return out
+
+    def _dataset_decompose(self, data=None, rows=None, series=None, max_terms=6):
+        """UNLABELED data taken apart: a 1-D series goes to decompose_signal (the additive
+        LAW that generates it, MDL-gated, with residual and bit-cost on record); a 2-D
+        (n, channels) dataset goes to explore_series (scaffold axis discovery + per-
+        channel decomposition + a structured/noise VERDICT). Formulas ship as strings;
+        every number in the report is the measurement, not a vibe."""
+        d = data if data is not None else (rows if rows is not None else series)
+        if d is None:
+            return {"error": "pass data= (aliases rows=, series=): a list (1-D) or "
+                             "list-of-rows (2-D)"}
+        import numpy as _np
+        arr = _np.asarray(d, float)
+        mind = self.service.mind
+        if arr.ndim == 1:
+            if len(arr) < 16:
+                return {"error": "1-D decomposition needs >= 16 points (got %d)" % len(arr)}
+            fml, rep = mind.decompose_signal(arr, max_terms=int(max_terms))
+            return {"kind": "series", "formula": str(fml),
+                    "report": {k: rep[k] for k in ("resid_rms", "n_terms", "mdl_bits",
+                                                   "mode", "multiplicative") if k in rep}}
+        if arr.ndim == 2:
+            r = mind.explore_series(arr, max_terms=int(max_terms))
+            out = {"kind": "dataset", "verdict": r.get("verdict"),
+                   "n_channels": r.get("n_channels"),
+                   "structured_channels": r.get("structured_channels"),
+                   "scaffold": r.get("scaffold"), "scores": r.get("scores")}
+            chans = r.get("channels")
+            if isinstance(chans, (list, tuple)):
+                out["channels"] = [str(c)[:200] for c in chans[:12]]
+            return out
+        return {"error": "data must be 1-D or 2-D (got %d-D)" % arr.ndim}
+
+    def _fact_check(self, text=None, claim=None, corpus=None):
+        """Claims CHECKED against arithmetic and (optionally) a bound corpus: every
+        'expr == value' is COMPUTED via check_math; with corpus= (a corpus_bind handle)
+        each sentence is gated against the corpus via the dispatch gate, so 'supported'
+        means retrieved evidence cleared the same bar corpus_ask uses -- and claims with
+        NO support come back named, never silently passed. Without corpus= only the
+        arithmetic half runs and the result SAYS so."""
+        text = text if text is not None else claim
+        if not text:
+            return {"error": "pass text= (alias claim=); optional corpus= handle from "
+                             "corpus_bind"}
+        mind = self.service.mind
+        out = {"math": mind.check_math(str(text))}
+        if corpus is None:
+            out["note"] = ("arithmetic only -- bind sources with corpus_bind and pass "
+                           "corpus= to also check claims for support")
+            return out
+        store = getattr(self, "_corpora", {})
+        if corpus not in store:
+            return {"error": "unknown corpus handle %r -- corpus_bind first" % corpus}
+        import re as _re
+        sents = [s.strip() for s in _re.split(r"(?<=[.!?])\s+", str(text)) if len(s.strip()) > 12]
+        checked = []
+        for s in sents[:12]:                       # bounded: 12 sentences per call
+            # MEASURED contract (sweep 83): the dispatch gate returns answerable /
+            # stage / margin, and certifies refusals ('cascade certified the corpus
+            # cannot support') rather than guessing
+            r = self._corpus_ask(corpus=corpus, question=s, gate="dispatch")
+            checked.append({"claim": s[:160],
+                            "supported": bool(r.get("answerable")),
+                            "stage": r.get("stage"),
+                            "margin": r.get("margin")})
+        out["claims"] = checked
+        out["unsupported"] = [c["claim"] for c in checked if not c["supported"]]
+        return out
+
+    # -- THE STUDIO DOORS (openzoo full-capability sweep): 3D, image, math, chart ---------
+    # One design across all five: thin over existing mind faculties, media rides as MCP
+    # image blocks, handles live for the server process (the corpus_bind contract --
+    # scenes and images are live objects; the zoo proxy owns durability).
+
+    def _scene_create(self, description=None, text=None, width=256, height=192,
+                      quality="fast", name=None):
+        """TEXT -> 3D SCENE -> RENDER, the Blender-MCP move on the substrate: build_scene
+        parses plain words into a live SemanticScene (named objects, materials, lighting),
+        renders it, and returns {handle, objects, image}. Deterministic end to end."""
+        description = description or text
+        if not description:
+            return {"error": "pass description= (alias text=), e.g. 'a red metal sphere "
+                             "and a small blue glass box on a sunny day'"}
+        if not hasattr(self, "_scenes"):
+            self._scenes = {}
+        scene = self.service.mind.build_scene(str(description))
+        import hashlib as _hl
+        handle = str(name) if name else             "scene:" + _hl.sha256(str(description).encode()).hexdigest()[:10]
+        self._scenes[handle] = scene
+        img = scene.render(width=int(width), height=int(height), quality=str(quality))
+        return {"handle": handle, "objects": scene.names(),
+                "description": str(description), "image": img}
+
+    def _scene_adjust(self, handle=None, instruction=None, scene=None, text=None,
+                      width=256, height=192, quality="fast", render=True):
+        """Adjust a live scene by TALKING to it ('make the sphere bigger', 'change the box
+        to glass') and re-render. The conversational loop is the whole point: the model
+        iterates toward what the user meant without touching a vertex."""
+        handle = handle or scene
+        instruction = instruction or text
+        if not hasattr(self, "_scenes") or handle not in getattr(self, "_scenes", {}):
+            return {"error": "unknown scene handle %r -- scene_create first (handles live "
+                             "for this server process)" % handle}
+        if not instruction:
+            return {"error": "pass instruction= (alias text=)"}
+        sc = self._scenes[handle]
+        r = sc.adjust(str(instruction))
+        out = {"handle": handle, "adjusted": str(instruction),
+               "interpretation": str(r)[:400], "objects": sc.names()}
+        if render:
+            out["image"] = sc.render(width=int(width), height=int(height),
+                                     quality=str(quality))
+        return out
+
+    def _scene_export(self, handle=None, scene=None, format="stl", spacing=2.7):
+        """Geometry OUT: realize the scene's objects to meshes and write the open exchange
+        format a modeler reads (ASCII STL today -- the mesh_to_stl door; the text is the
+        payload, the caller writes the file). KEPT NEG: export realizes CURRENT state; an
+        adjust after export is not in the file you already took."""
+        handle = handle or scene
+        if not hasattr(self, "_scenes") or handle not in getattr(self, "_scenes", {}):
+            return {"error": "unknown scene handle %r -- scene_create first" % handle}
+        fmt = str(format).lower()
+        if fmt != "stl":
+            return {"error": "format %r not offered here; 'stl' is the open exchange "
+                             "door (mesh_to_stl). DXF is 2-D (polylines_to_dxf via "
+                             "lecore_invoke); glTF/OBJ are IMPORT formats today." % fmt}
+        sc = self._scenes[handle]
+        mind = self.service.mind
+        parts, n_v = [], 0
+        for ob in sc.realize(spacing=float(spacing)):
+            mesh = getattr(ob, "mesh", None) or (ob.get("mesh") if isinstance(ob, dict)
+                                                 else None)
+            sdf = getattr(ob, "sdf", None) or (ob.get("sdf") if isinstance(ob, dict)
+                                               else None)
+            if mesh is None and sdf is not None:
+                mesh = mind.sdf_to_mesh(sdf) if hasattr(mind, "sdf_to_mesh") else None
+            if mesh is None:
+                continue
+            V = getattr(mesh, "vertices", None)
+            F = getattr(mesh, "faces", None)
+            if V is None or F is None:
+                continue
+            parts.append(mind.mesh_to_stl(V, F, name="lecore"))
+            n_v += len(V)
+        if not parts:
+            return {"error": "the scene realized no exportable meshes -- primitive-only "
+                             "scenes export via lecore_invoke on the sdf faculties"}
+        return {"handle": handle, "format": "stl", "meshes": len(parts),
+                "vertices": n_v, "stl": "\n".join(parts)}
+
+    def _image_tool(self, op=None, image=None, image_b64=None, ref=None, ref_b64=None,
+                    args=None, width=128, height=128):
+        """The 2D toolkit over the wire: generate (pattern kinds via pattern_field, vector
+        art via chart) and edit (sharpen / recolor / blend / downscale). Images arrive as
+        base64 PNG (image_b64=) or as a prior result's pixels re-shipped; results return
+        as MCP image blocks. Ops delegate to the cataloged faculties -- this door adds
+        transport, never algorithms."""
+        import base64 as _b64
+        import numpy as _np
+        from holographic.rendering.holographic_render import png_decode
+        mind = self.service.mind
+        def _dec(b):
+            arr, _info = png_decode(_b64.b64decode(b))    # MEASURED: (array, info) tuple
+            return _np.asarray(arr, float)
+        try:
+            img = _dec(image_b64) if image_b64 else None
+            rf = _dec(ref_b64) if ref_b64 else None
+        except Exception as e:
+            return {"error": "could not decode PNG input: %s" % e}
+        kw = dict(args or {})
+        op = str(op or "").lower()
+        if op == "pattern":
+            # MEASURED, not recalled: pattern_field returns a 3-D FIELD FUNCTION over
+            # points (the SDF costume) -- pixels are a sampled z=0 slice, scaled so the
+            # default fbm shows structure at any raster size.
+            f = mind.pattern_field(kw.pop("kind", "fbm"), **kw)
+            span = float(kw.pop("span", 4.0))
+            xs = _np.linspace(0.0, span, int(width))
+            ys = _np.linspace(0.0, span, int(height))
+            X, Y = _np.meshgrid(xs, ys)
+            P = _np.stack([X.ravel(), Y.ravel(), _np.zeros(X.size)], axis=1)
+            v = _np.asarray(f(P), float).reshape(int(height), int(width))
+            v = (v - v.min()) / (v.max() - v.min() + 1e-12)
+            return {"op": op, "image": v}
+        if op == "sharpen" and img is not None:
+            # MEASURED: sharpen_image is a single-channel deconvolution loop; RGB is
+            # three honest passes, never a silent luma collapse that discards color.
+            if img.ndim == 3:
+                ch = [mind.sharpen_image(img[:, :, c], **kw) for c in range(img.shape[2])]
+                return {"op": op, "image": _np.stack(ch, axis=2)}
+            return {"op": op, "image": mind.sharpen_image(img, **kw)}
+        if op == "recolor" and img is not None and rf is not None:
+            return {"op": op, "image": mind.recolor_image(img, rf, **kw)}
+        if op == "blend" and img is not None and rf is not None:
+            frames = mind.blend_images(img, rf, steps=int(kw.pop("steps", 3)))
+            mid = frames[len(frames) // 2] if isinstance(frames, (list, tuple)) else frames
+            return {"op": op, "image": mid}
+        return {"error": "op %r not recognized or missing inputs. Ops: pattern (kind=fbm|"
+                         "checker|stripes|dots|gradient, span, width, height), "
+                         "sharpen(image_b64), recolor(image_b64, ref_b64), "
+                         "blend(image_b64, ref_b64, steps). The FULL 2D toolkit is one "
+                         "lecore_find away ('2D image editing') via lecore_invoke." % op}
+
+    def _math_eval(self, text=None, expression=None):
+        """Arithmetic and calculus claims CHECKED, not vibed: check_math parses every
+        'expr == value' claim and computes it (exact where exact applies); a bare
+        expression is evaluated via do_math. Wrong claims come back named."""
+        text = text if text is not None else expression
+        if text is None:
+            return {"error": "pass text= (alias expression=), e.g. '2*3+4 == 10' or "
+                             "'integrate x**2 from 0 to 1'"}
+        mind = self.service.mind
+        s = str(text)
+        if "==" in s:
+            return mind.check_math(s)
+        try:
+            return {"input": s, "result": mind.do_math(s)}
+        except Exception as e:
+            return {"error": "%s: %s -- for symbolic work (solve/simplify/factor) use "
+                             "lecore_find('symbolic') + lecore_invoke" % (type(e).__name__, e)}
+
+    def _chart_make(self, kind=None, series=None, data=None, labels=None, title=None,
+                    x=None, width=640, height=400):
+        """Numbers -> a chart a human reads: deterministic SVG (line | bar | scatter),
+        colorblind-safe palette, bars anchored at zero. The SVG text IS the payload.
+        KEPT NEG rides through from the module: non-finite values are refused loudly."""
+        series = series if series is not None else data
+        if not kind or series is None:
+            return {"error": "pass kind=line|bar|scatter and series=[...] (alias data=; "
+                             "a list, a list of lists, or (x,y) pairs for scatter)"}
+        try:
+            svg = self.service.mind.chart_svg(kind, series, labels=labels, title=title,
+                                              x=x, width=int(width), height=int(height))
+        except ValueError as e:
+            return {"error": str(e)}
+        return {"kind": str(kind), "svg": svg, "bytes": len(svg)}
+
+    def _corpus_delta(self, chunk_hashes=None, chunks=None, hashes=None):
+        """CHUNK-LEVEL DELTA BIND (openzoo ergonomics sweep): the rsync move at the corpus seam.
+
+        corpus_bind content-addresses at the CORPUS level, so one edited chunk re-ships
+        megabytes -- exactly the workload an agent creates by re-binding a repo after one file
+        changed. This tool splits binding into a probe and a fill:
+
+        PROBE  -- corpus_delta(chunk_hashes=[sha256 hex, ...]): returns {"missing": [hashes the
+                  server lacks], "known": n}. Nothing is uploaded; order is the corpus order.
+        FILL   -- corpus_delta(chunk_hashes=[...], chunks={hash: text, ...}): ships ONLY the
+                  missing texts. When every hash resolves, the corpus is assembled IN HASH-LIST
+                  ORDER and lands under THE SAME handle function corpus_bind uses -- so a
+                  delta-bound corpus and a whole-bound one are indistinguishable downstream
+                  (reflex cache, corpus_ask, gate='dispatch': all untouched, invalidation still
+                  rides on content addressing).
+
+        The chunk store persists beside the corpora (E7.2: a restart must not turn every probe
+        into a full re-upload). A fill whose texts do not hash to their claimed keys is refused
+        PER CHUNK, loudly -- a silent mis-keyed chunk would corrupt every corpus that ever
+        references that hash.
+        KEPT NEG: the server cannot chunk for you here -- the CLIENT owns the chunking so its
+        hashes are computed over exactly what it will send; ship pre-chunked texts."""
+        import hashlib
+        chunk_hashes = chunk_hashes if chunk_hashes is not None else hashes
+        if not chunk_hashes:
+            return {"error": "pass chunk_hashes=[sha256 hex, ...] (probe), optionally with "
+                             "chunks={hash: text} (fill)"}
+        if not hasattr(self, "_chunk_store"):
+            self._chunk_store = {}
+            self._chunks_load()
+        rejected = []
+        for h, t in (chunks or {}).items():
+            t = str(t)
+            real = hashlib.sha256(t.encode("utf-8")).hexdigest()
+            if real != h:
+                rejected.append({"hash": h, "actual": real})    # refuse loudly, per chunk
+                continue
+            self._chunk_store[h] = t
+        missing = [h for h in chunk_hashes if h not in self._chunk_store]
+        if missing or rejected:
+            if chunks or rejected:
+                self._chunks_save()
+            out = {"missing": missing, "known": len(chunk_hashes) - len(missing)}
+            if rejected:
+                out["rejected"] = rejected
+            return out
+        ordered = [self._chunk_store[h] for h in chunk_hashes]
+        # THE SAME handle function as _corpus_bind, character for character: identical corpus
+        # => identical handle, whichever door it came through. That identity is what lets the
+        # zoo proxy mix delta and whole binds freely.
+        handle = "corpus:" + hashlib.sha256("\x00".join(ordered).encode()).hexdigest()[:12]
+        self._corpora[handle] = ordered
+        self._corpora_save()
+        self._chunks_save()
+        return {"handle": handle, "n_chunks": len(ordered), "uploaded": len(chunks or {}),
+                "reused": len(chunk_hashes) - len(chunks or {}), "missing": []}
+
+    def _chunks_save(self):
+        """Chunk store persists as its own container beside corpora.lecore (same blessed
+        format, separate file: the chunk store can grow large and corpora loads hot)."""
+        try:
+            from holographic.io_and_interop.holographic_container import save_container
+            blob = save_container([{"kind": "lecore.zoo.chunks", "id": "v1",
+                                    "meta": {"chunks": self._chunk_store}, "arrays": {}}],
+                                  meta={"app": "lecore.zoo", "version": 2})
+            import os
+            os.makedirs(str(self._memory_root), exist_ok=True)   # same rule as corpora above
+            with open(os.path.join(str(self._memory_root), "chunks.lecore"), "wb") as f:
+                f.write(blob)
+        except OSError:
+            pass                                            # best-effort, same as corpora
+
+    def _chunks_load(self):
+        import os
+        try:
+            p = os.path.join(str(self._memory_root), "chunks.lecore")
+            if os.path.exists(p):
+                from holographic.io_and_interop.holographic_container import load_container
+                got = load_container(open(p, "rb").read())
+                for sec in got["sections"]:
+                    if sec["kind"] == "lecore.zoo.chunks":
+                        self._chunk_store.update(sec["meta"].get("chunks") or {})
+        except Exception:
+            pass                                            # a cold chunk store is a fact, not an error
+
+    def _corpus_ask(self, handle=None, query=None, k=4, question=None, corpus=None, gate=None):
         # ALIAS TOLERANCE: question= for query=, corpus= for handle= -- and a missing arg
         # must produce advice, not a KeyError traceback in a tool result.
         query = query if query is not None else question
@@ -468,6 +1225,18 @@ class MCPServer:
             return {"error": "unknown handle %r -- corpus_bind first (handles live for this "
                              "server process; the zoo proxy owns persistence)" % handle}
         chunks = self._corpora[handle]
+        # DEFAULT-OFF DISPATCH GATE (openzoo ergonomics sweep): gate='dispatch' runs the FULL
+        # adaptive cascade server-side (exact -> dense-margin -> BM25-refine -> honest abstain)
+        # and returns the payment-gate verdict alongside the chunks -- the shape openzoo's
+        # x-hrr-gate header has been asking for. gate=None is the byte-identical BM25 path
+        # below (never-flip). The reflex cache is NOT consulted on the gated path on purpose:
+        # a payment gate must reflect the corpus as bound NOW, and the cascade is 3ms-class.
+        if gate == "dispatch":
+            g = self.service.mind.corpus_gate(query, chunks, k=int(k))
+            g["chunks"] = [{"index": i, "score": s, "chunk": chunks[i]}
+                           for i, s in g.pop("ranked", [])]
+            g["via"] = "dispatch"
+            return g
         # E7.1 -- REFLEX BEFORE THE CORPUS: a per-handle displacement trace caches
         # (question -> ranked answer) under the FULL lever-7 gate (cleanup + calibrated null +
         # volatility). Handles are content-addressed (sha256 of the corpus), so a re-bound
@@ -791,6 +1560,41 @@ class MCPServer:
             a = p.get("arguments", {}) or {}
             import time as _t
             _t0 = _t.perf_counter()
+            import os as _os
+            _memo_key = None
+            if tool in _MEMO_PURE_TOOLS and _os.environ.get("LECORE_MCP_MEMO", "1") != "0":
+                import hashlib as _hl
+                _canon0 = json.dumps({"tool": tool, "arguments": a}, sort_keys=True,
+                                     separators=(",", ":"), default=str)
+                _memo_key = (tool, _hl.sha256(_canon0.encode()).hexdigest())
+                if not hasattr(self, "_tool_memo"):
+                    from collections import OrderedDict
+                    self._tool_memo = OrderedDict()
+                hit = self._tool_memo.get(_memo_key)
+                src = "hit"
+                if hit is None and self._memory_root:
+                    # LAZY DISK READ (sweep 87; sweep 111 moved shards -> ONE store
+                    # file): the memo must survive the PROCESS, or 'faster as leCore
+                    # grows' resets every session. Same content-addressed key, now a
+                    # dict lookup in the consolidated store (which also migrates and
+                    # deletes any legacy per-call shard files on first load).
+                    _st = self._memo_store_load()
+                    hit = _st.get("%s-%s" % _memo_key)
+                    if hit is not None:
+                        self._tool_memo[_memo_key] = hit           # promote to RAM
+                        src = "hit-disk"
+                if hit is not None:
+                    self._tool_memo.move_to_end(_memo_key)
+                    import copy as _copy
+                    res = _copy.deepcopy(hit)
+                    res["_meta"]["lecore.cost"]["compute_ms"] = round(
+                        (_t.perf_counter() - _t0) * 1000.0, 3)
+                    res["_meta"]["lecore.cost"]["cache"] = src
+                    st = getattr(self, "_memo_stats", None) or {"hits": 0, "disk_hits": 0,
+                                                                "misses": 0}
+                    st["disk_hits" if src == "hit-disk" else "hits"] += 1
+                    self._memo_stats = st
+                    return {"jsonrpc": "2.0", "id": rid, "result": res}
             try:
                 if tool == "receipt_verify":
                     # ALIAS TOLERANCE (UX sweep): the primer says 'send a receipt back and
@@ -936,6 +1740,16 @@ class MCPServer:
                                           a.get("rows"), a.get("objects"))
                 elif tool == "zoo_report":
                     out = self.service.mind.zoo_report()
+                    # the improvement is only real if it is OBSERVABLE: the memo's
+                    # hit/miss ledger and disk footprint ride the report (sweep 87)
+                    st = dict(getattr(self, "_memo_stats", {}) or
+                              {"hits": 0, "disk_hits": 0, "misses": 0})
+                    st["ram_entries"] = len(getattr(self, "_tool_memo", {}) or {})
+                    if self._memory_root:
+                        _st4 = self._memo_store_load()
+                        st["disk_entries"] = max(len(_st4) - 1, 0)   # minus '_order' 
+                    out = dict(out) if isinstance(out, dict) else {"report": out}
+                    out["tool_memo"] = st
                 elif tool == "void_explore":
                     if a["handle"] not in self._corpora:
                         out = {"error": "unknown handle -- corpus_bind first"}
@@ -979,6 +1793,34 @@ class MCPServer:
                     out = self._corpus_bind(**a)               # handler owns alias tolerance
                 elif tool == "corpus_ask":
                     out = self._corpus_ask(**a)                # handler owns alias tolerance
+                elif tool == "corpus_delta":
+                    out = self._corpus_delta(**a)              # handler owns alias tolerance
+                elif tool == "study":
+                    out = self._study(**a)
+                elif tool == "study_ask":
+                    out = self._study_ask(**a)
+                elif tool == "wisdom_record":
+                    out = self._wisdom_record(**a)
+                elif tool == "wisdom_ask":
+                    out = self._wisdom_ask(**a)
+                elif tool == "series_analyze":
+                    out = self._series_analyze(**a)
+                elif tool == "fact_check":
+                    out = self._fact_check(**a)
+                elif tool == "dataset_decompose":
+                    out = self._dataset_decompose(**a)
+                elif tool == "scene_create":
+                    out = self._scene_create(**a)
+                elif tool == "scene_adjust":
+                    out = self._scene_adjust(**a)
+                elif tool == "scene_export":
+                    out = self._scene_export(**a)
+                elif tool == "image_tool":
+                    out = self._image_tool(**a)
+                elif tool == "math_eval":
+                    out = self._math_eval(**a)
+                elif tool == "chart_make":
+                    out = self._chart_make(**a)
                 elif tool == "lecore_find":
                     out = self._find(a["query"])
                 elif tool == "lecore_describe":
@@ -993,11 +1835,17 @@ class MCPServer:
                         out = {"error": "need name= (aliases: method=, faculty=) -- the string "
                                         "lecore_find returns as 'method'"}
                     else:
-                        out = self._invoke(fac, a.get("args", a.get("arguments", {})))
+                        # kwargs= joins args=/arguments= -- the payload aliases were
+                        # asymmetric with the method aliases, and kwargs is the first
+                        # word a Python-speaking stranger reaches for (measured on
+                        # ourselves, sweep 83)
+                        payload = a.get("args", a.get("arguments", a.get("kwargs", {})))
+                        out = self._invoke(fac, payload)
                 else:
                     return {"jsonrpc": "2.0", "id": rid,
                             "error": {"code": -32602, "message": "unknown tool %r" % tool}}
-                text = json.dumps(out, default=str)
+                out = _stub_media(out)                        # arrays out of the JSON,
+                text = json.dumps(out, default=str)           # pixels into image blocks
                 # THE METERING HOOK (measured, per call): compute ms + payload bytes in every
                 # result, because the cost census showed compute and wire diverge by 400:1 on
                 # some faculties (bind: 0.025 ms CPU, ~10 KB JSON) -- a flat per-call price
@@ -1018,9 +1866,41 @@ class MCPServer:
                 receipt = {"input_sha256": hashlib.sha256(_canon.encode()).hexdigest(),
                            "output_sha256": hashlib.sha256(text.encode()).hexdigest(),
                            "deterministic": True}
-                return {"jsonrpc": "2.0", "id": rid, "result": {
-                    "content": [{"type": "text", "text": text}], "isError": False,
-                    "_meta": {"lecore.cost": meta, "lecore.receipt": receipt}}}
+                content = [{"type": "text", "text": text}] + _media_blocks(out)
+                # payload accounting must cover the MEDIA too, or the wire-dominates
+                # census under-bills every render by orders of magnitude
+                meta["payload_bytes"] += sum(len(c.get("data", "")) for c in content[1:])
+                meta["cache"] = "miss" if _memo_key is not None else "n/a"
+                result = {"content": content, "isError": False,
+                          "_meta": {"lecore.cost": meta, "lecore.receipt": receipt}}
+                if _memo_key is not None and meta["payload_bytes"] <= _MEMO_ENTRY_CAP:
+                    import copy as _copy
+                    self._tool_memo[_memo_key] = _copy.deepcopy(result)
+                    while len(self._tool_memo) > _MEMO_MAX:
+                        self._tool_memo.popitem(last=False)
+                    st = getattr(self, "_memo_stats", None) or {"hits": 0, "disk_hits": 0,
+                                                                "misses": 0}
+                    st["misses"] += 1
+                    self._memo_stats = st
+                    if self._memory_root:
+                        # WRITE-THROUGH persistence (sweep 111: ONE store file, not a
+                        # shard farm): update the consolidated dict, evict from the
+                        # front of the mtime-free '_order' list past 512, rewrite
+                        # tmp+rename with sorted keys -- deterministic bytes for
+                        # identical entries, one file in the commit dialog forever.
+                        try:
+                            _st3 = self._memo_store_load()
+                            k3 = "%s-%s" % _memo_key
+                            if k3 not in _st3:
+                                _st3["_order"].append(k3)
+                            _st3[k3] = result
+                            while len(_st3["_order"]) > 512:
+                                _st3.pop(_st3["_order"].pop(0), None)
+                            self._memo_store_save(_st3)
+                        except Exception:
+                            pass                       # persistence is best-effort;
+                                                       # the answer already shipped
+                return {"jsonrpc": "2.0", "id": rid, "result": result}
             except Exception as e:
                 # MCP convention: tool-level failures ride in content with isError, so the
                 # HOST's model sees the message and can adapt -- a JSON-RPC error would
@@ -1060,7 +1940,12 @@ def _selftest():
     # invisible because the local regression constructed the server without running
     # _selftest(). The cp27 CI simulation (running the REAL test) caught it.
     assert names == ["lecore_map", "lecore_find", "lecore_describe", "corpus_bind",
-                     "corpus_ask", "void_explore", "zoo_ask", "zoo_panel", "zoo_tools",
+                     "corpus_ask", "corpus_delta",
+                     "study", "study_ask", "wisdom_record", "wisdom_ask",
+                     "series_analyze", "dataset_decompose", "fact_check",
+                     "scene_create", "scene_adjust", "scene_export",
+                     "image_tool", "math_eval", "chart_make",
+                     "void_explore", "zoo_ask", "zoo_panel", "zoo_tools",
                      "zoo_void",
                      "zoo_teach", "zoo_do",
                      "zoo_synthesize", "zoo_query", "zoo_report", "receipt_verify",
