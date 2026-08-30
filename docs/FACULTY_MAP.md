@@ -296,7 +296,7 @@
 
 ## ask
 
-- **`ask`** -- THE ONE-CALL ANSWER PATH, session-aware (cp36): inside a session the salted
+- **`ask`** -- ONE-CALL ASK for an attached mind (memory ladder, session-aware). POLYMORPHIC
 - **`ask_chain`** -- A CHAIN over the mind's own memory: ask('paris', ('capital',
 - **`ask_curious`** -- LOW CONFIDENCE BECOMES CURIOSITY (cp59, the standing behaviour asked for):
 - **`ask_grounded`** -- THE GROUNDED ANSWER ROUTINE, PUSHED DOWN (cp68): this logic lived only in

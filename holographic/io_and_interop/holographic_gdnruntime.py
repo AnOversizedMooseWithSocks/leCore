@@ -80,6 +80,26 @@ def _xp_of(*arrays):
         return np
 
 
+def _is_device_array(a):
+    """Follow-the-data by TYPE, not by whether cupy imports here: a cupy array's
+    class lives under cupy._core. The weight getters must never hand a device
+    array to np.asarray -- cupy refuses implicit conversion and that refusal is
+    the first read of every layer (sweep 114, pinned by the residency tests)."""
+    return str(getattr(type(a), "__module__", "")).startswith("cupy")
+
+
+def _weight_f64(a):
+    """A weight as float64 WHERE IT ALREADY LIVES: host arrays become float64
+    numpy (unchanged behaviour); device arrays are returned in place -- cast on
+    the device when its module is importable, untouched otherwise."""
+    if _is_device_array(a):
+        xp = _xp_of(a)
+        if xp is np:
+            return a                                  # cupy not importable here: never convert
+        return xp.asarray(a, xp.float64)
+    return np.asarray(a, np.float64)
+
+
 def _rmsnorm(x, w, eps):
     """Qwen3Next RMSNorm is ZERO-CENTERED: y = norm(x) * (1 + w), weight init 0.
     Field-caught: plain `* w` matched nothing (rel err 1.0) -- the norm is where
@@ -272,16 +292,12 @@ class GDNRuntime:
         # sibling and it still read through np.asarray -- the LAST hardcoded
         # weight read in the forward path. On device the array stays where it
         # is; on host this is byte-identical to before.
-        _a = self.w[key]
-        _xp = _xp_of(_a)
-        return _xp.asarray(_a, _xp.float64)
+        return _weight_f64(self.w[key])
 
     def _g(self, layer, name):
-        _a = self.w[self.root + "layers.%d.%s" % (layer, name)]
         # FOLLOW THE DATA. On a device this array is a cupy array and
-        # np.asarray would raise; xp.asarray keeps it where it already is.
-        _xp = _xp_of(_a)
-        return _xp.asarray(_a, _xp.float64)
+        # np.asarray would raise; _weight_f64 keeps it where it already is.
+        return _weight_f64(self.w[self.root + "layers.%d.%s" % (layer, name)])
 
     def load_factors(self, factors):
         """Attach low-rank factors produced by refactor.decompose so the forward
@@ -749,8 +765,13 @@ class GDNRuntime:
         # indexed by cupy-ids is exactly the "implicit conversion" crash. The
         # views move WITH the weights or the move is a lie.
         try:
+            # TIED WEIGHTS (sweep 114): when lm_head IS embed (tied embeddings), two
+            # independent moves would silently untie them into two device copies --
+            # double the memory and a divergence trap for any later in-place update.
+            # Move once, re-tie by identity.
+            _tied = self.lm_head is self.embed
             self.embed = _to(np.asarray(self.embed))
-            self.lm_head = _to(np.asarray(self.lm_head))
+            self.lm_head = self.embed if _tied else _to(np.asarray(self.lm_head))
         except Exception:
             self._dev = None
             return {"device": "cpu", "resident": 0,

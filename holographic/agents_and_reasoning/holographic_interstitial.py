@@ -139,3 +139,28 @@ def interstitial(runtime, cfg, sensors=None, bank=None, patches=None,
     rep["bank"] = bank
     return hooks, rep
 
+
+def _selftest():
+    """Assert the coordination contract without a live runtime (the function never
+    reads `runtime`; hooks are handed to it by the caller): default sensor placement
+    is [3, max(4, n//2), n-2] sorted; every sensor gets a hook; with an empty bank a
+    hook is read-only (returns None, patches nothing); finish() resolves 'novel'
+    when no sensor recognised anything. The thing most likely to break is the
+    sensor rule -- it encodes the cp121-125 measurement of where the signals live."""
+    import numpy as np
+    hooks, rep = interstitial(None, {"n_layers": 12})
+    assert rep["sensors"] == [3, 6, 10], rep["sensors"]
+    assert sorted(hooks) == [3, 6, 10], sorted(hooks)
+    h = np.zeros((1, 4, 8))
+    for L in (3, 6, 10):
+        assert hooks[L](h) is None, "an empty bank must patch nothing"
+    rep["finish"]()
+    assert rep["route"] == "novel", rep["route"]
+    hooks2, rep2 = interstitial(None, {"n_layers": 6}, sensors=(5, 1))
+    assert rep2["sensors"] == [1, 5] and sorted(hooks2) == [1, 5]
+    print("holographic_interstitial selftest OK")
+
+
+if __name__ == "__main__":
+    _selftest()
+

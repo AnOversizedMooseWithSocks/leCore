@@ -77,6 +77,9 @@ class KnowledgeStore:
     """Cataloged, searchable, persistent knowledge for one Galvatron."""
 
     KINDS = ("turn", "document", "note", "output")
+    # long documents get companion digest notes at or above this many characters
+    # (sweep 114); None disables. Kept a class attribute so a test can set the control.
+    DIGEST_THRESHOLD = 20000
 
     def __init__(self, root, session=None):
         # REFUSE A NON-PATH. `str(root)` accepts ANY object and makedirs then
@@ -141,6 +144,7 @@ class KnowledgeStore:
         if kind not in self.KINDS:
             raise ValueError("kind must be one of %r" % (self.KINDS,))
         made = []
+        new_ids = []
         for chunk in chunk_text(text):
             h = hashlib.sha256(chunk.encode("utf-8")).hexdigest()[:16]
             hit = next((e for e in self.entries if e["hash"] == h), None)
@@ -156,6 +160,37 @@ class KnowledgeStore:
                  "added": time.time(), "last_seen": time.time(), "seen": 1}
             self.entries.append(e)
             made.append(e["id"])
+            new_ids.append(e["id"])
+        # AUTO-DIGEST (sweep 114, the docforge contract): a LONG document gets
+        # COMPANION notes -- its table of contents, its kept negatives, its
+        # signature terms -- filed as separate 'note' entries tagged 'digest'.
+        # AUGMENT, NEVER EDIT: the document's own chunks and hashes are untouched,
+        # so dedup on re-add holds and the digest can never crowd the source
+        # (a handful of notes, bounded below). DIGEST_THRESHOLD=None disables.
+        if (kind == "document" and new_ids and self.DIGEST_THRESHOLD is not None
+                and len(str(text)) >= int(self.DIGEST_THRESHOLD)):
+            try:
+                from holographic.io_and_interop.holographic_docforge import digest_document
+                d = digest_document(str(text))
+                notes = []
+                toc = [str(t) for t in (d.get("toc") or [])]
+                if toc:
+                    notes.append("digest toc of %s: %s" % (source, " | ".join(toc[:40])[:1500]))
+                neg = [str(n) for n in (d.get("negatives") or [])]
+                if neg:
+                    notes.append("digest kept negatives of %s: %s" % (source, " | ".join(neg[:40])[:1500]))
+                sig = d.get("signatures") or {}
+                # digest_document's signatures are a DICT (section -> terms);
+                # a list-shaped assumption here silently killed every note once.
+                sig_items = list(sig.items()) if isinstance(sig, dict) else [(str(s), "") for s in sig]
+                if sig_items:
+                    notes.append("digest signature terms of %s: %s" % (
+                        source, "; ".join("%s: %s" % (k, v) for k, v in sig_items[:30])[:600]))
+                for n_ in notes[:3]:
+                    self.add(n_, kind="note", source=str(source), author=author,
+                             tags=tuple(tags) + ("digest",), session=session, save=False)
+            except Exception:
+                pass                                   # a digest is a courtesy, never a failure
         if save:
             self.save()
         return made

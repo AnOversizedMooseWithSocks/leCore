@@ -84395,3 +84395,113 @@ battery + suite green (92 passed); catalog 813.
 BACKLOG (updated): the xz rung is MOOT (container already compresses);
 remaining one-file-discipline review: none -- corpora/knowledge/
 learning/toolmemo all single containers now.
+
+--------------------------------------------------------------------------------
+SWEEP 113 -- THE SEMANTIC-COVERAGE CI RED: DOCSTRINGS FROM THE USER'S
+MOUTH, AND A GATE NOTE THAT TOLD THE TRUTH
+
+THE FAILURE (semantic-coverage.yml, the routing exam): shipped row
+(fused, gamma=1.00, 128d) top-5 7/12 against a bar of 8. The ask that
+fell out: 'break a shape into simpler pieces' -- flat @128d rank 4,
+fusion with workflow bones pushed it to 6. Accept set: resonator / peel
+/ sbc.
+
+WHY IT WAS BRITTLE: the index embeds only the FIRST 280 chars of each
+module docstring, and the accepted modules open in implementer
+language ('Factoring a composite back into its parts', 'B8 -- denoised
+structure decoding', 'B2 -- Sparse block codes'). The exam exists to
+enforce the alias discipline on docstrings: say what the module does
+in words a stranger would type.
+
+FIX (documentation, not gaming): one plain-language opening sentence
+on five accepted modules -- resonator/peel/sbc ('break a ... into its
+simpler pieces'), denoise ('make a grainy, noisy picture clean again'),
+dynamics ('guess where a moving thing goes next'). True descriptions,
+placed inside the 280-char window. The accept sets were NOT widened
+and no bar was lowered.
+
+MEASURED LOCALLY (the only routing signal available without weights --
+the nomic model is fetched in CI from a repo variable, not committed):
+the exam's own kw_rank over the live tree: the three targeted asks
+moved to r1 / r1 / r2; keyword top-1 4/12 vs CI's 1/12.
+PREDICTION ON RECORD for the dense gate CI will run: 'break a shape
+into simpler pieces' <= rank 4 in the fused row -> top-5 8/12 ->
+PASS; median stays <= 2.0; fused top-1 >= 6 holds. If CI disagrees,
+the next move is the KEPT NEGATIVE, not a widened accept set.
+
+ALSO FIXED: the gate's [note] claimed top-5/median come from FLAT
+@768d while --gate-shipped-row reads them from the FUSED row -- the
+EXAM line beneath it contradicted the note. The file's own rule
+('a displayed number disagreeing with the compared number is worse
+than none') applied to prose: the note now names its real source.
+
+lint_scripts 0/0; catalog_exam golds all present; house CI gates +
+battery + suite green (92 passed). Docs regenerated (REFERENCE.md
+carries the new openers).
+
+LESSON: the semantic exam is a SEPARATE workflow from ci.yml -- the
+sweep-110 push prep simulated ci.yml verbatim and never ran this one.
+Push prep now includes: lint_scripts.py + catalog_exam.py locally, and
+the kw_rank control for any docstring-touching sweep; the dense exam
+itself stays CI's.
+
+--------------------------------------------------------------------------------
+SWEEP 114 -- THE FULL-SUITE CI REDS: SEVEN ROOT CAUSES, ALL PRE-EXISTING ON
+THE BRANCH, ALL FIXED
+
+THE BRIEF (Moose): the full test job is red across several files. Fix.
+
+PROVENANCE FIRST (the collide-set lesson): every implicated module and
+test was BYTE-IDENTICAL between ours and the preserved sweep-97
+their-branch tree -- none of these were merge skew or sweep damage;
+they were red on the branch. The push prep (sweep 110) simulated
+ci.yml's GATES verbatim but never ran the FULL suite (6,656 tests does
+not fit a container wall clock serially; CI runs xdist). Recorded.
+
+FIXES, each with its mechanism:
+1. explain()/ask() ARITY (5 tests + app.py + tools/unified_app.py):
+   sweep 63 renamed the relations verbs to explain_similarity /
+   ask_chain; callers kept the original spelling; p20/p23 shadowed
+   them. POLYMORPHISM at the live names: explain(a, b) -> relations
+   comparison, ask(start, *hops) -> chain walk; one-argument callers
+   byte-identical. The sweep-63 names stay discoverable.
+2. GDN RUNTIME DEVICE RESIDENCY (2): _g_opt/_g read device weights
+   through np.asarray; to_device untied lm_head-is-embed. _weight_f64
+   follows the data BY TYPE (cupy._core class module -- never converts
+   a device array, cupy importable or not); to_device re-ties by
+   identity (_tied).
+3. KNOWLEDGESTORE AUTO-DIGEST: DIGEST_THRESHOLD=20000 (None disables);
+   a long document gets <=3 companion 'note' entries tagged 'digest'
+   (toc / kept negatives / signatures) -- AUGMENT NEVER EDIT; dedup on
+   re-add holds. SIGHTING: digest_document's 'signatures' is a DICT;
+   a list-shaped slice silently killed every note once. Probe shapes.
+4. CORPUS MANIFEST (3): tools/build_corpus.py RETURNED its manifest and
+   never wrote it. manifest.json now records corpus.txt.xz: sha256 of
+   the decompressed bytes, raw_chars, layers (read from the corpus's
+   own section headers), both sources with licences -- alongside the
+   dictionary record. Deterministic JSON (sorted keys).
+5. DICTIONARY COUNT: the shipped dictionary.json.xz measures 144,539
+   words, not the pinned 144,478. Manifest 'entries' corrected to the
+   MEASUREMENT; the test now reads the manifest as the contract --
+   an un-rottable pin instead of a hardcoded number.
+6. holographic_interstitial had no selftest: a REAL one (sensor
+   placement [3, n//2, n-2]; read-only hooks on an empty bank; 'novel'
+   route resolution) + __main__. The function never reads `runtime`.
+7. agent_loop KeyError: goal_create REFUSES without a plan source
+   ({'error': ...}); the loop indexed the goal book anyway. Now a
+   RuntimeError naming the reason -- the contract test_guards expects.
+8. PART SIZE CAP (test_unified_split, hard 2,000 lines): CI's -x hid
+   two more giants behind p03. SPLIT, not re-baselined: p03 ->
+   p03b_denoise (denoise verbs), p09 -> p09b_scene_verbs, p20 ->
+   p20b_transfer (contribute / commons_pool / memory_export /
+   memory_import -- one coherent family). Registered in the shim next
+   to their parents; every check_part selftest clean. GIANTS_BUDGET
+   dropped back to the measured 4 per the tool's own rule.
+
+VERIFIED: all originally-failing files 106 passed; every ci.yml gate
+green; regen_docs --check green after regeneration; battery + sweep
+suite 92 passed; first-40-file suite slice 399 passed. CI's xdist run
+is the final word on the full 6,656.
+
+WATCH: p16_unicron at 1,977 and p14_organics at 1,946 lines sit within
+60 lines of the part cap -- split BEFORE touching them.
