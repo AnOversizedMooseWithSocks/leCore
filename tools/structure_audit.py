@@ -43,7 +43,12 @@ MISC_BUDGET = 152            # RE-BASELINED (sweep 110): 152 in BOTH ours and th
 # verbs and whether it should split into (say) meshtools_repair / meshtools_query is an OPEN REVIEW ITEM for the
 # author, deliberately left as a decision rather than forced during a branch merge. If it splits, drop this back
 # to 3; if a FIFTH giant appears, that is the next review event, exactly as intended.
-GIANTS_BUDGET = 7            # RE-BASELINED (sweep 110) WITH MEASURED PROVENANCE, the cp52
+GIANTS_BUDGET = 4            # DROPPED BACK (sweep 114): test_unified_split's hard 2,000-line
+                             # part cap forced the real fix -- p03/p09/p20 split into
+                             # p03b/p09b/p20b -- so the measured giant count is now 4
+                             # (catalog_p06, meshtools, creature, unicron). A fifth is
+                             # the next review event. History of the 7 kept below:
+                             # RE-BASELINED (sweep 110) WITH MEASURED PROVENANCE, the cp52
                              # pattern exactly: p09_navigate_cost_field (2151) and
                              # p03_build_predictor (2038) arrived at IDENTICAL line counts
                              # in the sweep-97 their-branch tree (diffed against

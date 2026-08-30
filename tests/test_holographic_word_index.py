@@ -53,7 +53,11 @@ def test_dictionary_lazy_controls():
     assert hd.is_loaded() is False
     assert hd.stats()["loaded"] is False                      # reading stats does not load
     hd.preload()
-    assert hd.is_loaded() is True and hd.stats()["words"] == 144478
+    # the manifest's 'entries' is the contract for the shipped dictionary; a
+    # hardcoded 144478 went red when the data shipped with 144539 (sweep 114)
+    import json, os
+    _n = json.load(open(os.path.join("lecore_data", "knowledge", "manifest.json")))["entries"]
+    assert hd.is_loaded() is True and hd.stats()["words"] == _n
     hd.unload()
     assert hd.is_loaded() is False
     assert hd.define("dog")                                    # still works -- transparently reloads

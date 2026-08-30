@@ -1,4 +1,7 @@
-"""Denoising as manifold projection, and the Plug-and-Play / RED restoration loop.
+"""Make a grainy, noisy picture clean again -- denoising by projecting onto the manifold clean
+signals live on (Milanfar), plus the Plug-and-Play / RED restoration loop.
+
+Denoising as manifold projection, and the Plug-and-Play / RED restoration loop.
 
 WHY THIS EXISTS
 ---------------

@@ -1,4 +1,7 @@
-"""Factoring a composite back into its parts -- the inverse of binding, solved by
+"""Break a bound shape or composite into its simpler pieces -- the resonator factors a
+combined vector back into the parts it was built from (the inverse of binding).
+
+Factoring a composite back into its parts -- the inverse of binding, solved by
 searching in superposition.
 
 Binding combines several vectors into one (the cat, the colour red, the position

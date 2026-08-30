@@ -723,7 +723,17 @@ class _UnifiedPart23:
                 "rare": [r["token"] for r in rows if r["state"] == "rare"],
                 "unseen": [r["token"] for r in unseen]}
 
-    def ask(self, query, est_llm_tokens=600):
+    def ask(self, query, *hops, est_llm_tokens=600):
+        """ONE-CALL ASK for an attached mind (memory ladder, session-aware). POLYMORPHIC
+        (sweep 114): positional (role, role) hop tuples make this the RELATIONS chain
+        walk -- ask('tokyo', ('capital','currency'), ('currency','language')) ->
+        ask_chain -- the body sweep 63 renamed while the relations tests kept the
+        original spelling. Plain ask(query) is unchanged."""
+        if hops:
+            return self.ask_chain(query, *hops)
+        return self._ask_session(query, est_llm_tokens=est_llm_tokens)
+
+    def _ask_session(self, query, est_llm_tokens=600):
         """THE ONE-CALL ANSWER PATH, session-aware (cp36): inside a session the salted
         key space is tried first (this conversation's own memories), then the shared
         space (doctrine, unsalted teachings); the result reports which space served.

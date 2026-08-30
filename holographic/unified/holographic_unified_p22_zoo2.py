@@ -193,7 +193,14 @@ class _UnifiedPart22:
         except Exception:
             pass
         if gid not in self.goal_book.goals:
-            self.goal_create(gid, str(objective), plan=plan)
+            made = self.goal_create(gid, str(objective), plan=plan)
+            if gid not in self.goal_book.goals:
+                # goal_create REFUSES (returns {'error': ...}) when it has no plan
+                # source; indexing the goal book afterwards was a KeyError deep in
+                # the round loop (sweep 114, test_guards). A loop that cannot start
+                # says why, as the RuntimeError its callers already expect.
+                raise RuntimeError("agent_loop cannot start: %s" % (
+                    (made or {}).get("error", "goal was not created")))
         log = []
         idle = 0
         for r_ in range(int(rounds)):
