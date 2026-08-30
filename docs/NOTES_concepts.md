@@ -84505,3 +84505,29 @@ is the final word on the full 6,656.
 
 WATCH: p16_unicron at 1,977 and p14_organics at 1,946 lines sit within
 60 lines of the part cap -- split BEFORE touching them.
+
+SWEEP 114 ADDENDUM -- THE FACADE-SPLIT BUG, A THIRD TIME: the workflow
+graph folds unified parts back into one node by NAME PATTERN
+(^unified_p\d\d_); the letter-suffixed parts the split created
+(p03b/p09b/p20b) fell through it and survived as their own nodes --
+exactly what test_workflowgraph_parts pins ('a facade part is not a
+collaborator'). Pattern widened to \d\d[a-z]?; test + module selftest
+green (741 modules, hubs dropped). Repo-wide grep: no other copy of the
+two-digit assumption. LESSON: when you invent a new name SHAPE, grep
+for every pattern that parses the old one -- the graph, the gates, the
+docs generators all read names.
+
+SWEEP 114 ADDENDUM 2 -- A BLANK MUST NOT WEAR T0 (read-site half):
+test_an_abstention_stays_an_abstention (slow; skipped under the 15s
+budget locally, which is why the push prep never saw it) measured
+T4/'' then T0/'' on repeat. The exact cache already REFUSED to store a
+blank (write-site fix present); the via='reflex' READ site still
+passed '' through `is not None` and served it at T0. Fixed at the read
+site (blank_veto ledger counter) + a defensive check on the exact-cache
+read for any blank already cached. Pre-existing on the branch (zoo.py
+differed from theirs only by the sweep-109 session guard, which can
+only veto). Session pin still green. LESSON: run the slow tests before
+a push -- LECORE_RUN_SLOW=1 --run-slow -- the 15s budget hides exactly
+the ladder-level regressions the full suite exists to catch.
+Also: the workflowgraph reds in this CI run are the pre-addendum push;
+the delivered zip carries the widened pattern (verified by unzip -p).

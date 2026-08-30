@@ -166,7 +166,8 @@ class AnswerLadder:
         ex_ = getattr(self, "_exact", {})
         if nq_ in ex_:
             pe_ = ex_[nq_]
-            if pe_.get("pid") not in getattr(self, "_payload_bad", set()):
+            if (pe_.get("pid") not in getattr(self, "_payload_bad", set())
+                    and str(pe_.get("answer", "")).strip()):     # a cached blank is not a hit
                 out0 = {"tier": "T0", "via": "reflex-exact", "answer": pe_["answer"],
                         "provenance": pe_.get("provenance", "model-cached"),
                         "why": "exact repeat of a taught question (text-verified)"}
@@ -182,6 +183,15 @@ class AnswerLadder:
             pid_key = "%d:%d" % (t_, int(hit.get("atom", -1)))
             pays = getattr(self, "_payloads", {})
             payload = pays.get(pid_key, pays.get(int(hit.get("atom", -1))))  # legacy ints
+            if payload is not None and not str(payload).strip():
+                # THE READ-SITE HALF OF THE BLANK FIX (sweep 114): the exact cache
+                # refuses to STORE a blank, but a blank recovered from the TRACE
+                # still passed `is not None` and wore T0 on the second ask --
+                # measured T4/'' then T0/'' then T0/''. An abstention stays an
+                # abstention however often it is asked.
+                self.ledger.by_tier["blank_veto"] = \
+                    self.ledger.by_tier.get("blank_veto", 0) + 1
+                payload = None
             stored_q = getattr(self, "_payload_qs", {}).get(pid_key)
             if payload is not None and pid_key in getattr(self, "_payload_bad", set()):
                 # FEEDBACK VETO (cp22): this payload was marked BAD by outcome feedback --
