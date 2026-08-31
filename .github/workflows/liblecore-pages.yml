@@ -5,6 +5,12 @@ on:
     branches: [main]
     paths:
       - "site/liblecore/**"
+      - "tests/test_liblecore_site.py"
+      - ".github/workflows/liblecore-pages.yml"
+  pull_request:
+    paths:
+      - "site/liblecore/**"
+      - "tests/test_liblecore_site.py"
       - ".github/workflows/liblecore-pages.yml"
   workflow_dispatch:
 
@@ -18,8 +24,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate:
+    name: Validate landing page
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Check metadata, assets, and measured claims
+        run: python3 -m unittest discover -s tests -p test_liblecore_site.py
+
   deploy:
     name: Publish landing page
+    if: github.event_name != 'pull_request'
+    needs: validate
     runs-on: ubuntu-latest
     environment:
       name: github-pages
