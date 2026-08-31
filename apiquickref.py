@@ -108,11 +108,24 @@ def _resolve_module_path(root, mod):
     flat = os.path.join(root, mod + ".py")
     if os.path.exists(flat):
         return flat
+    # SORTED WALK, BECAUSE TWO MODULES CAN SHARE A NAME. There are two files
+    # called holographic_transform.py -- io_and_interop (rebuild a model) and
+    # misc (4x4 matrices for the modeling app) -- and an unsorted os.walk
+    # returns whichever the FILESYSTEM yields first. That made this generated
+    # file a function of DIRECTORY ORDER: it regenerated identically on one box
+    # and differently in CI, and the gate went red with no code changed.
+    # Exactly the failure the date-stamp comment below describes, in a second
+    # disguise: A GENERATED FILE MUST BE A FUNCTION OF THE CODE AND NOTHING
+    # ELSE -- not the calendar, not the inode order.
     holo_root = os.path.join(root, "holographic")
     if os.path.isdir(holo_root):
-        for dirpath, _, filenames in os.walk(holo_root):
+        hits = []
+        for dirpath, dirnames, filenames in os.walk(holo_root):
+            dirnames.sort()
             if mod + ".py" in filenames:
-                return os.path.join(dirpath, mod + ".py")
+                hits.append(os.path.join(dirpath, mod + ".py"))
+        if hits:
+            return sorted(hits)[0]
     return flat  # doesn't exist either way; the not-found branch below handles it
 
 

@@ -35,6 +35,14 @@ IO_KINDS = (
                    #   periodogram/phase-fold consumes and what nbody energy-over-time / audio_param_bus produce.
     "spectrum",    # a per-WAVELENGTH / per-frequency reading: SED samples, Stokes-vs-lambda, receptor responses --
                    #   what observe_spectrum / falsecolor_spectral / rm_synthesis take as their spectral axis.
+    "scene",       # a SCENE DOCUMENT: objects with transforms, materials and parenting -- what a mesh becomes
+                   #   once it is placed. Distinct from `mesh` (one object's geometry) and from `sdf_scene` (a
+                   #   composed implicit): a scene is the ARRANGEMENT, and it is what scene_graph produces and
+                   #   scene_flatten consumes. Without it the planner cannot express "place, then frame, then
+                   #   render", which is the route every renderer actually takes.
+    "camera",      # a VIEWPOINT: position, orientation, and a projection. A renderer needs geometry AND a camera,
+                   #   so this is the kind that makes render steps honest -- a mesh->image edge that does not
+                   #   mention framing is hiding a required input, and fit_camera is the step that supplies it.
 )
 
 _IO_KINDS_SET = frozenset(IO_KINDS)

@@ -13,6 +13,13 @@ on:
 permissions:
   contents: write               # needed so the job can commit the refreshed REFERENCE.md back to the repo
 
+# ONE LIVE RUN PER REF, same reasoning as ci.yml: superseded pushes should not
+# keep running. docs.yml in particular COMMITS BACK, so two concurrent runs can
+# race each other to push the same regenerated files.
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   reference:
     runs-on: ubuntu-latest

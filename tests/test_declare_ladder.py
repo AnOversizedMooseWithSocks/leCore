@@ -28,8 +28,25 @@ def mind():
 def arms():
     """(has_tool, no_tool) -- the committed seeded fixture."""
     cat = default_catalog()
+    # FILTERED IN CONTENT TOKENS, NOT RAW WORDS -- the two arms have to be
+    # measured in the SAME UNIT or the fixture leaks.
+    # The filter said `len(str(a).split()) >= 4` (raw words) while the no-tool
+    # salad is drawn at `len(_tokens(a))` (content words, stopwords dropped). An
+    # alias like "get the dictionary out" passes the raw filter at four words
+    # and tokenizes to ONE -- so its "word salad" partner was a SINGLE TERM, and
+    # one such draw was "dictionary". leCore ships a vendored dictionary, so
+    # declare_explain answered correctly: THE ROUTER WAS RIGHT AND THE FIXTURE
+    # HANDED IT A REAL REQUEST.
+    # Same failure as the agent benchmark's no-tool set in a different costume:
+    # a rule that can accidentally produce a MEANINGFUL query. TESTING
+    # ABSTENTION REQUIRES A QUESTION WITH NO GOOD ANSWER, and a single domain
+    # noun is always a good question.
+    # Filtering in content tokens fixes it WITHOUT lengthening the salad, so the
+    # arms keep the token-count parity test_the_no_tool_arm_is_not_an_easier_arm
+    # rightly insists on -- a longer no-tool arm would let the ladder refuse on
+    # LENGTH rather than on tool presence.
     pairs = [str(a) for c in cat.all() for a in (getattr(c, "aliases", ()) or [])
-             if getattr(c, "method", None) and len(str(a).split()) >= 4]
+             if getattr(c, "method", None) and len(_tokens(str(a))) >= 4]
     pairs = sorted(set(pairs))
     random.Random(0).shuffle(pairs)
     has = pairs[:60]

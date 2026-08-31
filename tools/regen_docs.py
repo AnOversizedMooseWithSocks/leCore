@@ -53,7 +53,10 @@ GENERATORS = [
     ("apiquickref.py", ["API_QUICKREF.md"]),
     ("facultymap.py",  ["docs/FACULTY_MAP.md"]),
     ("docmap.py",      ["docs/DOC_MAP.md"]),
-    ("pipelinemap.py", ["docs/PIPELINE_MAP.md", "pipelines.json"]),
+    # MOVED INTO THE PACKAGE, because a root-level module is never in the
+    # wheel -- see tests/test_pipeline_edges.py::test_no_top_level_module...
+    ("holographic/caching_and_storage/holographic_pipelinemap.py",
+     ["docs/PIPELINE_MAP.md", "pipelines.json"]),
     # A generator MAY carry args: the string is split on whitespace, so a tool whose default CLI does
     # something else (unifiers.py prints a wiring table) can still own its doc through the one door.
     ("tools/unifiers.py --write", ["docs/UNIFIERS.md"]),
@@ -141,7 +144,15 @@ def run(check=False, root=None):
         cur = _hl.sha256(b"\x00".join((_read(root / o) or b"") for o in _outs)).hexdigest()[:16]
         if bake.get(bkey) == cur:
             continue                                     # baked: tree, generator, outputs all unchanged
-        proc = subprocess.run([sys.executable] + argv, cwd=str(root), env=env,
+        # A GENERATOR INSIDE THE PACKAGE MUST RUN AS `-m`. Running
+        # holographic/.../x.py by PATH puts that file's directory on sys.path
+        # instead of the repo root, so `import holographic` fails -- the exact
+        # mirror of the bug that moving pipelinemap fixed. Root-level
+        # generators keep running by path; packaged ones run as modules.
+        _argv = list(argv)
+        if _argv[0].startswith("holographic/") and _argv[0].endswith(".py"):
+            _argv = ["-m", _argv[0][:-3].replace("/", ".")] + _argv[1:]
+        proc = subprocess.run([sys.executable] + _argv, cwd=str(root), env=env,
                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if proc.returncode == 0:
             bake[bkey] = _hl.sha256(b"\x00".join((_read(root / o) or b"")

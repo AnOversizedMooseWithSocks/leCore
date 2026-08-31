@@ -53,7 +53,7 @@ class VectorFunctionEncoder:
     is a binding, and the kernel is the product of the per-axis kernels.
     """
 
-    def __init__(self, n_dims, dim=1024, bounds=None, kernel="rbf", bandwidth=3.0, seed=0):
+    def __init__(self, n_dims, dim=1024, bounds=None, kernel="rbf", bandwidth=3.0, seed=0, taper=None):
         # bounds[k] = (lo, hi) sets axis k's working range (values that far apart come out ~orthogonal). RBF
         # phases are the sane default here: a function is a BUNDLE, and the RBF kernel is non-negative and
         # monotone, so the bundle reads as a proper kernel-density estimate rather than oscillating negative.
@@ -79,7 +79,8 @@ class VectorFunctionEncoder:
         # One independent base per axis (distinct seeds) so the axes are orthogonal sub-codes; binding them
         # keeps each coordinate separately recoverable and makes the kernel factor across axes.
         self.axes = [
-            ScalarEncoder(self.dim, lo=lo, hi=hi, seed=seed * 97 + k + 1, kernel=kernel, bandwidth=self.bandwidth[k])
+            ScalarEncoder(self.dim, lo=lo, hi=hi, seed=seed * 97 + k + 1, kernel=kernel, bandwidth=self.bandwidth[k],
+                          taper=taper)   # F35: per-encoder taper (sinc family only; rbf+taper refuses in ScalarEncoder)
             for k, (lo, hi) in enumerate(self.bounds)
         ]
 

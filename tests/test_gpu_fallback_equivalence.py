@@ -60,7 +60,10 @@ def test_the_wired_module_list_is_what_these_tests_cover():
     whoever wired it is told to add a fallback test rather than discovering the gap later."""
     covered = {"rendering/holographic_shader", "simulation_and_physics/holographic_fluid",
                "simulation_and_physics/holographic_memoryhome",
-               "unified/holographic_unified_p12_proc_texture"}
+               "unified/holographic_unified_p12_proc_texture",
+               # wired in the device-residency arc; fallback-equivalence pinned below
+               "io_and_interop/holographic_devicerun",
+               "io_and_interop/holographic_gdnruntime"}
     actual = set(gpu_report()["wired_modules"])
     assert actual == covered, ("the set of backend-wired modules changed: %r. Add a fallback-equivalence "
                                "test for the new one." % sorted(actual ^ covered))
@@ -114,3 +117,50 @@ def test_determinism_is_a_cpu_property_and_the_docs_say_so():
     doc = backend.__doc__ or ""
     assert "DETERMINISM" in doc
     assert "TOLERANCE" in doc or "tolerance" in doc
+
+
+# ---------------------------------------------------------------------------------------------------------
+# the two runtime-residency modules (devicerun + gdnruntime.to_device): the fallback claim on a GPU-less
+# box is that ASKING for a device NEVER raises, reports honestly, and leaves behavior bit-identical.
+# ---------------------------------------------------------------------------------------------------------
+
+def _stub_runtime():
+    """The smallest object honoring the to_device contract devicerun.place() drives: a weight dict and
+    the same three-way report GDNRuntime.to_device returns. On a box with no accelerator the REAL
+    runtime's to_device(True) takes exactly this cpu branch (array_module() is numpy), so pinning the
+    stub pins the branch the CI machine actually runs."""
+    import numpy as _np
+    from holographic.io_and_interop.holographic_gdnruntime import GDNRuntime
+
+    class _Stub:
+        def __init__(self):
+            self.w = {"a": _np.arange(6.0).reshape(2, 3)}
+            self._dev = None
+        to_device = GDNRuntime.to_device          # the REAL method, on the stub's state
+    return _Stub()
+
+
+def test_devicerun_place_never_raises_and_reports_honestly_without_a_gpu():
+    from holographic.io_and_interop.holographic_devicerun import place, status
+    st = status()
+    rt = _stub_runtime()
+    rep_cpu = place(rt, want="cpu")
+    assert rep_cpu["device"] == "cpu" and rt._dev is None
+    rep_gpu = place(rt, want="gpu")               # asking must RUN, not raise
+    if not st["gpu_available"]:
+        assert rep_gpu["device"] == "cpu" and rep_gpu.get("asked") == "gpu"
+        assert rt._dev is None                    # nothing silently moved
+
+
+def test_gdnruntime_to_device_is_behavior_preserving_without_a_gpu():
+    import numpy as _np
+    from holographic.misc.holographic_backend import gpu_available
+    rt = _stub_runtime()
+    before = {k: v.copy() for k, v in rt.w.items()}
+    rep = rt.to_device(True)
+    if not gpu_available():
+        assert rep["device"] == "cpu" and "no accelerator" in rep["why"]
+        for k in before:                          # weights untouched -> forward math untouched
+            assert _np.array_equal(rt.w[k], before[k])
+    rep_off = rt.to_device(False)
+    assert rep_off == {"device": "cpu", "resident": 0, "why": "disabled"}

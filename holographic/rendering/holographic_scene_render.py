@@ -152,7 +152,7 @@ def _resolve_material(material):
     return material                                              # assume it's already a PBRMaterial-like object
 
 
-def scene_to_render(scene, default_material="matte_gray", affine=False):
+def scene_to_render(scene, default_material="matte_gray", affine=False, distance_sdf=None):
     """Flatten a holographic_scene_doc.Scene into (sdf, material_fn) for the path tracer.
 
     `sdf` is an object with .eval(P) giving the distance to the WHOLE scene (the nearest object). `material_fn(P)`
@@ -163,7 +163,17 @@ def scene_to_render(scene, default_material="matte_gray", affine=False):
     import holographic.materials_and_texture.holographic_matlib as ML
 
     placed = []                                                 # (placed_sdf, material_object, albedo_socket) per object
-    for obj in scene.objects.values():
+    # OBJECTS MAY BE A DICT OR A LIST, because TWO CLASSES CALL THEMSELVES A
+    # SCENE: Scene (handle -> object, so .values()) and SemanticScene (an
+    # ordered list, which is what scene_from_image builds). This line assumed
+    # the first and raised "'list' object has no attribute 'values'" on the
+    # second -- the SECOND HALF of the same bug as the dict/Scene mismatch, and
+    # invisible until the first half was fixed.
+    # Reading both shapes is two lines; unifying the classes is a refactor that
+    # would break every caller of either. THE CONSUMER COERCES, which is the
+    # same call this project made for cameras and for the scene report.
+    _objs = scene.objects
+    for obj in (_objs.values() if hasattr(_objs, "values") else _objs):
         if obj.geometry is None:
             continue
         mat = _resolve_material(obj.material) or ML.material(default_material)
@@ -178,10 +188,23 @@ def scene_to_render(scene, default_material="matte_gray", affine=False):
     mats = [p[1] for p in placed]
     sockets = [p[2] for p in placed]
 
+    # DISTANCE PROXY (opt-in): `distance_sdf` is an explicit whole-scene distance SDF the caller GUARANTEES
+    # equals the union of the objects. Why it exists, measured: a scene that PARTITIONS one surface into
+    # several material objects (the shader ball's flush belts: outer = shell minus slabs, belts = shell
+    # intersect slabs) makes the plain min-over-objects evaluate the shared deep subtree once PER PIECE --
+    # 3x the dominant cost for a union that is provably just the shell. The caller who built the partition
+    # KNOWS the shared shape, so it hands the single-evaluation form here; per-object trees remain the
+    # attribution truth for material_fn. KEPT NEGATIVE on the alternative: bounding-sphere pruning was built
+    # and measured first -- partition pieces share one bounding sphere, so bounds cannot separate exactly the
+    # objects that are expensive, and the measured speedup was a null 1.13x on bulk queries. Structure the
+    # caller already has beats geometry probes the engine must guess.
     class _SceneSDF:
-        """The whole scene as one SDF: distance to the nearest object (a plain min over the objects' distances)."""
+        """The whole scene as one SDF: distance to the nearest object -- a plain min over the objects'
+        distances, or the caller's `distance_sdf` when provided (single evaluation of shared subtrees)."""
         def eval(self, P):
             P = np.atleast_2d(np.asarray(P, float))
+            if distance_sdf is not None:
+                return np.asarray(distance_sdf.eval(P), float)
             d = np.asarray(sdfs[0].eval(P), float)
             for g in sdfs[1:]:
                 d = np.minimum(d, np.asarray(g.eval(P), float))
@@ -336,10 +359,57 @@ def _fit_to(img, width, height):
     return out
 
 
+def emissive_mesh_lights_fn(scene, coarse=24, fine=22, margin=0.08,
+                         search_lo=(-2.0, -0.5, -2.0), search_hi=(2.0, 2.5, 2.0)):
+    """Derive MESH LIGHTS from every scene object whose material EMITS -- the decade-old standard the tracer
+    was missing a bridge to: an emissive material only glows when a path happens to HIT it, because next-event
+    estimation sends shadow rays only at LIGHTS. This walks the scene, and for each object with an emissive
+    material meshes its SDF (coarse global probe finds the object's bounding box inside the search volume,
+    surface_nets extracts the surface over a tight fine grid, quads split to triangles) and returns a
+    holographic_lights.MeshLight per emitter -- colour from the emissive hue, intensity from its HDR peak.
+    Now the glowing object CASTS light: pools on the floor, soft shadows, the works. Objects entirely outside
+    the search volume are skipped (documented scope: preview/tabletop scale; widen search_lo/hi for big scenes).
+    Deterministic, pure NumPy. Returns a list (possibly empty) -- append it to the `lights` you pass the renderer.
+    render_scene_document(..., emissive_mesh_lights=True) does exactly that for you (default OFF: additive).
+    (Function name carries _fn to keep the render_scene_document keyword from shadowing it.)"""
+    import numpy as np
+    from holographic.rendering.holographic_lights import MeshLight
+    from holographic.mesh_and_geometry.holographic_isosurface import surface_nets
+    out = []
+    lo = np.asarray(search_lo, float); hi = np.asarray(search_hi, float)
+    axes = [np.linspace(lo[k], hi[k], int(coarse)) for k in range(3)]
+    Xc, Yc, Zc = np.meshgrid(*axes, indexing="ij")
+    Pc = np.stack([Xc.ravel(), Yc.ravel(), Zc.ravel()], 1)
+    for obj in scene.objects.values():
+        mat = _resolve_material(obj.material)
+        emis = np.asarray(getattr(mat, "emissive", (0.0, 0.0, 0.0)), float)
+        peak = float(emis.max()) if emis.size else 0.0
+        if peak <= 0.0:
+            continue
+        inside = obj.geometry(Pc) < 0.0                       # coarse occupancy of THIS object
+        if not inside.any():
+            continue                                          # outside the search volume: skipped, by contract
+        pts = Pc[inside]
+        blo = pts.min(0) - margin; bhi = pts.max(0) + margin  # tight box + margin so the surface isn't clipped
+        fx = [np.linspace(blo[k], bhi[k], int(fine)) for k in range(3)]
+        Xf, Yf, Zf = np.meshgrid(*fx, indexing="ij")
+        field = obj.geometry(np.stack([Xf.ravel(), Yf.ravel(), Zf.ravel()], 1)).reshape(Xf.shape)
+        V, Q = surface_nets(field, tuple(fx))
+        if len(V) == 0 or len(Q) == 0:
+            continue
+        F = np.concatenate([Q[:, [0, 1, 2]], Q[:, [0, 2, 3]]], 0)     # quads -> two tris each
+        # colour = the emissive HUE; intensity = the HDR peak. MeshLight radiance is intensity*color/dist^2 with
+        # the one-sided cosine, so the constant matches how the other placed lights are tuned in this engine.
+        out.append(MeshLight(V, F, color=tuple((emis / peak).tolist()), intensity=peak))
+    return out
+
+
 def render_scene_document(scene, camera, width=96, height=72, quality="medium", max_bounce=4, seed=0,
                           sky=None, default_material="matte_gray", return_stats=False, sss_dir=None,
                           sss_depth=0.6, sss_sigma=4.0, lights=None, dome_cache=False, demodulate=False,
-                          soft_light_cache=False, indirect_cache=False, view=None, affine=False):
+                          soft_light_cache=False, indirect_cache=False, view=None, affine=False,
+                          sss_interior=False, emissive_mesh_lights=False, distance_sdf=None, active=None,
+                          tol_scale=None):
     """One call: flatten a Scene document and render it with the auto-calibrating path tracer (render_auto). This
     is the 'a modeling app builds a document, then renders it' path -- the renderer consuming the canonical scene
     instead of a hand-built Python class. `sss_dir` (a light direction) turns on the subsurface glow for any object
@@ -357,8 +427,13 @@ def render_scene_document(scene, camera, width=96, height=72, quality="medium", 
                               Honest tradeoff: one bounce, not full multi-bounce GI.
     The remaining (hard/cheap) lights -- point, directional, spot, IES -- render normally on the tracer."""
     from holographic.rendering.holographic_gbuffer import render_auto
-    sdf, material_fn = scene_to_render(scene, default_material=default_material, affine=affine)
+    sdf, material_fn = scene_to_render(scene, default_material=default_material, affine=affine,
+                                       distance_sdf=distance_sdf)
 
+    if emissive_mesh_lights:
+        # emissive objects become REAL lights (NEE-sampled area sources); appended before the dome/soft split
+        # so they ride the same pipeline as hand-placed lights.
+        lights = (list(lights) if lights else []) + emissive_mesh_lights_fn(scene)
     domes, soft, other = [], [], (list(lights) if lights else [])
     if dome_cache and other:
         domes = [L for L in other if getattr(L, "is_dome", False)]        # cached-dome pass takes these
@@ -371,7 +446,8 @@ def render_scene_document(scene, camera, width=96, height=72, quality="medium", 
     trace_bounce = 1 if indirect_cache else max_bounce                    # direct-only when the GI is cached
     out = render_auto(sdf, camera, width, height, material_fn, sky=sky, quality=quality,
                       max_bounce=trace_bounce, seed=seed, return_stats=return_stats, sss_dir=sss_dir,
-                      sss_depth=sss_depth, sss_sigma=sss_sigma, lights=other, demodulate=demodulate)
+                      sss_depth=sss_depth, sss_sigma=sss_sigma, lights=other, demodulate=demodulate,
+                      sss_interior=sss_interior, active=active, tol_scale=tol_scale)
     if not domes and not soft and not indirect_cache:
         if view is None:
             return out                                                    # DEFAULT: byte-for-byte today
@@ -517,6 +593,27 @@ def _selftest():
         raise AssertionError("an unknown view name must raise, not silently render untransformed")
     except ValueError as exc:
         assert "display" in str(exc), "the error must name the valid options: %s" % exc
+
+    # EMISSIVE MESH LIGHTS: (a) derivation -- the preview's neon core yields exactly one MeshLight whose
+    # vertices hug the core surface; (b) illumination -- an EXPOSED emitter must brighten the floor beneath it
+    # versus the flag off (measured +0.049 blue at build; gate at 0.02). A SEALED emitter is the documented
+    # negative (NEE occlusion is binary; see holographic_preview) -- so the pin uses a bare bulb, not the ball.
+    from holographic.mesh_and_geometry.holographic_sdf import sphere as _sphL, plane as _plnL
+    from holographic.rendering.holographic_render import Camera as _CamL
+    _scl = Scene(seed=0)
+    _scl.add(name="floor", geometry=_plnL(0.0), material="matte_white")
+    _scl.add(name="bulb", geometry=_sphL(0.18).translate((0.0, 0.55, 0.0)), material="neon_blue")
+    _mls = emissive_mesh_lights_fn(_scl)
+    assert len(_mls) == 1 and len(_mls[0].faces) > 100, "the emissive bulb must derive exactly one real MeshLight"
+    _v = np.linalg.norm(np.asarray(_mls[0].vertices) - np.array([0.0, 0.55, 0.0]), axis=1)
+    assert abs(float(_v.mean()) - 0.18) < 0.02, "derived light vertices must hug the emitter surface"
+    _camL = _CamL(eye=(1.1, 1.0, 1.6), target=(0.0, 0.3, 0.0), fov_deg=50.0, aspect=1.0)
+    _on = render_scene_document(_scl, _camL, 48, 48, quality="draft", seed=0, view="display",
+                                emissive_mesh_lights=True)
+    _off = render_scene_document(_scl, _camL, 48, 48, quality="draft", seed=0, view="display",
+                                 emissive_mesh_lights=False)
+    _fl = float(_on[35:45, 15:33, 2].mean() - _off[35:45, 15:33, 2].mean())
+    assert _fl > 0.02, "an exposed emissive object no longer casts light on the floor (blue delta %.4f)" % _fl
 
     print("holographic_scene_render selftest OK: a Scene document (%d objects) flattens to one SDF (nearest-object "
           "distance) + a per-object material_fn; red/gold/floor each shade with their own library material."

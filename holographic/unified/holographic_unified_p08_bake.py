@@ -152,7 +152,15 @@ class _UnifiedPart08:
         and a gap report (dead-end / source-only / untouched kinds). Where suggest_pipeline answers ONE route
         ('mesh -> image?'), this returns the entire map an agent can plan over without re-deriving it. See
         pipelinemap.generate (which also writes docs/PIPELINE_MAP.md + pipelines.json). Returns the dict."""
-        import pipelinemap                                    # top-level generator; stdlib-only, reads the catalog
+        # IN THE PACKAGE, NOT AT THE ROOT. pipelinemap.py lived beside
+        # setup.py and was never in the wheel, so this call worked from a repo
+        # checkout (cwd shadowing) and raised ModuleNotFoundError for anyone
+        # who pip-installed -- across SEVEN releases, 0.2.3 to 0.2.14, because
+        # every release check ran from the repo root.
+        # Moving it into holographic/ kills the whole TOP-LEVEL-MODULE bug
+        # class rather than adding one more manifest entry to forget.
+        from holographic.caching_and_storage import (
+            holographic_pipelinemap as pipelinemap)
         cat = self._capability_catalog()
         edges = pipelinemap._edges(cat)
         produce, consume = pipelinemap._adjacency(edges)
@@ -287,15 +295,16 @@ class _UnifiedPart08:
         self._user_embedder = fn
         return report
 
-    def route_semantic(self, problem, k=5, query_vec=None, gamma=0.5):
+    def route_semantic(self, problem, k=5, query_vec=None, gamma=1.0):
         """N28 -- route a request to the right MODULE by cosine in nomic's embedding space, not token
         overlap. Uses the shipped q8 index (lecore_data/routing/index_128d.npz preferred, 64d fallback)
-        with the ABTT correction baked in. Measured on the 12-ask suite at 128d: token overlap 1/12 top-1;
-        dense 6/12; dense + workflow bones (gamma=0.5) 7/12, median 1, ZERO per-ask regressions.
-        gamma DEFAULTS to 0.5 (the measured strict-Pareto winner at this exact dim): this method was broken
-        before the fusion landed (missing helper, raised on every call), so there is no prior behaviour to
-        preserve -- 0.5 is its first WORKING default. Pass gamma=0.0 for plain cosine. Boneless index ->
-        gamma degrades gracefully to plain dense, so old artifacts stay safe.
+        with the ABTT correction baked in. THE DEFAULT gamma IS THE MEASURED CHAMPION PER CORPUS EPOCH,
+        not a setting: 0.5 was crowned at 537 corpus entries (7/12 top-1, median 1 on the 12-ask suite);
+        at 715 entries CI's full sweep showed gamma=1.0 Pareto-dominating 0.5 at the ship dim (top-1 6
+        vs 5, median 2 vs 2.5, worst 80 vs 90, top-5 equal) and at 768d, so the default moved 0.5 -> 1.0
+        with the exam's SHIPPED_GAMMA and the CI bars in lockstep (tools/semantic/knowledge_index.py has
+        the full record). Keyword-overlap baseline for scale: 1/12 top-1. Pass gamma=0.0 for plain
+        cosine. Boneless index -> gamma degrades gracefully to plain dense, so old artifacts stay safe.
 
         It needs a query VECTOR. Supply one via `query_vec` (a 64d nomic vector your app produced), OR
         rely on the build-time cache for a known phrase. With NEITHER -- a brand-new free-text query and
@@ -479,11 +488,82 @@ class _UnifiedPart08:
             self._catalog_cache = cat
         return cat
 
-    def register_capability(self, name, does, example="", native=True, aliases=()):
+    def composite_layers(self, layers, meta=None, background=None):
+        """Composite a layer stack into one image -- the SHARED blend kernel (L-1).
+        Compositing is the one operation every image-consuming app must perform IDENTICALLY, and it existed only
+        inside leStudio: ten modes in that app's own __init__.py, nothing in the engine. Any second app reading a
+        shared workspace had to re-implement all ten plus the alpha-over loop, and TWO COPIES OF THE SAME MATHS
+        DRIFT -- the same document then renders differently in the modeller than in the painter, which is the exact
+        failure the shared container format was built to prevent.
+        `normal` stays in agreement by luck; the nine others are where copies diverge, because each is a one-line
+        formula four people will round, clamp and order differently. softlight here is the W3C form, not the cheap
+        approximation -- they differ visibly in the dark end, and A SHARED KERNEL THAT IS ALMOST THE SAME IS WORSE
+        THAN NONE, because the discrepancy is unattributable.
+        Reads the layer records exactly as a container section carries them: visible / opacity / blend / order /
+        mask. Two contracts pinned by selftest because both are commonly got wrong: OPACITY FADES RATHER THAN
+        DARKENS (scaling colour sends a half-opacity white layer over white to grey), and a multiply layer over
+        transparency is ITSELF rather than black (which is what compositing before blending gets wrong).
+        See holographic_composite.BLEND_MODES."""
+        from holographic.materials_and_texture.holographic_composite import (
+            composite_layers)
+        return composite_layers(layers, meta=meta, background=background)
+
+    def live_session(self, name="session", ttl=30.0):
+        """A revision counter, presence and a change feed, owned by NEITHER app (L-2).
+        leStudio's multiplayer is app-local -- a rev bumped by a Flask after_request hook, an SSE feed, presence
+        defined as an open stream -- all inside one app's web server. So file-level sharing works today (both apps
+        read and write one container) while LIVE CO-EDITING ACROSS TWO APPS CANNOT EXIST, because the second app
+        would have to import the first one's Flask app to join.
+        RULED OUT FIRST, as the backlog asks: WorkspaceManager is not this. It checkpoints a live DB's scratch
+        tables by replay; coordinating several concurrent editors is a different problem, and the container
+        module's own docstring already says so.
+        TRANSPORT-AGNOSTIC IS THE POINT AND THE HARD PART TO HOLD: no socket, no SSE, no thread, no Flask. The
+        moment this imports a web framework it becomes leStudio's implementation with a different filename and the
+        second app is locked out again. Each app drives it with the transport it already has.
+        bump(src) -> a monotonic revision; since(rev, exclude=src) -> the feed from a client's last-seen point,
+        minus its own echo; participants() -> presence as a HEARTBEAT WITH A TIMEOUT rather than an open stream,
+        so a polling client counts and a wedged process with an open socket does not.
+        See holographic_livesession.LiveSession."""
+        from holographic.io_and_interop.holographic_livesession import (
+            LiveSession)
+        return LiveSession(name=name, ttl=ttl)
+
+    def container_kinds(self, kind=None, describe="", container=None):
+        """Which section kinds this build understands (L-3), and the canonical image kind (L-4).
+        save_container accepted ANY kind string and nothing could tell you which ones a build knew, so an app
+        hardcoded the kinds it recognised and could not tell a user WHY a section was inert -- it carried them
+        silently. Now a UI can say "this file also contains 3 polystudio.object sections (not editable here)".
+        AND L-4: `lecore.image` is the canonical texture section -- RGBA float 0..1 straight alpha plus
+        colour_space and dpi. Without one name, each app PAIR needs its own adapter: N^2 adapters for N apps,
+        which is why leStudio writes lestudio.document and a modeller writes polystudio.texture and neither can
+        read the other's picture. One documented kind makes it N.
+        See holographic_container.register_kind / known_kinds / image_section."""
+        from holographic.io_and_interop import holographic_container as C
+        if container is not None:
+            return C.describe_sections(container)
+        if kind is not None:
+            return C.register_kind(kind, describe)
+        return C.known_kinds()
+
+    def register_capability(self, name, does, example="", native=True, aliases=(),
+                            consumes=(), produces=(), method=None, semantic=None,
+                            polymorphic=False, module=None):
         """Register a capability in the catalog so future `find_capability` calls surface it (backlog C1: as each
-        consolidation home lands, register it here). Additive; returns the entry."""
-        return self._capability_catalog().register_capability(name, does, example=example, native=native,
-                                                              aliases=aliases)
+        consolidation home lands, register it here). Additive; returns the entry.
+
+        REGISTRATION IS THE TAGGING API. The catalog's register_capability has
+        taken `consumes`/`produces`/`method` all along; THIS WRAPPER DROPPED
+        THEM, so anything registered through the mind arrived untagged and
+        invisible to suggest_pipeline. That is most of why io-kind coverage sat
+        at 110 of 3,239 -- not because tagging was hard, but because the door
+        everyone registers through had no keyhole for it.
+        `consumes`/`produces` are io kinds (see io_kinds()); `method` is the
+        UnifiedMind attribute a planner should call, which is what makes a
+        proposed step executable rather than prose."""
+        return self._capability_catalog().register_capability(
+            name, does, example=example, native=native, aliases=aliases,
+            consumes=consumes, produces=produces, method=method,
+            semantic=semantic, polymorphic=polymorphic, module=module)
 
     def scene_to_render(self, scene, default_material="matte_gray"):
         """Flatten a Scene document to (sdf, material_fn) for the path tracer, without rendering -- the bridge
@@ -1275,7 +1355,8 @@ class _UnifiedPart08:
 
     def render_mesh(self, mesh, camera, width=512, height=512, lights=None, base_color=(0.8, 0.8, 0.8),
                     background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True, texture=None, uvs=None,
-                    smooth=False, dtype=None, two_sided=False, vertex_colors=None):
+                    smooth=False, dtype=None, two_sided=False, vertex_colors=None,
+                   pbr=None):
         """Rasterise a mesh to an (H,W,3) RGB image with a z-buffer and Lambert shading (frustum + back-face
         culled). `base_color` may be a PBRMaterial's base_color. vectorized=True (default) uses the batched
         fragment-scatter path (the per-triangle Python loop ported to one array op -- ~8-15x faster, image
@@ -1296,7 +1377,7 @@ class _UnifiedPart08:
         img = rasterize_mesh(mesh, camera, width=width, height=height, lights=lights,
                              base_color=base_color, background=background, ambient=ambient,
                              vectorized=vectorized, texture=texture, uvs=uvs, smooth=smooth,
-                             two_sided=two_sided, vertex_colors=vertex_colors)
+                             two_sided=two_sided, vertex_colors=vertex_colors, pbr=pbr)
         # C16: dtype= (default None = float64, byte-identical to before). The rasteriser works in float64 and a
         # downstream client cast every frame to float32 itself; doing it here saves the extra full-image copy on a
         # big render. Cast at the EXIT only -- casting earlier would change the shading maths, and this method must

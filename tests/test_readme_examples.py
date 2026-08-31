@@ -13,7 +13,13 @@ import subprocess
 
 def _python_blocks(readme_path):
     src = open(readme_path, encoding="utf-8").read()
-    return re.findall(r"```python\n(.*?)```", src, re.DOTALL)
+    blocks = []
+    # fences may open with `> ```python` when the example lives inside a markdown BLOCKQUOTE (the
+    # "New here" callout does this; GitHub renders it fine). Match both fence forms, then strip the
+    # `> ` quote prefix per line so the extracted code is what a reader would actually copy.
+    for body in re.findall(r"^(?:> ?)?```python\n(.*?)^(?:> ?)?```", src, re.DOTALL | re.MULTILINE):
+        blocks.append(re.sub(r"^> ?", "", body, flags=re.MULTILINE))
+    return blocks
 
 
 def test_readme_python_examples_run():

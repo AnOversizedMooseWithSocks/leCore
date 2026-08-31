@@ -218,8 +218,40 @@ def audit(root):
         over = " -- OVER the cap: whole-file read() refuses BY DESIGN; view/read_lines/count/edits all work" \
                if sz > cap else ""
         print("      %s  %d bytes (%.0f%%)%s" % (fn, sz, 100.0 * sz / cap, over))
+    # DUPLICATE FACULTY DEFINITIONS (F24 -- the blind spot that let THREE silently-shadowed
+    # faculties through at 0/0/0): same-name `def` twice in one class body means Python keeps
+    # the second silently and the first becomes dead code with a live-looking docstring. AST
+    # walk per facade part; ten lines, permanent. HARD ERROR: a shadowed faculty is a silent
+    # behavior flip waiting to be re-edited.
+    dup = []
+    for fn in glob.glob(os.path.join(root, "holographic", "unified", "holographic_unified_p*.py")):
+        tree_ = ast.parse(open(fn, encoding="utf-8", errors="replace").read())
+        for node in ast.walk(tree_):
+            if isinstance(node, ast.ClassDef):
+                seen = {}
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef):
+                        if item.name in seen:
+                            dup.append((os.path.basename(fn), item.name, seen[item.name], item.lineno))
+                        seen[item.name] = item.lineno
+    # ...and the SAME disease in the catalog organ: a duplicate string KEY in an alias dict is
+    # kept-last silently by Python, darkening the first block's aliases (found mirroring all
+    # three shadowed faculties). Regex-level scan of the catalog files' top-level alias keys.
+    import re as _re
+    for fn in glob.glob(os.path.join(root, "holographic", "caching_and_storage", "holographic_catalog*.py")):
+        src_ = open(fn, encoding="utf-8", errors="replace").read()
+        keys = _re.findall(r'^    "([a-z0-9_]+)": \(', src_, _re.M)
+        seen_ = {}
+        for i, k in enumerate(keys):
+            if k in seen_:
+                dup.append((os.path.basename(fn), "ALIAS-KEY " + k, seen_[k], i))
+            seen_[k] = i
+    print()
+    print("  DUPLICATE (silently shadowed) faculty definitions -- HARD ERROR: %d" % len(dup))
+    for fn, name, first, second in dup:
+        print("      %s: %s at lines %d and %d (first is DEAD CODE)" % (fn, name, first, second))
     return {"no_doc": no_doc, "import_only": import_only, "kept_neg": kept_neg, "no_public": no_public,
-            "size_watch": watch}
+            "size_watch": watch, "duplicates": dup}
 
 
 if __name__ == "__main__":

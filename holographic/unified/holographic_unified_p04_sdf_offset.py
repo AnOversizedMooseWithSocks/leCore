@@ -313,7 +313,19 @@ class _UnifiedPart04:
         version instead of sniffing for methods. `capabilities_schema` is the contract version of
         capabilities.json / describe_skill records; it moves only when that shape changes."""
         import lecore as _lc
-        return {"engine": getattr(_lc, "__version__", None), "capabilities_schema": "1.0",
+        # 1.1: THE STEP AND MANIFEST FORMATS MOVED. A schema version that never
+        # changes is a field clients learn to ignore, and this one sat at "1.0"
+        # through +900 capabilities, the `method` field, `primary`/`params` and
+        # memoisation. It moves now because two CONTRACTS changed in ways a
+        # client can see:
+        #   suggest_pipeline steps gained `method` -- they were
+        #     {consumes, name, produces} and a planner client could not execute
+        #     one without re-deriving the mapping;
+        #   render edges now declare their SECOND input, so consumes can carry
+        #     ("mesh", "camera") where a client may have assumed one kind.
+        # Additive both times, which is why this is 1.1 and not 2.0 -- an old
+        # client that ignores `method` and reads consumes[0] still works.
+        return {"engine": getattr(_lc, "__version__", None), "capabilities_schema": "1.1",
                 "dim": int(self.dim), "seed": int(getattr(self, "seed", 0))}
 
     def semantic_tag_coverage(self):

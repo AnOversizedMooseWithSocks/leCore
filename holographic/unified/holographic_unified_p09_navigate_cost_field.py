@@ -1199,6 +1199,27 @@ class _UnifiedPart09:
         The handle is what selections, materials and edits refer to -- keep it. Validation is deliberately
         NOT done here: a half-built scene mid-edit is normal, so a bad material is reported by scene_info's
         pre-flight rather than refused at the point of the add. See holographic_scene_doc.Scene.add."""
+        # REFUSE A MESH AT THE DOOR, WITH THE ROUTE. A Scene document's geometry
+        # contract is the closed SDF DSL -- the renderer calls .eval() on it --
+        # and a Mesh has no .eval. Adding one SUCCEEDED and then crashed inside
+        # sphere_trace with "'Mesh' object has no attribute 'eval'", several
+        # calls later and nowhere near the mistake.
+        # ACCEPT-THEN-CRASH IS THE WORST OF THE THREE OPTIONS: the caller learns
+        # at render time, in someone else's stack frame. The other two (an
+        # SDF(kind="grid") wrapper, or mesh_to_sdf) are real features and would
+        # SILENTLY CHANGE WHAT WAS RENDERED -- a voxelised approximation where
+        # the caller passed exact geometry. Refusing names the mesh path
+        # instead, which is the honest move until a grid SDF exists.
+        if geometry is not None and not hasattr(geometry, "eval"):
+            _k = type(geometry).__name__
+            raise TypeError(
+                "scene_add takes SDF geometry (the document's closed DSL -- the "
+                "renderer calls .eval() on it), not a %s. For meshes use the "
+                "MESH path: scene_graph(mesh) to place it, render_mesh(mesh, "
+                "camera) to render it. To put a mesh in an SDF scene you must "
+                "convert it first (mesh_to_sdf_grid), which is an "
+                "APPROXIMATION and should be a choice you make, not one this "
+                "call makes for you." % _k)
         return scene.add(name=name, geometry=geometry, material=material, transform=transform,
                          tags=tags, params=params, parent=parent)
 

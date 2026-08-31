@@ -1,0 +1,28 @@
+# openzoo as a LibreChat custom endpoint.
+# Merge the `endpoints.custom` entry below into your existing librechat.yaml
+# (project root, next to .env). Docker users must mount librechat.yaml via
+# docker-compose.override.yml, then restart LibreChat.
+#
+# WHY apiKey is a placeholder by default: the local openzoo proxy takes
+# payment via x402 (burner wallet), not keys - but LibreChat requires the
+# field to be non-empty. For a hosted openzoo endpoint, put a real key in
+# .env as OPENZOO_KEY and reference it as "${OPENZOO_KEY}".
+
+version: 1.2.1
+cache: true
+
+endpoints:
+  custom:
+    - name: "openzoo"
+      # Local proxy (start with: npx openzoo). For hosted, e.g.:
+      # baseURL: "https://x402-tokens.fly.dev/v1"
+      baseURL: "http://localhost:8402/v1"
+      apiKey: "sk-openzoo"          # or "${OPENZOO_KEY}" for hosted
+      models:
+        # fetch: true pulls the live ~435-model list from /v1/models.
+        # The default below is only the pre-fetch fallback.
+        default: ["nvidia/nemotron-3.5-lightning"]
+        fetch: true
+      titleConvo: true
+      titleModel: "current_model"
+      modelDisplayLabel: "openzoo"

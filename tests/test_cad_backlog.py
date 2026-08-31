@@ -992,6 +992,14 @@ _GUARD_EXEMPT = {
     "splat_lod_chain",
     # explicit-budget wrapper whose guard parameter has its own name (asserted separately below):
     "mesh_decimate_to",
+    # VOLUMETRIC, not surface: tet_lod_chain takes a POINT SET and re-tetrahedralises each
+    # level, so there is no input mesh whose silhouette could be eaten -- and it already has a
+    # STRICTER contract than the guard, F3's certificate, which refuses a level that fragments
+    # or orphans a limb rather than shipping it looking fine. tet_lod_storage_cost only
+    # MEASURES a chain (rule units vs stored units); it reduces nothing at all.
+    # Exempted by reading both bodies, not by pattern -- the test matches on "lod" in the name,
+    # which is the right net and catches things that are not reductions.
+    "tet_lod_chain", "tet_lod_storage_cost",
     # POPULATION thinner, not a mesh reducer: scatter_lod takes TRANSFORMS and returns a kept subset,
     # so it never sees geometry and a silhouette IoU is not computable from its inputs. Its guard is
     # `min_keep` -- a floor on the surviving fraction -- plus the nesting property that stops blades

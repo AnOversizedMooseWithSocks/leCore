@@ -1,0 +1,23 @@
+# openzoo as a Hermes Agent custom provider.
+# Hermes Agent (Nous Research's model-agnostic agent harness) accepts any
+# OpenAI-compatible endpoint via `provider: custom`. Two ways to set it up:
+#
+#   A) Interactive (recommended - Hermes writes the config for you):
+#        hermes model
+#      -> pick "Custom endpoint"
+#      -> base URL:  http://localhost:8402/v1   (ends in /v1; Hermes appends
+#                                                /chat/completions itself)
+#      -> API key:   sk-openzoo                 (any value for the local proxy)
+#      -> model id:  nvidia/nemotron-3.5-lightning          (or any zoo id; `curl localhost:8402/v1/models`)
+#
+#   B) Manual: merge the block below into ~/.hermes/config.yaml.
+#
+# WHY provider: custom - Hermes's built-in provider registry (openrouter,
+# xai, deepseek, ...) is for known services; custom is the documented path
+# for any OpenAI-compatible endpoint that isn't in the registry.
+
+model:
+  provider: custom
+  name: nvidia/nemotron-3.5-lightning
+  base_url: http://localhost:8402/v1     # hosted: https://x402-tokens.fly.dev/v1
+  api_key: sk-openzoo                    # any value for local proxy; real key for hosted

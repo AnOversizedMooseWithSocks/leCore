@@ -19,6 +19,29 @@ import matplotlib.pyplot as plt
 OUT = "gallery"; os.makedirs(OUT, exist_ok=True)
 
 # --------------------------------------------------------------------------- small shared helpers
+def _despeckle(img, k=0.30):
+    """Firefly clamp: replace a pixel by its 3x3 median ONLY where it deviates strongly (relative
+    threshold k). Path-trace fireflies are isolated outliers; a full median would smear specular
+    detail, so only the outliers move -- the hero-render cleanup, now shared by the hero scenes."""
+    H, W = img.shape[:2]
+    pad = np.pad(img, ((1, 1), (1, 1), (0, 0)), mode="edge")
+    med = np.median(np.stack([pad[dy:dy + H, dx:dx + W] for dy in range(3) for dx in range(3)]), axis=0)
+    bad = (np.abs(img - med).max(axis=2) > k * (med.max(axis=2) + 0.05))[..., None]
+    return np.where(bad, med, img)
+
+
+def _bloom(img, threshold=1.0, sigma=3.0, gain=0.55):
+    """Emission bloom: bright-pass (radiance above `threshold`), separable Gaussian blur, add back.
+    Hot things should GLOW past their silhouette -- the camera artifact audiences read as heat."""
+    bright = np.clip(img - threshold, 0.0, None)
+    r = int(3 * sigma)
+    x = np.arange(-r, r + 1)
+    g = np.exp(-0.5 * (x / sigma) ** 2); g = g / g.sum()
+    for axis in (0, 1):
+        bright = np.apply_along_axis(lambda m: np.convolve(m, g, mode="same"), axis, bright)
+    return img + gain * bright
+
+
 def _tonemap(hdr, exposure=1.0):
     """HDR -> displayable sRGB via the ACES FILMIC curve with AUTO-EXPOSURE (Narkowicz 2015 + log-average metering)
     -- filmic contrast, a graceful highlight roll-off, and each scene self-exposed to mid-grey, instead of the old
@@ -326,13 +349,16 @@ def render_iridescence():
     _oil = ML.iridesce("oil_slick", 440.0)
     doc.add(name="oil", geometry=sphere(0.72).displace(0.05, 4.0), transform=_T((1.0, -0.23, -0.1)), material=_oil)
 
-    cam = Camera(eye=(0.0, 0.5, 3.8), target=(0.0, -0.2, 0.0), fov_deg=44, aspect=WIDTH / HEIGHT)
+    # camera low, looking LEVEL: the warm horizon band fills the background instead of the
+    # dome's flat grey ground hemisphere (the first framing was 60 percent grey band)
+    cam = Camera(eye=(0.0, 0.15, 3.8), target=(0.0, 0.05, 0.0), fov_deg=44, aspect=WIDTH / HEIGHT)
     # a COLOURFUL sky is essential: iridescence tints REFLECTED light, so the environment needs colour to tint.
     from holographic.rendering.holographic_raymarch import sky_dome
-    sky = lambda D: sky_dome(D, sun_dir=(0.4, 0.6, 0.5), sun_color=(7.0, 6.5, 6.0), sky_color=(0.25, 0.45, 0.85),
-                             horizon=(0.95, 0.75, 0.55), ground=(0.15, 0.14, 0.13), sun_size=0.04)
-    hdr = render_scene_document(doc, cam, width=WIDTH, height=HEIGHT, quality=QUALITY, max_bounce=4, seed=0, sky=sky)
-    plt.imsave(f"{OUT}/render_iridescence.png", _tonemap(np.clip(hdr, 0, None)))
+    # BRIGHT + colourful: the films tint reflected light, so the environment must have light to tint
+    sky = lambda D: sky_dome(D, sun_dir=(0.4, 0.6, 0.5), sun_color=(9.5, 8.8, 7.8), sky_color=(0.30, 0.52, 0.98),
+                             horizon=(1.05, 0.74, 0.50), ground=(0.17, 0.16, 0.15), sun_size=0.05)
+    hdr = render_scene_document(doc, cam, width=WIDTH, height=HEIGHT, quality="ultra", max_bounce=4, seed=0, sky=sky)
+    plt.imsave(f"{OUT}/render_iridescence.png", _tonemap(np.clip(_despeckle(hdr), 0, None)))
     print("  render_iridescence.png")
 
 
@@ -372,7 +398,7 @@ def render_crystal():
     sky = lambda D: sky_dome(D, sun_dir=SUN, sun_color=(6.5, 6.0, 5.4), sky_color=(0.30, 0.44, 0.82),
                              horizon=(0.80, 0.84, 0.92), ground=(0.16, 0.15, 0.14), sun_size=0.03)
     hdr = render_scene_document(doc, cam, width=WIDTH, height=HEIGHT, quality=QUALITY, max_bounce=3, seed=0, sky=sky)
-    plt.imsave(f"{OUT}/render_crystal.png", _tonemap(np.clip(hdr, 0, None)))
+    plt.imsave(f"{OUT}/render_crystal.png", _tonemap(np.clip(_despeckle(hdr), 0, None)))
     print("  render_crystal.png")
 
 
@@ -417,13 +443,20 @@ def render_hot_metal():
                 continue
             a_i, met_i, r_i, e_i, _ = ML.shade(mat, int(m.sum()))
             alb[m] = a_i; met[m] = met_i; rough[m] = r_i; emis[m] = e_i    # emis carries the thermal glow
+        fl = owner == (len(objs) - 1)                                       # the floor is the LAST object:
+        rough[fl] = 0.12; met[fl] = 0.35                                    # polish it so it MIRRORS the glow
         return alb, met, rough, emis
 
     cam = Camera(eye=(0.0, 0.7, 4.6), target=(0.0, -0.15, 0.0), fov_deg=46, aspect=WIDTH / HEIGHT)
     from holographic.rendering.holographic_raymarch import sky_dome
     sky = lambda D: sky_dome(D, sun_dir=SUN, sun_color=(0.6, 0.65, 0.8), sky_color=(0.05, 0.06, 0.09),
                              horizon=(0.06, 0.07, 0.10), ground=(0.03, 0.03, 0.04), sun_size=0.02)   # dark room
-    _save_render("render_hot_metal", Scene(), cam, material, max_bounce=3)
+    from holographic.rendering.holographic_gbuffer import render_auto
+    hdr = render_auto(Scene().eval, cam, WIDTH, HEIGHT, material, sky=sky, quality=QUALITY,
+                      max_bounce=3, seed=0)
+    hdr = _bloom(_despeckle(hdr), threshold=1.0, sigma=3.0, gain=0.55)      # hot things GLOW past their edge
+    plt.imsave(f"{OUT}/render_hot_metal.png", _tonemap(np.clip(hdr, 0, None)))
+    print("  render_hot_metal.png")
 
 
 def render_subsurface():
@@ -726,73 +759,110 @@ def render_fur_over_scene():
 
 
 def render_fur():
-    """FUR shaded by a physical FIBER material (holographic_matlib 'fur_ginger' -> a Marschner strand BSDF), and
-    properly GROOMED. Three fixes over the standing-on-end version:
-      * COMB -- groom grows each strand straight out along the surface normal, so raw fur stands on end. We bend
-        each strand from its normal toward a world FLOW direction (down and back), so it lies along the body and
-        flows, like a brushed coat, instead of sticking straight out.
-      * ANTI-ALIAS -- the strand rasteriser draws 1-px lines, which alias badly. We render at 2x and box-downsample
-        (supersampling), so the coat reads as smooth fur, not pixel noise.
-      * LIGHTING -- a KEY light from the front-upper reveals the groomed form; a softer warm RIM from behind makes
-        the translucent fur edges glow. (The old single back-light gave the blotchy orange-and-blown-white look.)"""
+    """FUR shaded by a physical FIBER material over a REAL studio: the hero pipeline.
+    Four fixes over the floating-hairball version (each one visible in the old render):
+      * ENVIRONMENT -- the strands composite over a PATH-TRACED backdrop: the critter's ginger
+        skin body on a floor under a graded sky with a warm key lobe, rendered with the SAME
+        look-at camera as the strand pass (a small adapter exposes ray_dirs), so the coat sits
+        on a body that casts a real contact shadow instead of hovering on a gradient.
+      * SOFT ALPHA -- the old binary mask (lit > threshold) fringed and speckled at dim strand
+        tips; coverage is now a smoothstep alpha, premultiplied BEFORE the downsample, which is
+        the correct compositing order for anti-aliasing.
+      * SS=3 -- 1-px strand rasterisation aliases; 3x supersampling + box downsample reads as
+        fur, not pixel noise (2x was not enough at 768-wide hero size).
+      * MEDIAN on the backdrop only -- path-trace fireflies are isolated outliers on smooth
+        studio surfaces, where a 3x3 median is surgical; the fur itself is never filtered.
+    COMB is unchanged: strands bend from the root normal toward a world flow with gravity sag."""
     import holographic.materials_and_texture.holographic_matlib as ML
     from holographic.mesh_and_geometry.holographic_groom import groom, Strand
     from holographic.mesh_and_geometry.holographic_hairshade import render_hair
     from holographic.rendering.holographic_render import Camera
-    from holographic.mesh_and_geometry.holographic_sdf import sphere
+    from holographic.rendering.holographic_gbuffer import render_auto
+    from holographic.mesh_and_geometry.holographic_sdf import sphere, box
 
     def _nrm(v):
         v = np.asarray(v, float); return v / (np.linalg.norm(v) + 1e-12)
 
-    fur = ML.material("fur_ginger"); fp = ML.fiber_params(fur)                    # physical fiber material
-    body = sphere(0.95).smooth_union(sphere(0.60).translate((0.0, 0.98, 0.10)), k=0.22)   # body + head
+    W, H, SS = WIDTH, HEIGHT, 3
+    cam = Camera(eye=(0.0, 0.5, 3.4), target=(0.0, 0.30, 0.0), fov_deg=46.0, aspect=W / H)
+
+    class _CamAdapter:
+        # render_auto expects camera.ray_dirs(w, h) -> (eye, dirs); build them from the SAME
+        # look-at basis + vertical fov the strand rasteriser uses, so the passes align per-pixel.
+        def __init__(self, c): self.c = c; self.eye = c.eye
+        def ray_dirs(self, w, h, jitter=None):
+            r, u, f = self.c._basis()
+            py = np.tan(np.radians(self.c.fov_deg) * 0.5); px = py * self.c.aspect
+            xs = (np.arange(w) + 0.5) / w * 2 - 1
+            ys = 1 - (np.arange(h) + 0.5) / h * 2
+            X, Y = np.meshgrid(xs, ys)
+            D = f[None, None] + X[..., None] * px * r[None, None] + Y[..., None] * py * u[None, None]
+            return self.eye, D / np.linalg.norm(D, axis=-1, keepdims=True)
+
+    body = sphere(0.95).smooth_union(sphere(0.60).translate((0.0, 0.98, 0.10)), k=0.22)
+    floor = box(6.0, 0.05, 6.0).translate((0.0, -1.02, 0.0))
+
+    def bg_material(P):
+        is_floor = P[..., 1] < -0.9
+        alb = np.where(is_floor[..., None], np.array([0.30, 0.28, 0.26]), np.array([0.36, 0.16, 0.08]))
+        emis = np.zeros(P.shape[:-1] + (3,))
+        return alb, np.zeros(P.shape[:-1]), np.where(is_floor, 0.55, 0.85), emis
+
+    def bg_sky(D):
+        t = np.clip(D[..., 1] * 0.5 + 0.5, 0, 1)[..., None]
+        base = (1 - t) * np.array([0.16, 0.15, 0.17]) + t * np.array([0.55, 0.60, 0.72])
+        keyd = _nrm([0.5, 0.7, 0.4])                      # the key lobe matches the strand key light,
+        lobe = np.clip(np.sum(D * keyd, axis=-1), 0, 1)[..., None] ** 5   # so shadow and coat agree
+        return base + 2.6 * lobe * np.array([1.0, 0.95, 0.85])
+
+    bg = render_auto(body.union(floor).eval, _CamAdapter(cam), W, H, bg_material,
+                     sky=bg_sky, quality=QUALITY, max_bounce=3, seed=0)
+    pads = np.pad(bg, ((1, 1), (1, 1), (0, 0)), mode="edge")             # 3x3 median: fireflies only
+    bg = np.median(np.stack([pads[dy:dy + H, dx:dx + W] for dy in range(3) for dx in range(3)]), axis=0)
+
+    fur = ML.material("fur_ginger"); fp = ML.fiber_params(fur)
     bnds = ([-1.7, -1.7, -1.7], [1.7, 2.0, 1.7])
-    # A DENSE coat so the body doesn't show through: a long top coat + a short undercoat that fills the base.
-    # (More strands is the honest fix for coverage -- the render cost is the strand count, so this is the lever.)
-    coat = groom(body.eval, 16000, bnds, length=0.55, n_pts=8, curl=0.28, seed=0, length_jitter=0.25)
-    under = groom(body.eval, 8000, bnds, length=0.30, n_pts=6, curl=0.15, seed=1, length_jitter=0.20)
-    strands = coat + under
+    strands = (groom(body.eval, 16000, bnds, length=0.55, n_pts=8, curl=0.28, seed=0, length_jitter=0.25)
+               + groom(body.eval, 8000, bnds, length=0.30, n_pts=6, curl=0.15, seed=1, length_jitter=0.20))
 
     def _comb(strands, flow=(0.10, -1.0, -0.30), lift=0.16, bend=1.45, droop=0.32):
-        """Reshape each strand so it curves from its outward normal (at the root) toward `flow` (at the tip),
-        projected onto the surface -- i.e. comb the fur to lie down and flow. `lift` keeps a little loft so it
-        doesn't clip into the body; `bend` is how far the tip lays over; `droop` adds a gravity SAG that grows
-        toward the tip (t^2), so the coat RELAXES and brushes down instead of standing off the surface."""
         f = _nrm(flow); down = np.array([0.0, -1.0, 0.0]); out = []
         for s in strands:
             n = s.root_normal if s.root_normal is not None else _nrm(s.points[1] - s.points[0])
-            ft = f - np.dot(f, n) * n                                             # flow in the surface tangent plane
+            ft = f - np.dot(f, n) * n
             ft = ft / np.linalg.norm(ft) if np.linalg.norm(ft) > 1e-6 else _nrm(np.cross(n, [0.0, 1.0, 0.0]) + 1e-6)
-            tip = _nrm(ft + lift * n)                                             # tip dir: mostly tangential, a little loft
-            seglen = float(np.linalg.norm(s.points[1] - s.points[0]))            # uniform segment length from the groom
+            tip = _nrm(ft + lift * n)
+            seglen = float(np.linalg.norm(s.points[1] - s.points[0]))
             pts = [s.points[0].copy()]
             for i in range(1, len(s.points)):
                 t = i / (len(s.points) - 1)
-                w = min(bend * t, 1.0)                                            # lay over more toward the tip (capped)
-                d = _nrm(_nrm((1.0 - w) * n + w * tip) + droop * (t * t) * down)  # + gravity sag that grows to the tip
+                w = min(bend * t, 1.0)
+                d = _nrm(_nrm((1.0 - w) * n + w * tip) + droop * (t * t) * down)
                 pts.append(pts[-1] + d * seglen)
             out.append(Strand(np.array(pts), root_normal=n, width=s.width, attrs=s.attrs))
         return out
-    strands = _comb(strands)
 
-    SS = 2                                                                        # supersample factor (2x -> downsample)
-    w, h = WIDTH * SS, HEIGHT * SS
-    cam = Camera(eye=(0.0, 0.5, 3.4), target=(0.0, 0.30, 0.0), fov_deg=46.0, aspect=WIDTH / HEIGHT)
+    strands = _comb(strands)
+    from holographic.mesh_and_geometry.holographic_groom import clump
+    strands = clump(strands, n_clumps=700, tightness=0.45, seed=2)        # TUFTS: fur gathers into locks
+    w, h = W * SS, H * SS
     hc = fp["hair_color"]
-    # KEY (front-upper 3/4) reveals the groomed form; RIM (behind) gives the warm translucent edge glow.
-    key = render_hair(strands, cam, light_dir=(0.5, 0.7, 0.4), width=w, height=h, shader="marschner",
-                      hair_color=hc, roughness=fp["roughness"], tilt_deg=fp["tilt_deg"], reflect=0.06,
-                      background=(0.0, 0.0, 0.0), smooth_levels=2)
-    rim = render_hair(strands, cam, light_dir=(-0.35, 0.45, -0.9), width=w, height=h, shader="marschner",
-                      hair_color=hc, roughness=fp["roughness"], tilt_deg=fp["tilt_deg"], reflect=0.06,
-                      background=(0.0, 0.0, 0.0), smooth_levels=2)
-    lit = key + 0.6 * rim                                                         # combine the two lights
-    ys = np.linspace(0, 1, h)[:, None, None]                                      # soft background gradient
-    bg = (0.78 + 0.16 * ys) * np.array([0.93, 0.94, 0.98])
-    mask = lit.sum(2) > 0.008                                                     # where a strand actually drew
-    hi = np.where(mask[..., None], lit, bg)
-    img = hi.reshape(HEIGHT, SS, WIDTH, SS, 3).mean(axis=(1, 3))                  # box downsample = anti-aliasing
-    plt.imsave(f"{OUT}/render_fur.png", _tonemap(np.clip(img, 0.0, None)))
+    # THE FILM RUNG (hairshade H7): deep-opacity self-shadow + dual scattering + medulla lobes --
+    # the difference between "strands" and "a coat" (Yuksel-Keyser / Zinke / Yan structures).
+    kw = dict(width=w, height=h, shader="marschner", hair_color=hc, roughness=fp["roughness"],
+              tilt_deg=fp["tilt_deg"], reflect=0.06, background=(0.0, 0.0, 0.0), smooth_levels=2,
+              self_shadow=0.16, dual_scatter=0.55, medulla=0.40, shadow_res=56)
+    key = render_hair(strands, cam, light_dir=(0.5, 0.7, 0.4), **kw)      # key reveals the groom
+    rim = render_hair(strands, cam, light_dir=(-0.35, 0.45, -0.9), **kw)  # rim = translucent edge glow
+    lit = key + 0.45 * rim
+    lum = lit.sum(2)
+    t = np.clip((lum - 0.002) / (0.020 - 0.002), 0.0, 1.0)               # smoothstep coverage, not a
+    alpha = (t * t * (3 - 2 * t))[..., None]                             # hard mask: tips BLEND
+    lit = lit + 0.10 * np.asarray(hc)[None, None] * alpha                # ambient lift under the coat
+    pre_d = (lit * alpha).reshape(H, SS, W, SS, 3).mean(axis=(1, 3))     # premultiply THEN downsample:
+    a_d = alpha.reshape(H, SS, W, SS, 1).mean(axis=(1, 3))               # the correct AA composite order
+    out = pre_d + (1.0 - a_d) * bg
+    plt.imsave(f"{OUT}/render_fur.png", _tonemap(np.clip(out, 0.0, None)))
     print("  render_fur.png")
 
 def render_ocean():

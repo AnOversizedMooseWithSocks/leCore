@@ -1405,11 +1405,15 @@ class _UnifiedPart07:
     def render_scene_document(self, scene, camera, width=96, height=72, quality="medium", max_bounce=4,
                               seed=0, sky=None, default_material="matte_gray", return_stats=False, sss_dir=None,
                               sss_depth=0.6, sss_sigma=4.0, lights=None, dome_cache=False, demodulate=False, soft_light_cache=False,
-                              indirect_cache=False, view=None, affine=False):
+                              indirect_cache=False, view=None, affine=False, sss_interior=False,
+                              emissive_mesh_lights=False):
         """Render the canonical SCENE DOCUMENT (holographic_scene_doc.Scene) -- the 'a modeling app builds a
         document, then renders it' path. The document is a table of objects (each a stable handle + transform +
         SDF geometry + library material); this flattens it to ONE scene SDF (nearest-object distance) plus a
-        material_fn that shades each hit with its owning object's material, then renders with render_auto. So the
+        material_fn that shades each hit with its owning object's material, then renders with render_auto.
+        emissive_mesh_lights=True derives a REAL MeshLight from every emissive-material object (NEE-sampled;
+        glowing objects cast light and soft shadows -- exposed emitters only, a sealed emitter is binary-occluded);
+        sss_interior=True adds the interior-emission translucency term (emissive bodies glow through wax/skin). So the
         renderer consumes the authoritative scene instead of a hand-built Python class per scene (backlog H7).
         `sss_dir` (a light direction) turns on the SUBSURFACE glow for translucent materials (wax/jade/skin).
         `dome_cache` (default off) serves any DomeLight via the cheap cached-dome pass (holographic_domecache)
@@ -1427,12 +1431,24 @@ class _UnifiedPart07:
         picture is wrong, but shipped output does not move without an explicit decision. mind.place() writes
         transforms that expect affine=True. See holographic_scene_render.render_scene_document."""
         from holographic.rendering.holographic_scene_render import render_scene_document
+        # COERCE THE CAMERA, like render_mesh already does. `fit_camera` and
+        # every JSON client hand back a dict, and this renderer raised
+        # "'dict' object has no attribute 'ray_dirs'" -- so the output of one
+        # faculty could not feed the input of another without a manual
+        # camera(...) call the caller had to know about.
+        # as_camera is the SHARED coercion render_mesh uses; there is no second
+        # implementation here, only a missing call.
+        from holographic.io_and_interop.holographic_coerce import (
+            as_camera, as_scene)
+        camera = as_camera(camera)
+        scene = as_scene(scene)          # accepts scene_from_image's report
         return render_scene_document(scene, camera, width=width, height=height, quality=quality,
                                      max_bounce=max_bounce, seed=seed, sky=sky,
                                      default_material=default_material, return_stats=return_stats, sss_dir=sss_dir,
                                      sss_depth=sss_depth, sss_sigma=sss_sigma, lights=lights, dome_cache=dome_cache,
                                      demodulate=demodulate, soft_light_cache=soft_light_cache,
-                                     indirect_cache=indirect_cache, view=view, affine=affine)
+                                     indirect_cache=indirect_cache, view=view, affine=affine,
+                                     sss_interior=sss_interior, emissive_mesh_lights=emissive_mesh_lights)
 
     def render_preview(self, scene, camera, width=240, height=180, scale=0.5, max_bounce=1,
                        quality="draft", seed=0, sky=None, lights=None, view="display", **kw):
@@ -1453,6 +1469,10 @@ class _UnifiedPart07:
         shadows, than the final. See holographic_scene_render.render_preview for the full measurements and
         for why bake_sdf is NOT used here (measured 0.5-0.6x on scenes like this)."""
         from holographic.rendering.holographic_scene_render import render_preview
+        from holographic.io_and_interop.holographic_coerce import (
+            as_camera, as_scene)
+        camera = as_camera(camera)          # same coercion as render_mesh
+        scene = as_scene(scene)
         return render_preview(scene, camera, width=width, height=height, scale=scale,
                               max_bounce=max_bounce, quality=quality, seed=seed, sky=sky,
                               lights=lights, view=view, **kw)

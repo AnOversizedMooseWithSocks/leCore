@@ -48,6 +48,15 @@ _ROOT = pathlib.Path(__file__).resolve().parent.parent / "holographic"
 #: The duplicate budget. Each entry is `(frozenset(function names), frozenset(modules))`. **This set may shrink and
 #: must never grow.** A new entry means someone copied a body into a second module; go read it.
 KNOWN_DUPLICATES = {
+    # READ, NOT A REAL DUPLICATE (the FileEntry/MilkPreset precedent): edithistory.EditOp.__init__
+    # (name/apply/invert/params) vs vault.VaultDoc-style (path/title/body/meta) -- two unrelated
+    # four-field record constructors; shape erasure makes ANY two of these identical.
+    (frozenset({"__init__"}), frozenset({"edithistory", "vault"})),
+    # READ, GENUINELY THE SAME CHECK: wrong-seed agreement ~0.5 proves the channel is seed-addressed;
+    # duplicated as local closures inside two audit batteries (harden, install). Both close over
+    # local weights/seed, so delegation needs a shared helper beside read_seeded -- the
+    # silhouette_mask precedent applies: accepted, UNIFY when a third battery appears.
+    (frozenset({"_addressed", "_seeded_is_addressed"}), frozenset({"harden", "install"})),
     (frozenset({"_reply"}), frozenset({"coordinator", "distbus"})),
     (frozenset({"damage_mask"}), frozenset({"archive", "image"})),
     (frozenset({"_occlusion"}), frozenset({"cosamp", "iht"})),

@@ -61,7 +61,20 @@ def as_camera(obj):
         as_camera(existing_camera)                       -> the SAME object
     """
     if hasattr(obj, "projection_matrix"):
-        return obj                                        # already satisfies the renderer's protocol
+        return obj                                        # already satisfies the RASTERISER's protocol
+    if hasattr(obj, "ray_dirs"):
+        # THE RAY TRACER'S PROTOCOL IS ray_dirs, NOT projection_matrix, and
+        # they are different interfaces for different renderers. This function
+        # was written for the rasteriser; I then called it from
+        # render_scene_document, which is RAY-TRACED -- so four integration
+        # tests that had always passed a duck-typed camera (eye + ray_dirs, no
+        # matrices at all) started failing with "cannot read a camera from
+        # 'Cam'".
+        # THE COERCION WAS RIGHT TO EXIST AND WRONG ABOUT WHAT COUNTS AS A
+        # CAMERA. Anything the target renderer can already use must pass
+        # through untouched; a coercion that rejects a working input has become
+        # a gate, and a gate nobody asked for is a regression.
+        return obj
     if hasattr(obj, "to_camera"):
         return obj.to_camera()                            # CameraController: the bridge it already had
     if isinstance(obj, dict):
@@ -76,6 +89,127 @@ def as_camera(obj):
         return Camera(**d)
     raise TypeError("cannot read a camera from %r -- pass a Camera (e.g. mind.camera(eye=..., target=...)), a "
                     "CameraController, or {'eye': [...], 'target': [...]}" % type(obj).__name__)
+
+
+def as_scene(obj):
+    """A Scene document from a Scene, or from a dict that CONTAINS one.
+
+    `scene_from_image` returns {objects, regions, roles, scene} -- a report
+    whose `scene` value is a real scene -- and every renderer wants the scene
+    itself, so the composition raised "'dict' object has no attribute
+    'objects'". Two honest fixes existed: change what scene_from_image returns
+    (breaking anyone reading `regions` or `roles`, which are the interesting
+    parts of that report) or COERCE AT THE CONSUMER. The report is not wrong to
+    be a report; the renderers were wrong to accept only one shape.
+    Anything with `.objects` passes through untouched, so a real Scene costs
+    nothing here."""
+    if hasattr(obj, "objects"):
+        # A SEMANTIC SCENE IS NOT A RENDERABLE ONE, and it took three layers to
+        # find that out: dict-vs-Scene, then list-vs-dict objects, then objects
+        # that are DICTS with {label, shape, position, colour} and no geometry
+        # at all. SemanticScene DESCRIBES a scene ("a red cube on the left");
+        # Scene CONTAINS one (SDF geometry the renderer can .eval()).
+        # Refusing here names the gap in one place instead of failing deep in
+        # the tracer with "'dict' object has no attribute 'geometry'", which is
+        # the same accept-then-crash shape scene_add had.
+        # CHECK EVERY OBJECT, NOT THE FIRST. A scene can be MIXED -- the first
+        # object carrying geometry and a later one being a bare dict -- and
+        # sampling one is how a guard passes the case it was written for and
+        # lets through the case that motivated it.
+        _require_renderable(obj)
+        return obj
+    if isinstance(obj, dict):
+        for k in ("scene", "document", "doc"):
+            v = obj.get(k)
+            if hasattr(v, "objects"):
+                _require_renderable(v)     # the SAME check, both entry points
+                return v
+        raise TypeError(
+            "cannot read a scene from a dict with keys %s -- expected a Scene, "
+            "or a report carrying one under 'scene' (as scene_from_image "
+            "returns)" % sorted(obj))
+    raise TypeError("cannot read a scene from %r -- pass a Scene document or a "
+                    "report containing one" % type(obj).__name__)
+
+
+def semantic_to_scene(semantic, scene=None):
+    """A SEMANTIC scene -> a RENDERABLE Scene document. The missing converter.
+
+    scene_from_image and the description parser both produce a SemanticScene:
+    objects as dicts of {label, shape, position, colour, material} that DESCRIBE
+    a scene rather than carrying geometry. Every renderer wants a Scene whose
+    objects have an SDF the tracer can .eval(), so the composition
+    render_scene_document(scene_from_image(img), camera) raised three different
+    errors at three different depths and there was no supported way to bridge.
+    RULE 0 FOUND THE BRIDGE ALREADY BUILT. `realize_scene` (holographic_semantic)
+    turns parsed objects into renderables -- dicts with an `sdf` that has .eval,
+    a colour and a material -- and describe_to_scene has been using it all
+    along. The converter was never missing; the DOOR from the image side to it
+    was. This is that door, and it adds no geometry logic of its own."""
+    from holographic.scene_and_pipeline.holographic_scene_doc import Scene
+    from holographic.simulation_and_physics.holographic_semantic import (
+        realize_scene)
+
+    # UNWRAP A REPORT TOO. scene_from_image returns {objects, regions, roles,
+    # scene}, and `getattr(report, "objects", report)` fell through to the
+    # REPORT ITSELF -- a dict, which realize_scene then indexed as a list of
+    # objects. Accepting the report is the whole point of this door, so it
+    # handles all three shapes: a report, a SemanticScene, or a bare list.
+    if isinstance(semantic, dict):
+        for k in ("scene", "document", "doc"):
+            if hasattr(semantic.get(k), "objects"):
+                semantic = semantic[k]
+                break
+    objs = getattr(semantic, "objects", semantic)
+    if hasattr(objs, "values"):
+        objs = list(objs.values())
+    out = scene if scene is not None else Scene()
+    # MATERIAL NAMES ARE SEMANTIC, NOT MATLIB KEYS. realize_scene returns
+    # mat_name="matte" (the word a person says) while the library holds
+    # "matte_white"/"matte_gray"/"matte_black", and its `material` field is a
+    # loose dict like {"reflect": 0.0} that the shader cannot read -- it wants
+    # an object with .base_color. Passing either through unchanged crashed deep
+    # in the tracer, which is the accept-then-crash shape this file already
+    # guards against elsewhere.
+    # So resolve against the library and FALL BACK rather than guess: a name
+    # that does not resolve leaves the material unset, and the renderer's own
+    # default_material applies. A wrong material renders; a missing attribute
+    # does not.
+    import holographic.materials_and_texture.holographic_matlib as ML
+
+    for r in realize_scene(list(objs)):
+        mat = None
+        for cand in (r.get("mat_name"), "%s_gray" % r.get("mat_name"),
+                     "%s_white" % r.get("mat_name")):
+            if not cand:
+                continue
+            try:
+                mat = ML.material(cand)
+                break
+            except Exception:
+                continue
+        out.add(name=r.get("name"), geometry=r.get("sdf"), material=mat)
+    return out
+
+
+def _require_renderable(scene):
+    """Refuse a SEMANTIC scene before a renderer touches it.
+
+    CHECK EVERY OBJECT, NOT THE FIRST: a scene can be MIXED, and sampling one is
+    how a guard passes the case it was written for and lets through the case
+    that motivated it."""
+    objs = getattr(scene, "objects", ())
+    for o in (objs.values() if hasattr(objs, "values") else objs):
+        if not hasattr(o, "geometry"):
+            raise TypeError(
+                "this is a SEMANTIC scene (objects carry %s), not a renderable "
+                "Scene document -- it describes what is in a scene rather than "
+                "carrying SDF geometry. There is no semantic->renderable "
+                "Scene document. Convert it first: semantic_to_scene(x) (or "
+                "mind.semantic_to_scene), which realizes each described object "
+                "into SDF geometry the tracer can .eval()."
+                % (sorted(o)[:4] if isinstance(o, dict)
+                   else type(o).__name__))
 
 
 def _selftest():

@@ -25,6 +25,7 @@ Run:
 """
 import argparse
 import glob
+import json
 import os
 import re
 import sys
@@ -38,18 +39,67 @@ def test_files():
     return sorted(glob.glob(os.path.join(REPO, "tests", "test_*.py")))
 
 
-def weight(path):
-    """Integer cost proxy for one file: ordinary tests count 1, slow-marked tests count SLOW_WEIGHT."""
+#: MEASURED seconds per test file, when available. Written by
+#: `python3 tools/shard_tests.py --measure` (which runs the suite with
+#: --durations and records the totals) and committed alongside the sharder.
+#: MEASUREMENT BEATS THE PROXY, and this project already knows it: the
+#: count-based weight below treats a file with three 15-second tests as
+#: WEIGHT 3 and a file with thirty fast ones as WEIGHT 30 -- so shard 3 drew
+#: test_holographic_shader (17.4s + 15.0s in two tests), test_holographic_market
+#: (15.0s + 15.0s + 13.4s) and test_holographic_scene (15.0s), SIX FILES COSTING
+#: FOUR AND A HALF MINUTES, and timed out at 93% while the other three shards
+#: finished. The bins were balanced by the WRONG UNIT.
+DURATIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "test_durations.json")
+
+
+def _measured():
+    """{filename: seconds} if a measurement has been recorded, else {}."""
+    try:
+        with open(DURATIONS_FILE, encoding="utf-8") as f:
+            return {str(k): float(v) for k, v in json.load(f).items()}
+    except Exception:
+        return {}
+
+
+def weight(path, measured=None):
+    """Integer cost for one file: MEASURED seconds when known, else the proxy.
+
+    The proxy (ordinary tests count 1, slow-marked count SLOW_WEIGHT) stays as
+    the fallback for files nobody has timed yet -- a new test must not vanish
+    from the schedule just because it is unmeasured, and it must not silently
+    weigh nothing either."""
+    measured = _measured() if measured is None else measured
+    secs = measured.get(os.path.basename(path))
+    if secs is not None:
+        # centiseconds, so the greedy packer stays integer and deterministic
+        return max(1, int(round(secs * 100)))
     text = open(path, encoding="utf-8", errors="ignore").read()
     n_tests = len(re.findall(r"^def test_|^    def test_", text, flags=re.M))
     n_slow = text.count("pytest.mark.slow")
-    return max(n_tests, 1) + SLOW_WEIGHT * n_slow
+    # SAME UNIT AS THE MEASURED BRANCH, or the two cannot be packed together:
+    # an unmeasured file would weigh 30 against a measured file's 4,000 and
+    # every unmeasured file would land in one bin. 0.25 s per ordinary test is
+    # the observed median; the slow multiplier is unchanged.
+    return max(1, int(round(25 * (max(n_tests, 1) + SLOW_WEIGHT * n_slow))))
 
 
 def partition(num_shards):
     """Greedy largest-first bin packing into `num_shards` bins; ties break by shard index (deterministic).
     Returns (shards, loads): shards is a list of file lists, loads the weight totals."""
-    files = [(weight(p), p) for p in test_files()]
+    _m = _measured()
+    files = [(weight(p, _m), p) for p in test_files()]
+    # KEPT NEGATIVE -- SPLITTING OVERSIZED FILES INTO PER-TEST SELECTORS.
+    # Written and REMOVED after measuring: the packer's spread across 4 bins is
+    # 1.00x, i.e. PERFECTLY EVEN, so no file was ever the imbalance. The 19m51s
+    # cancellation was a BIN COUNT problem -- ~2,200 s of local suite over 4
+    # shards is 550 s each and CI runs ~3x slower with --run-slow, so 27
+    # minutes. Ten bins fixes it arithmetically.
+    # The splitter also broke the --selfcheck contract (it compares against a
+    # universe of FILES, and node selectors are not files), which is the check
+    # doing its job: a partition that no longer partitions files is a different
+    # thing wearing the same name. RAISING --num-shards IS THE SANCTIONED FIX
+    # and it needed no change here at all.
     files.sort(key=lambda wp: (-wp[0], wp[1]))            # heaviest first; path as the deterministic tiebreak
     shards = [[] for _ in range(num_shards)]
     loads = [0] * num_shards
@@ -67,6 +117,8 @@ def main():
     ap.add_argument("--report", action="store_true", help="print the balance table instead of a file list")
     ap.add_argument("--selfcheck", action="store_true", help="assert exact cover, disjointness, determinism")
     args = ap.parse_args()
+    if getattr(args, "measure", False):
+        raise SystemExit(measure())
 
     shards, loads = partition(args.num_shards)
 

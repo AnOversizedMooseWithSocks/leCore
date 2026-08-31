@@ -897,14 +897,30 @@ def cvt_remesh(mesh, n_sites=500, iterations=6, shrink=True):
         d = np.minimum(d, np.linalg.norm(V - V[i], axis=1))
     S = V[np.array(seeds)].copy()
     # -- 2 Lloyd with surface snap (k-means = codebook; snap = the projection) -------------------------
+    # LEVER 5 (tile the domain under an orchestrator). The direct form materialises an
+    # (N, K, 3) array: MEASURED 7.57 GiB at N=112,838 verts / K=3,000 sites, which simply
+    # died. The assignment step is embarrassingly partitionable over the vertex axis -- each
+    # vertex's nearest site depends on no other vertex -- so chunking is BIT-IDENTICAL, not
+    # an approximation. Chunk size targets ~64 MB of working set regardless of K.
+    def _assign(P, Q):
+        """argmin over Q for each row of P, in memory-bounded tiles."""
+        n = len(P)
+        step = max(1, int(8_000_000 // max(len(Q), 1)))
+        out = np.empty(n, dtype=np.int64)
+        for i in range(0, n, step):
+            blk = P[i:i + step]
+            out[i:i + step] = np.argmin(((blk[:, None, :] - Q[None, :, :]) ** 2).sum(2),
+                                        axis=1)
+        return out
+
     for _ in range(int(iterations)):
-        lab = np.argmin(((V[:, None, :] - S[None, :, :]) ** 2).sum(2), axis=1)
+        lab = _assign(V, S)
         for k in range(K):
             sel = V[lab == k]
             if len(sel):
                 S[k] = sel.mean(0)
-        S = V[np.argmin(((S[:, None, :] - V[None, :, :]) ** 2).sum(2), axis=1)]
-    lab = np.argmin(((V[:, None, :] - S[None, :, :]) ** 2).sum(2), axis=1)
+        S = V[_assign(S, V)]
+    lab = _assign(V, S)
     # -- 3 bundled-quadric representative per cluster (cluster_decimate's move = CWF's QEM term) -------
     a3, b3, c3 = V[F[:, 0]], V[F[:, 1]], V[F[:, 2]]
     fn = np.cross(b3 - a3, c3 - a3)

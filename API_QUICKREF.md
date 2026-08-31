@@ -141,25 +141,11 @@
 ## Transforms
 
 ### `holographic_transform`
-*holographic_transform.py -- TRANSFORM UTILITIES for a modeling app (modeling-app backlog, item G).*
+*TRANSFORM -- rebuild a model where the MEASUREMENT says it needs rebuilding.*
 
-- `translation(t)` -- A 4x4 translation matrix from a 3-vector.
-- `scaling(s)` -- A 4x4 scale matrix.
-- `rotation_axis_angle(axis, angle)` -- A 4x4 rotation of `angle` radians about `axis` (Rodrigues' formula).
-- `compose(*mats)` -- Matrix product M0 @ M1 @ ...
-- `decompose(M)` -- Split a 4x4 affine transform into (translate (3,), rotation quaternion (4,), scale (3,)).
-- `compose_trs(translate, quat, scale)` -- Build a 4x4 from translate (3,), a rotation quaternion (4,), and scale (3,) -- the inverse of decompose.
-- `quat_normalize(q)` -- 
-- `quat_mul(a, b)` -- The Hamilton product a*b: the rotation "apply b, then a".
-- `quat_from_axis_angle(axis, angle)` -- A quaternion for a rotation of `angle` radians about `axis`.
-- `quat_to_axis_angle(q)` -- Recover (axis, angle) from a quaternion.
-- `quat_to_matrix(q)` -- The 3x3 rotation matrix for a quaternion.
-- `quat_from_matrix(R)` -- The quaternion for a 3x3 rotation matrix (Shepperd's method: branch on the largest diagonal term for numerical stability -- a naive formula loses precision when the trace is near zero).
-- `quat_from_euler(rx, ry, rz)` -- A quaternion from euler angles applied X then Y then Z (R = Rz @ Ry @ Rx).
-- `quat_to_euler(q)` -- Recover euler angles (rx, ry, rz) from a quaternion, inverting R = Rz @ Ry @ Rx.
-- `quat_slerp(a, b, t)` -- Spherical linear interpolation between two rotations -- constant angular speed, the smooth in-between an animation wants.
-- `quat_rotate(q, v)` -- Rotate a 3-vector by a quaternion.
-- `look_at(eye, target, up=(0.0, 1.0, 0.0))` -- An OpenGL view matrix for a camera at `eye` looking at `target` (the engine's convention: the camera looks down -z, y is up).
+- `analyse(weights, cfg)` -- Recover the block structure and per-layer memory from the weights.
+- `plan(weights, cfg, target_tokens=4096, kv_rank=64, grow_gain=0.0)` -- Decide what to do to each layer, from the analysis rather than by rule.
+- `apply_plan(weights, cfg, the_plan, progress=None)` -- Carry out the growth actions.
 
 ## Camera
 
@@ -186,7 +172,7 @@
     - `projection_matrix(self, aspect=None)` -- Perspective projection (OpenGL-style, maps the frustum to the [-1,1] cube).
     - `ray_dirs(self, width, height, jitter=None)` -- Per-pixel world-space ray origins (the eye) and unit directions, shape (H, W, 3), for ray marching.
 - **class `Light`** -- A light.
-- `rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=(0.8, 0.8, 0.8), background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True, texture=None, uvs=None, smooth=False, two_sided=False, vertex_colors=None)` -- Rasterise a triangle mesh to an (H, W, 3) RGB image in [0,1] with a z-buffer and per-face Lambert shading.
+- `rasterize_mesh(mesh, camera, width=512, height=512, lights=None, base_color=(0.8, 0.8, 0.8), background=(0.05, 0.06, 0.08), ambient=0.15, vectorized=True, texture=None, uvs=None, smooth=False, two_sided=False, vertex_colors=None, pbr=None)` -- Rasterise a triangle mesh to an (H, W, 3) RGB image in [0,1] with a z-buffer and per-face Lambert shading.
 - `volume_render(field, camera, bounds, width=256, height=256, steps=96, mode='smoke', sigma=12.0, emission_color=None, albedo=(0.9, 0.9, 0.95), lights=None, background=(0.0, 0.0, 0.0), early_term=True, empty_skip=True, occ_res=24, occ_thresh=0.001, term_eps=0.002, self_shadow=False, shadow_steps=16, shadow_sigma=None, ambient=(0.42, 0.52, 0.66), phase_g=0.0, powder=False, multi_scatter=1, only=None)` -- Render a density FIELD (callable points(N,3)->density>=0) volumetrically by marching camera rays through `bounds`=(min_corner, max_corner) and accumulating the volume-rendering integral.
 - `png_bytes(rgb01, level=6, filters=True)` -- Encode an (H,W,3) image in [0,1] to PNG *bytes* -- a minimal, pure-stdlib encoder (zlib + struct), so the render module carries no image-library dependency.
 - `png_decode(data)` -- Decode PNG *bytes* to (array, info) -- the read side of `png_bytes`, pure stdlib (zlib + struct).
@@ -225,17 +211,11 @@
     - `run_on_vm(self, machine=None, scene=None, seed=0, prev_frame=None, renderer=None)` -- Phase 6: RUN the pipeline ON the VM instead of a Python for-loop.
 
 ### `holographic_session`
-*holographic_session.py -- ONE render session that ties the disconnected rendering threads together.*
+*SESSION -- never compute the same conversation prefix twice.*
 
-- `sdf_surface_points(sdf, bounds, n=2000, seed=0, eps=0.02, oversample=8)` -- Sample points that lie ON an SDF's surface -- the front half of the SDF->splat bridge that was missing.
-- **class `RenderSession`** -- One scene, every renderer.
-    - `preview(self, width=None, height=None, reuse_margin=None, **kw)` -- FAST path: the material preview via render_surface (Lambert + spec + env reflection + one transparency layer), resolving every SurfaceMaterial channel per hit.
-    - `cache_stats(self)` -- {hits, rebuilds, hit_rate, margin} for the preview's fat-margin cache, or None if it is not in use.
-    - `invalidate_preview(self)` -- Drop the preview cache -- call after any scene edit.
-    - `render_final(self, spp=64, on_progress=None, progress_every=8, width=None, height=None, max_bounce=4, sky=None, seed=0, should_stop=None)` -- SLOW path: the photoreal final via path_trace, using the SAME SurfaceMaterials as the preview (through the material adapter).
-    - `to_splats(self, n=2000, radius=0.12, seed=0)` -- PROXY path: sample the SDF surface and fit splats (field_to_splats) so the scene can be drawn by a lightweight browser billboard shader -- no three.js scene graph, no mesh pipeline.
-    - `set_material(self, obj_id, material)` -- Replace one object's material.
-    - `edit_channel(self, obj_id, channel, value)` -- Edit ONE channel of one object's material (colour/roughness/reflect/emission/opacity) -- the value can be a constant, a Param, a pattern field, or a map.
+- **class `PrefixCache`** -- A radix tree over token sequences, holding inference states.
+    - `forward(self, token_ids)` -- Logits for this sequence, computing only the uncached tail.
+    - `report(self)` -- 
 
 ### `holographic_cancel`
 *holographic_cancel.py -- COOPERATIVE CANCELLATION for long operations (modeling-app backlog, item F).*
