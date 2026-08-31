@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0a0c0b">
+    <meta name="description" content="liblecore is a portable C11 implementation of leCore's frozen HRR vector algebra for C, C++, Rust, Python, and WebAssembly.">
+    <link rel="canonical" href="https://anoversizedmoosewithsocks.github.io/leCore/">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://anoversizedmoosewithsocks.github.io/leCore/">
+    <meta property="og:title" content="liblecore — one vector algebra, every runtime">
+    <meta property="og:description" content="Portable C11 kernels for leCore's frozen HRR algebra. Explicit semantics for C, C++, Rust, Python, and WebAssembly.">
+    <meta property="og:image" content="https://anoversizedmoosewithsocks.github.io/leCore/og.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="liblecore — One vector algebra. Every runtime.">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="liblecore — one vector algebra, every runtime">
+    <meta name="twitter:description" content="Portable C11 kernels for leCore's frozen HRR algebra.">
+    <meta name="twitter:image" content="https://anoversizedmoosewithsocks.github.io/leCore/og.png">
+    <title>liblecore — one vector algebra, every runtime</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <script src="script.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header>
+      <a class="wordmark" href="#top" aria-label="liblecore home"><span aria-hidden="true">●</span> liblecore</a>
+      <nav aria-label="Main navigation">
+        <a href="https://github.com/AnOversizedMooseWithSocks/leCore/tree/main/native/liblecore">Docs</a>
+        <a href="https://github.com/AnOversizedMooseWithSocks/leCore">GitHub ↗</a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-copy">
+          <p class="eyebrow">ABI-0 · C11 · MIT</p>
+          <h1>One vector algebra.<br><em>Every runtime.</em></h1>
+          <p class="lede">Bind, bundle, and retrieve with the same frozen HRR semantics in C, C++, Rust, Python, and WebAssembly.</p>
+          <a class="primary-link" href="https://github.com/AnOversizedMooseWithSocks/leCore/tree/main/native/liblecore">Explore the source <span>↗</span></a>
+          <ul class="facts" aria-label="Core facts">
+            <li><strong>f32 + f64</strong><span>numeric profiles</span></li>
+            <li><strong>0</strong><span>hot-path allocations</span></li>
+            <li><strong>5</strong><span>runtime paths</span></li>
+          </ul>
+        </div>
+
+        <div class="demo" aria-labelledby="demo-title">
+          <div class="demo-head">
+            <div>
+              <p>LIVE · 32D</p>
+              <h2 id="demo-title">Bind. Unbind. Recover.</h2>
+            </div>
+            <button id="reseed" type="button" aria-label="Generate a new deterministic vector example">↻</button>
+          </div>
+          <canvas id="vector-demo" width="680" height="440" aria-label="A live diagram showing a role vector and value vector being bound and recovered"></canvas>
+          <div class="readout" aria-live="polite">
+            <span>cos(value, recovered)</span>
+            <strong id="similarity">0.000000</strong>
+            <span>seed <b id="seed">0007</b></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="contract" aria-labelledby="contract-title">
+        <p class="eyebrow">THE CONTRACT</p>
+        <h2 id="contract-title">Small core. Clear boundary.</h2>
+        <div class="contract-grid">
+          <p><strong>Deterministic.</strong> Declared math, scan order, ties, and errors.</p>
+          <p><strong>Honest.</strong> Acceleration ships only when measured decisions agree.</p>
+          <p><strong>Host-owned.</strong> Your app keeps meaning, storage, state, and final authority.</p>
+        </div>
+        <p class="operations"><code>bind</code><code>unbind</code><code>bundle</code><code>cleanup</code><code>cosine_many</code></p>
+      </section>
+
+      <section class="evidence" aria-label="Measured evidence and adoption">
+        <article>
+          <p class="eyebrow">MEASURED</p>
+          <h2>13.43 μs</h2>
+          <p>f32 bind at 1,024 dimensions on the recorded Apple arm64 run. Direct: <strong>62.52 μs</strong>. Maximum delta: <strong>1.043e−7</strong>.</p>
+          <a href="https://github.com/AnOversizedMooseWithSocks/leCore/blob/main/native/liblecore/BENCHMARKS.md">Method and limits →</a>
+        </article>
+        <article>
+          <p class="eyebrow">FIRST PROVING GROUND</p>
+          <h2>Signal</h2>
+          <p>Shadow native and WASM replay against the existing 1,024D memory. Adopt only when every legal action agrees.</p>
+          <span class="status">Pilot planned</span>
+        </article>
+      </section>
+
+      <section class="closing">
+        <p class="eyebrow">ABI-0 PREVIEW</p>
+        <h2>Use one kernel.<br>Keep your policy.</h2>
+        <a class="primary-link" href="https://github.com/AnOversizedMooseWithSocks/leCore/tree/main/native/liblecore">Read the native guide <span>↗</span></a>
+      </section>
+    </main>
+
+    <footer>
+      <a class="wordmark" href="#top"><span aria-hidden="true">●</span> liblecore</a>
+      <p>Portable C11 HRR kernels · MIT</p>
+    </footer>
+  </body>
+</html>

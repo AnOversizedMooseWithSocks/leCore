@@ -1,0 +1,59 @@
+name: liblecore Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/liblecore/**"
+      - "tests/test_liblecore_site.py"
+      - ".github/workflows/liblecore-pages.yml"
+  pull_request:
+    paths:
+      - "site/liblecore/**"
+      - "tests/test_liblecore_site.py"
+      - ".github/workflows/liblecore-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: liblecore-pages
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate landing page
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Check metadata, assets, and measured claims
+        run: python3 -m unittest discover -s tests -p test_liblecore_site.py
+
+  deploy:
+    name: Publish landing page
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+
+      - name: Package static site
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/liblecore
+
+      - name: Publish
+        id: deployment
+        uses: actions/deploy-pages@v5
