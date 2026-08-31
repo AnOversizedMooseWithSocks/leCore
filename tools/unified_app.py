@@ -707,7 +707,9 @@ def relations():
     op = p.get("op")
     try:
         if op == "explain":
-            rows = mind.explain(p["a"].strip(), p["b"].strip())
+            # sweep 63: explain_similarity is the renamed per-role comparison
+            # (mind.explain is now only the docs-derived topic explainer).
+            rows = mind.explain_similarity(p["a"].strip(), p["b"].strip())
             return jsonify({"explain": [
                 {"role": r, "a": va, "b": vb, "shared": bool(sh), "conf": round(c, 2)}
                 for r, va, vb, sh, c in rows]})

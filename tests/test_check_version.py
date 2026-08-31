@@ -4,6 +4,18 @@ import sys
 import subprocess
 import importlib.util
 
+import pytest
+
+
+_VERSION_FILE = os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "VERSION")
+# Delivery archives deliberately omit VERSION (PACKAGING.md) -- the version
+# tooling under test is a clone-side concern, so this whole file skips there
+# instead of erroring five ways on a state that is by-design (sweep 63).
+pytestmark = pytest.mark.skipif(
+    not os.path.exists(_VERSION_FILE),
+    reason="VERSION deliberately excluded from delivery archives (PACKAGING.md)")
+
 
 def _mod():
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "check_version.py")

@@ -1474,7 +1474,7 @@ def source_dtypes(model_dir_or_file):
 
 
 def export_portable(weights, out_path, n_refine=None, dtype=None, like=None,
-                    keep_f32=(), dtypes=None):
+                    keep_f32=()):
     """Decode a compressed/lazy store back to a PLAIN safetensors file at a chosen
     fidelity -- the bridge to every standard harness.
 
@@ -1511,18 +1511,7 @@ def export_portable(weights, out_path, n_refine=None, dtype=None, like=None,
     _MAP = {"float16": "F16", "float32": "F32", "float64": "F64",
             "bfloat16": "BF16", "int8": "I8", "uint8": "U8",
             "int16": "I16", "int32": "I32", "int64": "I64"}
-    if dtypes is not None:
-        # EXPLICIT PER-NAME MAP (cp96): like= matches by NAME and layer
-        # renumbering (prepend) defeats it -- every shifted tensor missed the
-        # map and shipped at the decoded array's width. Measured on the user's
-        # box: 1.7 GB assimilated -> 3.4 GB installed, the same doubling this
-        # docstring already records for the F32-default era. The caller who
-        # renamed the tensors is the only one who can translate the map, so
-        # it hands the finished map here and it WINS.
-        _fb = {k: _MAP.get(str(np.asarray(v).dtype), "F32")
-               for k, v in out.items()}
-        dts = {k: dtypes.get(k, _fb[k]) for k in out}
-    elif dtype is not None:
+    if dtype is not None:
         dts = {k: dtype for k in out}
     elif like:
         # MATCH THE SOURCE FILE, not the decoded array. This is the only way to
@@ -1530,21 +1519,18 @@ def export_portable(weights, out_path, n_refine=None, dtype=None, like=None,
         src = source_dtypes(like)
         dts = {k: src.get(k, _MAP.get(str(np.asarray(v).dtype), "F32"))
                for k, v in out.items()}
-    else:
-        dts = {k: _MAP.get(str(np.asarray(v).dtype), "F32")
-               for k, v in out.items()}
     # SOME TENSORS CARRY PACKED BYTES, NOT NUMBERS, and must not be narrowed.
     # bf16 has EIGHT mantissa bits; the boot record's manifest needs more, so a
     # bf16 round trip returns zeros and boot() raises "no leCore substrate
     # header here". Field-caught on a real bf16 Qwen3.5-0.8B: the install said
     # boot_record ok (true in memory) and the audit on the SAVED model said NO
     # BOOT RECORD (true on disk).
-    # (cp96 postscript: an earlier splice left this loop BETWEEN the if-chain
-    # and its else, creating a for-else that recomputed dts unconditionally --
-    # caught by the shipping gate's size check, which is why that gate exists.)
     for _k in (keep_f32 or ()):
         if _k in dts and dts[_k] in ("BF16", "F8_E4M3", "F8_E5M2"):
             dts[_k] = "F32"
+    else:
+        dts = {k: _MAP.get(str(np.asarray(v).dtype), "F32")
+               for k, v in out.items()}
     save_safetensors(out_path, out, dtypes=dts)
     return {"path": out_path, "tensors": len(out),
             "bytes": os.path.getsize(out_path)}
