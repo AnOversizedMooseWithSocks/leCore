@@ -14,7 +14,7 @@ existing `/tools` + `/invoke` service (token gate, private-method refusals, and 
 {"mcpServers": {"lecore": {"command": "python3", "args": ["holographic_mcp.py"]}}}
 ```
 
-Design honesty: 1,944 faculties would make an unusable `tools/list`, so the adapter
+Design honesty: 2,286 faculties would make an unusable `tools/list`, so the adapter
 exposes a curated trio — `lecore_find` (the engine's own Rule-0 search),
 `lecore_describe` (one faculty's full contract), `lecore_invoke` (run anything) — and
 every faculty stays reachable through the third. Tool-level failures ride in `content`
@@ -35,6 +35,110 @@ query with calibrated abstention (promised false-alarm rate realized within bino
 — measured 0.013 @ α=0.01 on shuffled-real noise, power 1.000). A zoo answering machine
 that can *decline to hallucinate* at a promised rate is a differentiator no other zoo
 citizen offers.
+
+## 2b. The three gateway doors (openzoo-ergonomics sweep — meeting the proxy where it is)
+
+The zoo proxy's workflow taught three lessons, and each got a door shaped like the
+request the proxy already makes:
+
+**`corpus_delta`** — chunk-level delta bind, the rsync move. `corpus_bind` content-
+addresses at the *corpus* level, so an agent re-binding a repo after one edited file
+re-shipped megabytes. Now: probe with `chunk_hashes=[sha256,...]` → `{missing, known}`;
+fill with `chunks={hash: text}` shipping only those. A complete fill assembles under
+**the same handle `corpus_bind` gives the identical corpus** (pinned), so delta and
+whole binds are indistinguishable downstream — reflex cache, `corpus_ask`, the dispatch
+gate all ride along. Mis-keyed chunks refused per-chunk; the chunk store persists and
+survives restart (pinned). The client owns the chunking: hashes cover exactly what ships.
+
+**`corpus_ask(..., gate="dispatch")`** — the payment gate the `x-hrr-gate` header was
+asking for. Default-off (the gateless path is the classic BM25 row list, byte-identical
+— never-flip). Gated, the server runs the full adaptive cascade (exact → dense-margin →
+BM25-refine → honest abstain) and returns `{answerable, stage, margin, advice, chunks}`.
+`answerable: false` is a **certified** abstain: refuse before the 402, or downgrade to
+the cheapest model and say so in the receipt. (Why not `retrieval_verdict`: measured,
+it answers `mode='answer'` at top_score 0.0 on an off-topic ask — false-action for a
+payment gate. The mind-side faculty is `corpus_gate`.) Kept negative: abstain says the
+*corpus* cannot answer; the model still might from its own knowledge — gate the
+corpus-grounded price tier, never the model.
+
+**`transcript_prefix_route`** (via `lecore_invoke`) — the prefix decision without a
+Python seam in the request path. The proxy owns its request log; POST the prompt list
+(send order, stable serialization) and read back `{prefix_reuse, per_turn, route:
+{choice, effective_cost_per_1k, saving_estimate}}`. The accounting is **bit-identical
+to the live MeteredLLM seam** (pinned), so a replayed log measures what the seam would
+have. `per_turn` shows where reuse collapsed — a mid-session edit is one small entry.
+Kept negatives travel: `hit_rate` reads 0.0 (a transcript carries no replay table);
+`saving_estimate` is an upper bound (providers discount cached prefixes, not exempt).
+
+## 2c. The studio doors (openzoo full-capability sweep — Blender-MCP ergonomics)
+
+Six curated tools put the modeling / image / math / chart stack at the ergonomic
+level of the best single-purpose MCP servers, while the deep stack (~2,000
+faculties) stays one `lecore_find` + `lecore_invoke` away:
+
+**`scene_create`** — plain words → a live scene of NAMED objects → a render
+returned as a real MCP image block ("a red metal sphere and a small blue glass
+box"). **`scene_adjust`** — talk to it: "make the sphere bigger", "change the
+box to glass"; re-renders. The conversational loop is the point — the model
+iterates toward what the user meant without touching a vertex. **`scene_export`**
+— realize to meshes, ASCII STL text out (the open exchange format; measured on
+the demo scene: 2 meshes, 13,696 verts). **`image_tool`** — generate
+(pattern fields: fbm/checker/stripes/dots/gradient, sampled z=0 slices of the
+engine's 3-D field functions) and edit (sharpen / recolor / blend; base64 PNG
+in, image blocks out; sharpen runs per-channel — the underlying loop is
+single-channel, measured, and a silent luma collapse would discard color).
+**`math_eval`** — claims COMPUTED, not vibed: every `expr == value` is parsed
+and checked, wrong ones come back named. **`chart_make`** — numbers → a
+deterministic SVG chart (line | bar | scatter, colorblind-safe palette, bars
+anchored at zero); non-finite values are refused loudly through the wire.
+
+Under all of it: **any ndarray image in any tool result** — including plain
+`lecore_invoke` calls into the deep stack — now ships as a proper MCP image
+block (pure-zlib PNG, no Pillow anywhere), with `payload_bytes` covering the
+media so the wire-dominates billing census stays honest. Scene and image
+handles live for the server process (the corpus_bind contract; the zoo proxy
+owns durability).
+
+## 2d. The analyst doors (math, fact-checking, decomposition, markets)
+
+Four curated tools (sweeps 83–85) put the analysis stack in a JSON host's
+hands: **`math_eval`** (claims COMPUTED, wrong ones named); **`fact_check`**
+(arithmetic plus corpus-gated support — "supported" means the dispatch gate
+CERTIFIED evidence against sources bound with `corpus_bind`; unsupported
+claims come back named; without a corpus the result says math-only);
+**`series_analyze`** (demux with PARSEABLE separated components, regime
+segments, calibrated envelope forecast, a `formula` task recovering the
+generating law, and a `drift` task — the hrnn market recipe's split-half
+fingerprint comparison, online change detection beside regimes'
+retrospective segmentation: "state demand moved: max rank 1 → 3");
+**`dataset_decompose`** (1-D → MDL-gated formula WITH residual and bit
+cost; 2-D → scaffold discovery, per-channel decomposition, a
+structured/noise verdict — the inverse problem as a tool call).
+`lecore_invoke` accepts `kwargs=` alongside `args=`. Every door adds
+transport, never algorithms; the deep stack (ladder forecasts, hrnn
+recipes, symbolic reasoning) stays one `lecore_find` away.
+
+## 2e. Self-learning: faster and more accurate as the partition grows
+
+Two loops, both measured (sweep 86). **Accuracy**: `memory_write` /
+`memory_search` / `zoo_teach` persist to the memory root and survive server
+restarts; `corpus_delta` keeps bound sources current chunk-by-chunk; taught
+facts ride the generational rollover. **Speed**: the deterministic tool
+MEMO — the receipt machinery already proves every pure call's determinism
+(`input_sha256 → output_sha256`), and the memo cashes that proof in:
+identical input to a pure tool (`series_analyze`, `dataset_decompose`,
+`math_eval`, `chart_make`, `lecore_find/describe/map`) returns the stored
+content blocks byte-identically, measured **452× faster** on the hit.
+Stateful tools (scene registries, corpus mutation, remote zoo calls) never
+memo; entries over 2 MB are skipped; `meta.cache` reports hit/miss honestly
+with `compute_ms` near zero and payload billed the same (the wire still
+carries the bytes); `LECORE_MCP_MEMO=0` kills it. Since sweep 87 the memo **persists**:
+write-through to `memory_root/toolmemo/` (tmp+rename so a kill mid-write
+leaves a miss, never a corrupt hit; 512-entry directory cap, oldest-mtime
+evicted), lazy disk read on restart (`cache: "hit-disk"`, 0.2ms measured),
+and the hit/miss/disk ledger rides `zoo_report.tool_memo` — the improvement
+is only real if it is observable. A host that repeats itself pays once —
+across sessions.
 
 ## 3. The economics — rule-sized models for a 435-model zoo
 

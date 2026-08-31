@@ -12,6 +12,13 @@ One subfolder per target application, named after the app:
 ```
 integrations/
 ├── README.md                      ← this file
+├── openzoo/                       ← THE OTHER DIRECTION: how openzoo, as the HOST,
+│   └── PLATFORM_GUIDE.md            runs leCore server-side — booting with both ends,
+│                                    per-user partitions, /tools + /invoke, teaching,
+│                                    sharing, early exit. Every other folder here points
+│                                    a CLIENT AT openzoo; this one is openzoo USING
+│                                    leCore, so rule 3 (no engine imports) does not
+│                                    apply to it: openzoo is the host, not a client.
 ├── OpenWebUI/                     ← self-hosted AI chat harness (plugin: Pipe function)
 │   ├── README.md
 │   └── openzoo_pipe.py            ← manifold Pipe: openzoo as a model provider
@@ -62,7 +69,7 @@ Every integration here targets one or both of openzoo's surfaces:
    short prompts price at a 3× passthrough markup — receipts name which base
    applied, and print on the proxy console per call.
 2. **MCP server** — `npx openzoo mcp` (stdio). Tools: `zoo_ask` (corpus up to
-   ~9.8M tokens per call (~128M bound ceiling) + question → answer + receipt), `zoo_models`, `zoo_wallet`. MCP
+   ~1M tokens + question → answer + receipt), `zoo_models`, `zoo_wallet`. MCP
    hosts (Cursor, Cline, Claude Desktop, Windsurf) should wire BOTH surfaces —
    chat for ordinary completions, MCP for the giant-corpus flagship.
 

@@ -37,6 +37,8 @@ cp VERSION "$STAGE"/
 
 echo ">> copying the runtime data package (lecore_data/: the dictionary + material JSON the engine needs at runtime)"
 cp -r lecore_data "$STAGE"/
+[ -f holographic_mcp.py ] && cp holographic_mcp.py "$STAGE"/ || true   # sweep 115: the MCP server ships too
+
 
 # capabilities.json IS THE ONE ARTIFACT WHOSE WHOLE POINT IS BEING READ WITHOUT
 # IMPORTING THE ENGINE -- the machine-readable sibling of CAPABILITIES.md, for

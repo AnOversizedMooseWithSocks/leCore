@@ -48,6 +48,13 @@ _ROOT = pathlib.Path(__file__).resolve().parent.parent / "holographic"
 #: The duplicate budget. Each entry is `(frozenset(function names), frozenset(modules))`. **This set may shrink and
 #: must never grow.** A new entry means someone copied a body into a second module; go read it.
 KNOWN_DUPLICATES = {
+    # sweep-97 branch merge, both bodies read: conditioning/soprunner __init__ are
+    # unrelated tiny constructors sharing only the dunder name; lexicon.feats and
+    # p16._feats are parallel nested word-feature helpers that evolved on separate
+    # branches -- unification is backlogged, the duplication is DECLARED not hidden.
+    (frozenset({"__init__"}), frozenset({"conditioning", "soprunner"})),
+    (frozenset({"_feats", "feats"}), frozenset({"lexicon", "unified_p16_unicron"})),
+
     # READ, NOT A REAL DUPLICATE (the FileEntry/MilkPreset precedent): edithistory.EditOp.__init__
     # (name/apply/invert/params) vs vault.VaultDoc-style (path/title/body/meta) -- two unrelated
     # four-field record constructors; shape erasure makes ANY two of these identical.

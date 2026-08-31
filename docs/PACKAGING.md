@@ -135,7 +135,19 @@ The core requires **only NumPy**. Everything else is declared as a named "extra"
 | `ui` | `flask`, `pillow` | the browser UI (`app.py`) and image load/save |
 | `images` | `pillow` | image I/O beyond stdlib PNG (jpg/webp/…) without pulling in Flask — a headless subset of `ui` |
 | `dev` | `pytest`, `matplotlib`, `nltk` | running the test suite, generating plots, and loading the text corpora the benchmarks/ablations use |
+| `service` | `flask` | the standalone HTTP service — `lecore-service` on your PATH after install |
+| `mcp` | *(nothing)* | the stdio MCP server needs only the core; `lecore-mcp` is on your PATH after any install. Named so `pip install leos-core[mcp]` reads as intent |
 | `all` | numba, pyfftw, sympy, flask, pillow, pytest, matplotlib, ziglang, nltk, **wgpu** | everything portable, in one shot (CuPy excluded — wgpu is not) |
+
+**One distribution, by decision (sweep 117).** Python extras can only pull *dependencies*, not payload, so
+"optional components" means optional third-party packages — which is exactly the table above. The wheel
+itself is one thing: measured at 10.0 MB compressed / 21.8 MB installed on 0.7.81, of which 3.4 MB is the
+bundled knowledge data (WordNet dictionary + default corpus) that ships with every install so the dictionary,
+word-index and corpus faculties work offline out of the box. A separate data distribution was built, measured
+(base 6.7 MB) and **reverted** on the same day: one `pip install leos-core` must be the whole engine.
+
+**Console entry points:** `lecore-mcp` (stdio MCP server; `--selftest` runs its wire test) and `lecore-service`
+(HTTP service, needs `[service]`). Both land with the base wheel.
 
 **CuPy note:** CuPy is tied to your installed CUDA version, so plain `pip install cupy` often isn't what you
 want — install the matching wheel by hand instead (e.g. `cupy-cuda12x`). That's why `gpu` is kept out of `all`.

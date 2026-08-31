@@ -124,7 +124,7 @@ def export(pack_dir, out_dir, model_name="galvatron", port=5931):
     travels = [k for k in kinds if k in ("ward", "memory", "verifier",
                                          "toolbelt", "capability", "leap")]
     stays = [k for k in kinds if k in ("dreamer", "carrier", "hrnn", "oracle",
-                                       "screen", "corpus")]
+                                       "screen", "corpus", "ouroboros")]
     readme = _README % {
         "kinds": ", ".join(kinds) or "(none)",
         "travels": ", ".join(travels) or "(none)",

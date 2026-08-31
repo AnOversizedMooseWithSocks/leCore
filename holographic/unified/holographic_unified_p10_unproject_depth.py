@@ -46,6 +46,56 @@ class _UnifiedPart10:
         from holographic.io_and_interop.holographic_graphql import resolve
         return resolve(scene, graphql)
 
+    def table_analyze(self, table, column, tasks=("regimes", "forecast"), min_seg=16):
+        """A table COLUMN is a SERIES in a different costume (the sweep-89 database check):
+        the analyst stack existed and the database existed, with NO bridge -- a user had
+        to hand-extract floats and separately discover five faculties. One door: pass a
+        UserTable (db.resolve('ns.table')), a Table, or a list of row dicts, name a
+        numeric column, pick tasks from {'demux','regimes','forecast','formula','drift'}
+        (the same contract as the MCP series_analyze door). Non-numeric columns fail
+        HERE, naming the offending value, not five calls deep."""
+        import numpy as np
+        # MEASURED (sweep 89): UserTable.rows is the list of ROW DICTS while .records is
+        # the (n, dim) HYPERVECTOR matrix -- the names invite exactly the wrong guess.
+        # Prefer dict rows; fall back to a callable records() (plain Table); accept a
+        # bare list of dicts as itself.
+        rows = getattr(table, "rows", None)
+        rows = rows() if callable(rows) else rows
+        if not (isinstance(rows, list) and (not rows or isinstance(rows[0], dict))):
+            rec = getattr(table, "records", None)
+            rows = rec() if callable(rec) else (table if isinstance(table, list) else [])
+        vals = []
+        for i, r in enumerate(rows):
+            v = r.get(column) if isinstance(r, dict) else getattr(r, column, None)
+            if v is None:
+                continue
+            try:
+                vals.append(float(v))
+            except (TypeError, ValueError):
+                raise ValueError("column %r is not numeric at row %d (%r) -- "
+                                 "table_analyze needs a numeric series" % (column, i, v))
+        if len(vals) < 8:
+            raise ValueError("column %r has %d numeric values; need >= 8"
+                             % (column, len(vals)))
+        arr = np.asarray(vals, float)
+        want = set(tasks)
+        out = {"column": str(column), "n": int(len(arr))}
+        if "demux" in want:
+            out["demux"] = self.demux_series(arr)
+        if "regimes" in want:
+            out["regimes"] = self.detect_regimes(arr, min_seg=int(min_seg))
+        if "forecast" in want:
+            out["forecast"] = self.envelope_forecast(arr)
+        if "formula" in want:
+            fml, rep = self.decompose_signal(arr)
+            out["formula"] = {"formula": str(fml), **{k: rep[k] for k in
+                              ("resid_rms", "n_terms", "mdl_bits", "mode") if k in rep}}
+        if "drift" in want:
+            half = len(arr) // 2
+            out["drift"] = self.structure_drift(self.structure_fingerprint(arr[:half]),
+                                                self.structure_fingerprint(arr[half:]))
+        return out
+
     def database(self, dim=2048, seed=0):
         """Query Interface (Phases 9-13): a DATABASE you OWN -- user namespaces over a read-only 'system'
         namespace. The mind's capability registry is published as `system.actions` out of the box, so you can
@@ -830,6 +880,38 @@ class _UnifiedPart10:
         import holographic.materials_and_texture.holographic_materialindex as _mi
         return _mi.find_materials(query, k=k)
 
+    def material_data(self, name=None, category=None):
+        """REAL physics for named materials (holographic_materialdata: 116 measured
+        materials, 12 categories -- density, Young's modulus, sound speed, thermal
+        properties, melting point, with UNITS). Three asks in one door: material_data
+        ('copper') -> that record + units; material_data(category='metal') -> the
+        category roster; material_data() -> all categories with counts. This is the
+        LOOKUP door the DB never had -- the roster door (materials) lists RENDER
+        libraries, a different question. Unknown names return the near misses instead
+        of a KeyError: a typo is a query, not a crash."""
+        from holographic.materials_and_texture import holographic_materialdata as _md
+        if name is not None:
+            key = str(name).lower().strip()
+            rec = _md.PHYSICAL_MATERIALS.get(key)
+            if rec is None:
+                # difflib, not prefix matching: measured, 'coper' missed 'copper'
+                # under a 4-char prefix rule (the double letter breaks the prefix)
+                import difflib
+                near = difflib.get_close_matches(key, list(_md.PHYSICAL_MATERIALS),
+                                                 n=6, cutoff=0.6)
+                return {"found": False, "name": key, "near": near,
+                        "categories": _md.categories()}
+            out = dict(rec)
+            out.update({"found": True, "name": key,
+                        "units": {k: _md.UNITS[k][0] for k in rec if k in _md.UNITS}})
+            return out
+        if category is not None:
+            names = _md.by_category(str(category).lower().strip())
+            return {"category": str(category), "count": len(names), "materials": names}
+        cats = _md.categories()
+        return {"categories": {c: len(_md.by_category(c)) for c in cats},
+                "total": len(_md.PHYSICAL_MATERIALS)}
+
     def materials(self):
         """The whole material roster: every material with which library it lives in, plus a summary (counts by render
         class, physical count, overlap). The 'what materials do we have?' entry point. See holographic_materialindex."""
@@ -913,6 +995,26 @@ class _UnifiedPart10:
         holographic_surface.render_surface."""
         from holographic.mesh_and_geometry.holographic_surface import render_surface
         return render_surface(sdf, camera, width, height, materials, **kw)
+
+    def pattern_image(self, name="fbm", width=256, height=256, span=4.0, normalize=True,
+                      **params):
+        """A procedural pattern as PIXELS, one call -- the z=0-slice dance that every 2D
+        consumer of pattern_field re-writes (measured across three sweeps: the MCP
+        image_tool, the chart backgrounds, the 2D dogfood all repeat it): pattern_field
+        returns a 3-D FIELD FUNCTION over (N,3) points, so an image is a sampled z=0
+        slice over a (span x span*h/w) window, min-max normalised. Returns (H,W) floats
+        in [0,1]; stack or tint for RGB. Deterministic for fixed seed params."""
+        import numpy as np
+        f = self.pattern_field(name, **params)
+        w, h = int(width), int(height)
+        xs = np.linspace(0.0, float(span), w)
+        ys = np.linspace(0.0, float(span) * h / max(w, 1), h)
+        X, Y = np.meshgrid(xs, ys)
+        P = np.stack([X.ravel(), Y.ravel(), np.zeros(X.size)], axis=1)
+        v = np.asarray(f(P), float).reshape(h, w)
+        if normalize:
+            v = (v - v.min()) / (v.max() - v.min() + 1e-12)
+        return v
 
     def pattern_field(self, name, **params):
         """A named deterministic procedural pattern FIELD f(points)->[0,1] (checker, stripes, gradient, dots, noise,

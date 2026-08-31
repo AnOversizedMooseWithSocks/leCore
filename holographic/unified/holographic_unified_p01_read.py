@@ -757,7 +757,11 @@ class _UnifiedPart01:
         real queries route from z=+1.0 up; z_min=0.8 sits in the measured gap. KEPT NEGS: z is calibrated to
         the current vocabulary (not comparable across catalog versions); a genuine query in words the
         catalog never uses abstains CORRECTLY -- the fix is aliases, not a lower line. Returns {abstain, z,
-        score, null_mean, null_std, hits, reason}. See Catalog.route_or_abstain."""
+        score, null_mean, null_std, p, hits, reason} plus REFUSED on an abstain -- the ranking the gate
+        turned down, so the decision is auditable and appealable. hits stays EMPTY on abstain so no
+        caller acts on a refused route. MEASURED: on 10 catalog probes, 3 abstained and ALL THREE
+        carried the correct capability at rank 1 (one was a capability's own title verbatim, refused
+        at z=0.36) -- undetectable before `refused` existed. See Catalog.route_or_abstain."""
         return self._capability_catalog().route_or_abstain(problem, k=k, n_null=n_null, z_min=z_min, seed=seed)
 
 

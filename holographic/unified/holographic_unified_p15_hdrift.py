@@ -600,6 +600,173 @@ class _UnifiedPart15:
         import holographic.misc.holographic_ablate as _ab
         return _ab.ablation_table(seeds=seeds)
 
+    # ---- shader-native atom families -------------------------------------------------------
+    # WHY THESE ARE FACULTIES: an atom family that only `import` can reach is a gap. These are
+    # thin delegations; the logic lives in the family modules and the hash primitive itself is
+    # hash32_pcg in holographic_determinism, which both families call rather than reimplement.
+
+    def hash_atom(self, name, dim=None):
+        """A +/-1 atom that is a pure FUNCTION of its name -- zero stored vocabulary.
+
+        Use for bag-of-atoms text encoding you want to reproduce on a GPU or in a browser:
+        generation is integer-only (hash32_pcg), so NumPy, GLSL and JS agree BIT-IDENTICALLY.
+        Does NOT bind -- see phasor_atom. See holographic_hashatom.hash_atom.
+        """
+        import holographic.agents_and_reasoning.holographic_hashatom as _ha
+        return _ha.hash_atom(name, int(dim or self.dim))
+
+    def encode_hash(self, tokens, dim=None, normalise=True):
+        """Bundle hash atoms for a token list. Queries can skip normalise: a positive scalar
+        cannot move an argmax. See holographic_hashatom.encode_hash."""
+        import holographic.agents_and_reasoning.holographic_hashatom as _ha
+        return _ha.encode_hash(list(tokens), int(dim or self.dim), normalise=normalise)
+
+    def phasor_atom(self, name, dim=None):
+        """A unit-magnitude FHRR phasor atom, generated from its name -- zero stored vocabulary.
+
+        The binding vocabulary: bind is phase addition and unbind is the conjugate, so the round
+        trip is exact with NO FFT and no normalisation step. See holographic_phasor.atom.
+        """
+        import holographic.agents_and_reasoning.holographic_phasor as _ph
+        return _ph.atom(name, int(dim or self.dim))
+
+    def phasor_record(self, pairs, dim=None):
+        """Bundle bound (role, filler) NAME pairs into one complex record -- nothing but the
+        record is stored, and the record itself is a function of the names. See
+        holographic_phasor.bundle/bind."""
+        import holographic.agents_and_reasoning.holographic_phasor as _ph
+        d = int(dim or self.dim)
+        return _ph.bundle([_ph.bind(_ph.atom(r, d), _ph.atom(f, d)) for r, f in pairs])
+
+    def phasor_query(self, record, role, candidates, dim=None):
+        """Unbind a record by ROLE NAME and clean up against candidate NAMES.
+
+        Returns (best_name, scores). Candidate atoms are generated on demand, so a large
+        candidate set costs no memory. See holographic_phasor.unbind/cleanup.
+        """
+        import holographic.agents_and_reasoning.holographic_phasor as _ph
+        d = int(dim or self.dim)
+        return _ph.cleanup(_ph.unbind(record, _ph.atom(role, d)), list(candidates), d)
+
+    # ---- retrieval shape policy -------------------------------------------------------------
+    # WHY A FACULTY: three ad-hoc checks scattered across callers is how a measured behaviour
+    # drifts. The policy object holds all three thresholds and calibrates them on a null.
+
+    def retrieval_policy(self, docs, percentile=95.0, seed=0, null_n=200):
+        """Build a calibrated answer/set/abstain policy over `docs` (list of token lists).
+
+        Cached by CONTENT HASH so repeated calls on the same corpus do not re-index or
+        re-calibrate. See holographic_retrievalpolicy.RetrievalPolicy.
+        """
+        import holographic.agents_and_reasoning.holographic_retrievalpolicy as _rp
+        pol = _rp.RetrievalPolicy(docs)
+        key = (pol.fingerprint(), float(percentile), int(seed), int(null_n))
+        cache = getattr(self, "_retrieval_policy_cache", None)
+        if cache is None:
+            cache = self._retrieval_policy_cache = {}
+        if key not in cache:
+            cache[key] = pol.calibrate(n=null_n, percentile=percentile, seed=seed)
+        return cache[key]
+
+    def retrieval_verdict(self, query, docs, percentile=95.0, seed=0, rerank=False):
+        """Decide the SHAPE of an answer: one passage, an indistinguishable set, or abstain.
+
+        Returns mode/answer/set/ambiguity/top_score/margin/threshold/ceiling/reason. `query` may
+        be a string or a token list. The ambiguity count is EXACT (postings intersection), not a
+        predicted confidence -- see holographic_retrievalpolicy for why that distinction matters.
+
+        rerank=True adds unsupervised term-proximity reranking over the top-10, worth
+        +0.053 +- 0.017 top-1 at K=20,000 across six independent query draws. DEFAULT OFF: it
+        changes an existing decision. It does NOT help ambiguous queries -- see the kept negative
+        on holographic_retrievalpolicy.proximity_key.
+        """
+        q = query.lower().split() if isinstance(query, str) else list(query)
+        return self.retrieval_policy(docs, percentile=percentile,
+                                     seed=seed).verdict(q, rerank=rerank)
+
+    def canonical_terms(self, text):
+        """THE normalisation boundary: the one place a string becomes terms, for every arm.
+
+        Delegates to holographic_bm25.tokenize. Apply it EXACTLY ONCE -- it is not idempotent
+        ('settings' -> 'setting' -> 'sett'), so a second pass silently over-stems. See
+        holographic_hashatom.canonical_terms.
+        """
+        import holographic.agents_and_reasoning.holographic_hashatom as _ha
+        return _ha.canonical_terms(text)
+
+    def term_id(self, text):
+        """The u32 identity of a term AFTER the boundary -- the id the atom and lexical arms
+        must share. Returns None for text the boundary drops. Hashing a RAW token instead
+        disagrees for 48.1% of a 12,015-word vocabulary; that measurement is why this exists.
+        See holographic_hashatom.term_id."""
+        import holographic.agents_and_reasoning.holographic_hashatom as _ha
+        return _ha.term_id(text)
+
+    def phasor_factor(self, composite, codebooks, iters=100):
+        """Factor a phasor product into one atom per codebook, KEEPING THE PHASE.
+
+        Use this and not factor_composite for complex/phasor composites: that faculty is correct
+        for the real/bipolar family it was validated on, but casts a complex composite to float
+        and discards the imaginary part. Measured over 60 random 3-factor products (search space
+        512): real-cast 0.250, this 0.967, chance 0.002. See holographic_phasor.factor.
+        """
+        import holographic.agents_and_reasoning.holographic_phasor as _ph
+        return _ph.factor(composite, codebooks, iters=iters)
+
+    def phasor_power(self, atom, x):
+        """Fractional power of a phasor atom -- phase scaling, so continuous coordinates, time and
+        recency cost one multiply. Similarity decays smoothly with |x-y| (spearman 0.956). The
+        real-valued fractional-power encoder with kaiser sidelobe shaping already exists in the
+        Encoders family and is the one to use outside this atom family.
+        See holographic_phasor.power."""
+        import holographic.agents_and_reasoning.holographic_phasor as _ph
+        return _ph.power(atom, x)
+
+    def glsl_kernels(self):
+        """Names of the VERIFIED GLSL kernels this engine carries. See holographic_glslkernels."""
+        import holographic.io_and_interop.holographic_glslkernels as _gk
+        return _gk.names()
+
+    def glsl_kernel(self, name):
+        """GLSL SOURCE for a verified kernel, with what it does and the measurement that verified
+        it -- including its kept negative.
+
+        SOURCE, NOT A RUNNER: core is NumPy/Flask/stdlib, so no GL binding lives here. These are
+        the shaders the arc actually compiled and executed against exact references (BM25 +
+        containment, the scatter inverted index, diffusion, PBD, image formation, HDRIFT
+        attraction and repulsion); the harnesses that ran them ship beside the repo as glsl_*.py.
+        Every entry carries its boundary -- the scatter scorer gives up bit-reproducibility,
+        diffusion conserves heat only to f32, PBD is Jacobi, raster byte-exactness is conditional
+        on the scene. See holographic_glslkernels.kernel.
+        """
+        import holographic.io_and_interop.holographic_glslkernels as _gk
+        return _gk.kernel(name)
+
+    def index_save(self, docs_tokens, path, stats=None):
+        """Save a retrieval index to disk in the portable `lecore-index/1` bundle, and return it.
+
+        `mind.save` persists the MIND; it does NOT persist an index -- retrieval_policy rebuilds
+        from documents you must still be holding. This fills that gap with the format the shard
+        work already proved (merge bit-identical at 4 to 256 shards, reassembly verified under Node
+        at 5.8e-13). Pass TOKENS, not text: tokenize is not idempotent, so re-normalising on the way
+        in would silently over-stem the index. The SAME bytes load in a browser via
+        pages/idb_store.js. See holographic_indexstore.
+        """
+        import holographic.caching_and_storage.holographic_indexstore as _is
+        man = _is.build(docs_tokens, stats=stats)
+        _is.save(man, path)
+        return man
+
+    def index_load(self, path, verify=True):
+        """Load a `lecore-index/1` bundle and REFUSE a payload whose sha256 does not match.
+
+        A truncated write parses cleanly and answers wrongly, so verification is the default.
+        Returns the manifest; postings and lengths are DERIVED from it rather than stored, because
+        duplicate state can drift from the stream that describes it.
+        See holographic_indexstore.load."""
+        import holographic.caching_and_storage.holographic_indexstore as _is
+        return _is.load(path, verify=verify)
+
     def roles_by_shift(self, pairs, dim=None):
         """Encode role-filler pairs with ROLES AS POWERS OF ONE SHIFT OPERATOR -- the trick that
         made the in-weights role machine affordable (one permutation instead of one circulant
@@ -619,6 +786,7 @@ def _as_blob(blob):
     if isinstance(blob, str):
         return base64.b64decode(blob)
     return bytes(blob)
+
 
 
 def _selftest():

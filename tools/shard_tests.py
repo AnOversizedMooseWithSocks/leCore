@@ -110,15 +110,130 @@ def partition(num_shards):
     return shards, loads
 
 
+def measure(files, run_slow=True, timeout=None):
+    """RUN the given test files with --durations=0 and RECORD per-file wall seconds
+    into DURATIONS_FILE, merging with whatever is already there (sweep 116).
+
+    The flag was documented for a whole checkpoint arc and NEVER IMPLEMENTED -- the
+    durations file was a one-time hand transcription of a CI log covering 51 of 680
+    files, so 629 files rode the 0.25 s/test proxy and shard 3 of ten blew a
+    20-minute job at 91% while the packer believed every bin was ~226 s. Balanced by
+    the wrong unit, for the second time, because the measuring instrument did not
+    exist. Chunk with --shard/--num-shards or --only-missing so a measurement fits
+    a local wall clock; pytest prints the durations table only at exit, so a killed
+    run records nothing (measure smaller chunks rather than longer ones)."""
+    import subprocess, sys as _sys
+    if not files:
+        return 0
+    cmd = [_sys.executable, "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider",
+           "--durations=0", "--durations-min=0"] + (["--run-slow"] if run_slow else []) + list(files)
+    env = dict(os.environ, PYTHONHASHSEED="0")
+    if run_slow:
+        env["LECORE_RUN_SLOW"] = "1"
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env).stdout
+    except subprocess.TimeoutExpired as e:
+        out = (e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or ""))
+        print("measure: chunk timed out -- nothing recorded for it; use smaller chunks")
+    per_file = {}
+    # lines look like:  "12.34s call     tests/test_x.py::test_y[param]"  (setup/teardown rows too)
+    for line in out.splitlines():
+        m_ = re.match(r"^\s*([0-9.]+)s\s+(call|setup|teardown)\s+(\S+?\.py)::", line)
+        if m_:
+            per_file[os.path.basename(m_.group(3))] = per_file.get(os.path.basename(m_.group(3)), 0.0) + float(m_.group(1))
+    if not per_file:
+        print("measure: no durations parsed (did pytest reach its summary?)")
+        return 1
+    merged = _measured()
+    merged.update({k: round(v, 3) for k, v in per_file.items()})
+    with open(DURATIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(dict(sorted(merged.items())), f, indent=1, sort_keys=True)
+        f.write("\n")
+    print("measure: recorded %d file(s) (%.0f s); durations file now covers %d" %
+          (len(per_file), sum(per_file.values()), len(merged)))
+    return 0
+
+
+def merge_logs(paths):
+    """CI PATH (sweep 116): each full-suite shard runs pytest with --durations=0 and
+    saves its stdout; this merges every log's per-file totals into DURATIONS_FILE.
+    The shards already run every file every time -- the measurement was always
+    being made and never recorded. Measuring where the suite actually runs also
+    removes the ci-factor guess: recorded seconds ARE CI seconds."""
+    per_file = {}
+    for lp in paths:
+        try:
+            text = open(lp, encoding="utf-8", errors="ignore").read()
+        except OSError:
+            continue
+        for line in text.splitlines():
+            m_ = re.match(r"^\s*([0-9.]+)s\s+(call|setup|teardown)\s+(\S+?\.py)::", line)
+            if m_:
+                k = os.path.basename(m_.group(3))
+                per_file[k] = per_file.get(k, 0.0) + float(m_.group(1))
+    if not per_file:
+        print("merge-logs: no durations found in %d log(s)" % len(paths))
+        return 1
+    merged = _measured()
+    merged.update({k: round(v, 3) for k, v in per_file.items()})
+    with open(DURATIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(dict(sorted(merged.items())), f, indent=1, sort_keys=True)
+        f.write("\n")
+    print("merge-logs: %d file(s) from %d log(s); durations file now covers %d (%.0f s recorded)"
+          % (len(per_file), len(paths), len(merged), sum(per_file.values())))
+    return 0
+
+
+def suggest_shards(budget_s, ci_factor):
+    """The smallest shard count whose heaviest predicted bin fits the budget."""
+    for n in range(1, 200):
+        _sh, loads = partition(n)
+        if max(loads) / 100.0 * ci_factor <= budget_s:
+            return n, max(loads) / 100.0
+    return 200, max(partition(200)[1]) / 100.0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--shard", type=int, default=None, help="which shard to print (0-based)")
     ap.add_argument("--num-shards", type=int, default=4)
     ap.add_argument("--report", action="store_true", help="print the balance table instead of a file list")
     ap.add_argument("--selfcheck", action="store_true", help="assert exact cover, disjointness, determinism")
+    ap.add_argument("--measure", action="store_true",
+                    help="run the selected files (all, or --shard i of --num-shards, or --only-missing) with "
+                         "--durations and record per-file seconds into tools/test_durations.json")
+    ap.add_argument("--only-missing", action="store_true", help="with --measure: only files without a record")
+    ap.add_argument("--no-slow", action="store_true", help="with --measure: leave slow tests deselected")
+    ap.add_argument("--chunk-timeout", type=int, default=None, help="with --measure: seconds per pytest run")
+    ap.add_argument("--budget", type=float, default=None,
+                    help="seconds a shard may take on CI; with --selfcheck the check FAILS if the heaviest "
+                         "predicted bin x --ci-factor exceeds it (catch an overfull shard in the 12 s sanity "
+                         "step, not after 20 minutes); with --suggest prints the smallest shard count that fits")
+    ap.add_argument("--ci-factor", type=float, default=3.0, help="CI runner slowdown vs the measuring machine")
+    ap.add_argument("--min-coverage", type=float, default=0.9,
+                    help="with --selfcheck: fraction of test files that must carry a MEASURED duration; below "
+                         "it the packer is balancing by proxy and the check fails with the remedy")
+    ap.add_argument("--suggest", action="store_true", help="print the smallest --num-shards that fits --budget")
+    ap.add_argument("--merge-logs", nargs="+", default=None,
+                    help="merge per-file durations out of saved pytest --durations=0 logs (the CI path)")
     args = ap.parse_args()
-    if getattr(args, "measure", False):
-        raise SystemExit(measure())
+    if args.merge_logs:
+        raise SystemExit(merge_logs(args.merge_logs))
+    if args.measure:
+        files = test_files()
+        if args.shard is not None:
+            files = partition(args.num_shards)[0][args.shard]
+        if args.only_missing:
+            _m = _measured()
+            files = [p for p in files if os.path.basename(p) not in _m]
+        raise SystemExit(measure(files, run_slow=not args.no_slow, timeout=args.chunk_timeout))
+    if args.suggest:
+        if args.budget is None:
+            raise SystemExit("--suggest needs --budget SECONDS")
+        n, mx = suggest_shards(args.budget, args.ci_factor)
+        print("smallest shard count fitting %.0f s at ci-factor %.1f: %d (heaviest bin %.0f s local)"
+              % (args.budget, args.ci_factor, n, mx))
+        raise SystemExit(0)
 
     shards, loads = partition(args.num_shards)
 
@@ -133,8 +248,30 @@ def main():
         again, _ = partition(args.num_shards)
         assert [sorted(s) for s in shards] == [sorted(s) for s in again], "partition is not deterministic"
         spread = (max(loads) - min(loads)) / max(sum(loads) / len(loads), 1)
-        print("OK: %d files -> %d shards; exact cover, disjoint, deterministic; load spread %.0f%% of mean"
-              % (len(universe), args.num_shards, 100 * spread))
+        # THE TWO GUARDS THAT WERE MISSING (sweep 116): (1) an exact, disjoint,
+        # deterministic partition can still be OVERFULL -- so the heaviest bin is
+        # checked against the CI budget here, where failing costs 12 seconds instead
+        # of a 20-minute cancellation; (2) a partition balanced by the PROXY is not
+        # balanced at all -- so measurement coverage is enforced, with the remedy.
+        _m = _measured()
+        covered = sum(1 for p in universe if os.path.basename(p) in _m) / max(len(universe), 1)
+        if covered < args.min_coverage:
+            print("FAIL: only %.0f%% of test files carry a measured duration (need %.0f%%) -- the packer is "
+                  "balancing by proxy. Remedy: python tools/shard_tests.py --measure --only-missing "
+                  "(chunk with --shard/--num-shards; commit tools/test_durations.json)"
+                  % (100 * covered, 100 * args.min_coverage))
+            return 1
+        if args.budget is not None:
+            heaviest = max(loads) / 100.0
+            if heaviest * args.ci_factor > args.budget:
+                n, _mx = suggest_shards(args.budget, args.ci_factor)
+                print("FAIL: heaviest shard predicts %.0f s local x %.1f = %.0f s on CI > budget %.0f s. "
+                      "Remedy: --num-shards %d (and the matrix must match)"
+                      % (heaviest, args.ci_factor, heaviest * args.ci_factor, args.budget, n))
+                return 1
+        print("OK: %d files -> %d shards; exact cover, disjoint, deterministic; load spread %.0f%% of mean; "
+              "measured coverage %.0f%%; heaviest bin %.0f s local"
+              % (len(universe), args.num_shards, 100 * spread, 100 * covered, max(loads) / 100.0))
         return 0
 
     if args.report:

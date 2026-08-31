@@ -23,7 +23,17 @@ if not exist "%VPY%" (
 "%VPY%" -c "import torch, transformers" >nul 2>&1
 if errorlevel 1 (
     echo   Installing torch + transformers into the venv ^(one-time, large^)...
-    "%VPY%" -m pip install --quiet torch transformers
+    REM CUDA WHEEL WHEN A GPU EXISTS (cp87): plain `pip install torch` on
+    REM Windows ships the CPU-ONLY build -- an A4500 would sit idle. Detect
+    REM nvidia-smi and install the cu124 wheel; fall back to CPU torch.
+    where nvidia-smi >nul 2>&1
+    if %errorlevel%==0 (
+        echo   NVIDIA GPU detected -- installing CUDA torch...
+        "%VPY%" -m pip install --quiet torch --index-url https://download.pytorch.org/whl/cu124 || "%VPY%" -m pip install --quiet torch
+    ) else (
+        "%VPY%" -m pip install --quiet torch
+    )
+    "%VPY%" -m pip install --quiet transformers
 )
 
 "%VPY%" assimilation\chat.py %*

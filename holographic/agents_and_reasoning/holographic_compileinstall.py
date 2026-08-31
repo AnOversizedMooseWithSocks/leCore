@@ -360,9 +360,24 @@ def raster_program_pgm(machine, program, params, width, height, host_fallback=Fa
     chain stays float and certified). Byte-exactness vs the live path is a testable contract."""
     run, man = compile_installed(machine, program, host_fallback=host_fallback)
     px = run(init=np.asarray(params, float).reshape(-1))
+    # ROUNDING MARGIN (T14). Byte-exactness against another substrate holds only while that
+    # substrate's error is SMALLER than the distance from every pixel to a .5 rounding boundary.
+    # Measured on a GLSL port of this same chain: the f32-vs-f64 error EXCEEDED that distance at
+    # three of four light counts, and the images matched anyway only because the few near-boundary
+    # pixels happened to err the right way. So the margin is REPORTED rather than assumed, and a
+    # caller can decide whether their scene is inside it. One min over the fractional parts.
+    _f = np.asarray(px, float)
+    _frac = np.abs(_f - np.floor(_f) - 0.5)
+    _margin = float(np.min(_frac)) if _frac.size else 0.0
     q = np.clip(np.round(px), 0, 255).astype(int).reshape(height, width)
     lines = ["P2", "# leCore installed render -- emitted by the chain", "%d %d" % (width, height), "255"]
     lines += [" ".join(str(v) for v in row) for row in q]
+    if isinstance(man, dict):
+        man = dict(man)
+        man["rounding_margin"] = _margin
+        man["rounding_margin_note"] = (
+            "byte-exactness against another substrate holds only while its error < this margin "
+            "(T14); a GLSL f32 port of this chain measured 1e-5 to 7e-4")
     return "\n".join(lines) + "\n", man
 
 

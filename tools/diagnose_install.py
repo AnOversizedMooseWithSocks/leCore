@@ -78,6 +78,19 @@ def main(model_dir):
     for name, n, tot in nz:
         if n:
             print("    %-44s %d/%d" % (name[:44], n, tot))
+    # THE VERDICT LINE (added after a field run read the list as a failure):
+    # the operative test is the DRIFT. In hybrid families the blank layer
+    # carries whole gated sublayers whose contribution is shut off by their
+    # gates, so non-norm tensors can be nonzero while the layer stays exactly
+    # inert -- drift 0.0e+00 means bit-identical prepend, full stop.
+    if d == 0.0:
+        print("  VERDICT: drift is exactly zero -- the blank layer is "
+              "functionally INERT; the nonzero")
+        print("  tensors above are gated off in this family and are safe. "
+              "Prepend is safe here.")
+    else:
+        print("  VERDICT: drift is NONZERO -- the blank layer is leaking; "
+              "do NOT install until this reads 0.")
     return 0
 
 

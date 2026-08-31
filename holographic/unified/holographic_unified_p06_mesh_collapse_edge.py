@@ -180,7 +180,7 @@ class _UnifiedPart06:
         self._last_lod_chain_silhouette = rep
         return kept
 
-    def mesh_to_field(self, mesh, bounds, res=48, band=None):
+    def mesh_to_field(self, mesh, bounds, res=48, band=None, method="shell"):
         """The mesh -> FIELD direction (holographic_meshbridge.mesh_distance_grid): decompose a mesh into a SIGNED
         banded distance field (a banded SDF) by TILING -- each triangle updates only the local block of grid voxels
         within `band` of it (a vectorized sub-array scatter-min by magnitude, the apply_local pattern), so the cost is
@@ -195,7 +195,10 @@ class _UnifiedPart06:
         (magnitude is always right); far interior voxels default to +band (no flood-fill sign yet), so this is a
         sample-near-the-surface field, not yet a re-marchable full SDF."""
         from holographic.mesh_and_geometry.holographic_meshbridge import mesh_distance_grid
-        return mesh_distance_grid(mesh, bounds, res=res, band=band)
+        # method="scatter" is the ORIGINAL per-triangle path and the only one whose
+        # cost is O(triangle count); "shell" is O(surface area) and approximate.
+        # Dropping the flag pinned every caller to the fast approximation.
+        return mesh_distance_grid(mesh, bounds, res=res, band=band, method=method)
 
     def mesh_sample_field(self, grid, axes, points):
         """Trilinearly sample a banded SDF (from mesh_to_field) at query points (N,3) -> (N,) SIGNED distances; take

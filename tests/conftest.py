@@ -23,15 +23,32 @@ import pytest
 
 
 _BUDGET_SECONDS = 15
+# THE LONG BUDGET (sweep 118): under --run-slow the budget used to be LIFTED FOR EVERY TEST, so one unmarked
+# test that had quietly grown to minutes could hang a 20-minute shard -- measured twice in the full-suite
+# matrix (shard 3 of 10 at 91%, shard 17 of 20 at 84%). The rule is now Moose's rule: an UNMARKED test keeps
+# the 15 s budget ALWAYS and is skipped on overrun (the skip message says to mark it slow if it is critical);
+# a test MARKED slow -- i.e. declared critical-but-slow -- gets this long budget under --run-slow, and even
+# it has a ceiling, so no single test can take a shard down. Override per machine: LECORE_SLOW_BUDGET=seconds.
+_SLOW_BUDGET_SECONDS = int(os.environ.get("LECORE_SLOW_BUDGET", "600") or 600)
 _HAVE_SIGALRM = hasattr(signal, "SIGALRM")
 
 
+def _budget_for(item):
+    """Seconds this test may take: the long budget for a `slow`-marked test when slow tests are forced on,
+    the 15 s budget for everything else -- including unmarked tests under --run-slow."""
+    if _run_slow_forced(item.config) and item.get_closest_marker("slow") is not None:
+        return _SLOW_BUDGET_SECONDS
+    return _BUDGET_SECONDS
+
+
 def _run_slow_forced(config=None):
-    """True when the long tests are forced on -- via --run-slow or LECORE_RUN_SLOW=1. Then the budget is disabled.
+    """True when the long tests are forced on -- via --run-slow or LECORE_RUN_SLOW=1. Then slow-MARKED tests are
+    selected and get the long budget (_SLOW_BUDGET_SECONDS); unmarked tests KEEP the 15 s budget (sweep 118).
 
     The 15 s per-test budget (below) is a safety net ON TOP OF the `slow` marker: the marker deselects tests we KNOW
     are slow up front (cheap); the watchdog catches the ones we DON'T know about yet (a new slow test, or a change
-    that balloons a runtime) instead of letting them dominate a run. Both switches lift the budget AND select slow."""
+    that balloons a runtime) instead of letting them dominate a run -- and it must keep catching them in the full
+    suite, which is exactly where an unknown slow test can hang a shard."""
     if os.environ.get("LECORE_RUN_SLOW", "").strip() not in ("", "0", "false", "False"):
         return True
     if config is not None:
@@ -66,33 +83,36 @@ def pytest_runtest_call(item):
     DEPENDENCY-FREE (core is stdlib-only; test infra should be too -- no pytest-timeout wheel). On POSIX we use
     SIGALRM (precise, interrupts even C-bound loops that hold the GIL); elsewhere a timer thread turns a
     finished-too-late call into a skip (it cannot interrupt a stuck call, so POSIX CI gets the hard guarantee)."""
-    if _run_slow_forced(item.config):
-        yield
-        return
+    budget = _budget_for(item)
+    slow_marked = item.get_closest_marker("slow") is not None
+    if slow_marked and _run_slow_forced(item.config):
+        why = ("exceeded the %ds LONG budget for a slow-marked test (LECORE_SLOW_BUDGET raises it); "
+               "a critical test that needs longer must be split or made faster" % budget)
+    else:
+        why = ("exceeded the %ds per-test budget -- SKIPPED, not run to completion, even under --run-slow "
+               "(sweep 118). If this test is critical mark it @pytest.mark.slow so it gets the long budget; "
+               "otherwise make it fast" % budget)
     if _HAVE_SIGALRM:
         def _alarm(signum, frame):
             raise _Timeout()
         old_handler = signal.signal(signal.SIGALRM, _alarm)
-        signal.setitimer(signal.ITIMER_REAL, _BUDGET_SECONDS)
+        signal.setitimer(signal.ITIMER_REAL, budget)
         try:
             outcome = yield
             excinfo = outcome.excinfo
             if excinfo is not None and issubclass(excinfo[0], _Timeout):
-                outcome.force_exception(pytest.skip.Exception(
-                    "exceeded the %ds per-test budget; run with --run-slow or LECORE_RUN_SLOW=1 "
-                    "(and consider @pytest.mark.slow)" % _BUDGET_SECONDS))
+                outcome.force_exception(pytest.skip.Exception(why))
         finally:
             signal.setitimer(signal.ITIMER_REAL, 0)
             signal.signal(signal.SIGALRM, old_handler)
     else:
         timed_out = threading.Event()
-        timer = threading.Timer(_BUDGET_SECONDS, timed_out.set)
+        timer = threading.Timer(budget, timed_out.set)
         timer.start()
         try:
             outcome = yield
             if timed_out.is_set() and outcome.excinfo is None:
-                outcome.force_exception(pytest.skip.Exception(
-                    "exceeded the %ds per-test budget; run with --run-slow or LECORE_RUN_SLOW=1" % _BUDGET_SECONDS))
+                outcome.force_exception(pytest.skip.Exception(why))
         finally:
             timer.cancel()
 

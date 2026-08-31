@@ -198,7 +198,8 @@ def rest_quality(points, tets):
 
 
 def simulate(points, tets, steps=200, mu=1.0, lam=10.0, fibers=None, rest_lengths=None,
-             activation=1.0, k_muscle=10.0, gravity=0.0, pinned=None, step0=0.01, rest=None):
+             activation=1.0, k_muscle=10.0, gravity=0.0, pinned=None, step0=0.01, rest=None,
+             record_every=0):
     """Quasistatic solve: minimise (elastic + muscle + gravity) over vertex positions by
     gradient descent with backtracking, exactly as F1/F2 do. `pinned` indices are held fixed
     (their gradient is zeroed), which is how a body gets an anchor without a constraint solver.
@@ -228,8 +229,13 @@ def simulate(points, tets, steps=200, mu=1.0, lam=10.0, fibers=None, rest_length
 
     e, g = total(x)
     hist = [e]
+    # `history` is the ENERGY curve -- a name that promised a trajectory and delivered a
+    # loss plot (measured friction, sweep 82). record_every=k > 0 additionally snapshots
+    # POSITIONS every k accepted steps into "frames" (plus the final state), which is
+    # what an animation actually needs. Default 0 keeps the old result byte-identical.
+    frames = [x.copy()] if record_every else None
     step = step0
-    for _ in range(int(steps)):
+    for _i in range(int(steps)):
         if float(np.linalg.norm(g)) < 1e-12:
             break
         trial = step
@@ -243,9 +249,16 @@ def simulate(points, tets, steps=200, mu=1.0, lam=10.0, fibers=None, rest_length
             break
         x, e, g = y, e2, g2
         hist.append(e)
+        if record_every and (_i % int(record_every) == 0):
+            frames.append(x.copy())
         step = min(trial * 1.6, step0 * 8.0)
-    return {"positions": x, "energy": e, "history": hist,
-            "rest_quality": rest_quality(rest_x, tets)}
+    out = {"positions": x, "energy": e, "history": hist,
+           "rest_quality": rest_quality(rest_x, tets)}
+    if record_every:
+        if not np.array_equal(frames[-1], x):
+            frames.append(x.copy())
+        out["frames"] = frames
+    return out
 
 
 def _selftest():

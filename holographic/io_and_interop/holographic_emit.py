@@ -50,6 +50,11 @@ a hand-written C port produces in its first line, and there is no tolerance at w
 import ast
 import inspect
 import textwrap
+import re as _re
+
+#: `1.0f` (C float literal) -> `1.0` (GLSL ES has no such suffix). Used only by the differential
+#: selftest that pins glsl against c_f32; the emitter itself drives this off the dialect "suffix".
+_re_f_suffix = _re.compile(r"(\d)f\b")
 
 
 #: Intrinsics, per dialect. A name absent from this table is an unknown call and the emitter refuses it.
@@ -62,6 +67,16 @@ INTRINSICS = {
     "abs": {"c_f64": "fabs", "c_f32": "fabsf", "wgsl": "abs", "js": "Math.abs"},
     "min": {"c_f64": "fmin", "c_f32": "fminf", "wgsl": "min", "js": "Math.min"},
     "max": {"c_f64": "fmax", "c_f32": "fmaxf", "wgsl": "max", "js": "Math.max"},
+    # floor and trunc are the ONLY additions that are spelled AND defined identically in every
+    # dialect this table serves. Measured before adding, and the rest are refused on purpose:
+    #   fmod -> GLSL `mod` COMPILES AND IS WRONG on mixed signs: C's remainder takes the sign of
+    #     the DIVIDEND, GLSL's takes the sign of the DIVISOR -- fmod(-7,3) = -1 against mod = 2.
+    #     A silently wrong emission is worse than a refusal the caller can read.
+    #   sign, clamp, mix, step exist in GLSL and WGSL but NOT in C (clamp/mix/step not in JS
+    #     either). Adding them would make an emission's success depend on the dialect, which is
+    #     the one thing a shared table is for preventing.
+    "floor": {"c_f64": "floor", "c_f32": "floorf", "wgsl": "floor", "js": "Math.floor"},
+    "trunc": {"c_f64": "trunc", "c_f32": "truncf", "wgsl": "trunc", "js": "Math.trunc"},
     "pow": {"c_f64": "pow", "c_f32": "powf", "wgsl": "pow", "js": "Math.pow",
             # Zig's pow is type-parameterized -- std.math.pow(T, a, b) -- so a bare name cannot express it. An
             # intrinsic entry containing "{args}" is a TEMPLATE; plain entries keep the old name(args) form. This
@@ -70,6 +85,14 @@ INTRINSICS = {
 }
 
 # Zig builtins cover the rest; @abs/@min/@max exist for floats since 0.12 (ziglang wheel ships >= 0.13).
+# GLSL ES 3.0 names every one of these intrinsics exactly as WGSL does (sqrt/exp/log/sin/cos/abs/min/max/pow),
+# so the glsl column is a MIRROR of the wgsl column rather than a second table to keep in sync. `pow` included:
+# GLSL's pow(x, y) is undefined for x < 0, which is the same caveat WGSL carries, so no new refusal is needed.
+for _n in ("sqrt", "exp", "log", "sin", "cos", "abs", "min", "max", "pow", "floor", "trunc"):
+    INTRINSICS[_n]["glsl"] = INTRINSICS[_n]["wgsl"]
+    # Slang is an HLSL superset and names all of these identically -- mirror, do not duplicate.
+    INTRINSICS[_n]["slang"] = INTRINSICS[_n]["wgsl"]
+
 for _n, _z in (("sqrt", "@sqrt"), ("exp", "@exp"), ("log", "@log"), ("sin", "@sin"), ("cos", "@cos"),
                ("abs", "@abs"), ("min", "@min"), ("max", "@max")):
     INTRINSICS[_n]["zig_f64"] = _z
@@ -92,6 +115,30 @@ DIALECTS = {
              "sig": "fn {name}({params}) -> {s}", "param": "{n}: {s}", "suffix": "f", "brace": True,
              "mut_decl": "var {n} = {e};", "loop": "for (var {i}: i32 = 0; {i} < {n}; {i} = {i} + 1) {{",
              "int_promote": "f32({i})"},
+    # GLSL ES 3.0 (WebGL2). WHY THIS ROW EXISTS AND WHY IT DID NOT BEFORE: `glsl` was a DECLARED NEGATIVE --
+    # _selftest asserted emit(fn, "glsl") must raise -- because GLSL ES has no f64 and this emitter refuses
+    # rather than guesses a type. The refusal was correct while the f32 question was open. It is no longer
+    # open: the shader path's only decision is the cleanup argmax, and that decision is now certified by a
+    # machine-checked margin bound (margin > 2*eps => argmax cannot move), measured at gate precision 1.000
+    # over a real 122-document corpus. So the negative is flipped DELIBERATELY, with f32 semantics stated
+    # rather than guessed. Syntax is C-like, so this row is the c_f32 row with GLSL's type names and no
+    # float suffix (GLSL ES has no `f` suffix for float literals in the way C does; a bare 1.0 is a float).
+    "glsl": {"scalar": "float", "decl": "{s} {n} = {e};", "typed_decl": True,
+             "sig": "{s} {name}({params})", "param": "{s} {n}", "suffix": "", "brace": True,
+             "mut_decl": "{s} {n} = {e};", "loop": "for (int {i} = 0; {i} < {n}; {i}++) {{",
+             "int_promote": "float({i})"},
+    # SLANG (Khronos/NVIDIA). An HLSL SUPERSET, so the C-family forms carry over verbatim and the
+    # intrinsics mirror GLSL/WGSL exactly -- that is why this is a TABLE ENTRY and not a compiler.
+    # WHY EMIT INTO IT RATHER THAN AUTHOR IN IT: authoring in Slang would make Slang the source and
+    # the Python kernel a copy, which inverts the thesis and breaks the installed-weights path (you
+    # install the Python kernel, not a shader). Emitting keeps Python authoritative and buys
+    # SPIR-V/HLSL/MSL/CUDA through slangc as an OPT-IN accelerator -- never a required dependency,
+    # exactly the numba/sympy class. Slang's own headline feature, autodiff, is constitutionally
+    # irrelevant here.
+    "slang": {"scalar": "float", "decl": "{s} {n} = {e};", "typed_decl": True,
+              "sig": "{s} {name}({params})", "param": "{s} {n}", "suffix": "", "brace": True,
+              "mut_decl": "{s} {n} = {e};", "loop": "for (int {i} = 0; {i} < {n}; {i}++) {{",
+              "int_promote": "float({i})"},
     "zig_f64": {"scalar": "f64", "decl": "const {n}: {s} = {e};", "typed_decl": True,
                 "sig": "fn {name}({params}) {s}", "param": "{n}: {s}", "suffix": "", "brace": True,
                 "mut_decl": "var {n}: {s} = {e};",
@@ -641,8 +688,45 @@ def _selftest():
     w_loop = emit(octaves, "wgsl")
     assert "for (var i: i32 = 0; i < 4; i = i + 1) {" in w_loop and "f32(i)" in w_loop and "var s = " in w_loop
 
+    # floor / trunc, and the refusals that were measured rather than assumed. fmod is refused
+    # because C's remainder takes the sign of the DIVIDEND and GLSL's `mod` takes the sign of the
+    # DIVISOR -- fmod(-7,3) = -1 against mod = 2 -- so a mapping would compile and be WRONG.
+    # sign/clamp/mix/step are refused because they do not exist in C (nor clamp/mix/step in JS),
+    # and an intrinsic whose availability depends on the dialect defeats a shared table.
+    _floor_src = ("def q(x: float) -> float:\n    r = x * 9.0\n    return r - floor(r)\n")
+    for _d in ("glsl", "wgsl", "c_f32", "js"):
+        assert "floor" in emit_source(_floor_src, _d), "floor must emit in %s" % _d
+    for _bad, _why in (("fmod", "C and GLSL disagree on the remainder's sign"),
+                       ("clamp", "absent from C and JS"),
+                       ("mix", "absent from C and JS"),
+                       ("step", "absent from C and JS")):
+        try:
+            emit_source("def q(x: float) -> float:\n    return %s(x, 2.0)\n" % _bad, "glsl")
+        except EmitError:
+            pass
+        else:
+            raise AssertionError("%s must stay REFUSED: %s" % (_bad, _why))
+
+    # PINNED NEGATIVE FLIPPED, ON PURPOSE. This block used to assert that emit(fn, "glsl") RAISES.
+    # The refusal was right while f32 semantics were an open question; a machine-checked margin bound
+    # (margin > 2*eps => the cleanup argmax cannot move) plus gate precision 1.000 on a real corpus
+    # closed it. GLSL now emits, and the guard becomes a DIFFERENTIAL one: glsl and c_f32 come from the
+    # SAME AST, so glsl must equal the c_f32 arm under a mechanical token map -- if the two ever drift,
+    # one of them grew a hand-written special case, which is the failure this file exists to prevent.
+    g_src = emit(sdf_sphere, "glsl")
+    c_src = emit(sdf_sphere, "c_f32")
+    mapped = c_src
+    for _a, _b in (("sqrtf", "sqrt"), ("fabsf", "abs"), ("sinf", "sin"), ("cosf", "cos"),
+                   ("expf", "exp"), ("logf", "log"), ("fminf", "min"), ("fmaxf", "max"),
+                   ("powf", "pow"), ("(float)", "float")):
+        mapped = mapped.replace(_a, _b)
+    mapped = _re_f_suffix.sub(r"\\1", mapped)
+    assert "float sdf_sphere(float" in g_src, g_src
+    assert mapped == g_src, "glsl drifted from c_f32:\\n%s\\n---\\n%s" % (g_src, mapped)
+
+    # An UNKNOWN dialect must still raise -- that guard was never about glsl specifically.
     try:
-        emit(sdf_sphere, "glsl")
+        emit(sdf_sphere, "hlsl")
     except EmitError:
         pass
     else:

@@ -199,6 +199,17 @@ class _UnifiedPart16:
         curve = measure_memory_mountain(sizes=sizes)
         return curve, detect_tiers(curve)
 
+    def predict_streaming_ms(self, nbytes_touched, tiers):
+        """Predicted wall-clock (ms) for a streaming pass over `nbytes_touched`, from THIS box's
+        MEASURED floor bandwidth (holographic_memorymountain.predict_streaming_ms). `tiers` is the
+        second element of memory_mountain()'s return -- the measurement is the expensive half, the
+        prediction is one division, so they are separate calls on purpose. The fast-arbiter table
+        validated this to ~15%. LLM decode is memory-bandwidth bound, so bytes-per-token IS latency.
+        KEPT NEG: predicts the ROOFLINE, not the run -- it cannot see NUMA, page faults or a noisy
+        neighbour; a large miss is a scheduling bug, not a model error."""
+        from holographic.caching_and_storage.holographic_memorymountain import predict_streaming_ms as _p
+        return _p(nbytes_touched, tiers)
+
     def time_machine(self):
         """The unitary-recurrence toolkit: make_unitary_step (the rule), time_jump (random
         access into time, t may be NEGATIVE -- exact reversal; non-unitary refuses WITH the
@@ -761,6 +772,17 @@ class _UnifiedPart16:
         HONEST ABOUT DIRECTION: nothing here lets Ollama read the leCore format. It lets
         the leCore format be the ARCHIVE and produce a boring checkpoint on demand.
         See holographic_modelstore."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if weights is None:
+            raise ValueError(
+                "unicron_model_store needs weights= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.io_and_interop.holographic_modelstore import (
             save_model, load_model, materialize)
         if materialize_to is not None:
@@ -833,6 +855,175 @@ class _UnifiedPart16:
         if effect_pct is not None:
             m = dict(m, power=tokens_needed(m, effect_pct))
         return m
+
+    def unicron_embed_repair(self, weights, cfg, tokens, targets=None, k=64,
+                             blend=1.0, check=True, min_count=3):
+        """REPAIR UNDER-ESTIMATED EMBEDDING ROWS FROM THE SPELLING OF THEIR TOKENS.
+
+        THE FIRST INSTALL-PATH OPERATION THAT MAKES THE BASE MODEL BETTER. Every other
+        step here ADDS something -- registers, the HRNN ladder, the router, the memory
+        index. This one repairs what is already present: a quarter-million-token
+        vocabulary has a long tail whose rows were estimated from very few occurrences and
+        are noise-dominated, and a token's FORM predicts its meaning well enough to rebuild
+        them.
+
+        HOW, AND WHY NOT THE OBVIOUS WAY. The rebuilt value is NOT the form prediction.
+        Measured across cp111-cp118: form identifies WHICH word at 255x chance but places
+        the vector badly (variance explained -0.112 using the form vector directly). So
+        form SELECTS donors and real in-vocabulary rows -- already on the manifold --
+        supply the value (+0.063, against random donors at -0.015 and shuffled-letter
+        selection at -0.084). The signal is paradigmatic: form predicts what a token IS,
+        not what follows it (rank@1 0.254 vs 0.029 across the two meaning spaces).
+
+        WHEN A ROW IS WORTH REPLACING. A rebuilt row lands at a FIXED quality regardless of
+        how bad the row it replaces was, so repair only wins below a crossover, measured by
+        bisection at cosine 0.507 to truth. Rebuilding a GOOD row makes it worse. That is
+        why `targets` is explicit and there is no sweep-the-table mode: the caller must say
+        which rows it believes are bad, and `embed_repair_candidates` offers only a
+        heuristic for that, clearly labelled.
+
+        SELF-GATING. An install is sequential weight editing, and `unicron_edit_health`
+        exists because that composition is what degrades models. With check=True this runs
+        edit_health over the embedding tensor and REFUSES the edit if the condition number
+        moves the wrong way, returning the untouched weights with `applied=False`.
+
+        tokens: {row_index: token_string} for rows whose spelling is known.
+        targets: row indices to repair. Required -- see the crossover note above.
+        Returns (weights, report). The input weights are never mutated.
+        """
+        import numpy as _np
+        if targets is None:
+            raise ValueError("targets is required: repairing a good row makes it worse "
+                             "(crossover measured at cosine 0.507)")
+        key = [k_ for k_ in weights if k_.endswith("embed_tokens.weight")]
+        if not key:
+            return weights, {"applied": False, "reason": "no embed_tokens.weight"}
+        key = key[0]
+        E = _np.asarray(weights[key])
+        tgt = [int(t) for t in targets if int(t) < E.shape[0]]
+        donors = [(i, s) for i, s in tokens.items()
+                  if int(i) < E.shape[0] and int(i) not in set(tgt) and len(str(s)) >= 3]
+        known = {int(i): str(s) for i, s in tokens.items()}
+        tgt = [t for t in tgt if t in known]
+        if len(donors) < 32 or not tgt:
+            return weights, {"applied": False, "reason": "too few donor rows or targets",
+                             "donors": len(donors), "targets": len(tgt)}
+
+        # Same featurizer as Lexicon.bootstrap_by_form, so the two stay in step (cp118).
+        def _feats(word):
+            t = "<" + word + ">"
+            out = [t[i:i + n] for n in (3, 4, 5) for i in range(len(t) - n + 1)]
+            s = word
+            for p in ("un", "re", "in", "dis", "pre", "con", "com", "de", "ex", "sub",
+                      "inter", "trans", "over", "under", "mis"):
+                if s.startswith(p) and len(s) - len(p) >= 3:
+                    out.append("PRE:" + p)
+                    s = s[len(p):]
+                    break
+            for q in ("ation", "ment", "ness", "ity", "ive", "ous", "able", "less",
+                      "ful", "ing", "ed", "er", "ly", "al", "ic", "s"):
+                if s.endswith(q) and len(s) - len(q) >= 3:
+                    out.append("SUF:" + q)
+                    s = s[:-len(q)]
+                    break
+            out.append("STEM:" + s)
+            return out
+
+        dwords = [w for _, w in donors]
+        counts = {}
+        for w in dwords:
+            for f in set(_feats(w)):
+                counts[f] = counts.get(f, 0) + 1
+        cols = [f for f, c in counts.items() if c >= min_count]
+        if not cols:
+            return weights, {"applied": False, "reason": "no form features survived"}
+        index = {f: j for j, f in enumerate(cols)}
+
+        def _mat(ws):
+            M = _np.zeros((len(ws), len(cols)))
+            for r, w in enumerate(ws):
+                for f in _feats(w):
+                    j = index.get(f)
+                    if j is not None:
+                        M[r, j] = 1.0
+            return M
+
+        Yd = E[[i for i, _ in donors]].astype(_np.float64)
+        Xd = _mat(dwords)
+        A = Xd.T @ Xd
+        lam = 1e-2 * float(_np.trace(A)) / len(cols)
+        B = _np.linalg.solve(A + lam * _np.eye(len(cols)), Xd.T @ Yd)
+        P = _mat([known[t] for t in tgt]) @ B
+        P /= (_np.linalg.norm(P, axis=1, keepdims=True) + 1e-12)
+        Dn = Yd / (_np.linalg.norm(Yd, axis=1, keepdims=True) + 1e-12)
+        sims = P @ Dn.T
+        kk = int(min(k, len(donors)))
+        picks = _np.argsort(sims, axis=1)[:, -kk:]
+
+        E2 = E.copy()
+        for r, t in enumerate(tgt):
+            w = _np.maximum(_np.take(sims[r], picks[r]), 0.0) + 1e-9
+            w /= w.sum()
+            v = (Yd[picks[r]] * w[:, None]).sum(0)
+            v = blend * v + (1.0 - blend) * E[t].astype(_np.float64)
+            n = _np.linalg.norm(v)
+            if n > 1e-12:
+                # preserve the row's original norm: repair the DIRECTION, not the scale
+                v = v * (float(_np.linalg.norm(E[t].astype(_np.float64))) / n)
+                E2[t] = v.astype(E.dtype)
+
+        out = dict(weights)
+        out[key] = E2
+        rep = {"applied": True, "repaired": len(tgt), "donors": len(donors),
+               "features": len(cols), "k": kk, "tensor": key}
+        if check:
+            try:
+                h = self.unicron_edit_health(weights, out, keys=(key,))
+                rep["edit_health"] = h
+                bad = isinstance(h, dict) and (h.get("degrading") is True
+                                               or h.get("ok") is False)
+                if bad:
+                    rep["applied"] = False
+                    rep["reason"] = "edit_health flagged the edit as degrading; reverted"
+                    return weights, rep
+            except Exception as exc:  # a missing checker must not silently pass an edit
+                rep["edit_health_error"] = "%s: %s" % (type(exc).__name__, exc)
+        return out, rep
+
+    def embed_repair_candidates(self, weights, frac=0.05, method="norm"):
+        """A HEURISTIC shortlist of rows that MIGHT be under-estimated. Labelled as such.
+
+        There is no way to know a row's true quality from the weights alone, so this is a
+        proxy and nothing more: `norm` returns the smallest-norm rows, on the reasoning
+        that a row updated few times stays near its initialisation. Verify against real
+        token frequencies whenever they are available, and remember the crossover -- rows
+        that are actually fine will be made worse by repair.
+        """
+        import numpy as _np
+        key = [k for k in weights if k.endswith("embed_tokens.weight")]
+        if not key:
+            return []
+        E = _np.asarray(weights[key[0]], _np.float64)
+        n = max(1, int(frac * E.shape[0]))
+        score = _np.linalg.norm(E, axis=1)
+        return [int(i) for i in _np.argsort(score)[:n]]
+
+    def unicron_interstitial(self, runtime, cfg, sensors=None, bank=None, patches=None,
+                             familiar=0.55, drift=0.35, learn=True):
+        """THE THIN COORDINATION LAYER between the interstitial sensors (cp129).
+
+        Live inside the model and fix it from the inside as it is used, with external memory
+        as the patch. Three sensors, three jobs, never averaged; the route is decided from
+        the SHAPE of the score profile because a single reading cannot tell "this input is
+        new" from "the computation went wrong at depth d". Passive sensors are verified
+        BIT-IDENTICAL (max logit delta 0.000e+00), so the mesh is inert until asked to patch.
+
+        Implementation lives in holographic_interstitial (split out when structure_audit
+        refused another 2000-line monolith).
+        """
+        from holographic.agents_and_reasoning.holographic_interstitial import interstitial
+        return interstitial(runtime, cfg, sensors=sensors, bank=bank, patches=patches,
+                            familiar=familiar, drift=drift, learn=learn)
 
     def unicron_sidecar(self, base_dir, path=None, gain=1.0, merge_to=None,
                         seed="leCore", notes=""):
@@ -972,6 +1163,17 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
         WHAT IT DOES NOT DO: the model does not DECIDE to search -- it computes the address
         on every token because that is what a channel does. Conditional retrieval is
         control flow, and a forward pass has none. See holographic_memsearch."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if runtime is None:
+            raise ValueError(
+                "unicron_memory_search needs runtime= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.agents_and_reasoning.holographic_memsearch import (
             build_index, search, install_index)
         if weights is not None and index is not None:
@@ -1005,6 +1207,18 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
         router was the only missing piece, because everything downstream was already
         built and measured. A router fitted on 18 examples scored 100% train and 61%
         held-out; the accuracy is reported for that reason. See holographic_router."""
+        # SAME `=None` LIE as the rest of the unicron family. Called with
+        # defaults this died as "'NoneType' object is not subscriptable"
+        # inside fit_router -- two modules away from the caller.
+        # NOTE FOR THE NEXT SWEEP: my one-line regex missed this because the
+        # signature WRAPS. A pattern that assumes a def fits on one line will
+        # silently skip every long signature, which is exactly the set most
+        # likely to have this bug.
+        if runtime is None or cfg is None:
+            raise ValueError(
+                "unicron_router needs runtime= and cfg= -- both have None\n"
+                "defaults so they can be passed by keyword, but the router\n"
+                "reads the model layout out of cfg and cannot invent one.")
         from holographic.agents_and_reasoning.holographic_router import (
             fit_router, route, install_routed)
         if weights is not None and operator is not None:
@@ -1134,6 +1348,17 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
         reservation must be ENFORCED -- orthogonalise() projects other keys off it and
         collision() measures the overlap (1.6e-16 after, 0.407 before) rather than
         assuming it. See holographic_keyreserve."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if dim is None:
+            raise ValueError(
+                "unicron_reserve_keys needs dim= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.caching_and_storage.holographic_keyreserve import (
             reserve, orthogonalise, collision)
         if keys is not None and reserved is not None:
@@ -1332,6 +1557,17 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
         THE COST: one operator PER POSITION, so a depth-k reader is k circuits. That is
         the price of leaving the abelian ideal, and the alternative is not a cheaper
         non-commutative bind -- it is not having order at all. See holographic_seqbake."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if dim is None:
+            raise ValueError(
+                "unicron_sequence needs dim= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.io_and_interop.holographic_seqbake import (
             permutation, store_sequence, read_position, unpermute_operator)
         if trace is not None and position is not None:
@@ -1399,6 +1635,17 @@ PROVEN, on our own trained model: unbind and bind agree with the FFT to 1e-10; a
         which hands out an ordinary safetensors directory. This is for leCore's OWN
         trained objects, which are hypervectors and therefore already in the format the
         container was built for. See holographic_modelvault."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if objects is None:
+            raise ValueError(
+                "unicron_model_vault needs objects= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.caching_and_storage.holographic_modelvault import (
             store, recall, store_drift, rebuild_drift, store_registers,
             rebuild_registers)

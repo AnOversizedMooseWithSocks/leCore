@@ -401,16 +401,32 @@ class Index:
         priced, not hidden); tie ORDER follows merge order (deterministic; commutative up to
         ties, like the drift algebra it copies). Returns a NEW Index; inputs untouched. If BOTH
         sides carry the int8 rung it travels by concatenation (per-row facts, zero
-        requantization). LABEL WART, stated: unlabeled sides get LOCAL indices as labels --
-        two unlabeled merges collide on integer keys; label when identities must differ."""
+        requantization). UNLABELLED sides get GLOBAL indices (the right half is offset by
+        len(left)), so labels agree with the _sources spans and a merged hit resolves to the
+        source it actually came from. Labelled sides keep the caller's own labels untouched;
+        if BOTH sides are labelled and the label sets overlap, they still collide -- label
+        distinctly when identities must differ."""
         if self.items.shape[1] != other.items.shape[1]:
             raise ValueError("dim mismatch")
         self._ensure_screens()
         other._ensure_screens()
         out = Index.__new__(Index)
         out.items = np.vstack([self.items, other.items])
+        # GLOBAL indices for unlabelled sides, so labels and _sources share ONE
+        # coordinate system. This used to be `list(range(len(other.items)))` --
+        # LOCAL indices -- and the docstring called it a label wart that makes two
+        # unlabelled merges collide on integer keys. The unstated consequence was
+        # worse: _sources records GLOBAL spans (a: 0-300, b: 300-500) while the
+        # labels stayed local, so a hit from `b` returned 29 and RESOLVING IT
+        # AGAINST THIS INDEX'S OWN PROVENANCE TABLE ATTRIBUTED IT TO `a`. Measured
+        # identically on exact, forest and sphere.
+        # SAFE TO CHANGE, CHECKED: every existing caller labels BOTH sides (three
+        # test call sites and the catalog example, which asserts len(items) only),
+        # so nothing depends on the local form. A labelled side keeps its caller's
+        # labels exactly as before -- this only fills in the default.
         la = self.labels if self.labels is not None else list(range(len(self.items)))
-        lb = other.labels if other.labels is not None else list(range(len(other.items)))
+        lb = (other.labels if other.labels is not None
+              else list(range(len(self.items), len(self.items) + len(other.items))))
         out.labels = list(la) + list(lb)
         out.seed = self.seed
         out.method = "sphere"
@@ -447,6 +463,26 @@ class Index:
             out._dot88 = self._dot88
         return out
 
+    # KEPT NEGATIVE -- nearest_sourced(). Tried and REMOVED.
+    # THE GOAL: merge() states a LABEL WART (unlabeled sides keep LOCAL indices as
+    # labels, so two unlabeled merges collide on integer keys). The consequence it
+    # does NOT state is sharper -- `_sources` records GLOBAL spans (a: 0-300,
+    # b: 300-500) while labels stay LOCAL, so a hit from `b` returns 29 and
+    # RESOLVING IT AGAINST THIS INDEX'S OWN PROVENANCE TABLE ATTRIBUTES IT TO `a`.
+    # Measured identically on exact, forest and sphere.
+    # WHY THE FIX DID NOT WORK: I resolved provenance by treating the returned key
+    # as a POSITION in the merged array. It is not -- nearest() returns the LABEL,
+    # and for an unlabeled side the label is a local index, so the position is
+    # GENUINELY UNRECOVERABLE FROM THE RETURN VALUE. The accessor reported 'a' for
+    # a `b` hit, i.e. it reproduced the bug it existed to fix while looking
+    # authoritative, which is strictly worse than the stated wart.
+    # THE REAL FIX IS IN merge(): give unlabeled sides GLOBAL labels (la + [off+i])
+    # so labels and _sources share one coordinate system. That CHANGES WHAT
+    # nearest() RETURNS for existing callers of merged indexes, so it is a
+    # deliberate breaking change with a migration note -- not an end-of-sweep
+    # addition. Recorded in the plan.
+    # THE WORKAROUND THAT WORKS TODAY: label your sides. merge() honours caller
+    # labels, and the wart only bites unlabeled merges.
     def ablate(self, source):
         """HDRIFT's ablate: remove one merged source WITHOUT rebuild -- its block family and
         item span are sliced out (provenance recorded at merge), every surviving block's
@@ -598,6 +634,22 @@ class Index:
                 "n": take, "ms": ms}
 
     def _resolve_ladder(self, k):
+        # THE LADDER IS A RECALL-BUDGETED SEARCH AND CANNOT RUN WITHOUT A
+        # BUDGET. method="ladder" with no recall_budget compared a float to
+        # None and died with
+        #     TypeError: '>=' not supported between float and NoneType
+        # several frames below the constructor, naming neither the caller nor
+        # the missing argument. The ladder ESCALATES until measured recall
+        # clears a bar; with no bar there is nothing to escalate toward, so this
+        # is a caller error and it should say which one.
+        if self.recall_budget is None:
+            raise ValueError(
+                "method='ladder' needs recall_budget= -- the ladder escalates "
+                "routes (forest beams, then screens probes, then exact) until "
+                "MEASURED recall@k clears a bar, and with no bar there is "
+                "nothing to escalate toward. Try "
+                "build_index(v, method='ladder', recall_budget=0.95), or use "
+                "method='auto' to let the threshold decide.")
         """THE ADAPTIVE ROUTE (method='auto' + recall_budget): measure the fast structures on
         this data at this k -- forest at escalating beams, then screens -- and serve the FASTEST
         whose Wilson LOWER bound meets the budget; exact otherwise. The same contract the budget

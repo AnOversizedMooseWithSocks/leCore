@@ -468,6 +468,25 @@ def write_seeded(A, payload_bits, seed="leCore", rate=0.05, bits=4, group=64):
     return (q * scale).astype(np.asarray(A).dtype), take
 
 
+def wrong_seed_agreement(A_quant, seed="leCore", rate=0.05, wrong=None):
+    """FRACTION of positions where a right-seed read agrees with a wrong-seed
+    read of the same carrier -- THE addressed-channel probe, promoted (dedup
+    sweep 2). ~0.5 means the channel is seed-ADDRESSED (a wrong seed reads
+    noise); ~1.0 means it is merely hidden. The identical read-twice/align/
+    mean body lived as closures in the harden AND install batteries, and the
+    duplication budget's own ripening condition ("unify when a third battery
+    appears") fired when the substrate selftest became the third home. Band
+    judgments (0.35-0.65 etc.) stay AT THE BATTERIES -- the threshold is the
+    battery's verdict, only the measurement is shared. The substrate
+    selftest's want-referenced variant (agreement against the TRUE payload)
+    is a different measurement and deliberately does not delegate."""
+    a, _ = read_seeded(A_quant, seed=seed, rate=rate)
+    b, _ = read_seeded(A_quant, seed=(wrong or str(seed) + "!x"), rate=rate)
+    n = min(len(a), len(b))
+    import numpy as _np
+    return float(_np.mean(a[:n] == b[:n])) if n else 1.0
+
+
 def read_seeded(A_quant, seed="leCore", rate=0.05, bits=4, group=64):
     """Recover bits using ONLY the seed -- no original tensor required."""
     A = np.asarray(A_quant, np.float64)

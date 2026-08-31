@@ -40,14 +40,22 @@ setup(
     long_description_content_type="text/markdown",
     author="AnOversizedMooseWithSocks",
     url="https://github.com/AnOversizedMooseWithSocks/leCore",
-    py_modules=["lecore", "holographic_service"],   # <- top-level: the import-lecore shim + the standalone HTTP service (from holographic_service import serve)
+    py_modules=["lecore", "holographic_service", "holographic_mcp"],   # <- top-level: the import-lecore shim, the
+                                          # standalone HTTP service, and (sweep 115) the stdio MCP server -- it was
+                                          # never in the wheel, so a pip user had no harness door
+    entry_points={"console_scripts": [
+        "lecore-mcp = holographic_mcp:main",             # stdio MCP server (stdlib + numpy only)
+        "lecore-service = holographic_service:main",     # HTTP service ([service] extra for flask)
+    ]},
     packages=engine_packages + ["lecore_data"],   # <- the real holographic/ package tree + the runtime data package
     # The runtime data (the WordNet dictionary, material property JSON) ships as the small `lecore_data` PACKAGE, so
     # it is carried into the wheel and resolves the same from a clone or an install (see lecore_data/__init__.py).
     include_package_data=True,
     package_data={
         "lecore_data": [
-            "knowledge/*",                                  # dictionary.json.xz (lzma), manifest.json, LICENSE_WORDNET.txt
+            "knowledge/*",                                  # dictionary.json.xz (lzma), corpus, manifest, licences
+                                                            # -- 3.4 MB, and it STAYS in the one wheel (sweep 117):
+                                                            # extras can only pull dependencies, not payload
             "definitions/*.md",
             "definitions/native/materials/*.json",
             "definitions/standards/generic_table/*.json",
@@ -96,6 +104,9 @@ setup(
                                           #   rather than one).
         # -- optional tooling --
         "ui":       ["flask", "pillow"],  # the browser UI (app.py) + image load/save
+        "service":  ["flask"],            # the standalone HTTP service (lecore-service)
+        "mcp":      [],                   # the stdio MCP server needs NOTHING beyond the core; named so
+                                          #   `pip install leos-core[mcp]` reads as intent
         "images":   ["pillow"],           # image I/O beyond stdlib PNG (jpg/webp/... via mind.save_render) --
                                           #   pillow without pulling in Flask; a subset of `ui` for headless use
         "dev":      ["pytest", "matplotlib", "nltk"],   # run the test suite, generate the plots, and load the text

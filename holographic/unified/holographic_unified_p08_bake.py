@@ -32,13 +32,20 @@ class _UnifiedPart08:
         from holographic.caching_and_storage.holographic_cachehome import Cache
         return Cache.bake(evaluator, vary=vary, **kw)
 
-    def build_index(self, vectors, labels=None, method="auto", seed=0):
+    def build_index(self, vectors, labels=None, method="auto", seed=0,
+                    recall_budget=None, **kw):
         """CONSOLIDATION INDEX (H1) -- build a nearest-neighbour index over `vectors` with one interface: an exact
         cosine scan for small sets, the sub-linear RP-forest for large ones (chosen by `method='auto'`). The result
         has `.nearest(query, k, abstain=alpha)` -> [(label_or_index, score), ...], with an optional calibrated
         abstain. See holographic_index.Index."""
         from holographic.caching_and_storage.holographic_index import Index
-        return Index(vectors, labels=labels, method=method, seed=seed)
+        # FORWARD THE REST. The wrapper took (vectors, labels, method, seed) and
+        # dropped everything else Index accepts -- so method="ladder" was
+        # UNREACHABLE FROM THE MIND, because the ladder needs recall_budget and
+        # there was no way to pass one. Same shape as register_capability's
+        # dropped consumes/produces: an arm that exists in the module and cannot
+        # be selected through the faculty does not exist.
+        return Index(vectors, labels=labels, method=method, seed=seed, recall_budget=recall_budget, **kw)
 
     def find_capability(self, problem, k=3, accepts=None, produces=None):
         """CONSOLIDATION CATALOG (C1) -- 'search before you build'. Describe a problem in plain English and get the
@@ -345,6 +352,18 @@ class _UnifiedPart08:
                 return r.route(v, k=k)
         return None                                             # no vector, no map, no model -> honest miss
 
+    def prf_rank(self, query, docs, alpha=0.3, top_f=3, top_t=8, k1=1.5, b=0.75, top=None):
+        """PSEUDO-RELEVANCE FEEDBACK re-ranking (Rocchio 1971 / RM3, holographic_bm25.prf_rank): run BM25
+        once, treat the top `top_f` positive-scoring docs AS IF relevant, harvest their best `top_t` terms by
+        count-in-feedback x idf, re-score with the expanded query and interpolate at `alpha` -- a second
+        bounce where the first pass's top docs relight the query. Pure counting, zero learned weights, zero
+        model calls. ALPHA=0 IS BIT-IDENTICAL to bm25_rank (pinned), so it is opt-in by construction.
+        MEASURED (benchmarks/beir phase 8, test-once): NFCorpus nDCG@10 0.3371 -> 0.3442.
+        Returns {"ranked", "expansion", "alpha", "feedback"}.
+        KEPT NEG: cannot rescue gold OUTSIDE the first pass -- feedback docs are the horizon."""
+        from holographic.semantic_router.holographic_bm25 import prf_rank as _prf
+        return _prf(query, docs, alpha=alpha, top_f=top_f, top_t=top_t, k1=k1, b=b, top=top)
+
     def bm25_rank(self, query, docs, k1=1.5, b=0.75, top=None, expand=False):
         """LEXICAL ranking: rank `docs` (list of text strings) by Okapi BM25 against `query` -- exact term
         matching with tf-saturation (k1) and length normalization (b), pure NumPy/stdlib, no model. The
@@ -400,8 +419,13 @@ class _UnifiedPart08:
         """Spread per-module scores ONE hop along the workflow bones: a module whose COLLABORATORS are strongly
         scored gets lifted even if its own text was never matched. The structural complement to dense/BM25 --
         it can surface a module the query has no words in common with. alpha weights propagation vs the seed;
-        alpha=0 returns the seed unchanged. Returns [(module, score)] best-first. KEPT NEG: one hop only --
-        multi-hop re-diffuses toward the smeared io-kind regime.
+        alpha=0 returns the seed unchanged. Returns [(module, score)] best-first. KEPT NEG, REFINED
+        (above/below sweep, measured on the 675-node bones with controls): one hop only. Restart-FREE
+        multi-hop smears exactly as recorded (seed rank 0 -> 153+ by five hops, top-20 jaccard 0.05
+        vs one-hop). Personalized PageRank restart mass (repograph._pagerank teleport=) HOLDS the
+        seeds at rank 0-1, so the smear is a property of restart-free diffusion -- but its fixed
+        point's neighborhood still differs from one-hop's (jaccard 0.21) and no retrieval win is
+        demonstrated, so it stays unwired: a different lens, not a better default.
 
         `graph` (GS-C sweep): pass ANY directed weighted graph to spread scores over something other than the
         module bones (scene-selection growth, encyclopedia priming, any node set with weighted neighbours). Shape
@@ -490,6 +514,14 @@ class _UnifiedPart08:
 
     def composite_layers(self, layers, meta=None, background=None):
         """Composite a layer stack into one image -- the SHARED blend kernel (L-1).
+
+        THE SHAPES, FIRST (three wrong probes' worth of friction, sweep 80): `layers` is a
+        DICT of id -> (H,W,3|4) array; `meta` is a LIST of {'id': ..., 'opacity': 0..1,
+        'blend': mode, 'mask': (H,W)} records in paint order, e.g.
+            out = mind.composite_layers({'bg': bg, 'fg': fg},
+                                        meta=[{'id': 'bg'},
+                                              {'id': 'fg', 'blend': 'screen',
+                                               'opacity': 0.55, 'mask': mask}])
         Compositing is the one operation every image-consuming app must perform IDENTICALLY, and it existed only
         inside leStudio: ten modes in that app's own __init__.py, nothing in the engine. Any second app reading a
         shared workspace had to re-implement all ten plus the alpha-over loop, and TWO COPIES OF THE SAME MATHS
@@ -1011,6 +1043,72 @@ class _UnifiedPart08:
         from holographic.scene_and_pipeline.holographic_pipecompile import run_compiled
         return run_compiled(cfg, scene=scene, seed=seed, prev_frame=prev_frame, renderer=renderer,
                             registry=registry, options=options, cache=cache)
+
+    def perfect_recall_index(self, filter_bits=2048, k=4, tile=512, tile_bits=1 << 16):
+        """EXACT-containment index with GUARANTEED perfect recall at any corpus size (time is the only
+        scaling cost): per-doc sparse binary superposition filters (a Bloom filter is the simplest
+        computing-in-superposition, Kleyko et al. 2020/2022 -- structurally ZERO false negatives) under
+        OR-baked tile probes (irradiance-map cull; probes have their OWN resolution, a measured
+        saturation negative), with every candidate exactly verified against sha256 term-hash sets (the
+        depth test -- ZERO false positives). idx.add({'token': [...], 'trigram': [...]}) per doc;
+        idx.query(terms, channel) returns EXACTLY the ground-truth AND-containment set, multi-channel,
+        no BM25 anywhere. KEPT NEG: containment is not relevance ranking; a ubiquitous term degenerates
+        toward the O(N) verify scan -- 'no limit but time', literally. See
+        holographic_perfectrecall.PerfectRecallIndex."""
+        from holographic.caching_and_storage.holographic_perfectrecall import PerfectRecallIndex
+        return PerfectRecallIndex(filter_bits=filter_bits, k=k, tile=tile, tile_bits=tile_bits)
+
+    def guard_candidates(self, ranked, query_terms, index, budget=500, channel="token"):
+        """RECALL GUARD: union a ranked candidate list with exact-containment TIERS from a
+        perfect_recall_index (all-m-terms first, then m-1, ...) until `budget` fills -- returns
+        (candidates, certificate) where the certificate states the coordination level down to which
+        completeness is a GUARANTEE ('every doc sharing >= c query terms is present'), verified
+        exhaustively in the module selftest. The ranked head is preserved untouched (the beauty pass;
+        the guard is the coverage pass under it). MEASURED on real NFCorpus vs BM25 top-200: reachable
+        relevant misses 1165 -> 732 at budget 1000; Recall@1000 0.278 -> 0.311. KEPT NEG: guards only
+        lexically-reachable docs (zero-shared-term relevance needs the semantics arm); low tiers on
+        common terms may exceed budget -- the certificate then admits less rather than lying; ranking
+        quality inside the list is unchanged by design. See holographic_recallguard.guard_candidates."""
+        from holographic.semantic_router.holographic_recallguard import guard_candidates as _g
+        return _g(ranked, query_terms, index, budget=budget, channel=channel)
+
+    def corpus_gate(self, query, docs, k=5, tau=0.25):
+        """The PRE-PAYMENT gate, wire-shaped: run the adaptive retrieval cascade over a bound
+        corpus's chunks and return one flat dict a gateway can act on BEFORE quoting money --
+        {"answerable": bool, "stage", "margin", "ranked", "advice"}. answerable=False means the
+        cascade CERTIFIED the corpus cannot support this ask (honest abstain, not a low score),
+        so a proxy can refuse pre-402 (the 404-before-402 pattern one layer up) or downgrade to
+        its cheapest model and say so in the receipt. Delegates to retrieval_dispatch -- the
+        same cascade openzoo ported to JS -- so the verdict and the retrieval never disagree.
+        WHY NOT retrieval_verdict: measured live, verdict returns mode='answer' at top_score 0.0
+        on a fully off-topic ask (its containment logic assumes an in-domain query), which is a
+        FALSE-ACTION shape for a payment gate; dispatch abstains there, so dispatch is the gate.
+        KEPT NEG: an abstain says the CORPUS cannot answer -- the model still might, from its
+        own knowledge; gate the corpus-grounded price tier, never the model's existence."""
+        d = self.retrieval_dispatch(query, docs, k=k, tau=tau)
+        abstained = (d.get("stage") == "abstain")
+        return {"answerable": not abstained, "stage": d.get("stage"),
+                "margin": float(d.get("margin", 0.0)),
+                "ranked": [[int(i), float(s)] for i, s in d.get("ranked", [])],
+                "advice": ("refuse_or_downgrade: cascade certified the corpus cannot support "
+                           "this ask" if abstained else
+                           "forward: corpus-grounded answer available")}
+
+    def retrieval_dispatch(self, query, docs, dense_scores=None, k=5, tau=0.25, shortlist=32):
+        """ADAPTIVE retrieval cascade -- the render-strategy dispatcher pointed at search: exact-phrase
+        short-circuit (perfect recall, cost ~0) -> dense arm gated on the top-1/top-2 margin (stop when the
+        answer is PROVEN, like adaptive path tracing) -> BM25 as a LAST-PASS denoise fit over the dense
+        shortlist ONLY (O(shortlist), never the corpus) fused dense-dominant by RRF -> honest abstain when
+        both arms are flat. This replaces the run-both-arms-always hybrid: BM25 runs only when the dense
+        margin is narrow, and then only over the ambiguous window. Pass dense_scores from route_semantic /
+        find_capability; None uses a token-overlap fallback. tau=1.0 forces refine always (the old behavior);
+        tau=0.0 never refines. Returns {'ranked','stage','margin','shortlist_size'}. KEPT NEG: refine cannot
+        rescue gold OUTSIDE the shortlist (widen shortlist, not the lexical weight), and a confidently-wrong
+        dense top-1 passes the gate un-refined (lower tau where wrongness is costly). See
+        holographic_retrievaldispatch.dispatch_retrieval."""
+        from holographic.semantic_router.holographic_retrievaldispatch import dispatch_retrieval
+        return dispatch_retrieval(query, list(docs), dense_scores=dense_scores, k=k, tau=tau,
+                                  shortlist=shortlist)
 
     def bake_view_lut(self, metallic=1.0, base_color=(1.0, 1.0, 1.0), res_view=16, res_rough=16, samples=8192, seed=0):
         """Pre-integrate the view-DEPENDENT specular (MC3): bake directional_albedo over a (view_cos, roughness)

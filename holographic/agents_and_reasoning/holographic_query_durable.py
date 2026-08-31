@@ -64,6 +64,17 @@ class Journal:
     def log_update(self, qualified, where, changes):
         self._append({"op": "update", "table": qualified, "where": where, "changes": changes})
 
+    def log_create_table(self, qualified, columns):
+        """A SCHEMA CHANGE IS A WRITE. Without this, a table created after the
+        snapshot exists only in the live database: replay reaches its first row,
+        calls db.resolve(...) and the whole recovery dies with
+            QueryError: no such table 'a.u'
+        -- so one unjournalled CREATE TABLE loses EVERY later operation, not just
+        that table's. Louder than the silent divergence a partial journal gave,
+        and just as total."""
+        self._append({"op": "create_table", "table": qualified,
+                      "columns": list(columns)})
+
     def log_delete(self, qualified, where):
         self._append({"op": "delete", "table": qualified, "where": where})
 
@@ -87,6 +98,18 @@ class Journal:
     def replay(self, db):
         """Re-apply every logged operation to `db`, in order -- the recovery step after loading a snapshot."""
         for e in self.entries():
+            # CREATE FIRST, RESOLVE SECOND. resolve() on a table this entry is
+            # about to create would raise, so the schema op is handled BEFORE the
+            # lookup every data op needs.
+            if e["op"] == "create_table":
+                try:
+                    ns = e["table"].split(".")[0]
+                    if ns not in db.namespaces:
+                        db.create_namespace(ns)
+                    db.create_table(e["table"], e["columns"])
+                except Exception:
+                    pass          # already present: replaying onto a newer snapshot
+                continue
             tbl = db.resolve(e["table"])
             if e["op"] == "insert":
                 tbl.insert(e["row"])

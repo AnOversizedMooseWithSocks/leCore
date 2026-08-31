@@ -1,17 +1,43 @@
 {
-  "name": "WordNet English dictionary + taxonomy",
-  "entries": 144478,
+  "compression": "lzma (xz), preset 9",
+  "corpus.txt.xz": {
+    "builder": "tools/build_corpus.py (deterministic; no RNG)",
+    "bytes_compressed": 123156,
+    "bytes_decompressed": 420240,
+    "layers": [
+      "relations",
+      "order",
+      "syntax",
+      "math",
+      "planning",
+      "semantics"
+    ],
+    "raw_chars": 420240,
+    "sha256": "2b1b43680f90fa96ff1712540c9c88b4d000f47994070e346edcb5d026bbbea1",
+    "sources": [
+      {
+        "license": "PUBLIC DOMAIN (US, pre-1929)",
+        "source": "Webster's Unabridged Dictionary 1913"
+      },
+      {
+        "license": "PSF License Agreement",
+        "license_file": "LICENSE_PYTHON.txt",
+        "source": "Python documentation"
+      }
+    ]
+  },
+  "entries": 144539,
   "fields": {
     "d": "definition",
-    "p": "part of speech",
-    "s": "synonyms",
     "e": "example",
-    "h": "is_a (hypernym)"
+    "h": "is_a (hypernym)",
+    "p": "part of speech",
+    "s": "synonyms"
   },
-  "source": "Princeton WordNet 3.0 via NLTK",
-  "license": "WordNet License (free use with attribution)",
   "file": "dictionary.json.xz",
   "format": "gzip-compressed JSON, word -> entry",
-  "compression": "lzma (xz), preset 9",
-  "size_bytes": 3256896
+  "license": "WordNet License (free use with attribution)",
+  "name": "WordNet English dictionary + taxonomy",
+  "size_bytes": 3256896,
+  "source": "Princeton WordNet 3.0 via NLTK"
 }

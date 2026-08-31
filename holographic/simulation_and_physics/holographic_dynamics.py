@@ -1,4 +1,7 @@
-"""Propagator binding -- dynamics as an algebra of binds.
+"""Guess where a moving thing goes next -- learn the step operator of an evolving state and
+predict its future positions (dynamics as an algebra of binds).
+
+Propagator binding -- dynamics as an algebra of binds.
 
 WHY THIS EXISTS
 ---------------

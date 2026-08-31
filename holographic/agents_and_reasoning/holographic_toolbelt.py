@@ -98,6 +98,26 @@ class ToolbeltResident:
 
     # ---- use ----
 
+    def describe(self, query, k=3):
+        """THE MISSING HALF OF DISCOVERY (cp83): invoke(query) with no args
+        could only call zero-arg capabilities and its failure named nothing --
+        a caller inside the pack had no way to learn what arguments the routed
+        tool wanted. describe() returns the top-k routed candidates with their
+        SIGNATURES and docstring heads, so the caller's next invoke can carry
+        args. Same router, same whitelist, read-only."""
+        import inspect
+        out = []
+        for name, fn in self.candidates(query):
+            if len(out) >= int(k):
+                break
+            try:
+                sig = str(inspect.signature(fn))
+            except (TypeError, ValueError):
+                sig = "(...)"
+            doc = " ".join((fn.__doc__ or "").split())[:140]
+            out.append({"capability": name, "signature": sig, "doc": doc})
+        return {"query": query, "candidates": out}
+
     def invoke(self, query, args=None):
         """Run the best whitelisted capability for `query`. Returns a record
         with the name, the arguments and the result -- provenance first, because
@@ -118,9 +138,13 @@ class ToolbeltResident:
                    "args": dict(args or {}), "result": result}
             self.log.append(rec)
             return rec
+        # ACTIONABLE FAILURE (cp83): name the best candidate and its signature
+        # so the caller can retry with args instead of guessing in the dark.
+        hint = self.describe(query, k=1)["candidates"]
         self.log.append({"query": query, "ok": False,
                          "why": "no whitelisted capability could be called "
-                                "without arguments"})
+                                "without arguments",
+                         "try": hint[0] if hint else None})
         return self.log[-1]
 
     def encode(self, result):

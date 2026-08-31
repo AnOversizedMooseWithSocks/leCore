@@ -24,6 +24,70 @@
 
 ---
 
+
+
+> **Lost in the docs?** [docs/INDEX.md](docs/INDEX.md) maps everything by audience in
+> one page. New features with one copy-paste example each: [docs/WHATS_NEW.md](docs/WHATS_NEW.md).
+> Operating a hosted deployment: [docs/OPENZOO_OPERATIONS.md](docs/OPENZOO_OPERATIONS.md).
+
+## Measured, not promised
+
+Every headline claim below is a number produced by a harness in this repository.
+Run the command; get the number. (Deterministic: `PYTHONHASHSEED=0`, seed-pinned.)
+
+| Claim | Number | Verify |
+|---|---|---|
+| Long-horizon memory (LongMemEval-protocol: temporal, updates, abstention, multi-session) | **1.000** across all six categories, six seeds, **no LLM attached** | `python3 tools/bench_longmem.py` |
+| Grounded answering | 0.75 hit rate at **1.00 answer quality**, 0.25 *honest* escalation | `python3 tools/bench_ladder.py` |
+| Memory-first speed | **97× faster** than generating (3.5 ms serve vs 340 ms, 8-token gen) | speed-tier harness, `docs/OPENZOO_INTEGRATION.md` §8 |
+| In-model fact install, preservation (AlphaEdit, ICLR'25) | preserved-key perturbation **0.1014 → 2.69e-09** (float32 floor) | `python3 tools/unicron_install.py MODEL OUT --plan` |
+| Exact uninstall | max weight delta after revert **3.7e-09** | cartridge `--revert` |
+| Wiring health | 12 organ groups, **0 import failures**, 20-capability × 5-layer exposure matrix, 0 unintended gaps | `python3 tools/swarm_audit.py` |
+| CI discipline | ten generated-doc/wiring/catalog gates + full test suite, all green per checkpoint | `.github/workflows/ci.yml` |
+
+Failed experiments are **kept and documented**, not deleted — see
+[docs/ABLATIONS.md](docs/ABLATIONS.md). A project that hides its negatives is
+advertising; this one shows the capacity cliffs, the dead trading signals, and the
+nulls that flattered, with the numbers that caught them.
+
+## Try it in 60 seconds
+
+**The chat** (no model required — the substrate answers from memory with provenance):
+
+    run.bat            # Windows          ./run.sh   # macOS / Linux
+    # -> http://127.0.0.1:7860 ; say "commands" for everything it understands
+
+**Python** (one call, both ends, external memory loaded):
+
+    import lecore
+    m = lecore.autoboot()          # doctrine + memory + model rung when present
+    m.teach("what is our refund policy", "30 days")
+    m.ask("what is our refund policy")     # served with provenance "taught"
+    m.tool_find("scan a signal for structure")   # contextual discovery
+
+**Where that memory lives, and how to keep your own.** `autoboot()` mounts a
+*partition* — a directory holding `learning/state.lecore`, a zip container of
+eleven sections (taught pairs, an affinity table, chains, a predictor, a query
+ledger). It is picked in this order: the `partition=` argument, then
+`$LECORE_PARTITION`, then `./lecore_memory`, then the shipped `release_bundle/`.
+`m._autoboot_report` tells you which one you got, plus the POST line.
+
+    m = lecore.autoboot(partition="~/my_memory")   # your own, created on save
+    m.teach("the deploy host", "shipyard-3")
+    m.learning_save("~/my_memory")                 # write it back
+
+    # a later process, a different day
+    m = lecore.autoboot(partition="~/my_memory")
+    m.ask("the deploy host")        # -> tier T0, provenance "taught"
+
+`learning_load(root)` and `learning_save(root)` are the whole external-memory
+API; `autoboot` just calls the first one for you. Pass `llm=None` to boot the
+memory end alone, or `memory=False` to start clean.
+
+Attach any model with `m.attach_runtime(model_dir)` (automatic source attribution,
+opt-out honored) or any `prompt -> text` callable via `m.zoo_attach(fn)` — the
+contract never changes: taught beats model, provenance always visible, vetoes stick.
+
 ## What is this?
 
 Most software uses a *different* tool for every job: a database for memory, a mesh for 3-D, a solver for physics, a neural net for perception. They don't share much, so gluing them together is most of the work.
@@ -386,6 +450,9 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 - **[`SERVICE.md`](SERVICE.md)** — the **standalone HTTP service**: every endpoint (data store, jobs, and the
   agent-facing skills API) with `curl` examples, for driving leCore as an app rather than a library.
 - **[`GALLERY.md`](GALLERY.md)** — a **visual showcase**: renders, procedural patterns, memory/reconstruction demos, and performance charts, straight from the engine's tests (the visual companion to the code reference).
+- **[`docs/GLSL_GUIDE.md`](docs/GLSL_GUIDE.md)** — **building with leCoreGLSL**: an interactive field demo, the ten verified
+  shader kernels, the three shader shapes, what the GPU is measurably good and bad at here, and
+  what you can build (games and simulation: yes; retrieval: no; VR: untested and labelled so).
 - **[`writing_vsa_programs.md`](writing_vsa_programs.md)** — the **VSA program writing guide**: how to express
   your own logic as a holographic program on `HoloMachine`, the small stored-program machine, without baking it
   into the core. Read this when you want to run custom logic over the vector algebra.

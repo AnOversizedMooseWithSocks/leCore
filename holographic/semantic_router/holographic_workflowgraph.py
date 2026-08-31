@@ -50,7 +50,11 @@ _REF = re.compile(r"holographic_([a-z0-9_]+)")
 # UnifiedMind is ONE class assembled from mixin parts in holographic/unified/ by
 # holographic/misc/holographic_unified.py. On disk that is 13 files; as a REFERENCING ENTITY it is one
 # module, and this pattern is what folds them back before any counting happens.
-_PART_OF_UNIFIED = re.compile(r"^unified_p\d\d_")
+# sweep 114 widened the pattern: parts split AGAIN carry a letter suffix
+# (unified_p03b_denoise, p09b_scene_verbs, p20b_transfer). A pattern that only knew
+# two digits let those survive as their own nodes -- the facade-split bug a third
+# time, caught by test_workflowgraph_parts. \d\d[a-z]? folds every part shape.
+_PART_OF_UNIFIED = re.compile(r"^unified_p\d\d[a-z]?_")
 # THE SAME BUG, A SECOND TIME, AND CAUGHT THE SAME WAY. Splitting holographic_catalog into six parts (it had
 # reached 81% of the 1 MB agent-read cap) did to `catalog` exactly what the UnifiedMind split did to
 # `unified`: the facade's out-degree collapsed below the 15% hub threshold, so it STOPPED being dropped as a

@@ -437,17 +437,35 @@ def _repair_step(orig_dir, assim_dir, workdir):
     from holographic.io_and_interop.holographic_gdnruntime import load_runtime
     _rt, _c = load_runtime(orig_dir, lazy=True)
     ids = _probe_ids(orig_dir, None, _rt, minimum=32)
-    out_dir = os.path.join(workdir, "repaired")
+    # REPAIR IN PLACE (cp96, the user's design point): a pipeline that mints a
+    # third 3.4 GB model to hold a better version of the second one is not
+    # repairing, it is hoarding. The staging dir exists only long enough for
+    # repair_regressions to finish; when the repair wins, its model file
+    # atomically REPLACES the assimilated one (os.replace: complete file or no
+    # change, same guarantee the installer uses) and the staging dir is
+    # removed. work/ holds exactly: original, assimilated (its best self),
+    # galvatron.
+    stage = os.path.join(workdir, "repaired.staging")
     print("\n[repair] testing every changed tensor against the original "
           "(%d probe tokens) ..." % len(ids))
-    _w, rep = repair_regressions(orig_dir, assim_dir, ids, out_dir=out_dir)
+    _w, rep = repair_regressions(orig_dir, assim_dir, ids, out_dir=stage)
     print("      changed %d | reverted %d, blended %d, kept %d"
           % (rep["changed"], rep["reverted"], rep["blended"], rep["kept"]))
     print("      original %.4f | assimilated %.4f | REPAIRED %.4f"
           % (rep["perplexity_original"], rep["perplexity_assimilated"],
              rep["perplexity_repaired"]))
     print("      beats the original: %s" % rep["beats_original"])
-    return out_dir if rep["beats_original"] else assim_dir
+    import shutil as _sh
+    try:
+        if rep["beats_original"]:
+            _st = os.path.join(stage, "model.safetensors")
+            if os.path.exists(_st):
+                os.replace(_st, os.path.join(assim_dir, "model.safetensors"))
+                print("      repaired weights folded into %s (in place, "
+                      "atomic)" % assim_dir)
+    finally:
+        _sh.rmtree(stage, ignore_errors=True)
+    return assim_dir
 
 
 def _requantize_step(model_dir, workdir, budget):

@@ -100,6 +100,113 @@ class Lexicon:
         self.meaning = {w: V[w] / (np.linalg.norm(V[w]) + 1e-12) for w in self.words}
         return self
 
+    def bootstrap_by_form(self, k=64, targets=None, min_count=3):
+        """Give a meaning to words the DEFINITION GRAPH CANNOT REACH, using their spelling.
+
+        `bootstrap` leaves a word with no definition sitting at its random identity vector,
+        which is the correct conservative choice and also means such words carry no meaning
+        at all. Most real lexicons are full of them: inflected forms, compounds, technical
+        coinages and anything the dictionary happens not to define.
+
+        A word's FORM predicts its meaning well enough to fix that. Measured (cp111-cp117):
+        a held-out word's meaning is identified from its letters alone at 255x chance, and
+        131x chance for words below the corpus frequency floor. Critically, the form
+        prediction is used to SELECT donors, not as the meaning itself -- form identifies
+        WHICH word far better than WHERE its vector sits, so the value comes from real
+        meaning vectors that already lie on the manifold (variance explained -0.112 for the
+        raw form vector against +0.063 for donor combination, with random donors at -0.015).
+
+        WHY THIS BELONGS ON THE PARADIGMATIC SIDE. `holographic_meaning_predict` established
+        that co-occurrence meaning answers "what follows" and dictionary meaning answers
+        "what IS this". Form prediction was measured against both spaces (cp118) and is
+        overwhelmingly a paradigmatic signal: rank@1 0.254 and median rank 20 against the
+        dictionary-style space, versus 0.029 and median rank 272 against the co-occurrence
+        space -- 8.8x. Spelling tells you what a word IS, which is exactly this class's job.
+
+        HOW MUCH THIS ACTUALLY BUYS -- measured, so it is not oversold. With definitions
+        deleted for 700 of 5,628 words and the module's own `separation` d-prime as the
+        metric, over held-out words that share definition partners:
+
+            unreachable words, bootstrap only     d' = +0.115
+            after bootstrap_by_form()             d' = +0.250
+            ceiling: definitions never deleted    d' = +5.590
+
+        So form filling roughly DOUBLES the relational structure of a word the graph cannot
+        reach, and recovers about 2% of the way to actually having a definition. It is a
+        FALLBACK for undefined words, not a substitute for defining them. Use it to stop
+        unreachable words from sitting at pure noise; do not use it where a definition is
+        available.
+
+        targets: words to fill (default: every word whose definition list is empty).
+        Returns self; only the target words are modified.
+        """
+        donors = [w for w in self.words if self.defs[w]]
+        if targets is None:
+            targets = [w for w in self.words if not self.defs[w]]
+        targets = [w for w in targets if w in self._wset]
+        if not donors or not targets:
+            return self
+
+        def feats(word):
+            t = "<" + word + ">"
+            out = [t[i:i + n] for n in (3, 4, 5) for i in range(len(t) - n + 1)]
+            s = word
+            for p in ("un", "re", "in", "dis", "pre", "con", "com", "de", "ex", "sub",
+                      "inter", "trans", "over", "under", "mis"):
+                if s.startswith(p) and len(s) - len(p) >= 3:
+                    out.append("PRE:" + p)
+                    s = s[len(p):]
+                    break
+            for q in ("ation", "ment", "ness", "ity", "ive", "ous", "able", "less", "ful",
+                      "ing", "ed", "er", "ly", "al", "ic", "s"):
+                if s.endswith(q) and len(s) - len(q) >= 3:
+                    out.append("SUF:" + q)
+                    s = s[:-len(q)]
+                    break
+            out.append("STEM:" + s)
+            return out
+
+        counts = {}
+        for w in donors:
+            for f in set(feats(w)):
+                counts[f] = counts.get(f, 0) + 1
+        cols = [f for f, c in counts.items() if c >= min_count]
+        if not cols:
+            return self
+        index = {f: i for i, f in enumerate(cols)}
+
+        def matrix(ws):
+            M = np.zeros((len(ws), len(cols)))
+            for r, w in enumerate(ws):
+                for f in feats(w):
+                    j = index.get(f)
+                    if j is not None:
+                        M[r, j] = 1.0
+            return M
+
+        Xd = matrix(donors)
+        Yd = np.stack([self.meaning[w] for w in donors])
+        A = Xd.T @ Xd
+        lam = 1e-2 * float(np.trace(A)) / len(cols)
+        B = np.linalg.solve(A + lam * np.eye(len(cols)), Xd.T @ Yd)
+
+        P = matrix(targets) @ B
+        P = P / (np.linalg.norm(P, axis=1, keepdims=True) + 1e-12)
+        Dn = Yd / (np.linalg.norm(Yd, axis=1, keepdims=True) + 1e-12)
+        sims = P @ Dn.T
+        kk = int(min(k, len(donors)))
+        picks = np.argsort(sims, axis=1)[:, -kk:]
+        out = dict(self.meaning)
+        for r, w in enumerate(targets):
+            wt = np.maximum(np.take(sims[r], picks[r]), 0.0) + 1e-9
+            wt = wt / wt.sum()
+            v = (Yd[picks[r]] * wt[:, None]).sum(0)
+            n = np.linalg.norm(v)
+            if n > 1e-12:
+                out[w] = v / n
+        self.meaning = out
+        return self
+
     def similarity(self, a, b):
         return float(cosine(self.meaning[a], self.meaning[b]))
 

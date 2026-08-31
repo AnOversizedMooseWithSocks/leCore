@@ -269,6 +269,8 @@ class OuroborosResident:
         self.Pv = _projector(hidden_dim, dk, tag + "_v")
         self.S = np.zeros((dk, dk))
         self.n_writes = 0
+        self.n_stream = 0                               # cp46: writes from the hook
+        self.n_external = 0                             # cp46: writes from the mouth
         self._partition = partition                     # a KnowledgeStore, or None
 
     # -- the stream side (passive) --
@@ -279,6 +281,7 @@ class OuroborosResident:
             nk, nv = np.linalg.norm(k) or 1.0, np.linalg.norm(v) or 1.0
             self.S = self.decay * self.S + np.outer(k / nk, v / nv)
             self.n_writes += 1
+            self.n_stream += 1
         return np.zeros_like(h)
 
     # -- the mouth (measured verbs) --
@@ -287,6 +290,7 @@ class OuroborosResident:
         self.S = self.S + np.outer(k / (np.linalg.norm(k) or 1.0),
                                    v / (np.linalg.norm(v) or 1.0))
         self.n_writes += 1
+        self.n_external += 1
         if note and self._partition is not None:
             self._partition.add(str(note), kind="note", source="ouroboros")
         return True
@@ -303,12 +307,57 @@ class OuroborosResident:
 
     def capacity_report(self):
         """Predicted recall of a fresh memory from the crosstalk law -- effective load from
-        the decay-weighted write count, so the manager warns BEFORE the trace confabulates."""
-        n_eff = (1.0 - self.decay ** (2 * max(self.n_writes, 1))) / (1.0 - self.decay ** 2)
+        the decay-weighted write count.
+
+        KEPT NEGATIVE (cp46, the full-stack battery, and it QUALIFIES the cp45 claim that
+        "the manager knows saturation before it confabulates"): that is true only in a
+        HOMOGENEOUS trace. When the model's own forward passes accumulate a STREAM
+        BACKGROUND and facts are written on top, this prediction is an OPTIMISTIC UPPER
+        BOUND for those facts, and it does not notice: measured on a real baked model,
+        externally-written facts recalled at 0.923 / 0.753 / 0.424 against predictions of
+        0.938 / 0.886 / 0.852 for 0 / 3 / 40 background passes -- a gap of 0.43 while
+        `saturating` still read False. The resident CANNOT detect this from S alone,
+        because it stores the trace and not the keys. So it now reports the REGIME and
+        says plainly that mixed means upper-bound; verify_recall() is the ground-truth
+        path when it matters."""
+        # cp45 (the ouroboros battery found it): decay=1.0 is a LEGITIMATE config -- a
+        # trace with no forgetting -- and the geometric-series form divides by zero there.
+        # The limit is exact and obvious: with no decay every write counts once, so
+        # n_eff = n_writes. Guarding here keeps capacity_report honest at both extremes.
+        if abs(1.0 - self.decay ** 2) < 1e-12:
+            n_eff = float(max(self.n_writes, 1))
+        else:
+            n_eff = (1.0 - self.decay ** (2 * max(self.n_writes, 1))) / (1.0 - self.decay ** 2)
         pred = 1.0 / np.sqrt(1.0 + max(n_eff - 1.0, 0.0) / self.dk)
+        mixed = self.n_stream > 0 and self.n_external > 0
         return {"n_writes": self.n_writes, "n_effective": float(n_eff),
                 "predicted_recall": float(pred),
-                "saturating": bool(pred < 0.5)}
+                "saturating": bool(pred < 0.5),
+                "n_stream": self.n_stream, "n_external": self.n_external,
+                "regime": "mixed" if mixed else "homogeneous",
+                "prediction_is_upper_bound": bool(mixed),
+                "advice": ("stream background present -- predicted_recall is an UPPER "
+                           "BOUND for externally written facts; call verify_recall(pairs) "
+                           "for ground truth") if mixed else "prediction is calibrated"}
+
+    def verify_recall(self, pairs):
+        """GROUND TRUTH, because a prediction that cannot see its own regime must not be
+        the last word (cp46). Returns the MEASURED mean readback cosine over caller-owned
+        (key, value) pairs plus the gap against the prediction."""
+        if not pairs:
+            return {"measured_recall": None, "n": 0}
+        sims = []
+        for k, v in pairs:
+            r = self.external_read(k)
+            nv = np.asarray(v, np.float64)
+            sims.append(float(np.dot(r / (np.linalg.norm(r) or 1.0),
+                                     nv / (np.linalg.norm(nv) or 1.0))))
+        meas = float(np.mean(sims))
+        cap = self.capacity_report()
+        return {"measured_recall": meas, "n": len(pairs),
+                "predicted_recall": cap["predicted_recall"],
+                "gap": float(cap["predicted_recall"] - meas),
+                "regime": cap["regime"]}
 
     def consolidate(self, pairs, gain=0.6):
         """Transcript-sourced rehearsal ONLY: pairs = [(key, value), ...] from ground truth
@@ -334,6 +383,48 @@ class Galvatron:
     loop so residual residents (hooks) and logit residents (guards) both apply.
     Residents compose in list order; the composed stack is what the selftest
     certifies, not the residents in isolation."""
+
+    def teach(self, title, text, author="user"):
+        """LIVE TEACH ON A RUNNING PACK (cp83, coverage item 4): find the
+        memory-carrying resident and write a note into its database while
+        serving -- the database resident was built writable ("A Galvatron with
+        a corpus frozen at build time cannot LEARN"); this is the door. Returns
+        {taught, resident} or an honest miss when no memory resident is loaded."""
+        for r in self.residents:
+            db = getattr(r, "db", None) or getattr(r, "memory", None)
+            if db is not None and hasattr(db, "note"):
+                # THE DRIFT SENTINEL RIDES LIVE TEACH (cp85): a note that
+                # contradicts what the pack already holds is stored but FLAGGED
+                # -- the same advisory contract as the engine's teach_check;
+                # silent contradiction is how a memory drifts.
+                warn = None
+                try:
+                    prior = self.ask(str(title))
+                    if prior.get("answer") and \
+                            str(prior["answer"]).strip() != str(text).strip():
+                        warn = ("conflicts with existing pack answer: %r"
+                                % str(prior["answer"])[:80])
+                except Exception:
+                    pass
+                db.note(str(title), str(text), author=str(author))
+                out = {"taught": True, "resident": type(r).__name__}
+                if warn:
+                    out["drift_warning"] = warn
+                return out
+        return {"taught": False, "why": "no memory resident in this pack"}
+
+    def veto(self, token_ids):
+        """LIVE VETO ON A RUNNING PACK (cp83): extend the ward's banned set at
+        serve time -- vetoes are the part of leCore that must never wait for a
+        rebuild. Returns the new banned count or an honest miss."""
+        import numpy as _np
+        ids = sorted(set(int(t) for t in token_ids))
+        for r in list(getattr(self, "guards", ())) + list(self.residents):
+            if hasattr(r, "banned") and hasattr(r, "guard"):
+                r.banned = _np.asarray(
+                    sorted(set(r.banned.tolist()) | set(ids)), _np.int64)
+                return {"vetoed": len(ids), "banned_total": int(r.banned.size)}
+        return {"vetoed": 0, "why": "no ward resident in this pack"}
 
     def __init__(self, runtime, residents=(), guards=()):
         self.rt = runtime
@@ -361,6 +452,93 @@ class Galvatron:
         for g in self.guards:
             logits = g.guard(logits)
         return logits
+
+    def post_check(self, healthy_path=None, rel_threshold=0.7):
+        """DRIFT DETECTION AT SERVE TIME (cp85): run the POST probe ids through
+        the CURRENT runtime and compare hidden states against the model's own
+        HEALTHY BASELINE (galvatron_profile.npz: 39 probes + healthy hiddens,
+        written at install). The trigger is RELATIVE -- the selfheal lesson,
+        measured: at 90,000 interfering writes an absolute 0.35 threshold called
+        a collapsing register file fine while the relative check caught it.
+        Returns {margin, healthy_margin, ratio, drifted}. When drifted, the
+        serving policy is the caller's -- ask() below refuses the model arm."""
+        import numpy as np
+        import os
+        path = healthy_path
+        if path is None:
+            md = getattr(self.rt, "model_dir", None) or ""
+            for cand in (os.path.join(md, "galvatron_profile.npz"),
+                         "galvatron_profile.npz"):
+                if os.path.exists(cand):
+                    path = cand
+                    break
+        if path is None or not os.path.exists(path):
+            return {"drifted": None,
+                    "why": "no healthy baseline (galvatron_profile.npz) found"}
+        z = np.load(path)
+        ids = [int(t) for t in z["probe_ids"]]
+        healthy = np.asarray(z["healthy"], np.float64)
+        cur = []
+        for i, t in enumerate(ids):
+            h = np.asarray(self.rt.forward([t]), np.float64)
+            cur.append(h[-1] if h.ndim > 1 else h)
+        cur = np.stack(cur)[:, :healthy.shape[1]]
+        num = (cur * healthy).sum(1)
+        den = (np.linalg.norm(cur, axis=1) *
+               np.linalg.norm(healthy, axis=1) + 1e-12)
+        margin = float((num / den).mean())
+        healthy_margin = 1.0
+        ratio = margin / healthy_margin
+        self._post = {"margin": round(margin, 4),
+                      "healthy_margin": healthy_margin,
+                      "ratio": round(ratio, 4),
+                      "drifted": bool(ratio < rel_threshold)}
+        return dict(self._post)
+
+    def ask(self, question, min_margin=0.15):
+        """CONFIDENT ANSWERS OR HONEST SILENCE (cp85): the pack's question door.
+        Order: (1) the memory resident's database -- an answer must clear
+        min_margin or it is not served; (2) if the last post_check flagged
+        drift, the model arm is REFUSED outright and the caller is told why;
+        (3) otherwise the caller may fall through to generation knowing the
+        answer is model-tier. Never serves a below-margin answer as if it were
+        knowledge -- uncertainty is stated, not smoothed."""
+        for r in self.residents:
+            db = getattr(r, "db", None) or getattr(r, "memory", None)
+            if db is None:
+                continue
+            hit = None
+            for fn_name in ("recall", "search", "lookup"):
+                fn = getattr(db, fn_name, None)
+                if fn is None:
+                    continue
+                try:
+                    hit = fn(str(question))
+                    break
+                except TypeError:
+                    continue
+            if not hit:
+                continue
+            rows = hit if isinstance(hit, list) else [hit]
+            best = rows[0]
+            margin = float(best.get("score", best.get("margin", 1.0))) \
+                if isinstance(best, dict) else 1.0
+            text = best.get("text", best.get("answer", "")) \
+                if isinstance(best, dict) else str(best)
+            if text and margin >= float(min_margin):
+                return {"answer": str(text), "provenance": "pack-memory",
+                        "margin": round(margin, 4), "escalate": False}
+            if text:
+                return {"answer": None, "escalate": True,
+                        "why": "below confidence margin (%.3f < %.3f) -- "
+                               "not served" % (margin, float(min_margin))}
+        if getattr(self, "_post", {}).get("drifted"):
+            return {"answer": None, "escalate": True,
+                    "why": "model arm REFUSED: post_check reports drift "
+                           "(ratio %.3f)" % self._post.get("ratio", 0.0)}
+        return {"answer": None, "escalate": True,
+                "why": "no grounded answer in the pack; model-tier generation "
+                       "is the caller's explicit choice"}
 
     def generate(self, token_ids, n_new=16, state=None):
         hooks = self._hooks()
@@ -460,7 +638,27 @@ def _selftest():
         from transformers import Qwen3NextConfig, Qwen3NextForCausalLM
     except ImportError:
         print("galvatron selftest SKIPPED-REFERENCE (torch/transformers absent)")
-        return
+        # cp45 OUROBOROS BATTERY (found and fixed a real red): decay=1.0 is a legitimate
+    # no-forgetting trace and capacity_report divided by zero on it. The limit is exact.
+    oB = OuroborosResident(hidden_dim=32, layer=0, dk=16, decay=1.0)
+    import numpy as _np
+    _rg = _np.random.default_rng(0)
+    kB, vB = _rg.standard_normal(16), _rg.standard_normal(16)
+    oB.external_write(kB, vB)
+    capB = oB.capacity_report()
+    assert capB["n_effective"] == 1.0, "decay=1.0: every write counts once (no division)"
+    assert capB["regime"] == "homogeneous" and not capB["prediction_is_upper_bound"]
+    oB.hook(_np.zeros((2, 32)))                      # a stream background arrives
+    capM = oB.capacity_report()
+    assert capM["regime"] == "mixed" and capM["prediction_is_upper_bound"], \
+        "cp46: a mixed trace must SAY its prediction is an upper bound"
+    vr = oB.verify_recall([(kB, vB)])
+    assert vr["measured_recall"] is not None and "gap" in vr, \
+        "verify_recall is the ground-truth path when the regime is mixed"
+    rB = oB.external_read(kB)
+    assert float(_np.dot(rB / _np.linalg.norm(rB), vB / _np.linalg.norm(vB))) > 0.9, \
+        "a single write must read back cleanly at either decay extreme"
+    return
     import lecore
     from holographic.io_and_interop.holographic_gdnruntime import GDNRuntime
 

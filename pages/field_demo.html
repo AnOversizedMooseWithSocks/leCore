@@ -1,0 +1,398 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>leCore — a memory you can watch: plane-wave field, particle drift, diffusion glow</title>
+<style>
+ html,body{margin:0;background:#06070a;color:#cfd6e4;font:13px/1.6 ui-monospace,Consolas,monospace}
+ .wrap{max-width:1180px;margin:22px auto;padding:0 18px}
+ h1{font-size:19px;margin:0 0 4px;font-weight:600}
+ p.lede{color:#8a93a6;margin:0 0 14px;max-width:920px}
+ canvas{width:100%;max-width:1140px;aspect-ratio:16/9;display:block;border-radius:8px;background:#000}
+ .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0}
+ input[type=text]{flex:1;min-width:280px;background:#101319;color:#e6ecf7;border:1px solid #232838;
+   border-radius:6px;padding:9px 11px;font:13px ui-monospace,Consolas,monospace}
+ button{background:#151a24;color:#cfd6e4;border:1px solid #2a3142;border-radius:6px;padding:8px 12px;
+   cursor:pointer;font:13px ui-monospace,Consolas,monospace}
+ button:hover{background:#1c2330}
+ .stats{color:#7f8798}
+ .stats b{color:#5ad67d;font-weight:600}
+ .note{color:#6f7787;font-size:12px;margin-top:10px;max-width:920px}
+ code{color:#9fc3ff}
+</style>
+<div class=wrap>
+<h1>leCore &mdash; a memory you can watch</h1>
+<p class=lede>
+Type words. Each one is hashed to a frequency and a phase, and the field you see is the sum of
+those plane waves &mdash; that is fractional-power encoding, drawn instead of stored. Particles
+follow the field's gradient and repel each other, so they settle into the structure the words
+describe. <b>No vocabulary is shipped and nothing leaves the GPU between frames.</b>
+</p>
+
+<canvas id=cv></canvas>
+
+<div class=row>
+  <input id=q type=text spellcheck=false
+         value="holographic memory resonance cleanup binding superposition">
+  <button id=go>write into the field</button>
+  <button id=shake>scatter</button>
+  <button id=rep>repulsion: on</button>
+</div>
+
+<div class=row stats>
+  <span class=stats id=st>starting&hellip;</span><br><span class=stats id=chk></span>
+</div>
+
+<p class=note>
+Four passes per frame, none of which reads back: <code>drift</code> (one fragment per particle,
+summing plane waves for the gradient), <code>splat</code> (one point per particle, additive
+blending), <code>diffuse</code> (a five-point Laplacian ping-pong for the trail), and a colour
+blit. On an RTX A4500 those kernels measure 307&times;, 51&times; and 134&times; against NumPy
+&mdash; and the reason is that all three are per-element work with no BLAS equivalent. The same
+page's retrieval kernels <i>lose</i> to plain JavaScript, which is why this demo is fields and not
+search.
+</p>
+</div>
+
+<script>
+const cv = document.getElementById("cv");
+const gl = cv.getContext("webgl2", {antialias:false, preserveDrawingBuffer:false});
+const st = document.getElementById("st");
+if (!gl) { st.textContent = "WebGL2 unavailable in this browser."; throw new Error("no webgl2"); }
+if (!gl.getExtension("EXT_color_buffer_float")) {
+  st.textContent = "EXT_color_buffer_float is absent — the float targets this demo needs are unavailable.";
+  throw new Error("no float targets");
+}
+// Float BLENDING is a separate feature from float TARGETS. A driver can offer one without the
+// other, and blending to a float target anyway produces zeros with no error -- so it is requested
+// and branched on, never assumed.
+const FLOAT_BLEND = !!gl.getExtension("EXT_float_blend");
+
+const NP = 1 << 14;                 // particles; one texel each in a POS texture
+const PW = 128, PH = NP / PW;
+const FW = 960, FH = 540;           // field resolution
+const NTERM = 24;                   // frequency table entries the drift shader sums
+
+cv.width = FW; cv.height = FH;
+
+// ---- the vocabulary is a FUNCTION -------------------------------------------------------------
+// A term's frequency and phase come from its own hash. Nothing is stored; type a new word and its
+// wave exists immediately. This is the same hash the engine uses (PCG, hash32_pcg) -- a port that
+// substitutes a different 32-bit mixer produces a field orthogonal to the reference, which once
+// cost this project a day of blaming the driver.
+function fnv1a(s){ let h=2166136261>>>0;
+  for (const c of new TextEncoder().encode(s)) { h=(h^c)>>>0; h=Math.imul(h,16777619)>>>0; }
+  return h>>>0; }
+function pcg(v){ v=v>>>0;
+  let s=(Math.imul(v,747796405)+2891336453)>>>0;
+  let w=Math.imul(((s>>>((s>>>28)+4))^s)>>>0, 277803737)>>>0;
+  return ((w>>>22)^w)>>>0; }
+
+function tableFor(text){
+  const words = (text.toLowerCase().match(/[a-z][a-z0-9_]{1,}/g) || ["holographic"]).slice(0, NTERM);
+  const t = new Float32Array(NTERM*4);
+  for (let i=0;i<NTERM;i++){
+    const w = words[i % words.length];
+    const h = pcg(fnv1a(w) ^ (Math.floor(i/words.length)*2654435761>>>0));
+    // three independent bytes of one hash: two frequency components and a phase. Deterministic,
+    // so the same words always draw the same field on any machine.
+    const fx = ((h & 0xff)/255 - 0.5) * 26.0;
+    const fy = (((h>>>8) & 0xff)/255 - 0.5) * 26.0;
+    const ph = ((h>>>16) & 0xffff)/65535 * 6.2831853;
+    const amp = 0.55 + ((h>>>28)&0xf)/15 * 0.9;
+    t[i*4+0]=fx; t[i*4+1]=fy; t[i*4+2]=ph; t[i*4+3]=amp;
+  }
+  return {table:t, words};
+}
+
+// ---- shaders ----------------------------------------------------------------------------------
+const VS_QUAD = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p,0.,1.); }`;
+
+// DRIFT: one fragment per particle. Sums the plane-wave gradient, adds batch repulsion, integrates.
+const FS_DRIFT = `#version 300 es
+precision highp float;
+uniform sampler2D uPos, uTab, uDens;
+uniform int uNT; uniform float uDt, uRep, uTime, uJitter;
+uniform vec2 uPW;
+out vec4 o;
+void main(){
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  vec4 s = texelFetch(uPos, t, 0);
+  vec2 x = s.xy, v = s.zw;
+  // gradient of sum_k amp_k * cos(f_k . x + phase_k)  --  a sum of sines, no texture per sample
+  vec2 g = vec2(0.0);
+  for (int k = 0; k < uNT; ++k) {
+    vec4 c = texelFetch(uTab, ivec2(k,0), 0);
+    float a = dot(c.xy, x) + c.z;
+    g += -c.w * sin(a) * c.xy;
+  }
+  // REPULSION from the batch's own density, read from the splat buffer. Attraction alone
+  // memorises: every particle collapses onto the same ridge and the field stops being visible.
+  vec2 uv = x*0.5+0.5;
+  float e = 1.0/512.0;
+  float dl = texture(uDens, uv-vec2(e,0.0)).r, dr = texture(uDens, uv+vec2(e,0.0)).r;
+  float db = texture(uDens, uv-vec2(0.0,e)).r, dt2 = texture(uDens, uv+vec2(0.0,e)).r;
+  g -= uRep * vec2(dr-dl, dt2-db) * 120.0;   // strong enough to actually spread a well
+  // a little deterministic jitter keeps particles off exact saddle points
+  float n = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)) + uTime) * 43758.5453);
+  g += uJitter * (vec2(n, fract(n*7.0)) - 0.5);
+  v = v * 0.90 + g * uDt;
+  v = clamp(v, vec2(-2.0), vec2(2.0));
+  x += v * uDt;
+  // NaN GUARD. A non-finite particle can never recover, so one bad frame would empty the field
+  // for good. Comparing a value to itself is the portable finite test in GLSL.
+  if (!(x.x == x.x) || !(x.y == x.y) || !(v.x == v.x) || !(v.y == v.y)) {
+    float r = fract(sin(dot(gl_FragCoord.xy, vec2(4.898, 7.23))) * 43758.5453);
+    x = vec2(r, fract(r * 11.0)) * 2.0 - 1.0;
+    v = vec2(0.0);
+  }
+  // wrap: the field is periodic, so the domain should be too
+  x = fract(x*0.5+0.5)*2.0-1.0;
+  o = vec4(x, v);
+}`;
+
+// SPLAT: one POINT per particle, placed by the VERTEX stage, summed by additive blending.
+const VS_SPLAT = `#version 300 es
+// ES 3.00 gives samplers NO default precision in a VERTEX shader. Mesa accepts the omission;
+// ANGLE is entitled to reject it, and a rejected program draws nothing while the page still
+// reports 60 fps. Declare it.
+precision highp float; precision highp int; precision highp sampler2D;
+uniform sampler2D uPos; uniform vec2 uPW;
+out float vSpeed;
+void main(){
+  int i = gl_VertexID;
+  ivec2 t = ivec2(i % int(uPW.x), i / int(uPW.x));
+  vec4 s = texelFetch(uPos, t, 0);
+  vSpeed = clamp(length(s.zw)*0.9, 0.0, 1.0);
+  gl_Position = vec4(s.xy, 0.0, 1.0);
+  gl_PointSize = 1.0;
+}`;
+const FS_SPLAT = `#version 300 es
+precision highp float;
+in float vSpeed; out vec4 o;
+void main(){ o = vec4(1.0, vSpeed, 0.0, 1.0); }`;
+
+// DIFFUSE: five-point Laplacian, insulated edges. A boundary texel's missing neighbour is ITSELF
+// (zero flux); clamping the fetch would sample the interior twice and leak brightness inward.
+const FS_DIFFUSE = `#version 300 es
+precision highp float;
+uniform sampler2D uT; uniform vec2 uRes; uniform float uR, uDecay;
+out vec4 o;
+void main(){
+  ivec2 t = ivec2(gl_FragCoord.xy);
+  int W = int(uRes.x), H = int(uRes.y);
+  vec2 c = texelFetch(uT, t, 0).rg;
+  vec2 n = (t.x>0   ? texelFetch(uT, t-ivec2(1,0),0).rg : c)
+         + (t.x<W-1 ? texelFetch(uT, t+ivec2(1,0),0).rg : c)
+         + (t.y>0   ? texelFetch(uT, t-ivec2(0,1),0).rg : c)
+         + (t.y<H-1 ? texelFetch(uT, t+ivec2(0,1),0).rg : c);
+  o = vec4((c + uR*(n - 4.0*c)) * uDecay, 0.0, 1.0);
+}`;
+
+// BLIT: density and speed to colour. Field contours drawn underneath so the structure is visible
+// even where no particle has been yet.
+const FS_BLIT = `#version 300 es
+precision highp float;
+uniform sampler2D uDens, uTab; uniform int uNT;
+uniform vec2 uRes;
+out vec4 o;
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 x = uv*2.0-1.0;
+  float f = 0.0;
+  for (int k = 0; k < uNT; ++k) {
+    vec4 c = texelFetch(uTab, ivec2(k,0), 0);
+    f += c.w * cos(dot(c.xy, x) + c.z);
+  }
+  f /= float(uNT);
+  // The field itself, visible on its own: dark trough to a clear blue ridge, with a bright rim so
+  // the contours read even before a particle has been anywhere.
+  float band = smoothstep(0.55, 0.98, abs(fract(f*3.0) - 0.5) * 2.0);
+  vec3 bg = mix(vec3(0.03,0.05,0.09), vec3(0.10,0.24,0.46), smoothstep(-0.5,0.6,f));
+  bg += vec3(0.06,0.12,0.22) * band;
+  vec2 d = texture(uDens, uv).rg;
+  // LOG MAPPING. Simulated over 240 steps the density spans 0.01 to ~10,000 in the same frame --
+  // particles pile into the field's wells. A linear ramp shows a few blown-out pixels and reads as
+  // an empty screen, which is exactly how this demo first looked.
+  float m = clamp(log(1.0 + d.r * 8.0) / log(81.0), 0.0, 1.0);
+  vec3 hot = mix(vec3(0.35,0.72,1.0), vec3(1.0,0.88,0.45), clamp(d.g/max(d.r,1e-4),0.0,1.0));
+  o = vec4(bg + hot*m*1.6, 1.0);
+}`;
+
+// ---- plumbing ---------------------------------------------------------------------------------
+function sh(type, src){ const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+function prog(vs, fs){ const p=gl.createProgram();
+  try {
+    gl.attachShader(p, sh(gl.VERTEX_SHADER,vs)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER,fs));
+  } catch (e) {
+    // A compile failure used to throw into the console and leave a page that still animated at
+    // 60 fps with nothing on it. Say so on the page instead.
+    st.innerHTML = "<span style='color:#ff6b6b'>shader failed to compile: " +
+                   String(e.message).slice(0,200) + "</span>";
+    throw e;
+  }
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS)) {
+    st.innerHTML = "<span style='color:#ff6b6b'>program failed to link: " +
+                   String(gl.getProgramInfoLog(p)).slice(0,200) + "</span>";
+    throw new Error(gl.getProgramInfoLog(p));
+  }
+  return p; }
+// FLOAT TEXTURES ARE NOT FILTERABLE IN WebGL2 without OES_texture_float_linear. A texture carrying
+// an unsupported filter is INCOMPLETE and every sample of it returns (0,0,0,1) -- no error, no
+// warning. That single line is what made this demo run at 60 fps and draw a flat blue rectangle.
+const FLOAT_LINEAR = !!gl.getExtension("OES_texture_float_linear");
+const FILT = FLOAT_LINEAR ? gl.LINEAR : gl.NEAREST;
+function texF(w,h,data){ const t=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,FILT);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,FILT);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,w,h,0,gl.RGBA,gl.FLOAT,data||null); return t; }
+function fbo(t){ const f=gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER,f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0); return f; }
+
+const quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+const emptyVao = gl.createVertexArray();
+
+const pDrift = prog(VS_QUAD, FS_DRIFT), pSplat = prog(VS_SPLAT, FS_SPLAT);
+const pDiff = prog(VS_QUAD, FS_DIFFUSE), pBlit = prog(VS_QUAD, FS_BLIT);
+function bindQuad(p){ const l=gl.getAttribLocation(p,"p"); gl.bindBuffer(gl.ARRAY_BUFFER,quad);
+  gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l,2,gl.FLOAT,false,0,0); }
+
+function seed(){ const a=new Float32Array(NP*4);
+  for(let i=0;i<NP;i++){ a[i*4]=Math.random()*2-1; a[i*4+1]=Math.random()*2-1; }
+  return a; }
+let posA = texF(PW,PH,seed()), posB = texF(PW,PH,null);
+let fA = fbo(posA), fB = fbo(posB);
+let densA = texF(FW,FH,null), densB = texF(FW,FH,null);
+let fdA = fbo(densA), fdB = fbo(densB);
+// CLEAR THEM. texImage2D(..., null) leaves the contents UNDEFINED -- NaN on many drivers -- and the
+// drift shader samples this texture for repulsion on frame 0. One unread NaN empties the screen
+// permanently, which is exactly what it did.
+for (const f of [fdA, fdB]) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.clearColor(0,0,0,1); gl.clear(gl.COLOR_BUFFER_BIT);
+}
+gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+let tab = texF(NTERM,1,null);
+
+let table = tableFor(document.getElementById("q").value);
+gl.bindTexture(gl.TEXTURE_2D, tab);
+gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,NTERM,1,0,gl.RGBA,gl.FLOAT,table.table);
+
+let repulsion = 1.0, frames = 0, t0 = performance.now(), fps = 0;
+
+function step(now){
+  // 1 -- DRIFT
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fB); gl.viewport(0,0,PW,PH);
+  gl.useProgram(pDrift); bindQuad(pDrift);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,posA); gl.uniform1i(gl.getUniformLocation(pDrift,"uPos"),0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,tab);  gl.uniform1i(gl.getUniformLocation(pDrift,"uTab"),1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D,densA);gl.uniform1i(gl.getUniformLocation(pDrift,"uDens"),2);
+  gl.uniform1i(gl.getUniformLocation(pDrift,"uNT"), NTERM);
+  gl.uniform1f(gl.getUniformLocation(pDrift,"uDt"), 0.006);
+  gl.uniform1f(gl.getUniformLocation(pDrift,"uRep"), repulsion);
+  gl.uniform1f(gl.getUniformLocation(pDrift,"uTime"), now*0.001);
+  gl.uniform1f(gl.getUniformLocation(pDrift,"uJitter"), 0.20);   // keeps wells from swallowing everything
+  gl.uniform2f(gl.getUniformLocation(pDrift,"uPW"), PW, PH);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  [posA,posB]=[posB,posA]; [fA,fB]=[fB,fA];
+
+  // 2 -- SPLAT (additive). Without float blending the accumulation would silently be zeros, so the
+  // demo checks the extension and drops to a non-accumulating write instead of lying.
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fdA); gl.viewport(0,0,FW,FH);
+  gl.useProgram(pSplat); gl.bindVertexArray(emptyVao);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,posA);
+  gl.uniform1i(gl.getUniformLocation(pSplat,"uPos"),0);
+  gl.uniform2f(gl.getUniformLocation(pSplat,"uPW"), PW, PH);
+  if (FLOAT_BLEND) { gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); }
+  gl.drawArrays(gl.POINTS, 0, NP);
+  gl.disable(gl.BLEND);
+  gl.bindVertexArray(null);          // the quad passes set up their attribute on the default VAO
+
+  // 3 -- DIFFUSE the density for the trail
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fdB); gl.viewport(0,0,FW,FH);
+  gl.useProgram(pDiff); bindQuad(pDiff);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,densA);
+  gl.uniform1i(gl.getUniformLocation(pDiff,"uT"),0);
+  gl.uniform2f(gl.getUniformLocation(pDiff,"uRes"), FW, FH);
+  gl.uniform1f(gl.getUniformLocation(pDiff,"uR"), 0.20);
+  gl.uniform1f(gl.getUniformLocation(pDiff,"uDecay"), 0.93);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  [densA,densB]=[densB,densA]; [fdA,fdB]=[fdB,fdA];
+
+  // 4 -- BLIT
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0,0,FW,FH);
+  gl.useProgram(pBlit); bindQuad(pBlit);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,densA);
+  gl.uniform1i(gl.getUniformLocation(pBlit,"uDens"),0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D,tab);
+  gl.uniform1i(gl.getUniformLocation(pBlit,"uTab"),1);
+  gl.uniform1i(gl.getUniformLocation(pBlit,"uNT"), NTERM);
+  gl.uniform2f(gl.getUniformLocation(pBlit,"uRes"), FW, FH);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+
+  frames++;
+  if (now - t0 > 500) { fps = frames*1000/(now-t0); frames = 0; t0 = now;
+    st.innerHTML = `<b>${fps.toFixed(0)} fps</b> · ${NP.toLocaleString()} particles · ` +
+      `${NTERM} plane waves · 4 passes/frame, 0 readbacks · ` +
+      `field words: ${table.words.slice(0,6).join(", ")}` +
+      (FLOAT_BLEND ? "" : " · <span style='color:#ff9d5c'>EXT_float_blend absent: trails disabled</span>") +
+      (FLOAT_LINEAR ? "" : " · float filtering unavailable, using NEAREST");
+  }
+  requestAnimationFrame(step);
+}
+
+document.getElementById("go").onclick = () => {
+  table = tableFor(document.getElementById("q").value);
+  gl.bindTexture(gl.TEXTURE_2D, tab);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,NTERM,1,0,gl.RGBA,gl.FLOAT,table.table);
+};
+document.getElementById("q").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("go").click();
+});
+document.getElementById("shake").onclick = () => {
+  gl.bindTexture(gl.TEXTURE_2D, posA);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA32F,PW,PH,0,gl.RGBA,gl.FLOAT,seed());
+};
+document.getElementById("rep").onclick = (e) => {
+  repulsion = repulsion > 0 ? 0 : 1.0;
+  e.target.textContent = "repulsion: " + (repulsion ? "on" : "off");
+};
+
+// ---- STARTUP SELF-CHECK ----------------------------------------------------------------------
+// One readback, once, at startup. The blank-canvas failure was invisible because nothing ever
+// looked at a value: the table read as zeros and the page reported 60 fps regardless. A demo that
+// cannot tell "broken" from "boring" wastes the viewer's time and the author's.
+function selfCheck(){
+  const msgs = [];
+  // 1. did the frequency table actually land in the texture?
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tab, 0);
+  const px = new Float32Array(4 * NTERM);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
+    gl.readPixels(0, 0, NTERM, 1, gl.RGBA, gl.FLOAT, px);
+    const spread = Math.max(...px.filter((_,i)=>i%4<2).map(Math.abs));
+    msgs.push(spread > 1e-3
+      ? `table ok (max |freq| ${spread.toFixed(1)})`
+      : `<span style="color:#ff6b6b">TABLE READS ZERO — the field will be flat</span>`);
+  } else { msgs.push("table unreadable"); }
+  // 2. are the particles anywhere other than the origin?
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, posA, 0);
+  const pp = new Float32Array(4 * 64);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
+    gl.readPixels(0, 0, 64, 1, gl.RGBA, gl.FLOAT, pp);
+    const moved = pp.filter((_,i)=>i%4<2).some(v => Math.abs(v) > 1e-3);
+    msgs.push(moved ? "particles seeded"
+      : `<span style="color:#ff6b6b">ALL PARTICLES AT THE ORIGIN — position texture reads zero</span>`);
+  }
+  gl.deleteFramebuffer(fb);
+  document.getElementById("chk").innerHTML = msgs.join(" · ");
+}
+selfCheck();
+requestAnimationFrame(step);
+</script>
