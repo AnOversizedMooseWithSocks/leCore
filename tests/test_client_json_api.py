@@ -263,6 +263,10 @@ def test_render_mesh_dtype_is_exact_and_default_off(mind):
     assert np.array_equal(a.astype("float32"), b), "dtype= must be a cast, not a different render"
 
 
+@pytest.mark.skipif(
+    not __import__("pathlib").Path(__file__).resolve().parent.parent.joinpath(
+        "VERSION").exists(),
+    reason="VERSION deliberately excluded from delivery archives (PACKAGING.md)")
 def test_the_reported_engine_version_matches_the_packaged_one(mind):
     """**`version()['engine']` must equal what the wheel will be built as.**
 

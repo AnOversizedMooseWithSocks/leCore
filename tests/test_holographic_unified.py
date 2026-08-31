@@ -333,9 +333,9 @@ def test_unified_mind_relations_over_its_own_memory():
     assert m.find("capital", "tokyo")[0] == "japan"
     assert m.read_role("japan", "currency")[0] == "yen"
     # 3-hop chain over the mind's own memory
-    assert m.ask("tokyo", ("capital", "currency"), ("currency", "language")) == "japanese"
+    assert m.ask_chain("tokyo", ("capital", "currency"), ("currency", "language")) == "japanese"
     # learned-label explanation
-    v = {r: s for r, _, _, s, _ in m.explain("mexico", "usa")}
+    v = {r: s for r, _, _, s, _ in m.explain_similarity("mexico", "usa")}
     assert v["capital"] is False and v["currency"] is False
 
 
@@ -371,7 +371,7 @@ def test_unified_mind_explains_classes_learned_from_noisy_observations():
             tot += 1
     assert ok / tot >= 0.9                            # measured 100%
 
-    verd = {r: s for r, _, _, s, _ in m.explain("france", "belgium")}
+    verd = {r: s for r, _, _, s, _ in m.explain_similarity("france", "belgium")}
     assert verd["currency"] is True and verd["language"] is True
     assert verd["capital"] is False
 

@@ -118,10 +118,13 @@ def audit(weights, seed="leCore", boot_rate=0.01, payload=None,
         key = next(k for k in weights
                    if np.asarray(weights[k]).ndim == 2 and "embed" not in k)
         A = np.asarray(weights[key])
-        a, _i = read_seeded(A, seed=seed, rate=0.05)
-        b, _j = read_seeded(A, seed=str(seed) + "!wrong", rate=0.05)
-        n = min(len(a), len(b))
-        agree = float(np.mean(a[:n] == b[:n])) if n else 1.0
+        # measurement promoted to substrate.wrong_seed_agreement (dedup
+        # sweep 2); the band stays here, and the "!wrong" suffix rides along
+        # so this battery's probe is byte-for-byte what it always measured
+        from holographic.caching_and_storage.holographic_substrate import \
+            wrong_seed_agreement
+        agree = wrong_seed_agreement(A, seed=seed, rate=0.05,
+                                     wrong=str(seed) + "!wrong")
         return (0.35 < agree < 0.65,
                 "wrong-seed agreement %.2f (chance is the pass)" % agree)
     _check("channel_is_addressed", _seeded_is_addressed,

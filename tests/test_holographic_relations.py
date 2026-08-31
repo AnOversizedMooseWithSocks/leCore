@@ -104,7 +104,11 @@ def test_chained_queries_stay_exact_through_three_hops():
 def test_unified_mind_explains_its_own_records():
     from holographic.misc.holographic_unified import UnifiedMind
     m = UnifiedMind(dim=2048, seed=0)
-    out = {r: (f1, f2, shared) for r, f1, f2, shared, _ in m.explain(
+    # explain_pair, not explain: `explain` is defined in TWO parts of the mind --
+    # p02 compares two things, p20 answers "how does X work" from the docs -- and
+    # p20 wins by MRO, so m.explain(a, b) raised TypeError. TWO CAPABILITIES
+    # CANNOT SHARE ONE NAME; the pairwise form now has its own.
+    out = {r: (f1, f2, shared) for r, f1, f2, shared, _ in m.explain_pair(
         {"capital": "paris", "currency": "franc", "language": "french"},
         {"capital": "brussels", "currency": "franc", "language": "french"})}
     assert out["capital"] == ("paris", "brussels", False)

@@ -1426,7 +1426,9 @@ def compare():
         a, b = (names[i] for i in rng.choice(len(names), 2, replace=False))
     if a not in SPRITES or b not in SPRITES:
         return jsonify({"error": "unknown sprite name", "names": names[:0]})
-    rows = mind.explain(_COMPARE["recs"][a], _COMPARE["recs"][b])
+    # sweep 63: the per-role comparison is explain_similarity now (the
+    # collision with the docs-derived explain(topic) is resolved).
+    rows = mind.explain_similarity(_COMPARE["recs"][a], _COMPARE["recs"][b])
     out_rows = [{"role": r, "a": va, "b": vb, "shared": bool(sh)}
                 for r, va, vb, sh, _ in rows]
     seesay = {}
