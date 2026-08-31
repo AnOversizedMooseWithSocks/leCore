@@ -17,6 +17,9 @@ mechanism that created the darkness.
 #: docstring but assigns NO aliases, so bare method-names (agent, scene, query, material, ...) get shadowed in
 #: find_capability by a descriptively-titled sibling and become UNDISCOVERABLE. These are stranger-phrasings a
 #: user would actually type, so each method surfaces for its own concept. (Discoverability audit D1.)
+# sweep 129: two dead rows removed ('autoboot' is a lecore-level function, 'holographic_coldstore' a
+# module name) -- this table is consulted BY MIND-METHOD NAME at registration, so those keys were
+# never read; both phrasings already land on their real cards. The selftest below keeps it so.
 _METHOD_ALIASES = {
     # D1 REGRESSION, SECOND WAVE (post-merge). Ranking is GLOBAL: ~57 capabilities arrived with two merges and
     # pushed these 25 bare method-names out of the top-15 for their OWN name, which is the audit's definition
@@ -399,11 +402,6 @@ _METHOD_ALIASES = {
     # It is a MODULE function, not a mind method, so nothing auto-registered it:
     # the catalog only sees the mind's surface, and the one call a newcomer makes
     # first lives outside that surface.
-    "autoboot": ("boot up lecore",
-                 "start lecore with its memory",
-                 "the one call that gets me going",
-                 "load doctrine and memory and a model",
-                 "how do I start"),
     # EXTERNAL MEMORY: the phrase a user says, pointed at the pair that does it.
     # learning_load/learning_save ARE the external memory -- a .lecore container
     # partition on disk that survives the process -- and neither surfaced for
@@ -928,8 +926,6 @@ _METHOD_ALIASES = {
     # sweep 124: the catalog exam's twelve invisible faculties (rank 61 of 60 for their natural
     # asks) -- each shadowed by a DESCRIPTIVE card for the same capability sitting at top-1 (the
     # sweep-92 wave). Bare-name aliases from the user's mouth; NEVER descriptive renames.
-    "holographic_coldstore": ('squish a big array down for storage', 'compress inactive data to save memory',
-                              'park cold data on disk', 'shrink a big tensor for storage'),
     "brep_boolean": ('cut a hole in a mesh with another mesh', 'boolean subtract two meshes',
                      'union or intersect two solids', 'csg on meshes'),
     "mesh_qem_decimate": ('reduce the polygon count', 'simplify a mesh to fewer faces',
@@ -1023,3 +1019,30 @@ _METHOD_ALIASES = {
     "to_state": ('snapshot the mind for saving', 'serialize the learned mind', 'save state with quantization', "export the mind's state", 'dump the brain to state'),
     "trace": ('provenance of a result', 'style and material trace', 'where did this come from', 'full provenance answer', 'explain the origin'),
 }
+
+
+def _selftest():
+    """A DATA module still gets a real selftest (sweep 129): the alias table is the discoverability
+    contract for every bare-name faculty, and the failures that hurt are silent ones. Assert the
+    exact shape the catalog reads (str -> tuple of str), that NO alias is INERT (an alias with zero
+    content words can never be matched -- the sweep-109 catch), and that every key names a REAL
+    UnifiedMind method -- a typo here is a dark faculty nobody would notice until a stranger
+    could not find it."""
+    # the catalog's OWN tokenizer decides what a content word is -- a stricter rule here
+    # flagged 'new box' as inert when find_capability matches it fine (caught first run)
+    from holographic.caching_and_storage.holographic_catalog import _tokens
+    assert isinstance(_METHOD_ALIASES, dict) and _METHOD_ALIASES, "empty alias table"
+    for k, v in _METHOD_ALIASES.items():
+        assert isinstance(k, str) and isinstance(v, tuple) and v, "bad row for %r" % k
+        for a in v:
+            assert isinstance(a, str) and _tokens(a), \
+                "INERT alias (no content words) under %r: %r" % (k, a)
+    from holographic.misc.holographic_unified import UnifiedMind
+    dark = [k for k in _METHOD_ALIASES if not callable(getattr(UnifiedMind, k, None))]
+    assert not dark, "alias keys that name no UnifiedMind method: %s" % dark[:8]
+    print("holographic_catalog_aliases selftest OK -- %d verbs, %d aliases, none inert, all real"
+          % (len(_METHOD_ALIASES), sum(len(v) for v in _METHOD_ALIASES.values())))
+
+
+if __name__ == "__main__":
+    _selftest()

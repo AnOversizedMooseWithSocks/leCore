@@ -85212,3 +85212,28 @@ FIXED:
 The sweep-127 deptrace fix (footprint minus parts) stands.
 LESSON: 'the file is missing in CI' has two remedies -- add it, or stop
 depending on it -- and the .gitignore decides which. Read it first.
+
+--------------------------------------------------------------------------------
+SWEEP 129 -- A DATA MODULE GETS A REAL SELFTEST, AND IT EARNS ITS KEEP TWICE
+
+CI: test_no_selftest_budget_only_shrinks flagged holographic_catalog_
+aliases (the alias table the sibling line split out as data; adopted in
+sweep 125) -- a module with no _selftest.
+
+The easy move was the budget. The honest move was a selftest that
+asserts the contract this data carries: shape (str -> tuple of str),
+NO INERT ALIAS (zero content words -- the sweep-109 catch), and every
+key names a REAL UnifiedMind method, because the table is consulted BY
+METHOD NAME at registration (line 777) and a typo is a dark faculty.
+
+It earned its keep on the first two runs:
+1. 'new box' under mesh_box flagged inert -- by MY rule (>=4 letters),
+   not the catalog's. The catalog's own _tokens() ([a-z0-9]+, minus
+   stopwords, len>1) is the truth; the selftest now imports it. One
+   tokenizer in the repo, not two opinions.
+2. Two keys named no method: 'autoboot' (a lecore-level function) and
+   'holographic_coldstore' (a module) -- rows never read since the day
+   they were written; both phrasings already land on their real cards.
+   Removed, with the WHY at the top of the table.
+Result: 297 verbs, 1,450 aliases, none inert, all real. Budget test,
+buried audit, skill_lint, catalog exam, regen --check: green.
