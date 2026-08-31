@@ -236,6 +236,8 @@ lecore_status LECORE_CALL lecore_context_create(
     if (backend == LECORE_BACKEND_RADIX2) {
         const size_t scratch_scalars_per_element = 4;
 
+        /* A uint32_t dimension cannot overflow size_t on wider hosts. */
+#if SIZE_MAX <= UINT32_MAX
         if ((uintmax_t)config->dimension >
             (uintmax_t)SIZE_MAX /
                 ((uintmax_t)scratch_scalars_per_element * scalar_bytes) ||
@@ -246,6 +248,7 @@ lecore_status LECORE_CALL lecore_context_create(
                 (uintmax_t)SIZE_MAX / scalar_bytes)) {
             return LECORE_EOVERFLOW;
         }
+#endif
         scratch_bytes = (size_t)config->dimension *
             scratch_scalars_per_element * scalar_bytes;
         bit_reversal_bytes =
@@ -254,10 +257,13 @@ lecore_status LECORE_CALL lecore_context_create(
             twiddle_bytes = (size_t)config->dimension * scalar_bytes;
         }
     } else {
+        /* A uint32_t dimension cannot overflow size_t on wider hosts. */
+#if SIZE_MAX <= UINT32_MAX
         if ((uintmax_t)config->dimension >
             (uintmax_t)SIZE_MAX / scalar_bytes) {
             return LECORE_EOVERFLOW;
         }
+#endif
         scratch_bytes = (size_t)config->dimension * scalar_bytes;
     }
 
