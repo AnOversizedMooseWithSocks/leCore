@@ -84709,3 +84709,38 @@ say "watchdog lifted".
 Sweep-116 machinery stands (20 shards, --budget guard, durations
 capture + merge job); with the budget enforced, the packer's measured
 seconds become bounded by construction.
+
+--------------------------------------------------------------------------------
+SWEEP 119 -- CI IS GOOD TO GO: NO PHANTOM REDS, NO PHANTOM SKIPS
+
+THE BRIEF (Moose, with the screenshot): publishing needs all green; no
+weird failures; no runs skipped by a 'more important process', some
+during their post-steps.
+
+TWO CAUSES, both in the workflow files, both mine or inherited:
+1. PHANTOM RED: the sweep-116 `durations` job had `if: always()` and
+   `needs: full-suite`. On a PUSH, full-suite is SKIPPED by design
+   (weekly / manual / tag-only) -- so durations ran with no artifacts,
+   the shell glob passed the literal 'shard_*.log' as one 'log', the
+   merge exited 1, the `tests` workflow went RED, and package.yml
+   (keyed on tests == success) could not publish. Fixed: durations
+   runs only when full-suite actually ran (result in success/failure,
+   not cancelled); the merge step uses nullglob, exits 0 with a
+   message when there is nothing to merge, and parse trouble is a
+   ::warning::, never a red -- the sanity step's coverage guard is
+   where a missing measurement is enforced, deliberately.
+2. PHANTOM SKIPS: `cancel-in-progress` was true for push runs in
+   ci.yml, docs.yml, semantic-coverage.yml and wgsl.yml. Every new push
+   cancelled the running build -- GitHub's 'higher priority waiting
+   request' -- including docs-bot runs mid-commit. Now only superseded
+   PR runs are cancelled; a push run always reaches its own verdict.
+
+VERIFIED: all four workflow files parse; the CI-config lint (matrix vs
+--num-shards) passes; the push-event job table is exactly: gates ->
+pytest(4) -> pytest-gate; full-suite and durations skipped (skipped
+jobs do not fail a workflow). package.yml keys on conclusion ==
+success, which the push path now reaches whenever the tests pass.
+
+STANDING: full-suite (weekly/manual/tag) carries the 20-shard matrix,
+the budget rule (sweep 118), and the durations loop (116) -- and its
+merge job now runs exactly when it has something to merge.

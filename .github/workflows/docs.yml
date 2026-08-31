@@ -18,7 +18,10 @@ permissions:
 # race each other to push the same regenerated files.
 concurrency:
   group: docs-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # sweep 119: only superseded PR runs are cancelled; a push run always reaches its own verdict
+  # (cancelling push runs -- some during their commit/post steps -- was the 'higher priority
+  # request' skip Moose had to re-run by hand).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   reference:
