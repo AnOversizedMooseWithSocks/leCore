@@ -70,7 +70,7 @@ def _load():
     global _DICT
     if _DICT is None:
         if not os.path.exists(_DATA_PATH):
-            raise FileNotFoundError("vendored dictionary not found at %s -- is data/knowledge/ present?" % _DATA_PATH)
+            raise FileNotFoundError("vendored dictionary not found at %s -- is lecore_data/knowledge/ present?" % _DATA_PATH)
         with _open_compressed(_DATA_PATH) as f:
             _DICT = json.load(f)
         _merge_function_words(_DICT)

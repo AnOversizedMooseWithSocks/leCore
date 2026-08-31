@@ -84531,3 +84531,140 @@ a push -- LECORE_RUN_SLOW=1 --run-slow -- the 15s budget hides exactly
 the ladder-level regressions the full suite exists to catch.
 Also: the workflowgraph reds in this CI run are the pre-addendum push;
 the delivered zip carries the widened pattern (verified by unzip -p).
+
+--------------------------------------------------------------------------------
+SWEEP 115 -- THE WHEEL: KEPT IN LOCKSTEP, SPLIT WHERE THE BYTES ARE
+
+THE BRIEF (Moose): is the PyPI package kept current, and can the parts be
+optional so nobody pays for what they don't use?
+
+KEPT CURRENT -- verified by reading the pipeline, not assuming:
+package.yml is keyed on the `tests` workflow completing green on main
+(workflow_run), bumps VERSION's patch digit (tools/bump_version.py),
+builds via build_package.sh, smoke-installs the wheel, and publishes
+with trusted publishing. Every green merge to main ships. Dev-branch
+pushes do NOT publish -- correct.
+
+MEASURED before touching anything (built the 0.7.81 wheel locally):
+10.0 MB compressed / 21.8 MB installed / 817 files. 34% of the download
+was ONE component: lecore_data/knowledge (dictionary 3.26 MB + corpus +
+function words), read only by the dictionary / word-index / default-
+corpus faculties. The twelve engine families are 0.1-0.9 MB each --
+splitting CODE by family is a large cross-import surgery for small
+per-family gains; splitting the DATA is one clean cut.
+
+TWO REAL GAPS FOUND:
+1. holographic_mcp.py was NOT in the wheel (py_modules listed only
+   lecore + holographic_service) -- a pip user had no harness door.
+2. No console entry points -- users had to know file paths.
+
+SHIPPED:
+- The MCP server in the wheel + entry points `lecore-mcp` (stdio; core
+  deps only) and `lecore-service` (HTTP; [service] extra for flask).
+- THE KNOWLEDGE SPLIT: companion distribution leos-core-knowledge
+  (packaging/knowledge/setup.py; top-level package lecore_data_knowledge
+  -- sharing lecore_data/ across two wheels would collide pip's RECORD
+  on __init__.py). build_package.sh moves knowledge/* out of the base
+  stage and builds BOTH wheels from the SAME VERSION file: lockstep by
+  construction. lecore_data.file() falls back to the companion; a
+  source clone is untouched. The dictionary's missing-data error names
+  the extra. New extras: knowledge, service, mcp (no deps; named for
+  intent); `all` includes knowledge.
+- RESULT: base wheel 10.0 -> 6.7 MB (-33%); companion 3.4 MB.
+
+VERIFIED IN A CLEAN VENV FROM THE BUILT WHEELS (not the clone): base
+alone imports, refuses the dictionary BY NAME, lecore-mcp --selftest
+passes as an installed command; after the companion, lecore_data.file
+resolves into lecore_data_knowledge/ and the dictionary loads with
+144,539 == manifest. Packaging + techstack + word-index + corpus tests
+green; all gates green.
+
+OPERATIONAL NOTE FOR MOOSE (cannot be verified from here): the publish
+step uploads dist/* -- both wheels -- but PyPI trusted publishing is
+PER PROJECT. Before the first main merge after this lands, add a
+pending publisher for `leos-core-knowledge` under the same repo/
+workflow in PyPI settings, or the companion upload will be refused
+while the base publishes fine. package.yml's smoke step installs
+dist/*.whl (both), so its dictionary check keeps passing.
+
+NEXT RUNG (measured, not built): family-level optional installs would
+need the engine's cross-family imports mapped first (holographic_
+workflowgraph already has the edges); the honest first candidates are
+the leaf families with the fewest inbound edges.
+
+--------------------------------------------------------------------------------
+SWEEP 116 -- SHARDS BALANCED BY THE WRONG UNIT, FOR THE SECOND TIME: THE
+MEASURING INSTRUMENT DID NOT EXIST
+
+THE BRIEF (Moose, with the screenshot): full-suite shard 3 of 10 cancelled
+at 91% after 19m42s while nine shards passed. Groups must fit the window
+with headroom.
+
+RULE 0 found tools/shard_tests.py ALREADY duration-aware -- measured
+seconds when known, greedy largest-first bin packing, a selfcheck for
+exact cover -- and a documented `--measure` flag. MEASURED: the flag was
+documented and NEVER IMPLEMENTED (not even parsed); tools/
+test_durations.json was a one-time hand transcription of a CI log
+covering 51 of 680 files. 629 files rode the 0.25 s/test proxy. The
+packer predicted every bin at ~226 s; shard 3 ran past 1,180 s.
+Balanced by the wrong unit -- the docstring's own phrase -- because the
+instrument it promised was missing.
+
+SHIPPED:
+- measure() for real: runs files with --durations=0, parses per-file
+  totals (setup+call+teardown), MERGES into the durations file;
+  chunkable (--shard/--num-shards, --only-missing, --chunk-timeout).
+  KEPT NEG: locally, chunks of 20 files under --run-slow exceed a
+  container wall clock, and pytest prints durations only at exit, so a
+  killed chunk records nothing -- local measurement is for spot
+  checks; the suite must be measured WHERE IT RUNS.
+- merge_logs(): the CI path. Every full-suite shard now records
+  --durations=0 (it was printing the top 15 and discarding them),
+  uploads its log, and a `durations` job merges all twenty and commits
+  tools/test_durations.json (docs-bot pattern, [skip ci]). Recorded
+  seconds are CI seconds -- the ci-factor guess goes away.
+- TWO GUARDS in --selfcheck, where failing costs 12 s not 20 min:
+  --budget (heaviest predicted bin x ci-factor must fit) with the
+  remedy computed (--suggest gives the smallest shard count that fits),
+  and --min-coverage (a partition balanced by proxy fails with the
+  remedy). Phase-in: CI passes --min-coverage 0 until the first merged
+  durations land; then raise to 0.9 and proxy-balancing is impossible.
+- Matrix 10 -> 20 shards (every --num-shards in the job updated; the
+  regen_docs CI-config lint that compares them to the matrix passes);
+  --budget 1140 s under the 20-minute job timeout.
+
+FOR MOOSE: after the first full run on the branch, the durations job
+commits ~680 measured files; then flip --min-coverage 0 -> 0.9 in
+ci.yml's sanity step. Until then the 20-shard split is arithmetic
+headroom; after it, the packer balances by measured CI seconds and the
+sanity step refuses any partition that cannot fit.
+
+--------------------------------------------------------------------------------
+SWEEP 117 -- ONE DISTRIBUTION (the sweep-115 companion wheel, REVERTED by
+decision)
+
+MOOSE: one package with optional install components and an `all`
+extra -- which leos-core already has. No second PyPI distribution.
+
+THE PACKAGING FACT that decides it: Python extras carry DEPENDENCIES,
+not payload. "Optional components" in a single distribution means
+optional third-party packages -- the extras table. A wheel cannot ship
+optional files of its own; the only way to make data optional is a
+second distribution, and that is exactly what is NOT wanted.
+
+REVERTED: packaging/knowledge/, the build_package.sh companion stage,
+the `knowledge` extra, the lecore_data companion fallback, the
+dictionary error's extra hint, the .gitignore line. The knowledge data
+(3.4 MB) ships in the one wheel again: every `pip install leos-core`
+is the whole engine, offline out of the box.
+KEPT from sweep 115 (the parts that were gaps, not opinions): the MCP
+server IN the wheel (it never was), console entry points lecore-mcp /
+lecore-service, and the `service` / `mcp` extras.
+KEPT NEGATIVE, loud: a data-companion split was built, measured (base
+10.0 -> 6.7 MB) and reverted the same day. Do not re-propose it without
+a new argument; the numbers are in PACKAGING.md.
+VERIFIED from the rebuilt single wheel in a clean venv: 10.0 MB, 819
+files, knowledge + MCP inside, dictionary loads 144,539 == manifest,
+both entry points on PATH, lecore-mcp --selftest passes. Packaging /
+techstack / word-index / corpus tests green. The sweep-115 PyPI
+pending-publisher note is VOID.

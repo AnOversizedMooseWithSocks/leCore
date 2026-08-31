@@ -1,6 +1,7 @@
 {
  "test_agent_benchmark.py": 9.0,
  "test_amp_recovery.py": 1.9,
+ "test_check_version.py": 0.09,
  "test_deptrace.py": 11.2,
  "test_determinism_without_hashseed.py": 3.3,
  "test_duplication_audit.py": 31.0,

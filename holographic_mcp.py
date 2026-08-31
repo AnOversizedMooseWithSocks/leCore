@@ -2116,8 +2116,14 @@ def _selftest():
           "-32601; notifications silent)")
 
 
-if __name__ == "__main__":
+def main():
+    """Console entry point (sweep 115): `lecore-mcp` after `pip install leos-core` -- the stdio
+    MCP server any harness can point at. `lecore-mcp --selftest` runs the wire selftest."""
     if "--selftest" in sys.argv:
         _selftest()
     else:
         MCPServer().serve_stdio()
+
+
+if __name__ == "__main__":
+    main()
