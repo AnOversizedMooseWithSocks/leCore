@@ -1,0 +1,77 @@
+[
+  {
+    "head": [
+      "bound_le_true",
+      [
+        "c"
+      ]
+    ],
+    "name": "bound_is_valid"
+  },
+  {
+    "head": [
+      "best_lt_bound",
+      [
+        "c"
+      ]
+    ],
+    "name": "test_fired"
+  },
+  {
+    "head": [
+      "best_lt_true",
+      [
+        "c"
+      ]
+    ],
+    "body": [
+      [
+        "bound_le_true",
+        [
+          "c"
+        ]
+      ],
+      [
+        "best_lt_bound",
+        [
+          "c"
+        ]
+      ]
+    ],
+    "name": "transitivity"
+  },
+  {
+    "head": [
+      "cannot_win",
+      [
+        "c"
+      ]
+    ],
+    "body": [
+      [
+        "best_lt_true",
+        [
+          "c"
+        ]
+      ]
+    ],
+    "name": "worse_than_best_cannot_win"
+  },
+  {
+    "head": [
+      "skip_is_safe",
+      [
+        "c"
+      ]
+    ],
+    "body": [
+      [
+        "cannot_win",
+        [
+          "c"
+        ]
+      ]
+    ],
+    "name": "safe_to_skip_a_loser"
+  }
+]

@@ -1,4 +1,7 @@
-"""B2 -- Sparse block codes (SBC) + a scaled resonator for compositional factorization.
+"""Break a combined shape into its simpler pieces on sparse block codes -- a resonator that
+factors compositions where the dense one stalls.
+
+B2 -- Sparse block codes (SBC) + a scaled resonator for compositional factorization.
 
 WHY THIS EXISTS
 ---------------

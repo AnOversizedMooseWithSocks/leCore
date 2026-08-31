@@ -1,0 +1,197 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>leCore — encoder probe (why does hash→atom diverge in Chrome?)</title>
+<style>
+ body{background:#0b0b0d;color:#d8d8dc;font:14px/1.55 ui-monospace,Consolas,monospace;margin:28px 34px;max-width:1100px}
+ h1{font-size:19px;margin:0 0 6px} p{color:#9a9aa2;margin:0 0 18px}
+ table{border-collapse:collapse;width:100%;margin:14px 0}
+ td,th{border-bottom:1px solid #1e1e24;padding:6px 10px;text-align:left;vertical-align:top}
+ th{color:#7a7a84;font-weight:400} .ok{color:#5ad67d} .bad{color:#ff6b6b} .v{color:#7fb3ff}
+ pre{background:#111116;padding:10px 12px;border-radius:6px;overflow:auto;color:#c8c8d0}
+</style>
+<h1>leCore — encoder probe</h1>
+<p>
+The typed and VSA pages recall at chance in Chrome (2/101) while every other page passes, and the
+only thing those two do that the others don't is <b>expand token hashes into atom values inside a
+shader</b>. This page isolates that one step. Each stage is compared against the same arithmetic in
+JavaScript, so the first row that fails names the layer — not the symptom.
+</p>
+<div id="out">running…</div>
+<script>
+const D = 256, TOKENS = ["holographic", "vector", "memory", "cleanup"];
+
+// FNV-1a, u32 — the host side. Must match Python's holographic_hashatom.fnv1a.
+function fnv1a(s){ let h = 0x811c9dc5>>>0;
+  for (let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193)>>>0; }
+  return h>>>0; }
+
+// hash32_pcg (Jarzynski & Olano) — the SAME sequence the shader runs, in JS.
+function pcg(x){ x = x>>>0;
+  x ^= x>>>16; x = Math.imul(x, 0x7feb352d)>>>0;
+  x ^= x>>>15; x = Math.imul(x, 0x846ca68b)>>>0;
+  x ^= x>>>16; return x>>>0; }
+
+function jsAtomSum(hashes, i){ let a = 0;
+  for (const h of hashes) a += ((pcg((h ^ i)>>>0) >>> 31) === 1) ? 1 : -1;
+  return a; }
+
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p,0.,1.); }`;
+
+// STAGE 1 — can the shader read the u32 texture at all? Echo the token hash back untouched.
+const FS_ECHO = `#version 300 es
+precision highp float; precision highp int; precision highp usampler2D;
+uniform usampler2D uTok; out uvec4 o;
+void main(){ o = uvec4(texelFetch(uTok, ivec2(int(gl_FragCoord.x),0),0).r,0u,0u,0u); }`;
+
+// STAGE 2 — does the PCG mix match? Echo pcg(hash ^ i) as an integer, no float anywhere.
+const FS_PCG = `#version 300 es
+precision highp float; precision highp int; precision highp usampler2D;
+uniform usampler2D uTok; uniform int uTokIndex; out uvec4 o;
+void main(){
+  uint i = uint(int(gl_FragCoord.x));
+  uint x = texelFetch(uTok, ivec2(uTokIndex,0),0).r ^ i;
+  x ^= x >> 16u; x *= 0x7feb352du;
+  x ^= x >> 15u; x *= 0x846ca68bu;
+  x ^= x >> 16u;
+  o = uvec4(x,0u,0u,0u); }`;
+
+// STAGE 3 — the real encoder, verbatim from the failing pages.
+const FS_ENCODE = `#version 300 es
+precision highp float; precision highp int; precision highp usampler2D;
+uniform usampler2D uTok; uniform int uT; uniform float uScale;
+out vec4 o;
+void main(){
+  uint i = uint(int(gl_FragCoord.x));
+  float acc = 0.0;
+  for (int t = 0; t < uT; ++t) {
+    uint x = texelFetch(uTok, ivec2(t,0), 0).r ^ i;
+    x ^= x >> 16u; x *= 0x7feb352du;
+    x ^= x >> 15u; x *= 0x846ca68bu;
+    x ^= x >> 16u;
+    acc += ((x >> 31u) == 1u) ? 1.0 : -1.0;
+  }
+  o = vec4(acc*uScale, 0.0, 0.0, 1.0); }`;
+
+const rows = [];
+function row(check, value, ok, note){ rows.push({check, value, ok, note: note||""}); }
+
+function render(){
+  document.getElementById("out").innerHTML =
+    "<table><tr><th>stage</th><th>value</th><th>result</th><th>note</th></tr>" +
+    rows.map(r => `<tr><td>${r.check}</td><td class=v>${r.value}</td>`+
+      `<td class=${r.ok?"ok":"bad"}>${r.ok?"PASS":"FAIL"}</td><td>${r.note}</td></tr>`).join("") +
+    "</table>" +
+    "<p>The FIRST failing row is the one that matters; later rows inherit its damage.</p>" +
+    `<pre>${navigator.userAgent}</pre>`;
+}
+
+try {
+  const cv = document.createElement("canvas");
+  const gl = cv.getContext("webgl2");
+  if (!gl) throw new Error("no WebGL2");
+  const ext = gl.getExtension("EXT_color_buffer_float");
+  row("EXT_color_buffer_float", ext ? "present" : "ABSENT", !!ext, "needed for the R32F stage");
+  row("renderer", gl.getParameter(gl.VERSION), true, gl.getParameter(gl.RENDERER));
+
+  const prog = (fs) => { const mk=(t,s)=>{const o=gl.createShader(t);gl.shaderSource(o,s);
+      gl.compileShader(o); if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o;};
+    const p=gl.createProgram(); gl.attachShader(p,mk(gl.VERTEX_SHADER,VS)); gl.attachShader(p,mk(gl.FRAGMENT_SHADER,fs));
+    gl.linkProgram(p); if(!gl.getProgramParameter(p,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p; };
+
+  const quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const bindQuad = (p) => { const l = gl.getAttribLocation(p,"p");
+    gl.bindBuffer(gl.ARRAY_BUFFER, quad); gl.enableVertexAttribArray(l);
+    gl.vertexAttribPointer(l,2,gl.FLOAT,false,0,0); };
+
+  const hashes = TOKENS.map(fnv1a);
+  row("FNV-1a in JS", hashes.join(", "), true, "host side; the shader never computes this");
+
+  // token texture: R32UI
+  const tok = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tok);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.R32UI,hashes.length,1,0,gl.RED_INTEGER,gl.UNSIGNED_INT,
+                new Uint32Array(hashes));
+
+  function runU32(fs, w, setU){
+    const p = prog(fs); gl.useProgram(p); bindQuad(p);
+    const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,t);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.R32UI,w,1,0,gl.RED_INTEGER,gl.UNSIGNED_INT,null);
+    const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER,fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);
+    gl.viewport(0,0,w,1);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tok);
+    gl.uniform1i(gl.getUniformLocation(p,"uTok"),0);
+    if (setU) setU(p);
+    gl.drawArrays(gl.TRIANGLES,0,3);
+    const out = new Uint32Array(w*4); gl.readPixels(0,0,w,1,gl.RGBA_INTEGER,gl.UNSIGNED_INT,out);
+    return Array.from({length:w},(_,k)=>out[k*4]>>>0);
+  }
+
+  // STAGE 1
+  const echoed = runU32(FS_ECHO, hashes.length);
+  const echoOK = echoed.every((v,k)=>v===hashes[k]);
+  row("1 · u32 texture read back", echoed.join(", "), echoOK,
+      echoOK ? "R32UI upload and usampler2D fetch are exact"
+             : "THE TEXTURE IS THE PROBLEM — the shader never saw the right hashes");
+
+  // STAGE 2
+  const gpuPcg = runU32(FS_PCG, D, (p)=>gl.uniform1i(gl.getUniformLocation(p,"uTokIndex"),0));
+  const jsPcg  = Array.from({length:D},(_,i)=>pcg((hashes[0]^i)>>>0));
+  let firstBad = -1;
+  for (let i=0;i<D;i++) if (gpuPcg[i]!==jsPcg[i]) { firstBad = i; break; }
+  row("2 · PCG mix, GPU vs JS", firstBad<0 ? "all "+D+" identical"
+        : `diverges at i=${firstBad}: gpu ${gpuPcg[firstBad]} vs js ${jsPcg[firstBad]}`,
+      firstBad<0, firstBad<0 ? "integer arithmetic agrees exactly"
+        : "THE ARITHMETIC IS THE PROBLEM — unsigned multiply or shift differs under ANGLE");
+
+  // STAGE 3
+  const p3 = prog(FS_ENCODE); gl.useProgram(p3); bindQuad(p3);
+  const t3 = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,t3);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.R32F,D,1,0,gl.RED,gl.FLOAT,null);
+  const fb3 = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER,fb3);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t3,0);
+  gl.viewport(0,0,D,1);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tok);
+  gl.uniform1i(gl.getUniformLocation(p3,"uTok"),0);
+  gl.uniform1i(gl.getUniformLocation(p3,"uT"),hashes.length);
+  gl.uniform1f(gl.getUniformLocation(p3,"uScale"),1.0);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  const enc = new Float32Array(D*4); gl.readPixels(0,0,D,1,gl.RGBA,gl.FLOAT,enc);
+  const gpuEnc = Array.from({length:D},(_,i)=>enc[i*4]);
+  const jsEnc  = Array.from({length:D},(_,i)=>jsAtomSum(hashes,i));
+  let bad3 = -1, worst = 0;
+  for (let i=0;i<D;i++){ const d = Math.abs(gpuEnc[i]-jsEnc[i]);
+    if (d > worst) worst = d;
+    if (d > 1e-4 && bad3 < 0) bad3 = i; }
+  row("3 · encoder, GPU vs JS", bad3<0 ? "all "+D+" identical (max |diff| "+worst.toExponential(2)+")"
+        : `diverges at i=${bad3}: gpu ${gpuEnc[bad3]} vs js ${jsEnc[bad3]}`,
+      bad3<0, bad3<0 ? "the encoder itself is correct — look upstream at the token list"
+        : "the loop or the sign test differs");
+
+  // STAGE 4 — the loop bound. Same maths, unrolled with a constant bound.
+  const FS_CONST = FS_ENCODE.replace("uniform int uT;","").replace("t < uT","t < "+hashes.length);
+  const p4 = prog(FS_CONST); gl.useProgram(p4); bindQuad(p4);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,fb3); gl.viewport(0,0,D,1);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D,tok);
+  gl.uniform1i(gl.getUniformLocation(p4,"uTok"),0);
+  gl.uniform1f(gl.getUniformLocation(p4,"uScale"),1.0);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  const enc4 = new Float32Array(D*4); gl.readPixels(0,0,D,1,gl.RGBA,gl.FLOAT,enc4);
+  let same4 = true; for (let i=0;i<D;i++) if (Math.abs(enc4[i*4]-gpuEnc[i])>1e-6) { same4=false; break; }
+  row("4 · constant loop bound", same4 ? "identical to the uniform-bound version" : "DIFFERENT",
+      same4, same4 ? "a dynamic loop bound is not the cause"
+                   : "THE DYNAMIC LOOP BOUND IS THE PROBLEM — ANGLE unrolls it differently");
+} catch (e) {
+  row("probe", String(e), false, "the probe itself failed — that is the finding");
+}
+render();
+</script>

@@ -80,6 +80,26 @@ def _xp_of(*arrays):
         return np
 
 
+def _is_device_array(a):
+    """Follow-the-data by TYPE, not by whether cupy imports here: a cupy array's
+    class lives under cupy._core. The weight getters must never hand a device
+    array to np.asarray -- cupy refuses implicit conversion and that refusal is
+    the first read of every layer (sweep 114, pinned by the residency tests)."""
+    return str(getattr(type(a), "__module__", "")).startswith("cupy")
+
+
+def _weight_f64(a):
+    """A weight as float64 WHERE IT ALREADY LIVES: host arrays become float64
+    numpy (unchanged behaviour); device arrays are returned in place -- cast on
+    the device when its module is importable, untouched otherwise."""
+    if _is_device_array(a):
+        xp = _xp_of(a)
+        if xp is np:
+            return a                                  # cupy not importable here: never convert
+        return xp.asarray(a, xp.float64)
+    return np.asarray(a, np.float64)
+
+
 def _rmsnorm(x, w, eps):
     """Qwen3Next RMSNorm is ZERO-CENTERED: y = norm(x) * (1 + w), weight init 0.
     Field-caught: plain `* w` matched nothing (rel err 1.0) -- the norm is where
@@ -150,16 +170,24 @@ def _kmeans(X, nc, iters=8, seed=0):
 
 
 def _rope_tables(dim, positions, theta):
-    xp = _xp_of()
-    inv = 1.0 / (theta ** (xp.arange(0, dim, 2, dtype=xp.float64) / dim))
+    # FOLLOW THE DATA THAT ARRIVED (cp93, sixth screenshot): _xp_of() with no
+    # arguments follows nothing and returned numpy, so inv was host while
+    # positions was device -- np.outer then DISPATCHED to cupy through
+    # __array_function__ and died on the numpy operand. The positions array is
+    # the truth about where this computation lives. theta is cast to a plain
+    # float so a numpy-0d config scalar can never smuggle host-ness back in.
+    xp = _xp_of(positions)
+    inv = 1.0 / (float(theta) **
+                 (xp.arange(0, dim, 2, dtype=xp.float64) / dim))
     ang = xp.outer(positions, inv)               # (S, dim/2)
     emb = xp.concatenate([ang, ang], axis=-1)    # (S, dim) -- non-interleaved
     return xp.cos(emb), xp.sin(emb)
 
 
 def _rotate_half(x):
+    xp = _xp_of(x)
     h = x.shape[-1] // 2
-    return np.concatenate([-x[..., h:], x[..., :h]], axis=-1)
+    return xp.concatenate([-x[..., h:], x[..., :h]], axis=-1)
 
 
 def _apply_rope(q, k, cos, sin):
@@ -208,6 +236,20 @@ class InferenceState:
 
 # ---------------------------------------------------------------------- runtime
 
+
+def to_host(a):
+    """THE HOST BOUNDARY (cp89, field-caught on the A4500 twice): with weights
+    resident on GPU the forward math follows the data (xp), so its outputs are
+    device arrays -- and every host-side consumer (measure, factbake, the
+    installer, attribution) calls np.asarray, which cupy refuses BY DESIGN.
+    Logits are small and cross per call (the to_device docstring's own words),
+    so they cross HERE, once, instead of in 47 consumer sites. On numpy this is
+    identity, which is what keeps the CPU path bit-exact."""
+    if hasattr(a, "get") and type(a).__module__.split(".")[0] == "cupy":
+        return a.get()
+    return a
+
+
 class GDNRuntime:
     """Weights dict + config -> callable model. Tensor names follow the HF layout
     with or without the 'model.language_model.' / 'model.' prefix (auto-detected).
@@ -246,15 +288,16 @@ class GDNRuntime:
         key = self.root + "layers.%d.%s" % (layer, name)
         if key not in self.w:
             return None
-        return np.asarray(self.w[key], np.float64)
+        # FOLLOW THE DATA (cp92, fifth A4500 screenshot): this is _g's cached
+        # sibling and it still read through np.asarray -- the LAST hardcoded
+        # weight read in the forward path. On device the array stays where it
+        # is; on host this is byte-identical to before.
+        return _weight_f64(self.w[key])
 
     def _g(self, layer, name):
-        xp = _xp_of()
-        _a = self.w[self.root + "layers.%d.%s" % (layer, name)]
         # FOLLOW THE DATA. On a device this array is a cupy array and
-        # np.asarray would raise; xp.asarray keeps it where it already is.
-        _xp = _xp_of(_a)
-        return _xp.asarray(_a, _xp.float64)
+        # np.asarray would raise; _weight_f64 keeps it where it already is.
+        return _weight_f64(self.w[self.root + "layers.%d.%s" % (layer, name)])
 
     def load_factors(self, factors):
         """Attach low-rank factors produced by refactor.decompose so the forward
@@ -652,9 +695,13 @@ class GDNRuntime:
         stand-in is chosen for being unable to break.
         The fix is get_array_module (already in holographic_backend: "follow-the
         -data: cupy if any argument is a cupy array") threaded through those 47
-        sites, with a measured parity check per kernel. Until that is done, this
-        returns device="cpu" with the reason rather than moving weights the
-        forward pass cannot read."""
+        sites, with a measured parity check per kernel. DONE AS OF cp89: the
+        forward spine follows the data (xp), and the HOST BOUNDARY lives at the
+        API returns (to_host on logits -- small, cross per call) and at the hook
+        seam (residents receive host arrays; their deltas cross back to xp).
+        CPU parity re-measured bit-exact after the change. GPU numerics match to
+        TOLERANCE, not bit-exactly -- bit-exact runs use the cpu path, and the
+        pinned determinism suite guards exactly that."""
         from holographic.misc.holographic_backend import (
             array_module, gpu_available, to_device as _to)
         if not on:
@@ -680,6 +727,31 @@ class GDNRuntime:
                            "conversion. Residency is wired; the kernels are "
                            "not. Running on NumPy rather than crashing at the "
                            "first layer."}
+        # PREFLIGHT THE DEVICE WITH REAL KERNELS (cp91, fourth A4500
+        # screenshot): moving the weights succeeded and the FIRST fancy index
+        # then died inside cupy's JIT -- "Failed to find CUDA headers" -- because
+        # the bare cupy-cuda12x wheel ships the runtime but NOT the toolkit
+        # headers its kernel compiler needs. "weights resident" must never be
+        # declared until the ops the forward actually uses have RUN on the
+        # device: a take (fancy index), a matmul, and an astype. A probe
+        # failure is a clean refusal WITH THE REMEDY, not a traceback
+        # mid-install.
+        try:
+            _pa = xp.asarray([1.0, 2.0, 3.0])
+            _pi = xp.asarray([0, 2])
+            _ = _pa[_pi]                       # the exact op that crashed
+            _ = _pa.reshape(1, 3) @ _pa.reshape(3, 1)
+            _ = _pa.astype(xp.float64)
+        except Exception as _probe_exc:
+            self._dev = None
+            return {"device": "cpu", "resident": 0,
+                    "why": "CUDA device present but kernel compilation failed "
+                           "(%s: %s). Remedy: pip install \"cupy-cuda12x[ctk]\" "
+                           "into assimilation/.venv (the [ctk] extra ships the "
+                           "toolkit headers the JIT needs), or set CUDA_PATH "
+                           "to an installed toolkit."
+                           % (type(_probe_exc).__name__,
+                              str(_probe_exc)[:90])}
         moved = 0
         for k in list(self.w):
             try:
@@ -687,6 +759,24 @@ class GDNRuntime:
                 moved += 1
             except Exception:
                 pass
+        # THE ALIASING BUG (cp90, third A4500 screenshot): embed and lm_head are
+        # float64 COPIES bound at __init__ -- moving the dict leaves them on the
+        # host, and the very first read (embed[ids]) mixes devices: numpy-embed
+        # indexed by cupy-ids is exactly the "implicit conversion" crash. The
+        # views move WITH the weights or the move is a lie.
+        try:
+            # TIED WEIGHTS (sweep 114): when lm_head IS embed (tied embeddings), two
+            # independent moves would silently untie them into two device copies --
+            # double the memory and a divergence trap for any later in-place update.
+            # Move once, re-tie by identity.
+            _tied = self.lm_head is self.embed
+            self.embed = _to(np.asarray(self.embed))
+            self.lm_head = self.embed if _tied else _to(np.asarray(self.lm_head))
+        except Exception:
+            self._dev = None
+            return {"device": "cpu", "resident": 0,
+                    "why": "embed/lm_head would not move; refusing a mixed "
+                           "device state"}
         self._dev = xp
         return {"device": "gpu", "resident": moved, "why": "weights resident"}
 
@@ -778,7 +868,9 @@ class GDNRuntime:
                 break
             for fn in (hooks.get(L), step_hooks.get(step_i)):
                 if fn is not None:
-                    d = fn(h)
+                    d = fn(to_host(h))
+                    if d is not None:
+                        d = xp.asarray(d)
                     if d is not None:
                         h = h + xp.asarray(d, xp.float64)
         nk = next(k for k in (self.root + "norm.weight", "model.norm.weight")
@@ -794,8 +886,8 @@ class GDNRuntime:
             # was exact to 0.0.
             st.pos = past + len(ids)
             st.logits = logits[-1]
-            return logits, st
-        return logits
+            return to_host(logits), st
+        return to_host(logits)
 
     def _gdn_step(self, layer, x, st):
         """One token through a GDN mixer, carrying (S, conv window). Must be the
@@ -871,8 +963,9 @@ class GDNRuntime:
         qg = (x @ self._g(layer, "self_attn.q_proj.weight").T).reshape(
             H, (2 if _gated else 1) * hd)
         q = qg[:, :hd]
+        _xps = _xp_of(x)
         gate = (qg[:, hd:].reshape(H * hd) if _gated
-                else np.full(H * hd, 20.0))
+                else _xps.full(H * hd, 20.0))
         k = (x @ self._g(layer, "self_attn.k_proj.weight").T).reshape(Hkv, hd)
         v = (x @ self._g(layer, "self_attn.v_proj.weight").T).reshape(Hkv, hd)
         # QK-NORM IS OPTIONAL: Qwen normalises queries and keys per head, while
@@ -886,19 +979,27 @@ class GDNRuntime:
         if _kn is not None:
             k = _rmsnorm(k, _kn, eps)
         rd = int(hd * c.get("partial_rotary_factor", 1.0))
-        cos, sin = _rope_tables(rd, np.array([float(pos)]), c["rope_theta"])
+        # THE STEP PATH'S SEAM (cp94, seventh screenshot): positions built with
+        # hardcoded np handed numpy rope tables to a device q -- the batched
+        # forward never walks this line, which is why six fixes missed it.
+        cos, sin = _rope_tables(rd, _xps.asarray([float(pos)],
+                                                 _xps.float64),
+                                c["rope_theta"])
         q2, k2 = _apply_rope(q[None], k[None], cos, sin)
         q, k = q2[0], k2[0]
-        ks = np.concatenate([st["k"], k[None]], axis=0) if "k" in st else k[None]
-        vs = np.concatenate([st["v"], v[None]], axis=0) if "v" in st else v[None]
+        _xpk = _xp_of(k)
+        ks = _xpk.concatenate([st["k"], k[None]], axis=0) if "k" in st else k[None]
+        vs = _xpk.concatenate([st["v"], v[None]], axis=0) if "v" in st else v[None]
         st["k"], st["v"] = ks, vs                              # the growing RAM
         rep = H // Hkv
-        kr = np.repeat(ks, rep, axis=1); vr = np.repeat(vs, rep, axis=1)
-        scores = np.einsum("hd,thd->ht", q, kr) * (hd ** -0.5)
+        kr = _xps.repeat(ks, rep, axis=1)
+        vr = _xps.repeat(vs, rep, axis=1)
+        scores = _xps.einsum("hd,thd->ht", q, kr) * (hd ** -0.5)
         scores -= scores.max(axis=-1, keepdims=True)
-        w = np.exp(scores); w /= w.sum(axis=-1, keepdims=True)
-        o = np.einsum("ht,thd->hd", w, vr).reshape(H * hd)
-        o = o * (1.0 / (1.0 + np.exp(-gate)))
+        w = _xps.exp(scores)
+        w /= w.sum(axis=-1, keepdims=True)
+        o = _xps.einsum("ht,thd->hd", w, vr).reshape(H * hd)
+        o = o * (1.0 / (1.0 + _xps.exp(-gate)))
         return o @ self._g(layer, "self_attn.o_proj.weight").T
 
     def step(self, token_id, state, hooks=None):
@@ -920,13 +1021,15 @@ class GDNRuntime:
             if fn is not None:
                 d = fn(h[None, :])
                 if d is not None:
-                    h = h + np.asarray(d, np.float64).reshape(-1)
+                    h = h + _xp_of(h).asarray(d, _xp_of(h).float64).reshape(-1)
         state.pos += 1
         nk = next(k for k in (self.root + "norm.weight", "model.norm.weight")
                   if k in self.w)
-        h = _rmsnorm(h, np.asarray(self.w[nk], np.float64), c["rms_eps"])
+        _wnk = self.w[nk]
+        h = _rmsnorm(h, _xp_of(_wnk).asarray(_wnk, _xp_of(_wnk).float64),
+                     c["rms_eps"])
         state.logits = h @ self.lm_head.T
-        return state.logits, state
+        return to_host(state.logits), state
 
     def prefill(self, token_ids, hooks=None):
         """VECTORIZED prefill: one full-sequence forward that COLLECTS the carried
@@ -936,7 +1039,7 @@ class GDNRuntime:
         scale; collecting states from the vectorized pass makes it strictly
         dominate. Returns (last-token logits, InferenceState)."""
         logits, st = self.forward(token_ids, hooks=hooks, collect_state=True)
-        return logits[-1], st
+        return to_host(logits)[-1], st
 
     def generate_fast(self, token_ids, n_new=16, state=None, hooks=None):
         """Greedy generation with carried state -- the boosted path. Returns
@@ -964,7 +1067,7 @@ class GDNRuntime:
 
         This is the verification primitive speculative decoding needs: draft k
         tokens cheaply, then check all k with a single batched forward."""
-        xp = _xp_of()
+        xp = _xp_of(self.embed)
         c = self.cfg
         hooks = hooks or {}
         ids = xp.asarray(tokens, xp.int64)
@@ -984,7 +1087,9 @@ class GDNRuntime:
             h = h + self._mlp(L, hn)
             fn = hooks.get(L)
             if fn is not None:
-                d = fn(h)
+                d = fn(to_host(h))
+                if d is not None:
+                    d = xp.asarray(d)
                 if d is not None:
                     h = h + xp.asarray(d, xp.float64)
         state.pos += S
@@ -993,7 +1098,7 @@ class GDNRuntime:
         h = _rmsnorm(h, xp.asarray(self.w[nk], xp.float64), c["rms_eps"])
         logits = h @ self.lm_head.T
         state.logits = logits[-1]
-        return logits, state
+        return to_host(logits), state
 
     def forward_embeds(self, embeds, hooks=None, step_hooks=None):
         """Run the model from HIDDEN STATES instead of token ids.
@@ -1003,7 +1108,7 @@ class GDNRuntime:
         steered state. Without it, any such experiment silently degrades to
         re-tokenizing the input (measured: it did, and the results looked like a
         failure of the idea rather than of the plumbing)."""
-        xp = _xp_of()
+        xp = _xp_of(self.embed)
         c = self.cfg
         hooks = hooks or {}
         step_hooks = step_hooks or {}
@@ -1021,7 +1126,9 @@ class GDNRuntime:
             h = h + self._mlp(L, hn)
             for fn in (hooks.get(L), step_hooks.get(step_i)):
                 if fn is not None:
-                    d = fn(h)
+                    d = fn(to_host(h))
+                    if d is not None:
+                        d = xp.asarray(d)
                     if d is not None:
                         h = h + xp.asarray(d, xp.float64)
         nk = next(k for k in (self.root + "norm.weight", "model.norm.weight")
@@ -1332,9 +1439,23 @@ def _sanity_check(rt, model_dir, probe=None):
     print("      sanity: perplexity %.1f on plain English (chance ~%d) -- %s"
           % (ppl, vocab, verdict))
     if verdict != "looks correct":
-        print("      ^ the weights are probably being interpreted wrongly "
-              "(layout, head counts, or a transpose). Numbers measured now "
-              "would blame the MODEL for a reading error -- run --verify.")
+        # TWO CAUSES, ONE SYMPTOM, AND THE HEURISTIC CANNOT TELL THEM APART.
+        # Perplexity near chance means either the weights are being READ wrong
+        # OR the model was never TRAINED -- a random-init fixture sits at chance
+        # by construction. On the mini-Qwen fixture this printed "LIKELY MISREAD"
+        # while the install was reading the weights perfectly.
+        # It matters because the quality gates below (router accuracy, self_write
+        # novelty, the improvement search) CANNOT PASS on weights with no learned
+        # structure. Grading them FAIL against an untrained model reads as "the
+        # installer is broken" when the truth is "this cannot be judged here".
+        print("      ^ EITHER the weights are being interpreted wrongly "
+              "(layout, head counts, a transpose) OR this checkpoint was never "
+              "trained -- a random-init fixture sits at chance by construction. "
+              "Run --verify to tell them apart.")
+        print("      ^ if it is untrained: router / self_write / improvement "
+              "measure LEARNED structure and cannot pass here. Judge those on "
+              "real weights; the structural steps (prepend, registers, ladder, "
+              "memory_index, state_track, boot_record) are still meaningful.")
     return ppl
 
 

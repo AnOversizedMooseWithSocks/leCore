@@ -151,3 +151,151 @@ def _read_version():
 
 
 __version__ = _read_version()
+
+
+def agent_boot(llm="remote", partition=None, session=None):
+    """Boot leCore with BOTH ENDS ATTACHED: memory in front, an LLM behind.
+
+    THE PATTERN THIS NAMES. Forty-odd sweeps of agent work converged on the same
+    two-line opening -- autoboot with a partition so the reflex answers from
+    accumulated memory, and an `llm` callable so a question the reflex CANNOT
+    answer escalates to the model instead of stopping at T4. Measured on a live
+    partition:
+        autoboot()                  known question T4, unknown T4, 0 escalations
+        autoboot(partition=...)     known question T0, unknown T4, 0 escalations
+        autoboot(partition, llm=..) known question T0, unknown escalates, 3 calls
+    The partition half already had a default ($LECORE_PARTITION). The LLM half had
+    none, and `llm="auto"` looks for a MODEL DIRECTORY on disk -- which is the
+    wrong question when the caller IS the model.
+
+    `llm` IS REQUIRED AND MUST BE CALLABLE, deliberately. A human chatting at a
+    REPL must never be wired in as the back end: they would be prompted by the
+    engine mid-conversation, which is absurd and also unfalsifiable from inside
+    the process -- there is no reliable way to detect "an LLM is calling me", so
+    this asks instead of guessing. If you cannot pass a callable, you are not an
+    agent and autoboot() is your door.
+
+    Everything else is autoboot's: partition search order, doctrine, POST."""
+    # "remote" IS THE COMMON CASE, NOT THE EXCEPTION. The first version of this
+    # required a local callable, which fits a model loaded in-process and nothing
+    # else. People run Claude or ChatGPT behind an OpenAI-compatible endpoint --
+    # OpenWebUI, openzoo, ollama, a vendor API -- with the model in ANOTHER
+    # PROCESS and usually another machine. There is no callable to pass there,
+    # only a URL, and it is normally already in the environment.
+    if llm == "remote" or (isinstance(llm, str) and llm.startswith("http")):
+        from holographic.io_and_interop.holographic_remotellm import remote_llm
+        llm = remote_llm(url=(llm if isinstance(llm, str)
+                              and llm.startswith("http") else None))
+    if not callable(llm):
+        raise TypeError(
+            "agent_boot(llm=...) needs the model on the other end: a CALLABLE, or "
+            "\"remote\" / a base URL for an OpenAI-compatible endpoint (set "
+            "LECORE_LLM_URL, LECORE_LLM_MODEL, LECORE_LLM_KEY -- OPENAI_* also "
+            "read). Got %r. A human at a REPL wants lecore.autoboot(), which "
+            "leaves the back end unattached."
+            % type(llm).__name__)
+    return autoboot(partition=partition, session=session, llm=llm, memory=True)
+
+
+def autoboot(partition=None, session=None, llm="auto", memory=True):
+    """ONE CALL, BOTH ENDS, MEMORY IN (cp62): the standing boot ritual made standard so
+    it never has to be asked for again. Finds the partition (arg, or $LECORE_PARTITION,
+    or the conventional path), boots doctrine + external memory, attaches the model rung
+    when one is reachable (llm="auto": ModelRung if importable and a model dir exists;
+    pass a callable to override; llm=None for memory-end only), sets the archive root,
+    and opens a session. Returns the mind, ready.
+
+        import lecore
+        m = lecore.autoboot()          # attached on both ends, memory loaded
+
+    The POST line is available as m._autoboot_report."""
+    import os
+    # THE DEFAULT WAS ONE MACHINE'S ABSOLUTE PATH -- "/home/claude/claude_partition"
+    # -- which exists on nobody else's disk, so every outside user fell through to
+    # the shipped bundle without being told why. It still works (the fallthrough is
+    # correct), but a default nobody can hit is a default that teaches nothing.
+    # Order now: explicit argument, $LECORE_PARTITION, ./lecore_memory (the
+    # conventional per-repo partition, and the one that actually has content),
+    # then the shipped release_bundle/. The legacy absolute path stays LAST so an
+    # existing setup that relies on it keeps working -- additive, not a flip.
+    root = partition or os.environ.get("LECORE_PARTITION")
+    if not root:
+        for _cand in ("lecore_memory", "release_bundle",
+                      "/home/claude/claude_partition"):
+            if os.path.isdir(_cand):
+                root = _cand
+                break
+        root = root or "lecore_memory"
+    if not memory:
+        root = "\0no-memory"          # nothing on disk matches; boots clean
+    rung = None
+    if llm == "auto":
+        # cp78 polish: the auto arm now uses the ENGINE'S OWN RuntimeRung (ships
+        # with the repo, automatic source attribution, opt-outs honored) instead
+        # of a session-local /tmp tool that never shipped -- anyone else's
+        # llm="auto" was silently getting no rung at all. Candidates:
+        # $LECORE_MODEL first, then the conventional local paths.
+        cands = [os.environ.get("LECORE_MODEL", "")] + \
+            ["/tmp/mini_installed_full", "/tmp/mini_baked"]
+        for cand in cands:
+            if cand and os.path.isdir(cand):
+                try:
+                    from holographic.io_and_interop.holographic_runtimerung \
+                        import RuntimeRung
+                    rung = RuntimeRung(cand)
+                    break
+                except Exception:
+                    rung = None
+    elif callable(llm):
+        rung = llm
+    # THE SHIPPED-BUNDLE FALLBACK IS FOR AN ABSENT DEFAULT, NOT AN EXPLICIT ASK.
+    # cp79 added it so `lecore.autoboot()` works out of the box on a fresh
+    # machine, which is right -- but it fired unconditionally, so
+    # `autoboot(partition="/my/new/memory")` SILENTLY MOUNTED release_bundle
+    # instead. _autoboot_report then named release_bundle while the caller
+    # believed they were on their own partition, and the first learning_save
+    # went somewhere the next boot would not read.
+    # An explicit partition= or $LECORE_PARTITION is a REQUEST: create it and
+    # use it. Only the conventional-path search may fall back.
+    _explicit = bool(partition or os.environ.get("LECORE_PARTITION"))
+    if _explicit and memory and not os.path.isdir(root):
+        os.makedirs(root, exist_ok=True)
+    if not _explicit and memory and not os.path.isdir(root):
+        _shipped = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "release_bundle")
+        if os.path.isdir(_shipped):
+            root = _shipped
+    m = UnifiedMind()
+    # CREATE AN EXPLICITLY-REQUESTED PARTITION INSTEAD OF SILENTLY DROPPING IT.
+    # `partition=root if isdir(root) else None` meant that asking for a NEW
+    # directory -- the normal way to start your own memory -- fell through to
+    # the shipped bundle, and _autoboot_report then said "release_bundle" while
+    # the caller believed they were on their own partition. The first save would
+    # go to the right place and every boot before it to the wrong one.
+    # Only for an EXPLICIT partition= or $LECORE_PARTITION: the search-order
+    # fallbacks must still fall back, because a missing ./lecore_memory is a
+    # conventional absence, not a request.
+    rep = m.boot(partition=root if os.path.isdir(root) else None,
+                 doctrine=True, llm=rung or (lambda p: ""))
+    m._archive_root = root
+    if rung is not None:
+        try:
+            m.zoo_attach(rung)
+            m._zoo_llm = rung
+            if hasattr(rung, "mind"):
+                rung.mind = m
+        except Exception:
+            pass
+    if session:
+        m.session_open(str(session))
+    # REPORT THE POST TAKEN *AFTER* THE MOUNT WHEN THERE IS ONE. bios.boot runs
+    # POST twice on purpose -- once before mounting a partition and once after,
+    # as "post_after_mount", precisely because the spectral check needs state to
+    # read. This surfaced the PRE-mount one, so booting a partition with 116
+    # logged queries reported "virgin mind", identical to booting an empty one.
+    # THE DESIGN WAS ALREADY RIGHT AND THE WRAPPER READ THE WRONG FIELD.
+    m._autoboot_report = {"partition": root, "rung": type(rung).__name__
+                          if rung is not None else None,
+                          "post": rep.get("post_after_mount") or rep.get("post"),
+                          "mounted": rep.get("mounted")}
+    return m

@@ -2,6 +2,7 @@
 UnifiedMind actually work END-TO-END through the mind, not merely import. Per the project's rule that
 wiring is proven by a cross-faculty test, not an import check."""
 import numpy as np
+import pytest
 from holographic.misc.holographic_unified import UnifiedMind
 
 _MIND = UnifiedMind(dim=1024, seed=0)   # built once; both faculties run on the mind's own dim/seed
@@ -71,3 +72,79 @@ def test_learned_energy_faculty_through_mind():
     cb = clean[:64]                                                            # fixed soft energy cleanup over stored samples
     soft = np.mean([rel(dense_cleanup(nte[i], cb, beta=25.0, steps=3), cte[i]) for i in range(len(nte))])
     assert ep < soft, f"learned energy should beat the fixed soft cleanup on a continuous manifold, got ep={ep:.3f} soft={soft:.3f}"
+
+
+def test_import_does_not_treat_a_blank_local_answer_as_a_conflict(tmp_path):
+    """**Sharing knowledge fails if "I don't know" counts as disagreement.**
+
+    memory_import tested `q in mine`, which is TRUE for a question this memory holds
+    a BLANK for -- an abstention that reached the taught store. Incoming knowledge
+    was then flagged as a conflict and, under the default on_conflict="flag",
+    SILENTLY NOT IMPORTED.
+    MEASURED on a real bundle: 8 conflicts reported, FOUR against questions that
+    answered T4 with answer='' locally. Half the shared knowledge was withheld for
+    disagreeing with nothing. After: imported 11 -> 15, conflicts 8 -> 4, and the
+    withheld facts answer T0.
+    GENUINE conflicts must still be respected, so this asserts both directions."""
+    import lecore
+
+    src = lecore.UnifiedMind(dim=128, seed=0)
+    src.teach("shared fact alpha", "alpha is the answer")
+    src.teach("shared fact beta", "beta is the answer")
+    pack = str(tmp_path / "bundle.lecorepack")
+    rep = src.memory_export(pack, query="shared fact")
+    assert rep["exported"] >= 2, rep
+
+    # a receiver that knows NEITHER question must import both, not flag them
+    dst = lecore.UnifiedMind(dim=128, seed=0)
+    dst.ask("shared fact alpha")            # provokes any abstention caching
+    dst.ask("shared fact alpha")
+    got = dst.memory_import(pack)
+    blank = [c for c in (got.get("conflicts") or [])
+             if not str(c.get("mine", "")).strip()]
+    assert not blank, (
+        "an empty local answer was reported as a conflict: %r" % blank)
+    assert dst.ask("shared fact alpha").get("answer"), "the fact was not imported"
+
+    # a REAL disagreement must still be flagged and must not overwrite by default
+    other = lecore.UnifiedMind(dim=128, seed=0)
+    other.teach("shared fact alpha", "MY OWN different answer")
+    rep2 = other.memory_import(pack)
+    assert any(c["q"].startswith("shared fact alpha")
+               for c in (rep2.get("conflicts") or [])), rep2
+    assert "MY OWN" in str(other.ask("shared fact alpha").get("answer")), \
+        "on_conflict='flag' must keep the local answer"
+
+
+@pytest.mark.slow   # critical-but-slow (sweep 118): autoboot loads the full partition; measured ~225 s locally.
+                    # Under the budget rule an UNMARKED test this long is skipped in CI; the marker is what
+                    # declares it critical and buys it the long budget. It guards the tier contract (P0-adjacent).
+def test_an_abstention_stays_an_abstention_however_often_it_is_asked():
+    """**T0 is the contract that an answer came from memory. A blank must not wear it.**
+
+    TWO separate paths served a cached empty answer at the confident tier:
+        via="reflex-exact" -- the exact-question cache, fixed at its WRITE site
+        via="reflex"       -- recovered from the trace, `if payload is not None`
+                              lets "" through, so fixed at its READ site
+    MEASURED before: asking an unknown question twice gave T4/answer='' then
+    T0/answer='' -- the same blank, promoted by having been asked before. Every
+    caller that branches on tier == "T0" got a false positive, which is the whole
+    point of the tier.
+    Asks three times because the first fix made ONE probe stay T4 while two others
+    still flipped on the second call -- a single repeat was not enough to see it."""
+    import lecore
+
+    m = lecore.autoboot(llm=None)
+
+    for unknown in ("what is the capital of luxembourg", "what colour is a quark"):
+        tiers = [m.ask(unknown).get("tier") for _ in range(3)]
+        assert tiers == ["T4"] * 3, (
+            "%r escalated to a confident tier on repeat: %r" % (unknown, tiers))
+
+    # and a genuine answer must still be served, or the guard is too broad
+    known = "what is lecore"
+    tiers = [m.ask(known).get("tier") for _ in range(3)]
+    if tiers[0] == "T0":
+        assert tiers == ["T0"] * 3, tiers
+        assert str(m.ask(known).get("answer") or "").strip(), \
+            "a T0 answer must be non-empty"

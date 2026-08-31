@@ -650,7 +650,7 @@ def _base_size(obj):
     return 1.0, tuple(val)
 
 
-def realize_scene(objects, spacing=2.7, base_radius=0.7):
+def realize_scene(objects, spacing=2.7, base_radius=0.7, positions=None):
     """Turn parsed objects into a list of renderables: dicts with sdf (an object with .eval), color (rgb), and
     material render kwargs. Positions come from the relations (heuristic): roots spread along x; 'inside' sits at the
     container centre (and shrinks); 'leaning'/'on'/'beside'/'diagonal' offset from the reference. HONEST: rotation is
@@ -687,6 +687,18 @@ def realize_scene(objects, spacing=2.7, base_radius=0.7):
         else:                                                 # leaning / beside / diagonal
             off = np.array([2.1, 0.5, 0.3]) if relword in ("leaning", "diagonal") else np.array([2.4, 0.0, 0.0])
             pos[i] = pos[ref] + off
+
+    # POSITIONS OVERRIDE (default-off, additive): a dict {object name or index: (x,y,z)}
+    # replaces the relation-derived layout for those objects -- the door a physics
+    # trajectory walks through (scene.simulate returns exactly {name: (x,y,z)} frames,
+    # and until this hook existed nothing could render them: the sim was write-only).
+    # Absent -> byte-identical heuristic layout.
+    if positions:
+        for i, o in enumerate(objects):
+            key = _obj_name(o)
+            p = positions.get(key, positions.get(i))
+            if p is not None:
+                pos[i] = np.asarray(p, float)
 
     out = []
     for i, o in enumerate(objects):
@@ -1119,7 +1131,7 @@ def _scene_aabb(rs, margin=1.0):
     return lo, hi
 
 
-def render_scene(objects, camera, width=256, height=256, post=None, sun="bright", sky="clear",
+def render_scene(objects, camera, width=256, height=256, post=None, sun="bright", sky="clear", positions=None,
                  glass_tint=(0.75, 0.9, 0.85), ss=2, ground=True, dither=0.004, adaptive=True, stats=None,
                  fog=None, fog_density=0.12, fog_color=(0.80, 0.85, 0.92), fog_max_dist=14.0, region_field=None,
                  bake=None, relax=1.0, lighting=None, sun_scale=1.0, ground_color=None, backdrop=None):
@@ -1141,7 +1153,7 @@ def render_scene(objects, camera, width=256, height=256, post=None, sun="bright"
     classic adaptive-sampling caveat) -- raise the base resolution if that bites."""
     from holographic.rendering.holographic_postfx import supersample as _ssaa
     ss = max(1, int(ss))
-    rs_all = realize_scene(objects)                            # realize once; split surface vs volumetric objects
+    rs_all = realize_scene(objects, positions=positions)       # realize once; split surface vs volumetric objects
     vol_idx = [i for i, o in enumerate(objects) if isinstance(o, dict) and o.get("material") in _VOLUMETRIC]
     surf_rs = [rs_all[i] for i in range(len(objects)) if i not in vol_idx]
     ctx = _scene_setup(None, ground, sky, sun, glass_tint, rs=surf_rs, lighting=lighting, sun_scale=sun_scale,

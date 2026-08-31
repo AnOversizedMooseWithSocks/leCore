@@ -41,6 +41,7 @@ class Table:
 
     def __init__(self, records, roles, role_vocab, value_vocab, rows):
         self.records = np.asarray(records, float)   # (n, dim) the VSA rows
+        self._rec_cap, self._rec_n = None, 0        # amortised-append buffer
         self.roles = list(roles)                    # column names
         self.role_vocab = role_vocab                # Vocabulary: role name -> role vector (for unbind)
         self.value_vocab = value_vocab              # Vocabulary: filler name -> filler vector (fuzzy + cleanup)
@@ -134,6 +135,7 @@ class UserTable(Table):
         self.seed = seed
         self._pk = None                                        # B4: the primary-key column, if one is set
         self._pk_index = {}                                    # key value -> [row indices] (kept in sync on insert)
+        self._sec_index = {}                                   # col -> {value: [row indices]}, see create_index
         # B5 constraints, enforced on insert:
         self._not_null = set()                                 # columns that may not be None/absent
         self._unique = set()                                   # columns whose live values must be distinct
@@ -201,6 +203,11 @@ class UserTable(Table):
         """Live row indices for a primary-key value -- O(1) via the index, skipping tombstoned versions."""
         return [i for i in self._pk_index.get(value, []) if not self.rows[i].get("_deleted")]
 
+
+
+
+
+
     def add_column(self, name):
         """P13 -- add a queryable column with NO migration. Append the role (allocate its codebook vector); existing
         records are UNTOUCHED (no re-encoding, no table rewrite), so old rows are simply sparse on the new column
@@ -219,6 +226,10 @@ class UserTable(Table):
     def _restore(self, snap):
         """B6 -- restore the state captured by _snapshot (roll back to before the transaction)."""
         self.records, self.rows, self._pk_index = snap[0], snap[1], snap[2]
+        # DROP THE APPEND BUFFER when records is replaced wholesale -- otherwise
+        # the next insert would append into a stale capacity array and silently
+        # resurrect rows the restore just removed.
+        self._rec_cap, self._rec_n = None, 0
 
     def require_columns(self, cols):
         """Raise QueryError naming any column that does not exist on this table.
@@ -247,11 +258,52 @@ class UserTable(Table):
         self.require_columns(row.keys())                      # 5.1: schema, not just tier
         self._enforce_constraints(row)                        # B5: refuse the row before any state changes
         rec = _encode_row(row, self.roles, self.role_vocab, self.value_vocab, self.dim)
-        self.records = rec[None, :] if len(self.records) == 0 else np.vstack([self.records, rec[None, :]])
+        # AMORTISED APPEND, NOT A FULL RESTACK. This was
+        #     np.vstack([self.records, rec[None, :]])
+        # which COPIES THE WHOLE TABLE ON EVERY INSERT -- O(N) per row, O(N^2)
+        # overall. MEASURED before the fix: insert time grew 3.1x then 3.7x per
+        # DOUBLING of rows (200/400/800/1600), and vstack was 1.23s of a 1.5s
+        # profile. A table that costs quadratic time to fill cannot hold "massive
+        # amounts of information" whatever the storage layer does underneath.
+        # Grow a capacity buffer geometrically and hand out a VIEW of the filled
+        # prefix, so `self.records` keeps its exact meaning -- an (n, dim) array
+        # -- for every reader (snapshot, len, the SELECT path).
+        _cap = getattr(self, "_rec_cap", None)
+        if _cap is None or self._rec_n >= _cap.shape[0]:
+            _n = 0 if _cap is None else self._rec_n
+            _new = max(8, (0 if _cap is None else _cap.shape[0]) * 2)
+            _buf = np.zeros((_new, rec.shape[0]), float)
+            if _n:
+                _buf[:_n] = _cap[:_n]
+            self._rec_cap = _buf
+            self._rec_n = _n
+        self._rec_cap[self._rec_n] = rec
+        self._rec_n += 1
+        self.records = self._rec_cap[:self._rec_n]
         self.rows.append(dict(row))
         if self._pk is not None:                              # B4: keep the primary-key index in sync
             self._pk_index.setdefault(row.get(self._pk), []).append(len(self.rows) - 1)
+        for _c, _ix in self._sec_index.items():               # and every secondary index too
+            _ix.setdefault(row.get(_c), []).append(len(self.rows) - 1)
         return self
+
+
+def _rewarm_records(table):
+    """Rebuild a cooled table's `records` from its rows -- the regeneration half
+    of dropping them before compression. Deterministic by construction: the same
+    _encode_row over the same rows, roles and vocabularies that produced them."""
+    if table is None:
+        return table
+    recs = getattr(table, "records", None)
+    if recs is not None and np.asarray(recs).size == 0 and getattr(table, "rows", None):
+        table.records = np.vstack([
+            _encode_row(r, table.roles, table.role_vocab, table.value_vocab,
+                        table.dim)[None, :] for r in table.rows])
+        table._rec_cap, table._rec_n = None, 0
+    return table
+
+
+_EMPTY_RECORDS = np.zeros((0, 0), float)   # marker: records dropped before cooling
 
 
 class Database:
@@ -290,11 +342,26 @@ class Database:
         from holographic.agents_and_reasoning.holographic_query_durable import load_snapshot
         return load_snapshot(path, system_tables=system_tables)
 
-    def journal(self, path):
+    def journal(self, path, attach=True):
         """DURABILITY: an append-only REDO log of writes since the last snapshot; `replay(db)` re-applies it.
-        See holographic_query_durable.Journal."""
+
+        ATTACHED BY DEFAULT, so INSERTs through this database are logged. It used
+        to return a BARE HANDLE that recorded nothing until the caller invoked
+        log_insert/log_update themselves, once per write, in parallel with doing
+        the write -- while READING exactly like enable_cold_storage(), which does
+        turn a feature on.
+        MEASURED before the fix: snapshot, `db.journal(path)`, ten more inserts,
+        recover() -> TEN WRITES SILENTLY GONE, journal entries 0. The mechanism was
+        correct and the API promised durability it did not deliver, which is worse
+        than not having it: a caller who calls this believes they are safe.
+        Pass attach=False for the original bare handle (the durable module's own
+        demonstration drives one by hand, and dual-logging would double every
+        entry). See holographic_query_durable.Journal."""
         from holographic.agents_and_reasoning.holographic_query_durable import Journal
-        return Journal(path)
+        j = Journal(path)
+        if attach:
+            self._journal = j
+        return j
 
     def writer_lock(self):
         """CONCURRENCY: one writer at a time, readers never blocked. See holographic_querylock.SingleWriterLock."""
@@ -374,7 +441,13 @@ class Database:
             from holographic.caching_and_storage.holographic_coldstore import Cold
             with self._cold["lock"]:
                 if isinstance(entry, Cold):
-                    entry = entry.warm()                      # inflate a cooled table transparently
+                    # REBUILD THE DROPPED CACHE ON THE WAY BACK IN. cool_idle
+                    # removes `records` before compressing (it is derivable from
+                    # rows); this is the other half, and it must be on BOTH warm
+                    # paths -- the lazy resolve() here and the explicit
+                    # warm_all() below. Missing either one hands back a table
+                    # whose SELECTs would silently match nothing.
+                    entry = _rewarm_records(entry.warm())     # inflate a cooled table transparently
                     self.namespaces[ns]["tables"][name] = entry
                 self._touch(ns, name)
         return entry
@@ -428,11 +501,97 @@ class Database:
                 entry = self.namespaces[ns]["tables"][nm]
                 if isinstance(entry, Cold) or (ns, nm) in recent:
                     continue                                   # already cold, or one of the hot ones we keep warm
-                c = Cold(entry, codec=self._cold["codec"], spill_dir=self._cold["spill_dir"])
-                c.cool()
+                # DO NOT FREEZE WHAT YOU CAN REGENERATE. `records` is the (n, dim)
+                # VSA encoding of `rows`, derived deterministically by _encode_row
+                # from rows + roles + vocabularies -- all of which are already in
+                # the pickle. Compressing it is compressing a CACHE.
+                # MEASURED at n=4,000, dim=256: the raw records array is 8,192 KB;
+                # the whole database pickled WITHOUT it and zlib'd is 13.0 KB; the
+                # cold blob WITH it was 95.2 KB. SEVEN TIMES LARGER THAN THE WARM
+                # SNAPSHOT -- a cold tier that costs more than staying warm is a
+                # tier nobody should switch on.
+                # to_state() already drops it (determinism over storage, the
+                # engine's own lever); the cold path simply never did the same.
+                # Dropped here and rebuilt on warm(), so nothing else changes.
+                _saved = getattr(entry, "records", None)
+                _cap = getattr(entry, "_rec_cap", None)
+                try:
+                    if _saved is not None and getattr(entry, "rows", None):
+                        entry.records = _EMPTY_RECORDS
+                        entry._rec_cap, entry._rec_n = None, 0
+                    c = Cold(entry, codec=self._cold["codec"],
+                             spill_dir=self._cold["spill_dir"])
+                    # COOL INSIDE THE WINDOW. Cold.__init__ only KEEPS A LIVE
+                    # REFERENCE; cool() is what serialises. My first version
+                    # restored `records` in the finally BEFORE cool() ran, so the
+                    # blob was byte-identical and the measurement said "no
+                    # change" -- a fix that ran, passed its correctness check,
+                    # and did nothing.
+                    c.cool()
+                finally:
+                    if _saved is not None:
+                        entry.records = _saved
+                        entry._rec_cap = _cap
                 self.namespaces[ns]["tables"][nm] = c
                 cooled += 1
             return cooled
+
+    def vacuum_idle(self, threshold=0.25):
+        """Vacuum every user table whose tombstone share exceeds `threshold`.
+
+        CALL THIS WHEN THE DATABASE IS IDLE, exactly like cool_idle -- vacuum
+        renumbers rows and rebuilds indexes, so it must not run underneath a
+        query or an open transaction.
+        MEASURED, and this is why a threshold rather than a hair trigger: ordinary
+        churn is cheap. Ten updates across a 4,000-row table left 4.9% dead and
+        cost ~5% on a scan and NOTHING on an indexed lookup -- proportional, not
+        pathological, and vacuuming there would be pure overhead.
+        The case that earns it is REPEATED UPDATES TO THE SAME ROWS (a counter
+        column, a status field), where tombstone-and-reinsert compounds:
+            round   rows   dead%   scan ms
+                0   2,000    0.0     0.491
+                3   4,400   54.5     1.094
+                5   8,000   75.0     1.739
+        75% DEAD AND A 3.5x SCAN SLOWDOWN. The default 0.25 sits above ordinary
+        churn and well below that curve.
+        NOT AUTOMATIC ON WRITE, DELIBERATELY: a vacuum inside an INSERT would
+        renumber rows under a caller holding indices, and would make one unlucky
+        write pay for everyone else's churn. Returns {tables, rows_removed}."""
+        # TAKE THE WRITER LOCK. vacuum RENUMBERS ROW INDICES, and the database
+        # already has a one-writer lock that this never asked for.
+        # MEASURED: a caller holding 57 row indices for `v = 3` across a vacuum
+        # found them pointing at values [4, 5, 6, 0, 2] afterwards -- SILENT
+        # CORRUPTION, no exception, no warning. "Call when idle" was a comment
+        # and comments do not serialise anything.
+        # It does NOT make vacuum safe against a reader mid-scan (readers are
+        # never blocked here, by design); it serialises vacuum against the
+        # WRITERS, which is the half a lock can actually give.
+        removed = tables = 0
+        _lock = None
+        try:
+            _lock = self.writer_lock()
+        except Exception:
+            _lock = None
+        # `write()` is the context manager, not the lock object -- the lock
+        # exposes held/snapshot/write, and I assumed `with lock:` first.
+        if _lock is not None:
+            with _lock.write():
+                return self._vacuum_idle_locked(threshold)
+        return self._vacuum_idle_locked(threshold)
+
+    def _vacuum_idle_locked(self, threshold):
+        """The body of vacuum_idle, run under the writer lock. See vacuum_idle."""
+        removed = tables = 0
+        for ns, nm in self._user_tables():
+            entry = self.namespaces[ns]["tables"][nm]
+            if not hasattr(entry, "dead_fraction"):
+                continue                       # cold: leave it cold, it is not costing scans
+            if entry.dead_fraction() <= float(threshold):
+                continue
+            rep = entry.vacuum()
+            removed += rep["removed"]
+            tables += 1
+        return {"tables": tables, "rows_removed": removed}
 
     def warm_all(self):
         """Inflate every cooled table back to a live Table (used before serialising or sharing). Safe anytime."""
@@ -443,7 +602,7 @@ class Database:
             for body in self.namespaces.values():
                 for nm, entry in list(body["tables"].items()):
                     if isinstance(entry, Cold):
-                        body["tables"][nm] = entry.warm()
+                        body["tables"][nm] = _rewarm_records(entry.warm())
         return self
 
     def cold_stats(self):
@@ -489,6 +648,17 @@ class Database:
         self._require_writable(ns)
         t = UserTable(name, columns, dim=dim, seed=seed)
         self.namespaces[ns]["tables"][name] = t
+        # A SCHEMA CHANGE IS A WRITE, so it belongs in the journal. Without it,
+        # replay hits the first row of a post-snapshot table, resolve() raises
+        # "no such table", and the ENTIRE recovery dies -- one unjournalled
+        # CREATE TABLE loses every later operation, not just that table's.
+        _j = getattr(self, "_journal", None)
+        if _j is not None:
+            try:
+                _j.log_create_table(qualified, list(columns))
+            except Exception:
+                pass
+
         return t
 
     def insert(self, qualified, row):
@@ -496,6 +666,12 @@ class Database:
         ns, _name = self._split(qualified)
         self._require_writable(ns)
         self.resolve(qualified).insert(row)
+        # LOG AFTER THE WRITE SUCCEEDS. An entry written first would survive a
+        # refused row (a constraint violation raises inside insert) and replay
+        # would then resurrect data the database rejected.
+        _j = getattr(self, "_journal", None)
+        if _j is not None:
+            _j.log_insert(qualified, dict(row))
         return self
 
     # -- bookmarks: cross-namespace INSERT ... SELECT (Phase 11) ------------------------------------------------
@@ -723,6 +899,15 @@ def _run_update(s, db):
     pairs = re.findall(r"(\w+)\s*=\s*('[^']*'|\"[^\"]*\"|[^,]+)", m.group(2))
     changes = {col: _coerce_value(val) for col, val in pairs}
     n = update(table, m.group(3).strip(), changes)               # update() takes a WHERE STRING
+    # JOURNAL THE MUTATION, AFTER IT SUCCEEDS. Only INSERT was wired, so recovery
+    # replayed inserts and LOST every update and delete -- and a PARTIAL JOURNAL
+    # IS WORSE THAN NONE. Measured: a live table of 8 rows recovered as 11, with
+    # rows the database had DELETED and values it had UPDATED AWAY, silently.
+    # Logged only when n > 0 so a WHERE that matched nothing does not fill the
+    # log with no-ops that replay would re-evaluate.
+    _j = getattr(db, "_journal", None)
+    if _j is not None and n:
+        _j.log_update(m.group(1), m.group(3).strip(), dict(changes))
     return {"updated": n}
 
 
@@ -735,6 +920,11 @@ def _run_delete(s, db):
         raise QueryError("DELETE FROM ns.name WHERE predicate  (a WHERE is required)")
     table = db.resolve(m.group(1))
     n = delete(table, m.group(2).strip())
+    # SAME RULE AS UPDATE: log after the delete succeeds, and only when it
+    # matched. Without this, replay resurrected every deleted row.
+    _j = getattr(db, "_journal", None)
+    if _j is not None and n:
+        _j.log_delete(m.group(1), m.group(2).strip())
     return {"deleted": n}
 
 
@@ -1031,8 +1221,63 @@ class Query:
         _pk = getattr(table, "_pk", None)
         _pk_fast = (self._where is not None and _pk is not None and self._where[0] == "pred"
                     and self._where[1] == _pk and self._where[2] == "=")
+        # AND THE SAME FAST PATH FOR ANY INDEXED COLUMN. The pk branch above was
+        # the only consumer of a hash index, so `WHERE v = 42` on an indexed
+        # non-key column still scanned. MEASURED at 16,000 rows before wiring
+        # this: pk 0.064 ms, non-key 2.623 ms -- a 41x gap that grows with the
+        # table.
+        # index_lookup returns None for an UNINDEXED column, which is why the
+        # check is `is not None` and not truthiness: an indexed column with no
+        # matches returns [], and treating that as "fall through and scan" would
+        # be correct but slow, while treating a missing index as [] would be
+        # fast and WRONG.
+        def _leaf_index(node):
+            """Row indices for ONE leaf predicate via an index, or None to scan.
+
+            Shared by the single-predicate fast path and the AND intersection
+            below, so both agree by construction about what an index can serve."""
+            if node is None or node[0] != "pred":
+                return None
+            if node[2] == "=":
+                return getattr(table, "index_lookup", lambda *_a: None)(
+                    node[1], node[3])
+            if node[2] in ("<", "<=", ">", ">="):
+                return getattr(table, "index_range", lambda *_a: None)(
+                    node[1], node[2], node[3])
+            return None
+
+        _sec = None
+        # AN `AND` OF TWO INDEXED LEAVES IS AN INTERSECTION, NOT A SCAN.
+        # The fast path tested `self._where[0] == "pred"`, so a bare predicate hit
+        # the index and `x = 7 AND y = 11` fell through to a full scan even with
+        # BOTH columns indexed. MEASURED at 16,000 rows, returning THREE rows:
+        # no index 5.750 ms, index on x 5.539 ms, indexes on x and y 5.541 ms --
+        # the indexes bought NOTHING.
+        # This is why a COMPOSITE index was on the backlog, and it is the wrong
+        # answer: intersecting two indexes we already have needs no new structure,
+        # no new memory, and no decision about column order. A composite index
+        # only wins when one column alone is unselective, which is a tuning
+        # problem, not a missing capability.
+        if not _pk_fast and self._where is not None and self._where[0] == "and":
+            _l = _leaf_index(self._where[1])
+            _r = _leaf_index(self._where[2])
+            if _l is not None and _r is not None:
+                _sec = sorted(set(_l) & set(_r))
+        if not _pk_fast and _sec is None and self._where is not None \
+                and self._where[0] == "pred":
+            if self._where[2] == "=":
+                _sec = getattr(table, "index_lookup", lambda *_a: None)(
+                    self._where[1], self._where[3])
+            elif self._where[2] in ("<", "<=", ">", ">="):
+                # RANGES THROUGH THE SAME INDEX, by sorting its keys. Without
+                # this, `v > 990` scanned all 16,000 rows to return 96 while the
+                # equality path next to it answered in 0.023 ms.
+                _sec = getattr(table, "index_range", lambda *_a: None)(
+                    self._where[1], self._where[2], self._where[3])
         if _pk_fast:
             idx = table.pk_lookup(self._where[3])                 # already live (skips tombstones), O(1)
+        elif _sec is not None:
+            idx = _sec                                            # O(1) via a secondary index
         else:
             idx = [i for i in range(n) if not table.rows[i].get("_deleted")]   # B2: scans skip tombstoned rows
             if self._where is not None:
@@ -1052,7 +1297,48 @@ class Query:
                 _s = sims if sims is not None else [1.0] * n
                 idx.sort(key=lambda i: (_s[i], -i), reverse=desc)   # tie-break by row index (stable, deterministic)
             else:
-                idx.sort(key=lambda i: (table.rows[i].get(key, 0), -i), reverse=desc)
+                # WALK THE INDEX INSTEAD OF SORTING THE TABLE. The index already
+                # groups rows by value, so ordering its KEYS is O(K log K) in
+                # DISTINCT VALUES rather than O(N log N) in rows -- the same lever
+                # as index_range.
+                # THE TIE-BREAK IS DERIVED FROM THE SORT KEY BELOW, NOT GUESSED.
+                # That key is (value, -row_index) with reverse=desc, so:
+                #   reverse=False -> value ASC,  and -i ASC  == ROW INDEX DESC
+                #   reverse=True  -> value DESC, and -i DESC == ROW INDEX ASC
+                # THE BUCKET ORDER IS THEREFORE `not desc`, OPPOSITE TO THE VALUE
+                # ORDER. A previous attempt aligned it WITH desc, got DESC right
+                # and ASC wrong ([39,35,31,27] against [3,7,11,15]), and was
+                # reverted -- a gain that changes which rows LIMIT returns is a
+                # bug with a stopwatch. Pinned by a test that compares ORDER in
+                # both directions.
+                # Only when there is no WHERE: with a predicate `idx` is already
+                # a narrowed subset, and walking the whole index would be slower
+                # and would have to re-filter.
+                _ordered = None
+                if self._where is None:
+                    _ix = getattr(table, "_sec_index", {}).get(key)
+                    if _ix is not None:
+                        try:
+                            _keys = sorted(k for k in _ix if k is not None)
+                        except TypeError:
+                            _keys = None                  # mixed types -> plain sort
+                        if _keys is not None:
+                            if desc:
+                                _keys.reverse()
+                            _ordered = []
+                            for _k in _keys:
+                                _ordered.extend(sorted(
+                                    (i for i in _ix[_k]
+                                     if not table.rows[i].get("_deleted")),
+                                    reverse=not desc))
+                            _ordered.extend(sorted(
+                                (i for i in _ix.get(None, ())
+                                 if not table.rows[i].get("_deleted")),
+                                reverse=not desc))
+                if _ordered is not None:
+                    idx = _ordered
+                else:
+                    idx.sort(key=lambda i: (table.rows[i].get(key, 0), -i), reverse=desc)
         elif sims is not None and self._where is not None and _tree_has_fuzzy(self._where):
             idx.sort(key=lambda i: (sims[i], -i), reverse=True)       # fuzzy queries rank by match by default
 
@@ -1624,3 +1910,13 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+# LATE BIND, DELIBERATELY. holographic_tableindex imports QueryError and
+# _encode_row from THIS module, so importing it at the top would be a cycle.
+# Binding after the class is defined keeps both files importable on their own and
+# leaves UserTable's method set identical to before the extraction.
+from holographic.agents_and_reasoning.holographic_tableindex import (  # noqa: E402
+    TableIndexMixin as _late_mixin)
+for _n in ("create_index", "index_lookup", "index_range", "vacuum", "dead_fraction"):
+    setattr(UserTable, _n, getattr(_late_mixin, _n))

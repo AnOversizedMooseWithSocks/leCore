@@ -11,7 +11,7 @@ source integrations/aider/openzoo.env          # sets the two variables
 aider --model openai/nvidia/nemotron-3.5-lightning         # any zoo model id works
 ```
 
-`curl localhost:8402/v1/models` lists model ids and pricing.
+`npx openzoo models` lists model ids and pricing.
 
 ## Persistent config (optional)
 

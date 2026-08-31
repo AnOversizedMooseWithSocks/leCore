@@ -1477,6 +1477,54 @@ class _UnifiedPart07:
                               max_bounce=max_bounce, quality=quality, seed=seed, sky=sky,
                               lights=lights, view=view, **kw)
 
+    def place_viscera(self, body_sdf, z0, z1, y_mid, half_width, organs=None, scale=0.11,
+                      bone_sdf=None, clearance=1.02, margin=0.045):
+        """Place NAMED organs inside a plain SDF body, guaranteed pairwise DISJOINT (holographic_viscera).
+        Returns a Viscera with .sdf(P) (distance to the nearest organ), .which(P) (per-point organ INDEX,
+        -1 outside -- the thing a union cannot answer) and .names.
+        WHY IT EXISTS: viscera built as smooth_union of ellipsoids merge into ONE SOLID with no identity,
+        so every organ shades the same colour and a section plate shows a featureless mass. Real organs
+        PRESS AGAINST each other, they do not occupy the same space. This enforces what
+        creaturetissue.organ_field documents -- inside the muscle envelope, bone subtracted, no
+        interpenetration -- for a composed-SDF creature, since organ_field itself requires a RIG.
+        The fit SHRINKS AND SEPARATES: shrinking alone drives organs to zero (measured -- only 2 of 6
+        stayed reachable), so overlapping pairs are pushed apart as well, converging to separated rather
+        than to tiny. Deterministic, bounded loop, no rng."""
+        from holographic.mesh_and_geometry.holographic_viscera import place_viscera, DEFAULT_ORGANS
+        return place_viscera(body_sdf, z0, z1, y_mid, half_width,
+                             organs=organs or DEFAULT_ORGANS, scale=scale,
+                             bone_sdf=bone_sdf, clearance=clearance, margin=margin)
+
+    def studio_sky(self, preset="classic", key_dir=(0.62, 0.66, 0.42), fill_dir=(-0.70, 0.30, 0.55),
+                   rim_dir=(-0.35, 0.55, -0.76), warmth=0.06, ambient=0.22, bounce=0.30, gain=1.0,
+                   backdrop=None, backdrop_falloff=1.6):
+        """A three-point STUDIO rig as an emissive ENVIRONMENT -- a `sky(D) -> radiance` to hand path_trace
+        (holographic_studiorig). preset: 'classic' (~4:1 key:fill, the portrait convention), 'soft' (~1.8:1,
+        beauty/e-comm), 'dramatic' (~10:1, low key). Key is warm and dominant, fill cool and WEAK (a fill that
+        matches the key is flat light), rim behind for separation, plus ambient and a downward bounce.
+        WHY AN ENVIRONMENT AND NOT scene_light() x3, which is the obvious move and is wrong here: path_trace's
+        own kept negative is "no next-event estimation... great for a big sky, VERY NOISY for small emitters",
+        and a softbox IS a small emitter. But a softbox is also physically a LARGE source subtending a wide
+        solid angle -- that is what makes studio shadows soft -- so describing the same rig as broad sky lobes
+        lands it in exactly the regime the sampler converges in. Play the negative, do not fight it.
+        `backdrop=(r,g,b)` FIXES THE GREY FOG. A sky does two jobs -- it lights the subject AND it is what the
+        camera sees on a miss -- and the first version returned one radiance for both, so ambient painted the
+        whole frame flat mid-grey and every render came out hazed. That was a bug found by looking at an image.
+        A real studio has its softboxes OUT OF FRAME and a dark graded sweep behind the subject; `backdrop`
+        gives camera-facing directions that sweep while the lighting lobes illuminate exactly as before.
+        KEPT NEGATIVE: this lights the SUBJECT. `backdrop` paints what the lens sees; it is not geometry, so
+        nothing catches a shadow -- a cast shadow needs a real floor in the SDF. See mind.rig_ratios()."""
+        from holographic.rendering.holographic_studiorig import studio_sky
+        return studio_sky(preset=preset, key_dir=key_dir, fill_dir=fill_dir, rim_dir=rim_dir,
+                          warmth=warmth, ambient=ambient, bounce=bounce, gain=gain,
+                          backdrop=backdrop, backdrop_falloff=backdrop_falloff)
+
+    def rig_ratios(self, preset="classic"):
+        """The key:fill and key:rim ratios of a studio_sky preset, as plain data (holographic_studiorig) -- so
+        a render can STATE the lighting ratio it used instead of describing the result as 'nice'."""
+        from holographic.rendering.holographic_studiorig import rig_ratios
+        return rig_ratios(preset)
+
 
 def _selftest():
     """Delegates to holographic.unified.check_part -- one home for the shared contract."""

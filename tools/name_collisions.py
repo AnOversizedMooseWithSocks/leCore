@@ -51,6 +51,12 @@ except Exception:
 # remove the entry, or accept it as a benign homonym / pinned divergence and leave it -- WITH the reason on the
 # line. Never add an entry just to make the test pass without reading. The budget may shrink, never grow.
 KNOWN_COLLISIONS = {
+    # sweep-97 merge, bodies read: mathcheck.check/evaluate are arithmetic verifiers;
+    # proglib.check and navigator.evaluate are program/route scorers -- same verb,
+    # different domains, both public on purpose.
+    "check": frozenset({"mathcheck", "proglib"}),
+    "evaluate": frozenset({"mathcheck", "navigator"}),
+
     # ---- REVIEWED IN THE CREATURE/ANATOMY MERGE. Both bodies read for each; reasons below. ----
     # A real ARCHITECTURAL TRANSITION, not a homonym: two implementations of "the creature's skin as a
     # field" -- the shipped metaball route and the new grouped-convolution route (bulge-free joints,
@@ -142,6 +148,23 @@ KNOWN_COLLISIONS = {
     # named preset. Different solvers, different state, different physics --
     # the shared name is the English verb.
     "simulate": frozenset({"fem", "smokepresets"}),
+    # bios.boot brings a model up; boot.boot READS the boot record out of weights. Adjacent domain,
+    # different verb sense -- start vs. parse.
+    "boot": frozenset({"bios", "boot"}),
+    # phasor is a new VSA BACKEND (unit-modulus FHRR phasors) and cleanup is part of the algebra it must
+    # implement -- same reason bind/unbind/bundle already collide across backends.
+    "cleanup": frozenset({"core", "phasor"}),
+    # glslkernels.names lists shader kernel identifiers; matlib.names lists MATERIAL identifiers. Two
+    # registries, one obvious accessor name.
+    "names": frozenset({"glslkernels", "matlib"}),
+    # mueller.power is optical POWER (radiometry); phasor.power is FRACTIONAL POWER of an atom (phase
+    # scaling). Physics vs algebra -- the word is a homonym here, not a shared idea.
+    "power": frozenset({"mueller", "phasor"}),
+    # foldfit samples points on a fitted surface; matpreview samples them on a preview sphere. Same
+    # geometric noun, two unrelated call sites.
+    "surface_points": frozenset({"foldfit", "matpreview"}),
+    # elements.symbols is CHEMICAL symbols; indexstore.symbols is the index vocabulary. Unrelated.
+    "symbols": frozenset({"elements", "indexstore"}),
     "gather": frozenset({"shader", "transfer"}),                 # deliberate aliases (recorded in dup audit)
     # pipelinemap joined this set when it MOVED INTO THE PACKAGE (it was a
     # root-level module the scan never saw, and never in the wheel either --
@@ -194,11 +217,16 @@ KNOWN_COLLISIONS = {
     # ai = HRR via FFT circular convolution; hlb = Hadamard/WHT-domain elementwise; vsaroles =
     # integer cyclic shifts (roles as permutation powers, storage-free). Same verb, three algebras,
     # each module states its own; unifying would erase the distinction the modules exist to make.
-    "bind": frozenset({"ai", "hlb", "vsaroles"}),
-    "unbind": frozenset({"ai", "hlb", "vsaroles"}),
+    # phasor is a NEW VSA BACKEND (FHRR-style unit-modulus phasors), so it implements the algebra's
+    # verbs by definition -- the same reason ai/hlb/vsaroles already share them. A backend that did NOT
+    # define bind would not be a backend.
+    "bind": frozenset({"ai", "hlb", "phasor", "vsaroles"}),
+    # same family as bind above.
+    "unbind": frozenset({"ai", "hlb", "phasor", "vsaroles"}),
     # bundle: ai renormalizes; vsaroles is raw addition (residual-stream semantics); galvabundle is
     # a PACKAGING verb (write a deployment bundle) -- homonym across abstraction levels.
-    "bundle": frozenset({"ai", "galvabundle", "vsaroles"}),
+    # same family; galvabundle is the unrelated archive verb already on record.
+    "bundle": frozenset({"ai", "galvabundle", "phasor", "vsaroles"}),
     # BIT-IDENTICAL one-line FFT primitives, kept local ON PURPOSE: querypath and vsarun ship as
     # self-contained installable payloads, and a cross-import would break payload isolation. If a
     # third copy ever appears, promote to one home and delegate.
@@ -217,7 +245,9 @@ KNOWN_COLLISIONS = {
     # possible or appropriate; module namespaces are the disambiguator: ----
     "allocate": frozenset({"calltoken", "supermemory"}),      # token rows vs capacity law inverse
     "audit": frozenset({"install", "orphanaudit"}),           # install reachability vs repo orphans
-    "build": frozenset({"directed", "recipe"}),               # graph assembly vs install rules
+    # indexstore.build bundles tokenised documents into the portable index form; the other two build a
+    # directed graph and an install recipe. The English verb, three artefacts.
+    "build": frozenset({"directed", "indexstore", "recipe"}),               # graph assembly vs install rules
     "build_index": frozenset({"codemap", "memsearch"}),       # source tree vs passage addresses
     "compare": frozenset({"assess", "hybrid", "querytime"}),  # runs vs accuracies vs branches
     "content_key": frozenset({"declare", "galvacache", "querypath"}),  # digest/digest/hypervector
@@ -232,7 +262,8 @@ KNOWN_COLLISIONS = {
     "imbue": frozenset({"galvapack", "unicron"}),             # packaging verb vs task-vector write
     "install": frozenset({"galvacache", "install", "install_lecore"}),  # monkey-patch cache vs
                                                               # weight install vs six-part assembly
-    "load": frozenset({"core", "sidecar", "testkit"}),        # npz objects vs curtain vs kit
+    # indexstore joins the existing load/save family: every store-shaped module has these two.
+    "load": frozenset({"core", "indexstore", "sidecar", "testkit"}),        # npz objects vs curtain vs kit
     "load_model": frozenset({"modelstore", "unicron"}),       # container vs safetensors front door
     "measure": frozenset({"hrnnbake", "measure"}),            # ppl+horizon vs ppl+uncertainty
     "place": frozenset({"devicerun", "machinemodel"}),        # device placement vs cost arithmetic
@@ -241,7 +272,8 @@ KNOWN_COLLISIONS = {
     "recall_all": frozenset({"ai", "hybrid"}),                # trace sweep vs register sweep
     "reconstruct": frozenset({"ratedistortion", "refactor"}), # rANS decode vs factor re-dense
     "report": frozenset({"bios", "measure"}),                 # BIOS screen vs ppl bootstrap
-    "save": frozenset({"core", "sidecar"}),                   # npz objects vs sidecar write
+    # see load.
+    "save": frozenset({"core", "indexstore", "sidecar"}),                   # npz objects vs sidecar write
     "search": frozenset({"dictionary", "memsearch"}),         # prefix words vs state ranking
     "select": frozenset({"scene_query", "writepolicy"}),      # scene predicates vs register policy
 

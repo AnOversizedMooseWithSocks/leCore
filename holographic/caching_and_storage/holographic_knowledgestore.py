@@ -77,16 +77,60 @@ class KnowledgeStore:
     """Cataloged, searchable, persistent knowledge for one Galvatron."""
 
     KINDS = ("turn", "document", "note", "output")
+    # long documents get companion digest notes at or above this many characters
+    # (sweep 114); None disables. Kept a class attribute so a test can set the control.
+    DIGEST_THRESHOLD = 20000
 
     def __init__(self, root, session=None):
-        self.root = str(root)
+        # REFUSE A NON-PATH. `str(root)` accepts ANY object and makedirs then
+        # creates whatever it stringifies to -- a caller who passed a list got a
+        # directory literally named "[]", and it SHIPPED: `[]/knowledge.lecore`
+        # and `[]/learning/state.lecore` were in the release zip, found by
+        # globbing for containers rather than by anything failing.
+        # A path is a string or an os.PathLike. Everything else is a bug at the
+        # call site, and creating a directory named after its repr hides that bug
+        # behind a plausible-looking artifact.
+        if not isinstance(root, (str, bytes, os.PathLike)):
+            raise TypeError(
+                "KnowledgeStore(root=...) needs a path (str or PathLike), got %s "
+                "%r -- str() would turn it into a directory name like %r."
+                % (type(root).__name__, root, str(root)[:24]))
+        self.root = os.fspath(root) if not isinstance(root, str) else root
+        if not self.root.strip():
+            raise ValueError("KnowledgeStore(root=...) got an empty path")
         self.session = session
         os.makedirs(self.root, exist_ok=True)
-        self.path = os.path.join(self.root, "knowledge.json")
+        # THE JOURNAL LIVES IN THE CONTAINER (cp31 -- the migration cp20 flagged and two
+        # detonations demanded): knowledge.lecore is a typed, zip-compressed holographic
+        # container (sections lecore.memory.journal + lecore.memory.scopes). A legacy
+        # knowledge.json is READ ONCE, migrated by replay, and renamed *.migrated -- the
+        # doctrine holds: loose JSON is not a storage format here.
+        self.path = os.path.join(self.root, "knowledge.lecore")
+        self._legacy = os.path.join(self.root, "knowledge.json")
         self.entries = []
+        self._scopes = {}
         if os.path.exists(self.path):
-            with open(self.path) as f:
+            from holographic.io_and_interop.holographic_container import load_container
+            got = load_container(open(self.path, "rb").read())
+            for sec in got["sections"]:
+                if sec["kind"] == "lecore.memory.journal":
+                    self.entries = list(sec["meta"].get("entries") or [])
+                elif sec["kind"] == "lecore.memory.scopes":
+                    self._scopes = dict(sec["meta"].get("map") or {})
+        elif os.path.exists(self._legacy):
+            with open(self._legacy) as f:
                 self.entries = json.load(f)
+            sp = os.path.join(self.root, "scopes.json")
+            if os.path.exists(sp):
+                try:
+                    with open(sp) as f:
+                        self._scopes = json.load(f)
+                except (OSError, ValueError):
+                    pass
+            self.save()                                   # migrate by replay
+            os.rename(self._legacy, self._legacy + ".migrated")
+            if os.path.exists(sp):
+                os.rename(sp, sp + ".migrated")
 
     # ---- writing ----
 
@@ -100,6 +144,7 @@ class KnowledgeStore:
         if kind not in self.KINDS:
             raise ValueError("kind must be one of %r" % (self.KINDS,))
         made = []
+        new_ids = []
         for chunk in chunk_text(text):
             h = hashlib.sha256(chunk.encode("utf-8")).hexdigest()[:16]
             hit = next((e for e in self.entries if e["hash"] == h), None)
@@ -115,6 +160,37 @@ class KnowledgeStore:
                  "added": time.time(), "last_seen": time.time(), "seen": 1}
             self.entries.append(e)
             made.append(e["id"])
+            new_ids.append(e["id"])
+        # AUTO-DIGEST (sweep 114, the docforge contract): a LONG document gets
+        # COMPANION notes -- its table of contents, its kept negatives, its
+        # signature terms -- filed as separate 'note' entries tagged 'digest'.
+        # AUGMENT, NEVER EDIT: the document's own chunks and hashes are untouched,
+        # so dedup on re-add holds and the digest can never crowd the source
+        # (a handful of notes, bounded below). DIGEST_THRESHOLD=None disables.
+        if (kind == "document" and new_ids and self.DIGEST_THRESHOLD is not None
+                and len(str(text)) >= int(self.DIGEST_THRESHOLD)):
+            try:
+                from holographic.io_and_interop.holographic_docforge import digest_document
+                d = digest_document(str(text))
+                notes = []
+                toc = [str(t) for t in (d.get("toc") or [])]
+                if toc:
+                    notes.append("digest toc of %s: %s" % (source, " | ".join(toc[:40])[:1500]))
+                neg = [str(n) for n in (d.get("negatives") or [])]
+                if neg:
+                    notes.append("digest kept negatives of %s: %s" % (source, " | ".join(neg[:40])[:1500]))
+                sig = d.get("signatures") or {}
+                # digest_document's signatures are a DICT (section -> terms);
+                # a list-shaped assumption here silently killed every note once.
+                sig_items = list(sig.items()) if isinstance(sig, dict) else [(str(s), "") for s in sig]
+                if sig_items:
+                    notes.append("digest signature terms of %s: %s" % (
+                        source, "; ".join("%s: %s" % (k, v) for k, v in sig_items[:30])[:600]))
+                for n_ in notes[:3]:
+                    self.add(n_, kind="note", source=str(source), author=author,
+                             tags=tuple(tags) + ("digest",), session=session, save=False)
+            except Exception:
+                pass                                   # a digest is a courtesy, never a failure
         if save:
             self.save()
         return made
@@ -136,32 +212,19 @@ class KnowledgeStore:
 
     SCOPES = ("all", "session", "none")
 
-    def scope_path(self):
-        return os.path.join(self.root, "scopes.json")
-
     def get_scope(self, session=None):
-        """How much history a session may reference. Persisted, so a private
-        conversation stays private across restarts -- a privacy setting that
+        """How much history a session may reference. Persisted IN THE CONTAINER, so a
+        private conversation stays private across restarts -- a privacy setting that
         forgets itself is worse than none, because the user believes it held."""
         session = session or self.session
-        try:
-            with open(self.scope_path()) as f:
-                return json.load(f).get(str(session), "all")
-        except (OSError, ValueError):
-            return "all"
+        return self._scopes.get(str(session), "all")
 
     def set_scope(self, scope, session=None):
         if scope not in self.SCOPES:
             raise ValueError("scope must be one of %r" % (self.SCOPES,))
         session = session or self.session
-        try:
-            with open(self.scope_path()) as f:
-                m = json.load(f)
-        except (OSError, ValueError):
-            m = {}
-        m[str(session)] = scope
-        with open(self.scope_path(), "w") as f:
-            json.dump(m, f, indent=1, sort_keys=True)
+        self._scopes[str(session)] = scope
+        self.save()                                       # scopes ride the same container
         return scope
 
     # ---- pruning: the other half of remembering ----
@@ -202,9 +265,15 @@ class KnowledgeStore:
         return n
 
     def save(self):
+        from holographic.io_and_interop.holographic_container import save_container
+        blob = save_container([
+            {"kind": "lecore.memory.journal", "id": "v1",
+             "meta": {"entries": self.entries}, "arrays": {}},
+            {"kind": "lecore.memory.scopes", "id": "v1",
+             "meta": {"map": self._scopes}, "arrays": {}}])
         tmp = self.path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(self.entries, f)
+        with open(tmp, "wb") as f:
+            f.write(blob)
         os.replace(tmp, self.path)     # atomic: a crash mid-write must not eat
                                        # the whole knowledge base
         return len(self.entries)

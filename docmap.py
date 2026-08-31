@@ -45,6 +45,25 @@ DOCS = [
      "holographic_skills.manifest()", "capability + method cards as data; not a file on disk"),
     ("Is the tree still ORGANIZED (misc budget, giants, section markers)?", "(report)",
      "tools/structure_audit.py", "budgeted-baseline structural gates; fails only on regression"),
+    ("How will the void explorer let us leap beyond known data, honestly?",
+     "docs/VOID_EXPLORER_PLAN.md", "hand-written",
+     "the metaball model (expand radii, collide, mix at the lens), the "
+     "propose-validate-research-record pipeline built from existing organs, provenance "
+     "rungs for conjectures, composability in plans/apps/hosted, and the honest limits"),
+    ("I am building an app ON leCore -- where do I start?",
+     "docs/BUILDING_ON_LECORE.md", "hand-written",
+     "the App substrate: per-app per-user memory with physical isolation, "
+     "remember/recall with provenance, observe/suggest/habits so the app grows with the "
+     "person using it, a capability preflight, and the honest limits"),
+    ("What IS lever 7, and why should I trust it?", "docs/LEVER7.md", "hand-written",
+     "the displacement trace: the superposed algebra, the delta-rule write, the "
+     "governance table (calibration, veto, sessions, receipts, provenance), where it sits "
+     "against Titans / Larimar / MemoryLLM, and the kept negatives that shaped it"),
+    ("How do I install leCore INTO a model with Unicron?", "docs/UNICRON_INSTALL.md",
+     "hand-written",
+     "the runbook for tools/unicron_install.py: facts into down_proj, the algebra as "
+     "circulants, a routed swarm that arrives off, the five-point health gate, "
+     "budget-by-bisect, cartridges with exact revert, and the honest boundary"),
 ]
 
 

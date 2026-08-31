@@ -41,6 +41,7 @@ Usage:
 """
 import argparse
 import hashlib
+import hashlib as _hl
 import os
 import sys
 import time
@@ -49,7 +50,33 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-REAL = "/home/claude/realdata/wiki_vectors.npy"
+# WHERE THE REAL ANCHORS COME FROM. This was a bare absolute path --
+# "/home/claude/realdata/wiki_vectors.npy" -- that exists on ONE machine, with no
+# fetcher and no fallback, so the harness CRASHED WITH FileNotFoundError for
+# everyone else. A benchmark an outside party is invited to run must run for
+# them; a hardcoded path is a private benchmark wearing a public one's name.
+# Order: $LECORE_BENCH_VECTORS, then a few conventional locations. If none
+# resolves, the harness says exactly what to provide and REFUSES rather than
+# quietly substituting Gaussians -- which is the one substitution this whole
+# file exists to prevent.
+_REAL_CANDIDATES = (
+    os.environ.get("LECORE_BENCH_VECTORS", ""),
+    "data/wiki_vectors.npy",
+    "benchmarks/data/wiki_vectors.npy",
+    os.path.expanduser("~/realdata/wiki_vectors.npy"),
+    "/home/claude/realdata/wiki_vectors.npy",      # the original, kept last
+)
+
+
+def _real_vectors_path():
+    """The first anchor file that exists, or None."""
+    for c in _REAL_CANDIDATES:
+        if c and os.path.exists(c):
+            return c
+    return None
+
+
+REAL = _real_vectors_path() or _REAL_CANDIDATES[-1]
 
 
 # ------------------------------------------------------------------ dataset --
@@ -67,7 +94,21 @@ def build_hard_dataset(n, dim, seed=0):
     recall is contested. Gate: mean corpus nearest-neighbour similarity must exceed 0.4
     (near-duplicate rich); isotropic Gaussians measure ~3/sqrt(dim) and are refused."""
     rng = np.random.default_rng(seed)
-    A = np.load(REAL).astype(np.float32)
+    _p = _real_vectors_path()
+    if _p is None:
+        raise SystemExit(
+            "no real anchor embeddings found -- this harness REFUSES to run on\n"
+            "random Gaussians, because they are nearly orthogonal and every\n"
+            "engine then scores ~1.0 recall while measuring nothing.\n"
+            "Provide a float32 (N, D) .npy of REAL text embeddings at one of:\n"
+            "    $LECORE_BENCH_VECTORS\n"
+            "    data/wiki_vectors.npy\n"
+            "    benchmarks/data/wiki_vectors.npy\n"
+            "    ~/realdata/wiki_vectors.npy\n"
+            "Any sentence-embedding model over any real corpus works; the\n"
+            "reference run used 35,934 x 768 WikiText embeddings. The hardness\n"
+            "gate below will tell you if what you supplied is too easy.")
+    A = np.load(_p).astype(np.float32)
     rng.shuffle(A)
     if dim < A.shape[1]:
         mu = A.mean(0)
@@ -99,6 +140,31 @@ def build_hard_dataset(n, dim, seed=0):
         m0 = np.sort(sims, axis=1)[:, -2]                # -2: skip self when in-block
         nn_best = np.maximum(nn_best, m0)
     nn = float(np.mean(nn_best))
+    # THE GATE MEASURED THE WRONG THING AND THEREFORE COULD NEVER FIRE.
+    # nn is the corpus nearest-neighbour similarity AFTER offspring are mixed
+    # in -- and offspring are interpolants between an anchor and its own near
+    # neighbour, so they manufacture near-duplicates whatever the anchors were.
+    # MEASURED: pure Gaussian anchors give nn=0.6866 and clustered anchors give
+    # nn=0.6865. IDENTICAL TO THREE DECIMALS. The friendly-sample refusal this
+    # whole file is built around was reading a number the construction pinned.
+    # The honest test is on the ANCHORS THEMSELVES, before any offspring: real
+    # embeddings cluster (top-1 cosine 0.5-0.9), unit Gaussians in high
+    # dimension are near-orthogonal (~0.15). That number the construction
+    # cannot fake.
+    _a = base[:n_anchor] if n_anchor else base
+    _a = _a[:2000]
+    _sims = _a @ _a.T
+    np.fill_diagonal(_sims, -1.0)
+    anchor_nn = float(np.mean(np.max(_sims, axis=1)))
+    if anchor_nn < 0.35:
+        raise SystemExit(
+            "REFUSED: the ANCHOR embeddings are nearly orthogonal (mean top-1 "
+            "cosine %.3f).\nThat is the signature of random vectors: every "
+            "engine will score ~1.0 recall\nand the benchmark will measure "
+            "nothing. Real text embeddings sit at 0.5-0.9.\n"
+            "(corpus-NN after offspring reads %.3f, but offspring MANUFACTURE "
+            "near-duplicates\nregardless of the anchors, which is why that "
+            "number cannot be the gate.)" % (anchor_nn, nn))
     if nn < 0.4:
         raise SystemExit("dataset looks FRIENDLY (corpus-NN sim %.3f) -- refusing" % nn)
     return base, queries, nn
@@ -248,6 +314,20 @@ def main():
     ap.add_argument("--queries", type=int, default=100)
     ap.add_argument("--budget-s", type=float, default=300.0)
     ap.add_argument("--k", type=int, default=10)
+    # CALIBRATED, not chosen. Mean top-1 cosine over 2,000 anchors at 768d:
+    #     pure gaussian                    0.123
+    #     60 clusters, sd=0.06             0.325
+    #     anisotropic spectrum (real-ish)  0.413
+    #     60 clusters, sd=0.03             0.627
+    #     400 clusters, sd=0.01            0.927
+    # Random vectors sit at 0.12 and anything with real structure clears 0.32,
+    # so 0.35 is inside a wide gap rather than on a cliff.
+    ap.add_argument("--min-hardness", type=float, default=0.35,
+                    help="refuse a corpus whose top-1 similarity is below this "
+                         "(default 0.35: Gaussians sit near 0.15, real "
+                         "clustered embeddings at 0.6-0.9). Lower it only to "
+                         "put on the record that you are benchmarking easy "
+                         "data.")
     ap.add_argument("--dim", type=int, default=768)
     ap.add_argument("--engines", default="", help="comma filter; empty = all. At 1M on a 3GB "
                     "box 'leCore fast' stands in for exact (certified bit-identical arbiter).")
@@ -261,7 +341,23 @@ def main():
         dim = args.dim if n * args.dim * 4 < 1.2e9 else 128
         # cache the dataset + ground truth so per-engine runs (small boxes, short cells)
         # don't pay the build repeatedly; the cache is keyed by (n, dim, k, queries)
-        tag = "/tmp/bench_%d_%d_%d_%d" % (n, dim, args.k, args.queries)
+        # THE CACHE KEY MUST INCLUDE THE ANCHOR CORPUS. It was (n, dim, k,
+        # queries) only -- so switching the anchor file SILENTLY REUSED the
+        # previous dataset, and the hardness gate never re-ran. That is how a
+        # Gaussian corpus produced a full results table on this box: the gate
+        # was correct and the cache walked around it.
+        # A BENCHMARK CACHE KEYED ON LESS THAN ITS INPUTS IS A BENCHMARK THAT
+        # REPORTS THE WRONG EXPERIMENT. Hash the anchor path and its mtime+size,
+        # which is cheap and changes whenever the corpus does.
+        try:
+            _rp = _real_vectors_path() or ""
+            _st = os.stat(_rp)
+            _key = _hl.sha256(("%s|%d|%d" % (_rp, _st.st_size,
+                                             int(_st.st_mtime))).encode()
+                              ).hexdigest()[:12]
+        except Exception:
+            _key = "noanchors"
+        tag = "/tmp/bench_%s_%d_%d_%d_%d" % (_key, n, dim, args.k, args.queries)
         if os.path.exists(tag + "_gt.npy"):
             base = np.load(tag + "_base.npy")
             queries = np.load(tag + "_q.npy")
@@ -275,6 +371,23 @@ def main():
             np.save(tag + "_gt.npy", gt); np.save(tag + "_gap.npy", np.array(gap))
         note = "" if dim == args.dim else "  [dim reduced to %d for RAM -- full-dim rung needs a bigger box]" % dim
         print("\nN=%d  dim=%d  hardness top1=%.3f%s" % (n, dim, gap, note))
+        # THE GATE THE DOCSTRING PROMISED AND THE CODE DID NOT HAVE. This file
+        # says "a gap that looks like random vectors' aborts the run"; it only
+        # PRINTED the number, so a corpus of pure Gaussians sailed through and
+        # every engine scored ~1.000 -- exactly the friendly-sample result the
+        # harness exists to refuse. A DOCUMENTED REFUSAL THAT IS NOT IMPLEMENTED
+        # IS WORSE THAN NO REFUSAL, because the reader believes it fired.
+        # Threshold from measurement, not taste: unit-norm Gaussians in 768d
+        # give a top-1 cosine near 0.15, while clustered real embeddings give
+        # 0.6-0.9. Anything below 0.35 is not a retrieval contest.
+        if gap < float(args.min_hardness):
+            raise SystemExit(
+                "REFUSED: top-1 similarity %.3f is below the hardness floor "
+                "%.2f.\nThis corpus is nearly orthogonal -- every engine will "
+                "score ~1.0 recall\nand the benchmark will measure nothing. "
+                "Supply real embeddings (see the\nmodule docstring), or pass "
+                "--min-hardness to state on the record that you\nare "
+                "benchmarking easy data." % (gap, args.min_hardness))
         print("  %-14s %10s %12s %10s" % ("engine", "build s", "query ms", "recall@%d" % args.k))
         wanted = [e.strip() for e in args.engines.split(",") if e.strip()]
         for name, fn in ENGINES:

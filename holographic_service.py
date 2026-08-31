@@ -926,7 +926,8 @@ def _selftest():
           "over documents; save+load persistence survives a restart; clean 400/404; token field -- standalone DB)")
 
 
-if __name__ == "__main__":
+def main():
+    """Console entry point (sweep 115): `lecore-service` after `pip install leos-core[service]`."""
     import argparse
     p = argparse.ArgumentParser(description="leCore standalone API service (talk to the engine over HTTP/JSON).")
     p.add_argument("--host", default="127.0.0.1", help="bind address (127.0.0.1 = local only; 0.0.0.0 = all NICs)")
@@ -940,3 +941,7 @@ if __name__ == "__main__":
         _selftest()
     else:
         serve(host=args.host, port=args.port, token=args.token, persist_path=args.persist)
+
+
+if __name__ == "__main__":
+    main()

@@ -3,7 +3,7 @@
 Grok CLI (superagent-ai/grok-cli — the open-source terminal coding agent built
 for the Grok API) speaks the OpenAI chat-completions format and accepts a custom
 base URL, so it can route through openzoo. This covers "Grok-ecosystem" users:
-they keep their harness and gain the zoo's 480+ models and leCore large-context
+they keep their harness and gain the zoo's ~435 models and leCore large-context
 handling.
 
 ## Setup
@@ -23,7 +23,7 @@ grok --model nvidia/nemotron-3.5-lightning
 
 Persistent — add the provider entry from `models.openzoo.json` in this folder to
 `~/.grok/models.json` (append to the existing array; add more zoo ids to
-`models` as desired — `curl localhost:8402/v1/models` lists them). Per-project model
+`models` as desired — `npx openzoo models` lists them). Per-project model
 pinning lives in `.grok/settings.json`.
 
 ## Notes

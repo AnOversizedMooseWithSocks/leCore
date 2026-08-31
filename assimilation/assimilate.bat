@@ -56,6 +56,14 @@ REM --- dependencies: numpy + huggingface_hub always ---------------------------
 if errorlevel 1 (
     echo   Installing numpy + huggingface_hub into the venv...
     "%VPY%" -m pip install --quiet --upgrade pip
+REM GPU FOR THE INSTALL PIPELINE (cp88): the engine's cupy backend engages
+REM automatically when cupy is importable (--device auto). The CUDA Toolkit is
+REM NOT required -- the wheel bundles the runtime. Fallback: cpu numpy.
+where nvidia-smi >nul 2>&1
+if %errorlevel%==0 (
+    echo   NVIDIA GPU detected -- installing cupy for the install pipeline...
+    "%VPY%" -m pip install --quiet "cupy-cuda12x[ctk]" || echo   cupy install failed; staying on cpu numpy
+)
     "%VPY%" -m pip install --quiet numpy huggingface_hub
 )
 

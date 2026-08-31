@@ -55,7 +55,7 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
             passages=(), router_positive=(), router_negative=(),
             n_registers=None, prepend=None, seed=0, progress=None, mind=None,
             target_tokens=None, scales=4, n_state_slots=4,
-            vm_program=None, exit_floor=0.999):
+            vm_program=None, exit_floor=0.999, nov_ids=None):
     """Install leCore into a model, THROUGH leCore. Returns (weights, cfg, report).
 
     Pass `mind` and every step routes through UnifiedMind faculties rather than
@@ -279,7 +279,129 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
         _a = np.asarray(GDNRuntime(w, c).forward(probe2), np.float64)
         _b = np.asarray(GDNRuntime(w_h, c_h).forward(probe2), np.float64)
         drift = float(np.max(np.abs(_b - _a)))
-        identical = drift <= 1e-9
+        # THE GATE PREPEND ALREADY HAS (cp95, field-caught: FAIL at drift
+        # 2.8e+01 under a message claiming "reassociation, not behaviour" --
+        # the absolute 1e-9 gate and the message were written when CPU
+        # bit-exactness made them agree; GPU split them). Judge RELATIVE to
+        # the output scale, exactly as prepend does; report the first token
+        # touched; and when the ladder truly alters behaviour SAY THAT,
+        # because a gate whose failure message argues with its own verdict
+        # teaches nobody anything.
+        scale = float(np.max(np.abs(_a))) or 1.0
+        rel = drift / scale
+        identical = rel <= 1e-6
+        first_tok = int(np.unravel_index(
+            int(np.argmax(np.abs(_b - _a))), _a.shape)[0]) if drift else -1
+        _culprit = ""
+        if not identical:
+            # PLACEMENT AUDIT ON FAILURE (cp98): forward-bisecting with
+            # reverted families cannot work -- shapes are coupled to the
+            # raised config. But a gain-0 grow makes an EXACT promise: every
+            # original value sits INTACT at its mapped position (tail-appends
+            # keep leading rows; out_proj keeps leading columns; the conv is
+            # SPLICED at section offsets computed from the OLD head counts).
+            # Checking that promise needs no forward pass and names the
+            # family AND offset when it is broken. The faithful /8 fixture
+            # passes at 0.0, so a field failure is either a moved value
+            # (named here) or a config-interpretation difference (said here).
+            _Kh0 = int(c.get("linear_num_key_heads", 0))
+            _dk0 = int(c.get("linear_key_head_dim", 0))
+            _dv0 = int(c.get("linear_value_head_dim", 0))
+            _Vh0 = int(c.get("linear_num_value_heads", 0))
+            _moved = []
+            for _k in sorted(set(w) & set(w_h)):
+                _A = np.asarray(w[_k], np.float64)
+                _B = np.asarray(w_h[_k], np.float64)
+                if _A.shape == _B.shape:
+                    _d = float(np.max(np.abs(_B - _A))) if _A.size else 0.0
+                    if _d > 0:
+                        _moved.append((_d, "%s (same-shape tensor changed)"
+                                       % _k.split("layers.")[-1]))
+                    continue
+                if "conv1d" in _k and _B.shape[0] > _A.shape[0]:
+                    _qe = _Kh0 * _dk0
+                    _ke = 2 * _Kh0 * _dk0
+                    _r0 = max(1, _Vh0 // max(1, _Kh0))
+                    _map = [(0, _qe, 0), (_qe, _ke, _dk0),
+                            (_ke, _A.shape[0], 2 * _dk0)]
+                    for _a0, _a1, _off in _map:
+                        _d = float(np.max(np.abs(
+                            _B[_a0 + _off:_a1 + _off] - _A[_a0:_a1]))) \
+                            if _a1 > _a0 else 0.0
+                        if _d > 0:
+                            _moved.append((_d,
+                                           "conv1d section [%d:%d] shifted"
+                                           % (_a0, _a1)))
+                    continue
+                if _B.ndim == 2 and _B.shape[0] > _A.shape[0] \
+                        and _B.shape[1] == _A.shape[1]:
+                    _d = float(np.max(np.abs(_B[:_A.shape[0]] - _A)))
+                    if _d > 0:
+                        _i = int(np.unravel_index(int(np.argmax(np.abs(
+                            _B[:_A.shape[0]] - _A))), _A.shape)[0])
+                        _moved.append((_d, "%s leading rows moved (first at "
+                                       "row %d)" % (
+                                           _k.split("layers.")[-1], _i)))
+                    continue
+                if _B.ndim == 2 and _B.shape[1] > _A.shape[1] \
+                        and _B.shape[0] == _A.shape[0]:
+                    _d = float(np.max(np.abs(_B[:, :_A.shape[1]] - _A)))
+                    if _d > 0:
+                        _moved.append((_d, "%s leading cols moved"
+                                       % _k.split("layers.")[-1]))
+                    continue
+                if _B.ndim == 1 and _B.shape[0] > _A.shape[0]:
+                    _d = float(np.max(np.abs(_B[:_A.shape[0]] - _A)))
+                    if _d > 0:
+                        _moved.append((_d, "%s leading entries moved"
+                                       % _k.split("layers.")[-1]))
+            # SHIP THE GROUND TRUTH (cp99): whatever the verdict, a failing
+            # box writes the layer-0 linear_attn shape manifest + config to
+            # hrnn_debug.json beside the install log -- the exact facts a
+            # faithful fixture needs. Seven hypotheses were falsified on
+            # reconstructed shapes; the eighth gets built from real ones.
+            try:
+                import json as _json
+                import os as _os
+                _pre0 = None
+                for _k in w:
+                    if "linear_attn" in _k:
+                        _pre0 = _k.split("linear_attn")[0]
+                        break
+                _man = {"cfg": {k_: c.get(k_) for k_ in (
+                            "linear_num_key_heads", "linear_num_value_heads",
+                            "linear_key_head_dim", "linear_value_head_dim",
+                            "linear_conv_kernel_dim", "hidden", "n_layers",
+                            "qkv_order")},
+                        "layer0": {k_.split("linear_attn.")[-1]:
+                                   list(np.asarray(v_).shape)
+                                   for k_, v_ in sorted(w.items())
+                                   if _pre0 and k_.startswith(_pre0)
+                                   and "linear_attn" in k_},
+                        "grown_layer0": {k_.split("linear_attn.")[-1]:
+                                         list(np.asarray(v_).shape)
+                                         for k_, v_ in sorted(w_h.items())
+                                         if _pre0 and k_.startswith(_pre0)
+                                         and "linear_attn" in k_}}
+                _dbg = _os.path.join(_os.getcwd(), "hrnn_debug.json")
+                with open(_dbg, "w") as _f:
+                    _json.dump(_man, _f, indent=1)
+                _culprit += "; shapes -> hrnn_debug.json"
+            except Exception:
+                pass
+            if _moved:
+                _moved.sort(reverse=True)
+                _culprit = ("; placement audit: %d tensor(s) moved existing "
+                            "values -- worst: %s (%.1e)"
+                            % (len(_moved), _moved[0][1], _moved[0][0])) \
+                    + _culprit
+            else:
+                _culprit = ("; placement audit CLEAN -- every original value "
+                            "intact at its mapped position, so the drift is "
+                            "config-interpretation: the runtime reads a "
+                            "grown tensor with the raised head counts in a "
+                            "way this architecture lays out differently. "
+                            "Report this line.") + _culprit
         if identical:
             w, c = w_h, c_h
             rep["hrnn"] = {"gain": 0.0, "target_tokens": target_tokens,
@@ -288,9 +410,16 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
                                       "ACT-R activation (tool choice by "
                                       "recency AND frequency), R^2 0.99858"]}
         _note("hrnn_channel", identical,
-              "%s, output drift %.1e (float reassociation, not behaviour)"
+              "%s, output drift %.1e (relative %.1e%s) -- %s"
               % (("%d-rung ladder for %d tokens" % (scales, target_tokens))
-                 if target_tokens else "single channel at a_log -9", drift))
+                 if target_tokens else "single channel at a_log -9",
+                 drift, rel,
+                 (", first at token %d" % first_tok) if drift else "",
+                 "bit-identical" if drift == 0.0 else
+                 ("float reassociation, accepted" if identical else
+                  "the ladder ALTERS BEHAVIOUR at this config -- not "
+                  "installed (optional: registers, router and improvement "
+                  "do not need it; continuing)" + _culprit)))
     except Exception as exc:
         # SAY WHERE IT BROKE, not just what threw. A reshape error names two
         # numbers and neither of them is a tensor -- on a 24-layer Qwen-shaped
@@ -300,10 +429,26 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
         # aborting, because registers, router and improvement do not need it.
         _kh = c.get("linear_num_key_heads")
         _vh = c.get("linear_num_value_heads")
+        # AND NAME THE LINE. The config context above tells you the SHAPES the
+        # caller believed in; it does not tell you WHERE the belief broke, and
+        # without that the only way to find a reshape two modules down is to
+        # rebuild the call by hand -- which I did, three times, and could not
+        # reproduce it because the faculty path normalises the config
+        # differently from a hand-built dict.
+        # A DIAGNOSTIC THAT CANNOT BE REPRODUCED BY HAND MUST CARRY ITS OWN
+        # LOCATION. One frame is enough: file, line, and the expression.
+        import traceback as _tb
+        _fr = _tb.extract_tb(exc.__traceback__)
+        _at = ""
+        if _fr:
+            _last = _fr[-1]
+            _at = " at %s:%d in %s(): %s" % (
+                _last.filename.split("/")[-1], _last.lineno, _last.name,
+                (_last.line or "")[:60])
         _note("hrnn_channel", False,
-              "%s: %s [heads k=%s v=%s, kdim=%s vdim=%s, hidden=%s, %d layers "
+              "%s: %s%s [heads k=%s v=%s, kdim=%s vdim=%s, hidden=%s, %d layers "
               "-- the ladder is optional, continuing without it]"
-              % (type(exc).__name__, str(exc)[:70], _kh, _vh,
+              % (type(exc).__name__, str(exc)[:70], _at, _kh, _vh,
                  c.get("linear_key_head_dim"), c.get("linear_value_head_dim"),
                  c.get("hidden"), int(c["n_layers"])))
 
@@ -387,14 +532,40 @@ def install(weights, cfg, runtime, fit_ids, eval_ids, tokenize=None,
     if _stateful and R is not None:
         try:
             from holographic.caching_and_storage.holographic_selfwrite import (
-                fit_novelty)
-            nov = fit_novelty(GDNRuntime(w, c), w, c, list(fit_ids)[:1400])
+                fit_novelty_chunked)
+            # SAMPLE COUNT MUST SCALE WITH HIDDEN SIZE. The readout is a ridge
+            # fit of `hidden` coefficients trained on HALF the tokens, so a
+            # flat 1400-token budget silently becomes underdetermined the
+            # moment hidden >= 700: at hidden=1024 that is 699 rows for 1024
+            # features (0.68 rows/feature) and the held-out score collapses
+            # toward the fit, not toward the truth. Measured on a matched
+            # synthetic (planted r=0.55, correlated design, identical
+            # estimator): 0.68 rows/feature recovers r=0.166 / 15% top decile,
+            # 2.0x recovers 0.347 / 25%, 4.0x recovers 0.430 / 30%. The signal
+            # did not change -- only the number of rows did. So ask for
+            # 4 rows per feature when the corpus can supply them, and say
+            # plainly when it cannot.
+            _nov_src = list(nov_ids) if nov_ids else list(fit_ids)
+            _hid = int(c.get("hidden_size") or c.get("hidden") or 0) or None
+            _want = (8 * _hid + 2) if _hid else 1400
+            _nov_ids = _nov_src[:max(1400, min(len(_nov_src), _want))]
+            nov = fit_novelty_chunked(GDNRuntime(w, c), w, c, _nov_ids,
+                                      chunk=1400)
+            _rpf = float(nov.get("rows_per_feature", float("nan")))
             rep["self_write"] = {"mode": nov["mode"],
                                  "correlation": nov["correlation"],
-                                 "top_decile_hit": nov["top_decile_hit"]}
-            _note("self_write", nov["top_decile_hit"] > 0.4,
-                  "novelty readout r=%.3f, finds %.0f%% of the top decile"
-                  % (nov["correlation"], 100 * nov["top_decile_hit"]))
+                                 "top_decile_hit": nov["top_decile_hit"],
+                                 "fit_tokens": len(_nov_ids),
+                                 "rows_per_feature": _rpf}
+            _msg = ("novelty readout r=%.3f, finds %.0f%% of the top decile "
+                    "(%d tokens, %.2f rows/feature)"
+                    % (nov["correlation"], 100 * nov["top_decile_hit"],
+                       len(_nov_ids), _rpf))
+            if _rpf == _rpf and _rpf < 2.0:
+                _msg += (" -- UNDERDETERMINED: the fit has fewer than 2 rows "
+                         "per coefficient, so this score is a floor, not a "
+                         "verdict. Pass a longer --doc corpus")
+            _note("self_write", nov["top_decile_hit"] > 0.4, _msg)
         except Exception as exc:
             _note("self_write", False, "%s: %s" % (type(exc).__name__, exc))
 

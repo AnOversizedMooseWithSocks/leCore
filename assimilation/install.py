@@ -70,8 +70,10 @@ def _free_rows(model_dir, n_vocab, need):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("model_dir", nargs="?", default="work/original",
-                    help="the model to assimilate (default: work/original, "
+    ap.add_argument("model_dir", nargs="?", default=None,
+                    help="the model to install into (default: work/assimilated "
+                         "when it exists -- THE POINT OF THE PIPELINE -- else "
+                         "work/original, "
                          "resolved from where you are standing)")
     ap.add_argument("out_dir", nargs="?", default=None,
                     help="where to write Galvatron (default: work/galvatron "
@@ -93,6 +95,26 @@ def main():
                          "intervention is proportionate on a 4-layer fixture "
                          "and on a 61-layer model alike)")
     a = ap.parse_args()
+
+    # THE PIPELINE'S POINT (cp93, the user's question answered in code): the
+    # old flow was assimilate -> repair -> imbue -- leCore went into the
+    # ASSIMILATED model. When install.py replaced that pipeline, the default
+    # quietly regressed to work/original, orphaning the assimilation: all that
+    # spectral filtering produced a model nothing installed into. Galvatron is
+    # assimilated + leCore. So: no explicit model_dir -> prefer
+    # work/assimilated when it exists, fall back to work/original, and SAY
+    # which was chosen. An explicit argument always wins.
+    if a.model_dir in (None, ""):
+        _assim = os.path.join("work", "assimilated")
+        if os.path.isdir(_assim):
+            a.model_dir = _assim
+            print("[pipeline] installing into work/assimilated (assimilate -> "
+                  "install = Galvatron; pass work/original explicitly for the "
+                  "untouched base)")
+        else:
+            a.model_dir = os.path.join("work", "original")
+            print("[pipeline] work/assimilated not found -- installing into "
+                  "work/original")
 
     from holographic.io_and_interop.holographic_gdnruntime import (
         GDNRuntime, load_runtime, load_weights_dir)
@@ -191,6 +213,12 @@ def main():
             "text -- it loaded but does not encode this corpus. Pass --doc "
             "with text the model was trained on, or check tokenizer.json."
             % len(fit_ids))
+    # The novelty readout fits `hidden` coefficients and needs rows to match:
+    # at hidden=1024 the old flat 1400-token budget gave 0.68 rows per feature
+    # and the step failed marginally (top decile 36% against a 40% bar) on a
+    # model whose signal was fine. This slice is for THAT fit only -- fit_ids
+    # stays exactly as it was, so every other step is bit-for-bit unchanged.
+    nov_ids = tok(text[:160000]) if len(text) > 20000 else fit_ids
     eval_ids = tok(text[20000:26000])[:1200]
     if len(eval_ids) < 128:
         cut = max(128, len(fit_ids) // 3)
@@ -321,7 +349,7 @@ def main():
                 if not _hint:
                     print("      [!] --device gpu requested but no CUDA device "
                           "is visible. Check `nvidia-smi` runs; if it does, "
-                          "install cupy-cuda12x (or cupy-cuda11x for an older "
+                          "install \"cupy-cuda12x[ctk]\" (or cupy-cuda11x[ctk] for an older "
                           "driver) into assimilation\\.venv. The CUDA Toolkit "
                           "is NOT required -- the wheel bundles the runtime.")
         except Exception as _exc:
@@ -336,7 +364,7 @@ def main():
                           passages=passages, router_positive=pos,
                           router_negative=neg, n_registers=n_reg,
                           prepend=a.prepend,       # None -> derived from depth
-                          progress=show, mind=mind)
+                          progress=show, mind=mind, nov_ids=nov_ids)
     if rep.get("aborted"):
         raise SystemExit("[install] ABORTED: %s" % rep["aborted"])
 
@@ -365,7 +393,31 @@ def main():
     # MISREAD.
     _final = os.path.join(a.out_dir, "model.safetensors")
     _tmp = _final + ".incomplete"
-    export_portable(w2, _tmp, like=a.model_dir, keep_f32=_keep)
+    # TRANSLATE THE DTYPE MAP THROUGH THE RENUMBERING (cp96): prepend shifts
+    # source layer i to i+n, so like= (which matches by name) missed every
+    # layer tensor and the file DOUBLED (1.7 -> 3.4 GB, field-measured -- the
+    # third time this class of bug has surfaced, so this time the map is
+    # built explicitly by the code that did the renaming). New blank layers
+    # take the dtype of their source-layer-0 counterpart; leCore substrate
+    # stays f32 via keep_f32 exactly as before.
+    import re as _re
+    _srcdt = source_dtypes(a.model_dir)
+    _n_pre = int((rep.get("prepend") or {}).get("layers_added", 0) or
+                 (2 if any(".layers.25." in k for k in w2) and
+                  not any(".layers.25." in k for k in _srcdt) else 0))
+    _dtmap = {}
+    for _k in w2:
+        _m = _re.search(r"(.*\.layers\.)(\d+)(\..*)", _k)
+        if _m:
+            _i = int(_m.group(2))
+            _srck = "%s%d%s" % (_m.group(1), _i - _n_pre, _m.group(3)) \
+                if _i >= _n_pre else "%s%d%s" % (_m.group(1), 0, _m.group(3))
+            if _srck in _srcdt:
+                _dtmap[_k] = _srcdt[_srck]
+        elif _k in _srcdt:
+            _dtmap[_k] = _srcdt[_k]
+    export_portable(w2, _tmp, like=a.model_dir, keep_f32=_keep,
+                    dtypes=_dtmap)
     os.replace(_tmp, _final)
     for f in os.listdir(a.model_dir):
         src = os.path.join(a.model_dir, f)
@@ -459,7 +511,14 @@ def main():
     #      KEPT NEGATIVE: CENTRING DID NOT HELP HERE (9/18 either way), which is
     #      worth stating because centring has been the fix four separate times
     #      in this project and it is tempting to apply it on faith.
-    if rows is None and passages:
+    # THE GUARD WAS THE BUG (cp97, field-caught by audit.bat's "sidecar:
+    # absent"): rows is ALWAYS a list here -- never None -- so this block was
+    # dead code on every install since the refactor that made it so. The
+    # comment upstream names the disease exactly: the constraint of one
+    # storage scheme silently limiting a different one. The sidecar needs no
+    # vocabulary rows; it builds whenever passages exist, beside whatever the
+    # row-based memory_index installs into the weights.
+    if passages:
         try:
             import numpy as _np
             from holographic.io_and_interop.holographic_gdnruntime import (

@@ -1,4 +1,7 @@
-"""Factoring a composite back into its parts -- the inverse of binding, solved by
+"""Break a bound shape or composite into its simpler pieces -- the resonator factors a
+combined vector back into the parts it was built from (the inverse of binding).
+
+Factoring a composite back into its parts -- the inverse of binding, solved by
 searching in superposition.
 
 Binding combines several vectors into one (the cat, the colour red, the position
@@ -71,9 +74,41 @@ class ResonatorNetwork:
     """Factor a composite vector into one codevector from each codebook, by searching
     in superposition with random restarts."""
 
-    def __init__(self, codebooks):
+    #: Imaginary content below this fraction of the real magnitude is treated as FFT round-trip
+    #: residue and cast away silently; above it, the input is a genuinely complex vector and
+    #: casting would discard half the representation. 1e-9 sits far above float64 FFT residue
+    #: (~1e-16) and far below any real phasor content (order 1).
+    COMPLEX_TOL = 1e-9
+
+    @classmethod
+    def _demand_real(cls, x, what, allow_complex_cast=False):
+        """Refuse a genuinely complex input instead of quietly discarding its phase.
+
+        WHY THIS GUARD EXISTS, with the measurement: handed a phasor product this class used to
+        cast to float, drop the imaginary part, and return a dict whose `factors` field was
+        populated and whose `solved` field was False -- a correct-looking answer built from half
+        the representation. Over 60 random 3-factor products (8 entries per codebook, search space
+        512) the real-cast path recovered 0.250 against 0.967 for a resonator that keeps the phase
+        (chance 0.002). Use holographic_phasor.factor for complex composites.
+        """
+        a = np.asarray(x)
+        if not np.iscomplexobj(a):
+            return np.asarray(a, float)
+        mi = float(np.max(np.abs(a.imag))) if a.size else 0.0
+        mr = float(np.max(np.abs(a.real))) if a.size else 0.0
+        if mi > cls.COMPLEX_TOL * max(mr, 1e-30) and not allow_complex_cast:
+            raise TypeError(
+                "%s is COMPLEX (max|imag| %.3e vs max|real| %.3e): casting to float would discard "
+                "half the representation and this resonator is validated only for real/bipolar "
+                "codebooks. Measured cost of casting: 0.250 vs 0.967 recovery. Use "
+                "holographic_phasor.factor for phasor composites, or pass allow_complex_cast=True "
+                "to keep the old behaviour deliberately." % (what, mi, mr))
+        return np.asarray(a.real, float)
+
+    def __init__(self, codebooks, allow_complex_cast=False):
         # codebooks: list of (n_f, dim) bipolar matrices, rows = codevectors
-        self.books = [np.asarray(B, float) for B in codebooks]
+        self._allow_cast = bool(allow_complex_cast)
+        self.books = [self._demand_real(B, "a codebook", self._allow_cast) for B in codebooks]
         self.F = len(self.books)
         self.dim = self.books[0].shape[1]
 
@@ -172,7 +207,7 @@ class ResonatorNetwork:
         composite. Returns {'factors', 'solved', 'restarts', 'iterations',
         'search_space'}. Tries random restarts because a single run may not converge,
         but a converged run is always correct."""
-        c = np.asarray(composite, float)
+        c = self._demand_real(composite, "the composite", self._allow_cast)
         space = 1
         for B in self.books:
             space *= B.shape[0]
@@ -396,6 +431,23 @@ def recursive_factor(composite, codebook, vocab, arity=2, restarts=10, iters=300
 def _selftest():
     """Regression trap for R2: the cliff is real, recursion crosses it, and the verify gate refuses rather than
     guesses. Small sizes so the self-test stays fast; the full measurement lives in the tests."""
+
+    # COMPLEX GUARD, pinned in all three directions. A genuinely complex composite must be
+    # REFUSED (casting recovers 0.250 against 0.967 for a phase-keeping resonator); FFT
+    # round-trip residue at ~1e-16 must be ACCEPTED, because refusing it would break every
+    # legitimate caller whose vector went through a transform; and the old behaviour must stay
+    # reachable behind an explicit flag rather than being deleted.
+    _rng = np.random.default_rng(0)
+    _real = _rng.choice([-1.0, 1.0], (8, 64))
+    _resid = np.fft.ifft(np.fft.fft(_real, axis=1), axis=1)
+    ResonatorNetwork([_resid[:4], _resid[4:]])          # residue: must not raise
+    _cx = _real[:4] + 1j * _rng.standard_normal((4, 64))
+    try:
+        ResonatorNetwork([_cx, _cx])
+        raise AssertionError("a genuinely complex codebook must be REFUSED, not cast")
+    except TypeError:
+        pass
+    ResonatorNetwork([_cx, _cx], allow_complex_cast=True)   # deliberate opt-out: must not raise
     import itertools
     from holographic.agents_and_reasoning.holographic_chunkcodebook import ChunkCodebook
 

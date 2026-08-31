@@ -142,8 +142,19 @@ class _PlacedEval:
 
 
 def _resolve_material(material):
-    """Turn an object's `material` field into something matlib.shade understands: a library material name (str) or
-    an already-built material object. Returns the material object, or None to mean 'use a default'."""
+    """Turn an object's `material` field into something matlib.shade understands: a library material name (str),
+    a PLAIN DICT (color/base_color [+ metallic/roughness/emissive/ior/transmission] -> PBRMaterial -- measured,
+    sweep 80: the natural add(material={'color': ...}) was accepted and then exploded at RENDER time inside
+    matlib.shade, the accepted-then-explodes trap), or an already-built material object. Returns the material
+    object, or None to mean 'use a default'."""
+    if isinstance(material, dict):
+        d = dict(material)
+        base = d.pop("color", d.pop("base_color", (0.8, 0.8, 0.8)))
+        base = tuple(base) + (1.0,) if len(tuple(base)) == 3 else tuple(base)
+        keep = {k: d[k] for k in ("metallic", "roughness", "emissive", "ior",
+                                  "transmission") if k in d}
+        import holographic.materials_and_texture.holographic_matlib as ML
+        return ML.PBRMaterial(name=str(d.get("name", "custom")), base_color=base, **keep)
     if material is None:
         return None
     if isinstance(material, str):
@@ -272,6 +283,17 @@ def _view_transform(img, view):
 
 def render_preview(scene, camera, width=240, height=180, scale=0.5, max_bounce=1, quality="draft",
                    seed=0, sky=None, lights=None, view="display", **kw):
+    if lights is None and sky is None:
+        # DEFAULT ILLUMINATION for the preview (sweep 80): at max_bounce=1 a sky cannot
+        # light a surface (env radiance rides the BOUNCE ray -- measured: crop 0.034 at
+        # mb1 vs 0.749 at mb2), so the unlit default was a black silhouette. A default
+        # SUN shades correctly at one bounce (NEE at the hit) and costs 3.3x LESS than
+        # raising max_bounce (0.20s vs 0.66s at 160x120, measured). lights=[] opts out.
+        from holographic.rendering.holographic_lights import DirectionalLight
+        # direction is TOWARD the light (ctor default (0.4, 0.8, 0.5), +y = sun in the
+        # sky); the first draft pointed it BELOW the ground and lit nothing -- probed.
+        lights = [DirectionalLight(direction=(0.45, 0.8, 0.35),
+                                   color=(1.0, 0.98, 0.94), intensity=2.6)]
     """A FAST, deliberately rough look at a scene -- the 'is it roughly right?' pass, not the render.
 
     Renders at `scale` of the requested size, then upscales back. The result is `width` x `height` and
@@ -404,6 +426,28 @@ def emissive_mesh_lights_fn(scene, coarse=24, fine=22, margin=0.08,
     return out
 
 
+def _resolve_sky(sky):
+    """Accept a sky as a FUNCTION (the tracer's contract) or a PRESET STRING. Measured
+    (sweep 80): sky='clear' -- the semantic pipeline's vocabulary -- crashed five frames
+    deep as "'str' object is not callable"; the two scene worlds did not share words.
+    Strings resolve through the studio rig; unknown ones fail HERE, naming the roster."""
+    if sky is None or callable(sky):
+        return sky
+    if isinstance(sky, str):
+        from holographic.rendering.holographic_studiorig import studio_sky
+        from holographic.rendering.holographic_studiorig import PRESETS
+        presets = tuple(PRESETS)                      # read the roster, never recall it
+        name = {"clear": "soft", "cloudy": "soft", "overcast": "soft",
+                "studio": "classic"}.get(sky.lower(), sky.lower())
+        if name in presets:
+            return studio_sky(name)
+        raise ValueError("unknown sky preset %r -- pass a sky(D)->radiance function or "
+                         "one of %s (aliases: clear/cloudy/overcast -> soft, "
+                         "studio -> classic)" % (sky, ", ".join(presets)))
+    raise TypeError("sky must be None, a callable, or a preset string; got %s"
+                    % type(sky).__name__)
+
+
 def render_scene_document(scene, camera, width=96, height=72, quality="medium", max_bounce=4, seed=0,
                           sky=None, default_material="matte_gray", return_stats=False, sss_dir=None,
                           sss_depth=0.6, sss_sigma=4.0, lights=None, dome_cache=False, demodulate=False,
@@ -427,6 +471,15 @@ def render_scene_document(scene, camera, width=96, height=72, quality="medium", 
                               Honest tradeoff: one bounce, not full multi-bounce GI.
     The remaining (hard/cheap) lights -- point, directional, spot, IES -- render normally on the tracer."""
     from holographic.rendering.holographic_gbuffer import render_auto
+    sky = _resolve_sky(sky)                                    # preset strings welcome at the door
+    if lights is None and sky is None:
+        # DEFAULT ILLUMINATION (sweep 80): with neither lights nor sky, surfaces got ZERO
+        # light while the backdrop still rendered bright -- the flagship card example
+        # produced a black silhouette on a lit background (measured: object crop 0.03,
+        # frame mean 0.68). A bare document now gets the soft studio sky; pass lights=[]
+        # (or any explicit sky) to opt out and get the old literal darkness.
+        from holographic.rendering.holographic_studiorig import studio_sky as _ss
+        sky = _ss("soft")
     sdf, material_fn = scene_to_render(scene, default_material=default_material, affine=affine,
                                        distance_sdf=distance_sdf)
 

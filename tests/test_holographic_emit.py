@@ -151,8 +151,11 @@ def test_the_emitter_refuses_and_names_the_construct(src, needle):
 
 
 def test_an_unknown_dialect_raises():
+    # NOT "glsl" -- this test used it as the example of an unknown dialect and then glsl was ADDED
+    # to DIALECTS, so the test quietly began asserting that a real dialect is unknown. A negative
+    # test whose subject can be implemented later is a time bomb; use a name that never will be.
     with pytest.raises(EmitError, match="unknown dialect"):
-        emit_source(SDF, "glsl")
+        emit_source(SDF, "no_such_dialect_ever")
 
 
 def test_statements_after_return_are_refused():

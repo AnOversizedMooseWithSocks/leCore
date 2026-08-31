@@ -99,6 +99,14 @@ class _UnifiedPart04:
         """MAP binding: elementwise product. Commutative AND self-inverse (bind(x, x) is the all-ones vector),
         which is what makes stable factorization possible -- and what makes the recoverable object a multiset
         modulo cancelling pairs. See holographic_resonator.map_bind."""
+        # A VARIADIC WITH NO ARGUMENTS IS STILL A CALL THAT CANNOT BE SERVED.
+        # map_bind() died as "tuple index out of range" inside the reduce --
+        # true, and useless to the caller. Binding is a fold over vectors;
+        # there is no identity to return for an empty fold here.
+        if not vectors:
+            raise ValueError(
+                "map_bind needs at least one vector -- it is a fold over\n"
+                "elementwise products, and an empty fold has no answer.")
         from holographic.misc.holographic_resonator import map_bind as _mb
         return _mb(*[np.asarray(v, float) for v in vectors])
 
@@ -1318,7 +1326,11 @@ class _UnifiedPart04:
 
     # -- K8: dialect emitters -- one source of truth, two runtimes, no drift -------------------------------
     def emit_kernel(self, fn, dialect="wgsl"):
-        """Emit a scalar, straight-line, float kernel into `wgsl` | `c_f64` | `c_f32` | `js` | `zig_f64` | `zig_f32`. The hand-written
+        """Emit a scalar, straight-line, float kernel into `wgsl` | `glsl` | `slang` | `c_f64` | `c_f32` | `js` |
+        `zig_f64` | `zig_f32`. SLANG is an HLSL superset, so one emitted artifact reaches SPIR-V, HLSL,
+        MSL and CUDA through slangc -- OPT-IN, never a required dependency. Emitting INTO Slang rather
+        than authoring in it keeps the Python kernel authoritative, which is what the installed-weights
+        path needs (you install the kernel, not a shader). The hand-written
         compute shader becomes a PROJECTION of the authoritative Python kernel. K10's rule: the emitter REFUSES
         rather than guesses -- an unannotated parameter, an unknown call, a `while`, a range whose bound is not a
         literal, or a missing return each raise with

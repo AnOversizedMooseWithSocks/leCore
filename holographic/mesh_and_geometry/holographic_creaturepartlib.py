@@ -357,6 +357,43 @@ def library(dim=1024, seed=0, params=None):
     return lib
 
 
+def stock_for_sockets(sockets, dim=None, seed=0, params=None, expect_sockets=None):
+    """Build geometry for every part the given `sockets` ask for and DEFINE it into a fresh
+    PartLibrary -- the missing half of the render path. part_library() returns an EMPTY codebook
+    by design (define(name, geometry=) is how geometry gets in), and nothing was calling it: so
+    place_parts resolved placements against a library holding NOTHING, returned geometry with
+    0 VERTICES, and reported missed: [] -- placement succeeded; there was nothing to place.
+
+    `sockets` is build_creature(..., parts=True)['sockets']: dicts whose 'part' key names what
+    each socket wants. `dim=None` prices the dimension from the socket count via the capacity law
+    (PartLibrary's own rule); `params` overrides per-part builder defaults, exactly as library().
+
+    POSTCHECKED per part, so a silent nothing cannot ride through again: a part whose builder
+    returns 0 vertices lands in 'empty' (defined anyway -- the caller decides), a name no builder
+    knows lands in 'missed' (NOT raised: a creature document with one exotic socket should still
+    render its feet). Returns {"library", "stocked", "missed", "empty"} -- 'stocked' is what an
+    agent prints to see the fix worked.
+    KEPT NEG: stocking EVERYTHING via library() when the creature asks for 3 parts pays ~10x the
+    geometry build for vectors that then sit unread in the codebook; sockets are the demand signal."""
+    from holographic.mesh_and_geometry.holographic_creatureparts import PartLibrary
+    names = sorted({s.get("part") for s in (sockets or []) if isinstance(s, dict) and s.get("part")})
+    n_sock = int(expect_sockets) if expect_sockets else max(32, len(sockets or []) * 2)
+    lib = (PartLibrary(seed=int(seed), expect_sockets=n_sock) if dim is None
+           else PartLibrary(dim=int(dim), seed=int(seed)))
+    over = dict(params or {})
+    stocked, missed, empty = [], [], []
+    for name in names:
+        if name not in BUILDERS:
+            missed.append(name)
+            continue
+        g = build_part(name, **over.get(name, {}))
+        if len(getattr(g, "vertices", [])) == 0:
+            empty.append(name)
+        lib.define(name, handles=PART_HANDLES.get(name, {}), geometry=g)
+        stocked.append(name)
+    return {"library": lib, "stocked": stocked, "missed": missed, "empty": empty}
+
+
 # ------------------------------------------------------------------ small mesh helpers --
 
 def _merge(meshes):
@@ -410,6 +447,15 @@ def _selftest():
         else:
             assert V[:, 2].min() < 0.0 < V[:, 2].max(), \
                 "%s is declared an aperture, so it must straddle the surface" % name
+
+    # 1b) SOCKET-DRIVEN STOCKING, three planted truths. A demand of two distinct parts stocks
+    #     exactly those two (not the whole palette); an unknown name is REPORTED missed, never
+    #     raised (one exotic socket must not cost the creature its feet); and the geometry is
+    #     actually IN the library -- the zero-vertex silence this function exists to end.
+    _r = stock_for_sockets([{"part": "foot"}, {"part": "foot"}, {"part": "eye"},
+                            {"part": "frobnicator"}])
+    assert _r["stocked"] == ["eye", "foot"] and _r["missed"] == ["frobnicator"] and not _r["empty"], _r
+    assert len(_r["library"].parts["foot"]["geometry"].vertices) > 3,         "stocking must put real geometry in the library, not another empty codebook"
 
     # 2) DIGIT COUNT CHANGES TOPOLOGY, not just size -- the handle that a deformed authored mesh
     #    could not express, and the reason these are parametric.

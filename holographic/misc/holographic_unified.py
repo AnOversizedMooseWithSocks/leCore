@@ -43,12 +43,14 @@ from holographic.misc.holographic_creature import HolographicMind
 from holographic.unified.holographic_unified_p01_read import _UnifiedPart01
 from holographic.unified.holographic_unified_p02_fit_deterministic import _UnifiedPart02
 from holographic.unified.holographic_unified_p03_build_predictor import _UnifiedPart03
+from holographic.unified.holographic_unified_p03b_denoise import _UnifiedPart03B
 from holographic.unified.holographic_unified_p04_sdf_offset import _UnifiedPart04
 from holographic.unified.holographic_unified_p05_explain_code import _UnifiedPart05
 from holographic.unified.holographic_unified_p06_mesh_collapse_edge import _UnifiedPart06
 from holographic.unified.holographic_unified_p07_mesh_csg import _UnifiedPart07
 from holographic.unified.holographic_unified_p08_bake import _UnifiedPart08
 from holographic.unified.holographic_unified_p09_navigate_cost_field import _UnifiedPart09
+from holographic.unified.holographic_unified_p09b_scene_verbs import _UnifiedPart09B
 from holographic.unified.holographic_unified_p10_unproject_depth import _UnifiedPart10
 from holographic.unified.holographic_unified_p11_encyclopedia_reset import _UnifiedPart11
 from holographic.unified.holographic_unified_p12_proc_texture import _UnifiedPart12
@@ -58,9 +60,21 @@ from holographic.unified.holographic_unified_p15_hdrift import _UnifiedPart15
 from holographic.unified.holographic_unified_p16_unicron import _UnifiedPart16
 from holographic.unified.holographic_unified_p17_unicron2 import _UnifiedPart17
 from holographic.unified.holographic_unified_p18_lean import _UnifiedPart18
+from holographic.unified.holographic_unified_p19_lever7 import _UnifiedPart19
+from holographic.unified.holographic_unified_p20_zoo import _UnifiedPart20
+from holographic.unified.holographic_unified_p20b_transfer import _UnifiedPart20B
+from holographic.unified.holographic_unified_p21_codetools import _UnifiedPart21
+# sweep 63: p20_zoo split three ways against the 2,000-line part cap -- the
+# moved methods resolve from p22/p23 with byte-identical bodies.
+from holographic.unified.holographic_unified_p22_zoo2 import _UnifiedPart22
+from holographic.unified.holographic_unified_p23_zoo3 import _UnifiedPart23
+# MERGE 2026-08: upstream shipped its OWN _UnifiedPart19 (p19_verify -- answer
+# verification faculties). Both live here: upstream's rides as _UnifiedPart19V, ours
+# keeps the alias; MRO puts our arc first (p20 > p19_lever7 > p19_verify > base parts).
+from holographic.unified.holographic_unified_p19_verify import _UnifiedPart19 as _UnifiedPart19V
 
 
-class UnifiedMind(_UnifiedPart01, _UnifiedPart02, _UnifiedPart03, _UnifiedPart04, _UnifiedPart05, _UnifiedPart06, _UnifiedPart07, _UnifiedPart08, _UnifiedPart09, _UnifiedPart10, _UnifiedPart11, _UnifiedPart12, _UnifiedPart13, _UnifiedPart14, _UnifiedPart15, _UnifiedPart16, _UnifiedPart17, _UnifiedPart18):
+class UnifiedMind(_UnifiedPart21, _UnifiedPart22, _UnifiedPart23, _UnifiedPart20, _UnifiedPart20B, _UnifiedPart19, _UnifiedPart19V, _UnifiedPart01, _UnifiedPart02, _UnifiedPart03, _UnifiedPart03B, _UnifiedPart04, _UnifiedPart05, _UnifiedPart06, _UnifiedPart07, _UnifiedPart08, _UnifiedPart09, _UnifiedPart09B, _UnifiedPart10, _UnifiedPart11, _UnifiedPart12, _UnifiedPart13, _UnifiedPart14, _UnifiedPart15, _UnifiedPart16, _UnifiedPart17, _UnifiedPart18):
     """Perceive once, into one space; remember, organize, recall, and decide over it.
 
     THE THREE MINDS -- one division of labour, so this never gets confusing again:

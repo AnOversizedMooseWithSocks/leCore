@@ -1,0 +1,98 @@
+<!doctype html><html><head><meta charset="utf-8"><title>leCore</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#0e1116;--panel:#161b24;--ink:#e6e9ef;--dim:#8b94a7;--acc:#5eead4;--acc2:#f0abfc;--line:#232b3a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;height:100vh;display:flex;flex-direction:column}
+header{display:flex;gap:12px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+header b{font-size:17px;letter-spacing:.4px}header .sub{color:var(--dim);font-size:12.5px}
+select,button,input{background:#0c0f14;color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit}
+button{cursor:pointer}button:hover{border-color:var(--acc)}
+#log{flex:1;overflow-y:auto;padding:22px;display:flex;flex-direction:column;gap:14px;max-width:880px;width:100%;margin:0 auto}
+.msg{max-width:78%;padding:11px 14px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word}
+.me{align-self:flex-end;background:#1d3a37;border:1px solid #2b5a54}
+.core{align-self:flex-start;background:var(--panel);border:1px solid var(--line)}
+.prov{display:inline-block;margin-top:7px;font-size:11px;color:#0c0f14;background:var(--acc);border-radius:20px;padding:2px 9px}
+.prov.model{background:var(--acc2)}.prov.esc{background:#f59e0b}
+.art{margin-top:9px}.art img{max-width:100%;border-radius:10px;border:1px solid var(--line);display:block}
+.art .cap{color:var(--dim);font-size:12px;margin-top:4px}
+.cur{margin-top:9px;border-left:3px solid var(--acc2);padding:6px 10px;color:var(--dim);font-size:13px}
+.cur b{color:var(--acc2)}
+#bar{display:flex;gap:10px;padding:14px 18px;border-top:1px solid var(--line);background:var(--panel);max-width:880px;width:100%;margin:0 auto}
+#inp{flex:1}
+.chips{display:flex;gap:8px;flex-wrap:wrap;padding:0 18px 10px;max-width:880px;margin:0 auto;width:100%}
+.chip{font-size:12.5px;color:var(--dim);border:1px solid var(--line);border-radius:20px;padding:5px 11px;cursor:pointer}
+.chip:hover{color:var(--ink);border-color:var(--acc)}
+dialog{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:22px;min-width:340px}
+dialog::backdrop{background:#0009}dialog h3{margin:0 0 12px}dialog label{display:block;margin:10px 0 4px;color:var(--dim);font-size:13px}
+</style></head><body>
+<header>
+  <b>leCore</b><span class="sub">holographic substrate &middot; memory-first &middot; no model unless you attach one</span>
+  <span style="flex:1"></span>
+  <select id="ws"><option value="default">shared workspace</option></select>
+  <button onclick="newWs()">+ workspace</button>
+  <label class="chip" style="margin:0"><input type="file" id="memf" style="display:none" onchange="upMem()">load memory</label>
+  <button onclick="dlgSettings.showModal()">settings</button>
+</header>
+<div id="log"></div>
+<div class="chips">
+  <span class="chip" onclick="fill('What is leCore and what can it do?')">what is leCore?</span>
+  <span class="chip" onclick="fill('render a scene: a red sphere and a glass cube on a checker floor at sunset')">render a scene</span>
+  <span class="chip" onclick="fill('show me a texture: warped wood grain')">make a texture</span>
+  <span class="chip" onclick="fill('palette 12')">a palette</span>
+  <span class="chip" onclick="fill('teach: my project codename = ultramarine')">teach it something</span>
+  <span class="chip" onclick="fill('explore')">explore the voids</span>
+  <span class="chip" onclick="fill('how does the drift sentinel work')">how does it work?</span>
+  <span class="chip" onclick="fill('commands')">all commands</span>
+</div>
+<div id="bar">
+  <input id="inp" placeholder="talk to the substrate&hellip;  (teach: question = answer  to store a fact)" onkeydown="if(event.key==='Enter')send()">
+  <button onclick="send()">send</button>
+</div>
+<dialog id="dlgSettings">
+  <h3>Backend model</h3>
+  <label>LLM rung</label>
+  <select id="llmSel"><option value="none">none &mdash; substrate only (default)</option>
+    <option value="mini">local mini (installed model dir)</option>
+    <option value="ollama">Ollama / OpenAI-compatible endpoint</option></select>
+  <label>Endpoint URL (ollama)</label><input id="llmUrl" value="http://localhost:11434" style="width:100%">
+  <label>Model name / path</label><input id="llmModel" placeholder="qwen3.5:0.8  or  /path/to/model" style="width:100%">
+  <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end">
+    <button onclick="dlgSettings.close()">cancel</button>
+    <button onclick="saveSettings()" style="border-color:var(--acc)">save</button></div>
+  <p style="color:var(--dim);font-size:12px;margin-top:12px">The ladder's contract holds either way: taught facts serve
+  from memory with provenance, model answers arrive marked <i>model-cached</i>, vetoes stick, and the substrate
+  escalates honestly instead of guessing.</p>
+</dialog>
+<script>
+const log=document.getElementById('log'),inp=document.getElementById('inp'),ws=document.getElementById('ws');
+function fill(t){inp.value=t;inp.focus()}
+function add(cls,html){const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
+function esc(s){return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+async function send(){
+  const t=inp.value.trim();if(!t)return;inp.value='';
+  add('me',esc(t));
+  const w=add('core','<span style="color:var(--dim)">thinking&hellip;</span>');
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:t,workspace:ws.value})});
+    const d=await r.json();let h=esc(d.text);
+    if(d.artifact)h+='<div class="art"><img src="data:image/png;base64,'+d.artifact+'">'+(d.caption?'<div class="cap">'+esc(d.caption)+'</div>':'')+'</div>';
+    if(d.provenance)h+='<br><span class="prov '+(d.provenance==='model-cached'?'model':d.provenance==='escalated'?'esc':'')+'">'+esc(d.provenance)+'</span>';
+    if(d.curiosity){h+='<div class="cur"><b>the voids suggest:</b>';for(const c of d.curiosity)h+='<br>&bull; '+esc(c.a)+' &times; '+esc(c.b)+(c.lens?' &rarr; '+esc(c.lens):'');h+='</div>'}
+    if(d.conjectures){h+='<div class="cur"><b>conjectures on the board:</b>';for(const c of d.conjectures)h+='<br>'+c.i+'. '+esc(c.a)+' &times; '+esc(c.b)+' <span class="chip" onclick="fill(\'test '+c.i+'\');send()">test</span> <span class="chip" onclick="fill(\'promote '+c.i+'\');send()">promote</span>';h+='</div>'}
+    if(d.provenance && d.provenance!=='engine' && d.provenance!=='docs')h+=' <span class="chip" title="veto this answer" onclick="fill(\'wrong\');send()">veto</span>';
+    w.innerHTML=h;
+  }catch(e){w.innerHTML='<span style="color:#f87171">server error: '+esc(String(e))+'</span>'}
+}
+async function upMem(){const f=document.getElementById('memf').files[0];if(!f)return;
+  const fd=new FormData();fd.append('file',f);
+  const r=await fetch('/api/memory/upload',{method:'POST',body:fd});const d=await r.json();
+  add('core','Memory <b>'+esc(d.name)+'</b> loaded ('+d.entries+' entries). Try  <i>ask '+esc(d.name)+': &lt;question&gt;</i>  or  <i>compare: &lt;question&gt;</i>');}
+function newWs(){const n=prompt('workspace name');if(!n)return;const o=document.createElement('option');o.value=o.textContent=n;ws.appendChild(o);ws.value=n}
+async function saveSettings(){
+  await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({llm:document.getElementById('llmSel').value,url:document.getElementById('llmUrl').value,model:document.getElementById('llmModel').value})});
+  dlgSettings.close();add('core','Backend updated: <b>'+document.getElementById('llmSel').value+'</b>');
+}
+add('core','This is <b>leCore</b> &mdash; a deterministic holographic memory and creation engine. By default you are talking to the <b>substrate</b>: answers come from leCore memory with provenance, it escalates honestly when it does not know, and creation (scenes, textures, palettes, meshes, simulations) runs the same faculties the API exposes &mdash; no model involved unless you attach one in settings.');
+</script></body></html>

@@ -2,7 +2,7 @@
 #
 # On a push or a pull request it runs only the tests AFFECTED by the changed files (see the "Run the test suite"
 # step). A docs- or config-only change runs no tests at all. As a safety net, the WHOLE suite -- slow tests
-# included, watchdog lifted -- runs weekly (schedule), on demand (the "Run workflow" button), and on a version
+# included, budget kept: unmarked tests 15 s, slow-marked the long budget -- runs weekly (schedule), on demand (the "Run workflow" button), and on a version
 # tag, as a MATRIX of 4 shard jobs (see `full-suite` at the bottom): timeout-minutes is per JOB, so sharding is
 # what lets the true full run fit GitHub's budget at all. The job only goes green if every test that ran passes.
 #
@@ -35,7 +35,10 @@ on:
 # "superseding" push for a schedule anyway.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}
+  # sweep 119: cancelling in-progress PUSH runs is what produced the 'skipped because a higher-priority
+  # request exists' runs Moose had to re-run by hand -- including runs cancelled during their post-steps.
+  # A branch build now always runs to its own verdict; only superseded PR runs are cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # GATES FIRST, THEN TESTS. `gates` (docs drift, apiquickref, skill_lint,
@@ -62,7 +65,7 @@ jobs:
     # This job now handles ONLY the per-change path (a push or a PR): affected-test selection + the gates below.
     # The FULL suite (schedule / manual / version tag) moved to the sharded `full-suite` matrix job at the bottom --
     # GitHub's timeout-minutes budget is PER JOB, so one 20-minute job could never hold the true full run
-    # (slow tests selected, watchdog lifted), but four parallel shard jobs give it 4x the budget. Branch protection
+    # (slow tests selected, budget kept: unmarked tests 15 s, slow-marked the long budget), but four parallel shard jobs give it 4x the budget. Branch protection
     # is unaffected: pushes and PRs still produce this same "pytest" check.
     needs: [gates]                 # cheap checks first -- see the comment above
     if: (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request'
@@ -118,7 +121,7 @@ jobs:
           set -e
           EVENT="${{ github.event_name }}"
 
-          # The FULL suite (slow tests selected, watchdog lifted) lives in the sharded `full-suite` job now -- it
+          # The FULL suite (slow tests selected, budget kept: unmarked tests 15 s, slow-marked the long budget) lives in the sharded `full-suite` job now -- it
           # cannot fit one job's 20-minute budget. This job's fallback for an unscopable change is the FAST suite
           # (the default `-m 'not slow'` from pyproject.toml): complete coverage of the fast tests, and the weekly
           # sharded run remains the safety net for the slow ones.
@@ -276,7 +279,7 @@ jobs:
         run: python servicedoc.py
 
   # ---------------------------------------------------------------------------------------------------------
-  # The TRUE full suite: every test, slow ones included, watchdog lifted (--run-slow). One job's 20-minute
+  # The TRUE full suite: every test, slow ones included, budget kept: unmarked tests 15 s, slow-marked the long budget (--run-slow). One job's 20-minute
   # budget can't hold it -- timeout-minutes is PER JOB, so a matrix of 4 shard jobs runs 1/4 of the suite each,
   # in parallel, with 4x the total budget. tools/shard_tests.py partitions the test files DETERMINISTICALLY
   # (sorted, integer weights, greedy largest-first; slow-marked tests weighted ~20x since they dominate wall
@@ -323,7 +326,7 @@ jobs:
         # the budget, which is the headroom a suite that keeps growing needs.
         # RAISING THE SHARD COUNT IS THE SANCTIONED FIX (shard_tests.py's own
         # docstring says so); the packer stays untouched.
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
     env:
       MPLBACKEND: Agg
       # Same determinism pins as the per-change job (see the comment there): one BLAS thread, fixed hash seed.
@@ -355,9 +358,14 @@ jobs:
           python tools/usage_audit.py
 
       - name: Sanity-check the partition (exact cover, disjoint, deterministic)
-        run: python tools/shard_tests.py --selfcheck --num-shards 10
+        # sweep 116: the sanity step now also FAILS on an overfull bin (--budget, seconds a shard may
+        # take here) so a bad partition costs 12 s, not a 20-minute cancellation. --min-coverage is 0
+        # for the PHASE-IN: the `durations` job below records real CI seconds per file and commits
+        # them; once tools/test_durations.json covers the suite, raise it to 0.9 and the packer can
+        # never again balance by proxy. --ci-factor 1.0 because the seconds are measured HERE.
+        run: python tools/shard_tests.py --selfcheck --num-shards 20 --budget 1140 --ci-factor 1.0 --min-coverage 0
 
-      - name: Run shard ${{ matrix.shard }} of 10 (slow tests included, watchdog lifted)
+      - name: Run shard ${{ matrix.shard }} of 20 (slow-marked tests included with the long budget; unmarked tests keep the 15 s budget)
         run: |
           # MUST MATCH THE MATRIX LENGTH ABOVE. A matrix of ten with a smaller shard count asks
           # for slices 0..9 of a narrower partition: the high shards come back EMPTY and most of
@@ -371,5 +379,59 @@ jobs:
           # what it did, and the test was right to fail. A LINTER THAT READS TEXT CANNOT TELL
           # DOCUMENTATION FROM CONFIGURATION, so configuration is the only thing that carries
           # numbers here.
-          SELECTED=$(python tools/shard_tests.py --shard ${{ matrix.shard }} --num-shards 10)
-          pytest -q -n auto --run-slow --durations=15 $SELECTED
+          SELECTED=$(python tools/shard_tests.py --shard ${{ matrix.shard }} --num-shards 20)
+          # sweep 116: RECORD EVERY DURATION. The shards were already printing the top 15 and
+          # throwing them away while the packer balanced 629 of 680 files by a 0.25 s proxy.
+          # pipefail keeps a red pytest red through the tee.
+          set -o pipefail
+          pytest -q -n auto --run-slow --durations=0 --durations-min=0 $SELECTED | tee "shard_${{ matrix.shard }}.log"
+      - name: Upload this shard's durations log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: durations-${{ matrix.shard }}
+          path: shard_${{ matrix.shard }}.log
+          retention-days: 3
+
+  # sweep 116: THE MEASURING INSTRUMENT, finally. Every full run records per-file seconds on the runner that
+  # actually runs them and commits tools/test_durations.json (docs-bot pattern, [skip ci]); the packer then
+  # balances by CI seconds, and the sanity step's --budget guard has real numbers to guard with.
+  durations:
+    needs: full-suite
+    # sweep 119: `always()` here ran this job on every PUSH, where full-suite is SKIPPED by design (it is
+    # weekly / manual / tag-only) -- no artifacts, the shell glob passed the literal 'shard_*.log' as one
+    # 'log', the merge exited 1, and the whole `tests` workflow went red, which blocks publishing. Run
+    # only when the suite actually ran (success or a partial run with cancelled shards still yields logs).
+    if: ${{ !cancelled() && contains(fromJSON('["success","failure"]'), needs.full-suite.result) && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download every shard's durations log
+        uses: actions/download-artifact@v4
+        with:
+          pattern: durations-*
+          merge-multiple: true
+      - name: Merge into tools/test_durations.json
+        run: |
+          shopt -s nullglob
+          logs=(shard_*.log)
+          if [ ${#logs[@]} -eq 0 ]; then echo "no shard logs downloaded -- nothing to merge"; exit 0; fi
+          python tools/shard_tests.py --merge-logs "${logs[@]}" || echo "::warning::no durations parsed from the shard logs"
+      - name: Commit the refreshed durations
+        run: |
+          git config user.name  "docs-bot"
+          git config user.email "docs-bot@users.noreply.github.com"
+          if git diff --quiet -- tools/test_durations.json; then echo "durations unchanged"; exit 0; fi
+          git add tools/test_durations.json
+          git commit -m "ci: refresh measured test durations for the shard packer [skip ci]"
+          git push origin HEAD:${{ github.ref_name }}

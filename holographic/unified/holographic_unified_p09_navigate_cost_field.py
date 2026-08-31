@@ -570,6 +570,140 @@ class _UnifiedPart09:
         from holographic.misc.holographic_backwardwarp import backward_gather
         return backward_gather(values, positions, query_source_positions)
 
+    def body_animation(self, bodies, steps=30, camera=None, width=200, height=150,
+                       dt=1.0 / 40.0, step_kwargs=None, colors=None, radius_px=3.5,
+                       gif=None, fps=15.0):
+        """STEP any mix of bodies and SEE them -- softbody ropes/cloth, shape-matched
+        rigids, anything with .step(dt, **kw) and a live state .x. The third appearance
+        of the same 12-line glue (drop, fountain, now bodies -- sweep 80/81) unified into
+        one door: per body, pass its own step kwargs (gravity is DIMENSION-DEPENDENT:
+        a 2D rope wants (gx, gy), a 3D rigid wants (gx, gy, gz) -- measured); 2D states
+        are z=0-padded for the camera (rope.x is (N,2), undocumented until now); each
+        body gets a distinct palette colour unless colors= overrides. Returns frames;
+        gif= writes GIF89a. KEPT NEG: RigidBody's live state is .x -- .rest is the rest
+        POSE and splatting it animates nothing (measured: a static cube, two probes)."""
+        import numpy as np
+        from holographic.rendering.holographic_render import Camera, save_gif
+        bodies = list(bodies)
+        kws = [dict(k) for k in (step_kwargs or [{}] * len(bodies))]
+        if len(kws) != len(bodies):
+            raise ValueError("step_kwargs must match bodies (%d vs %d)"
+                             % (len(kws), len(bodies)))
+        # per-body SUBSTEPS, popped before .step sees the kwargs: stiff solvers (MPM snow,
+        # dt~2e-3) move sub-pixel per step -- measured 0.02 grid units over 10 steps --
+        # so a frame is `substeps` solver steps, not one
+        subs = [max(1, int(k.pop("substeps", 1))) for k in kws]
+        if camera is None:
+            # AUTO-FRAME (sweep 82, paying the 'cameras aimed blind' P0 for this door):
+            # solvers live in DIFFERENT coordinate spaces -- softbodies near the origin,
+            # MPM snow in GRID units (x~19..29, measured) -- so one fixed default camera
+            # silently frames empty space for half of them. Bound the initial states and
+            # look at what is actually there.
+            pts0 = []
+            for b in bodies:
+                x = np.asarray(b.x, float)
+                if x.shape[1] == 2:
+                    x = np.concatenate([x, np.zeros((len(x), 1))], axis=1)
+                pts0.append(x)
+            P0 = np.vstack(pts0)
+            c = P0.mean(axis=0)
+            r = float(np.linalg.norm(P0 - c, axis=1).max()) + 1e-6
+            # leave headroom below for falls: aim slightly under centre, back off ~3 radii
+            camera = Camera(eye=(c[0] + 0.4 * r, c[1] + 0.6 * r, c[2] + 3.0 * r),
+                            target=(c[0], c[1] - 0.5 * r, c[2]), fov_deg=42.0)
+        palette = np.array([[1.0, 0.55, 0.2], [0.3, 0.7, 1.0], [0.4, 0.9, 0.45],
+                            [0.9, 0.4, 0.75], [0.95, 0.85, 0.3]])
+        frames = []
+        for _ in range(int(steps)):
+            pts, cols = [], []
+            for j, (b, kw) in enumerate(zip(bodies, kws)):
+                for _s in range(subs[j]):
+                    b.step(dt=float(dt), **kw)
+                x = np.asarray(b.x, float)
+                if x.shape[1] == 2:                      # 2D solver -> z=0 plane
+                    x = np.concatenate([x, np.zeros((len(x), 1))], axis=1)
+                pts.append(x)
+                cols.append(np.tile(palette[j % len(palette)], (len(x), 1)))
+            P = np.vstack(pts)
+            C = np.vstack(cols) if colors is None else colors
+            img, _alpha = self.splat_points(P, camera, int(width), int(height),
+                                            colors=C, radius_px=float(radius_px))
+            frames.append(np.asarray(img, float))
+        if gif:
+            save_gif(gif, frames, fps=float(fps))
+        return frames
+
+    def particle_animation(self, emitter_sdf=None, n=500, steps=20, camera=None,
+                           width=200, height=150, dt=0.05, speed=2.0, gravity=(0.0, -4.5, 0.0),
+                           damping=0.05, radius_px=2.5, colors=None, bounds=None,
+                           gif=None, fps=12.0, seed=0):
+        """A PARTICLE SYSTEM you can SEE, in one call: emit from a surface (emitter_sdf,
+        default a small sphere), integrate under gravity, splat every frame, return the
+        (H,W,3) frames and optionally write a GIF. Composes emit_from_surface + advance +
+        splat_points + save_gif -- the ~14 lines of glue every fountain needed (measured,
+        sweep 80), with the two tuple contracts honoured so nobody re-trips on them:
+        emit returns (pos, vel, normals) and splat returns (image, alpha). Deterministic
+        for a fixed seed."""
+        import numpy as np
+        from holographic.simulation_and_physics.holographic_emitter import (
+            emit_from_surface, advance)
+        from holographic.rendering.holographic_render import Camera, save_gif
+        if emitter_sdf is None:
+            emitter_sdf = lambda P: (np.linalg.norm(
+                np.asarray(P, float) - np.array([0.0, 1.0, 0.0]), axis=-1) - 0.4)
+        if bounds is None:
+            bounds = ((-1.5, 0.0, -1.5), (1.5, 2.5, 1.5))
+        if camera is None:
+            camera = Camera(eye=(0.0, 1.4, 5.0), target=(0.0, 0.9, 0.0), fov_deg=40.0)
+        pos, vel, _normals = emit_from_surface(emitter_sdf, int(n), bounds=bounds,
+                                               speed=float(speed), seed=int(seed))
+        if colors is None:
+            colors = 0.55 + 0.45 * np.random.default_rng(int(seed)).random((int(n), 3))
+        g = np.asarray(gravity, float)
+        frames = []
+        for _ in range(int(steps)):
+            pos, vel = advance(pos, vel, force=np.broadcast_to(g, pos.shape),
+                               dt=float(dt), damping=float(damping))
+            img, _alpha = self.splat_points(pos, camera, int(width), int(height),
+                                            colors=colors, radius_px=float(radius_px))
+            frames.append(np.asarray(img, float))
+        if gif:
+            save_gif(gif, frames, fps=float(fps))
+        return frames
+
+    def smoke_animation(self, steps=30, shape=(64, 64), buoyancy=1.6, smoke_density=0.25,
+                        dt=0.12, seed_region=None, tint=(0.92, 0.92, 1.0), gif=None,
+                        fps=12.0):
+        """SMOKE you can SEE, in one call: seed a light component in the mixture model,
+        step the shared incompressible flow, colormap the density each frame, return the
+        (H,W,3) frames and optionally a GIF. Composes make_mixture + matter_step +
+        save_gif and OWNS the state contract that took five probes to discover (measured,
+        sweep 80): the FIELD lives in mix.channels[name] (mix.comp holds constants),
+        buoyancy needs component density < 1, and vx/vy must be threaded between steps.
+        seed_region=(r0, r1, c0, c1) places the initial puff; default sits low-centre so
+        the rise is visible."""
+        import numpy as np
+        from holographic.rendering.holographic_render import save_gif
+        h, w = int(shape[0]), int(shape[1])
+        mix = self.make_mixture((h, w), buoyancy=float(buoyancy))
+        r0, r1, c0, c1 = seed_region or (int(h * 0.78), int(h * 0.9),
+                                         int(w * 0.42), int(w * 0.58))
+        blob = np.zeros((h, w)); blob[r0:r1, c0:c1] = 1.0
+        mix.add("smoke", blob, density=float(smoke_density))
+        vx, vy = np.zeros((h, w)), np.zeros((h, w))
+        tint = np.asarray(tint, float)
+        frames = []
+        for _ in range(int(steps)):
+            r = self.matter_step(mix, vx, vy, dt=float(dt))
+            if isinstance(r, tuple) and len(r) >= 2:
+                vx, vy = r[-2], r[-1]
+            d = np.array(mix.channels["smoke"], float)
+            d = d / (d.max() + 1e-9)
+            frames.append(np.clip(d[:, :, None] * tint[None, None, :], 0.0, 1.0))
+        if gif:
+            save_gif(gif, frames, fps=float(fps))
+        return frames
+
     def splat_points(self, points, camera, width, height, colors=None, radius_px=2.0, intensity=1.0,
                      depth_fade=None, background=(0.0, 0.0, 0.0)):
         """IMAGE GENERATION from geometry: render an (N,3) point cloud to an (image (H,W,3), alpha (H,W)) by
@@ -939,6 +1073,21 @@ class _UnifiedPart09:
         .solve(); .dof() reports under/well/over-constrained. See holographic_sketch2d.Sketch2D."""
         from holographic.mesh_and_geometry.holographic_sketch2d import Sketch2D
         return Sketch2D(tol=tol)
+
+    def chart_svg(self, kind, series, labels=None, title=None, x=None,
+                  width=640, height=400, colors=None):
+        """Render a LINE, BAR, or SCATTER chart of numeric series to a deterministic SVG string
+        (holographic_chartsvg.chart_svg) -- the missing door from "here are numbers" to "here is
+        a chart a human reads", with axes, ticks, a colorblind-safe fixed palette, and bars
+        anchored at zero by convention. Pure string assembly, stdlib only (the cadexport
+        contract: the caller writes the file or ships it over a wire); byte-identical output
+        for identical input. `series` is one list or a list of lists; scatter takes (x, y)
+        pairs. KEPT NEG: non-finite values are REFUSED loudly -- a chart that silently drops a
+        NaN lies about the data it claims to show. NOT svg_canvas, which is a hypervector
+        CODEC for vector art -- a different costume; audited so nobody merges them."""
+        from holographic.io_and_interop.holographic_chartsvg import chart_svg as _cs
+        return _cs(kind, series, labels=labels, title=title, x=x,
+                   width=width, height=height, colors=colors)
 
     def mesh_to_stl(self, vertices, faces, name="lecore"):
         """CAD EXPORT (K7): an ASCII STL string for a mesh (tris/quads/ngons; per-facet normals from the winding).
@@ -1432,13 +1581,30 @@ class _UnifiedPart09:
             fluid.density[lo_i:lo_i + max(g // 4, 1), 1:max(g // 3, 2), lo_i:lo_i + max(g // 4, 1)] = 1.0
             fluid.vel[1, :, :max(g // 6, 1), :] = 1.0                # a little upward flow so something happens
             sim = Simulation.for_fluid(fluid, lo=lo, hi=hi)
+        elif k == "smoke":
+            # the mixture matter model as a REGISTERED kind (the card advertised smoke;
+            # the roster served fluid/automaton only -- sweep 81). 2D: returns the final
+            # (grid, grid) smoke density after `steps` buoyant flow steps.
+            import numpy as np
+            mix = self.make_mixture((g, g), buoyancy=float(solver_kwargs.pop("buoyancy", 1.6)))
+            blob = np.zeros((g, g))
+            blob[int(g * 0.78):int(g * 0.9), int(g * 0.42):int(g * 0.58)] = 1.0
+            mix.add("smoke", blob, density=float(solver_kwargs.pop("smoke_density", 0.25)))
+            vx, vy = np.zeros((g, g)), np.zeros((g, g))
+            for _ in range(int(steps)):
+                r = self.matter_step(mix, vx, vy, dt=float(dt) if dt != 1.0 / 60.0 else 0.12)
+                if isinstance(r, tuple) and len(r) >= 2:
+                    vx, vy = r[-2], r[-1]
+            return np.array(mix.channels["smoke"])
         elif k == "automaton":
             from holographic.misc.holographic_automaton import HyperCA
             sim = Simulation.for_automaton(HyperCA(size=g, seed=seed, **solver_kwargs), lo=lo, hi=hi)
         else:
             from holographic.misc.holographic_simulationhome import known_solver_strategies
+            known = sorted(set([x.replace("for_", "") for x in known_solver_strategies()]
+                               + ["smoke"]))               # smoke dispatches here, not via the registry
             raise ValueError("run_simulation: unknown kind %r; known: %s (or use mind.simulation() with your own "
-                             "step/field closures)" % (kind, [x.replace("for_", "") for x in known_solver_strategies()]))
+                             "step/field closures)" % (kind, known))
         return sim.run(int(steps), dt).grid()
 
     def simulate_snow(self, cx=24, cy=12, w=10, h=8, n=400, grid=48, gravity=9.81, dt=2e-3, steps=600, seed=0):
@@ -1772,207 +1938,6 @@ class _UnifiedPart09:
         abstain mask + coverage. See holographic_photo3d."""
         from holographic.rendering.holographic_photo3d import photo_to_gaussians
         return photo_to_gaussians(depth, colour, fx, fy, cx, cy, confidence_floor=confidence_floor)
-
-
-    def sky_model(self, hour=12.0, clouds=(), stars_seed=None, star_density=0.9985, moon=None,
-                  sun_intensity=18.0, cloud_seed=0, time_s=0.0, wind=(0.05, 0.02), evolve=0.10):
-        """A PARAMETRIC sky -- time of day, sun arc, moon, deterministic stars, HIGH cloud layers -- as one
-        radiance callable f(dirs)->rgb, pluggable anywhere sky_dome is (the tracer's sky=, a dome light's
-        color=). hour drives a keyed gradient palette AND the sun's position; clouds=[(kind, coverage)] with SEVEN kinds -- cirrus
-        (streaks), cirrostratus (veil), cirrocumulus (mackerel sky), altocumulus (clumps), altostratus
-        (milky sun), stratocumulus (broken deck), nimbostratus (rain blanket) -- composing as Beer-Lambert
-        shells with per-KIND extinction and threshold sharpness (cellular kinds keep real GAPS, base
-        shading keeps texture in even a full deck);
-        stars_seed makes a hash-of-direction starfield (same seed = same sky forever) that fades by daylight
-        and by cloud; moon=True auto-places opposite the sun. MEASURED under one fixed transform: noon
-        linear mean 0.529, sunset+cirrus 0.260, midnight+stars 0.019 -- a 28x day/night range the
-        auto-exposing display view will happily hide, so compare skies with view=None. LOW puffy clouds are
-        deliberately refused toward cloud_scene (the volumetric stack -- real depth and self-shadowing);
-        this model owns only what reads as a textured dome from the ground. See holographic_skymodel."""
-        from holographic.rendering.holographic_skymodel import sky_model
-        return sky_model(hour=hour, clouds=clouds, stars_seed=stars_seed, star_density=star_density,
-                         moon=moon, sun_intensity=sun_intensity, cloud_seed=cloud_seed,
-                         time_s=time_s, wind=tuple(wind), evolve=evolve)
-
-    def render_animation(self, scene, camera, keys, n_frames=24, fps=12.0, width=160, height=120,
-                         gif=None, interp="smooth", seed=0, lights=None, sky=None, sky_keys=None,
-                         **render_kw):
-        """ANIMATE the Scene document and render it -- keyframes in, frames (and optionally a GIF) out.
-
-        NOTHING HERE IS NEW MACHINERY, and that is the point. The keyframe Timeline (key/sample, easing,
-        vectorised) existed. place() existed. render_preview existed. save_gif was the one missing writer.
-        What did not exist was any path that COMPOSES them -- 'animate an object in my scene document'
-        returned scene_info, 'render frames over time' returned a cache -- and no JSON client could build
-        the composition itself, because a Timeline object cannot cross POST /invoke. This is the bridge, in
-        the same sense scene_set_texture is: JSON-safe values in, the callables live server-side.
-
-        `keys` (JSON-safe): {handle: {property: [[t, value], ...]}} with property one of
-        'position' ([x,y,z]), 'rotation' (Euler degrees [rx,ry,rz]), 'scale' (a number). Times are in
-        SECONDS; the animation spans [0, n_frames/fps]. `interp` is the Timeline's easing for every key
-        ('linear', 'step', 'smooth', 'ease_in', 'ease_out').
-
-        Returns the list of rendered frames ((H,W,3) float each); with `gif=` set, also writes an animated
-        GIF there -- the see->fix loop for MOTION.
-
-        KEPT NEGATIVES, stated rather than discovered later:
-          * Frames render at PREVIEW quality (draft, 1 bounce) -- measured at 12x the full path. An
-            N-frame final-quality animation is N full renders and wants the job system, not a loop that
-            holds an HTTP request open for an hour.
-          * Edits go through place(), so the LAST FRAME'S transforms persist on the document afterwards --
-            deliberate (undo works, and 'where did it end up' is a real question), but a caller re-rendering
-            stills afterwards should place() things back or undo.
-          * Rotation keys interpolate EULER ANGLES componentwise. Fine for turntables and tilts; a path
-            that swings past gimbal territory wants quaternions, which the Timeline does not speak. That is
-            a real limitation of composing existing parts and it is documented instead of hidden."""
-        import numpy as np
-        from holographic.rendering.holographic_scene_render import render_preview
-
-        tl = self.timeline()
-        tracks = []                                            # (handle, property, channel_name)
-        for handle, props in keys.items():
-            for prop, kvs in props.items():
-                if prop not in ("position", "rotation", "scale"):
-                    raise ValueError("unknown animatable property %r -- position, rotation, scale "
-                                     "(what place() can apply)" % (prop,))
-                chan = "%s.%s" % (handle, prop)
-                for t, value in kvs:
-                    tl.key(chan, float(t), np.asarray(value, float) if prop != "scale" else float(value),
-                           interp=interp)
-                tracks.append((handle, prop, chan))
-
-        # sky_keys: the TIMELAPSE half, default off (additive). {'hour': [[t, hour], ...]} plus any
-        # static sky_model kwargs ('clouds', 'stars_seed', 'moon', ...). Discovery already routed
-        # 'day to night timelapse' at sky_model + render_animation -- but neither could DO it: keys move
-        # objects, and the sky was frozen per call. The hour rides the SAME Timeline as the object keys
-        # (delegation, per the hand-roll audit), and the sky closure is rebuilt per frame -- closure
-        # construction only, the texture fields inside are built per call by sky_model as before.
-        sky_tl = None
-        sky_static = {}
-        if sky_keys is not None:
-            if sky is not None:
-                raise ValueError("pass sky= (fixed) OR sky_keys= (animated), not both -- one sky per frame")
-            sky_static = {k: v for k, v in sky_keys.items() if k != "hour"}
-            if "hour" not in sky_keys:
-                raise ValueError("sky_keys needs 'hour': [[t, hour], ...] -- the keyed part; everything "
-                                 "else in sky_keys is passed to sky_model unchanged")
-            sky_tl = self.timeline()
-            for tt, hh in sky_keys["hour"]:
-                sky_tl.key("hour", float(tt), float(hh), interp=interp)
-
-        frames = []
-        for i in range(int(n_frames)):
-            t = i / float(fps)
-            for handle, prop, chan in tracks:
-                self.place(scene, handle, **{prop: tl.sample(chan, t)})
-            frame_sky = sky
-            frame_lights = lights
-            if sky_tl is not None:
-                # clouds MOVE during a timelapse (review: "changing shape and moving naturally"): the
-                # frame time feeds sky_model's wind-drift + solid-noise evolution unless the caller pinned
-                # time_s themselves. A timelapse compresses hours into seconds, so the animation time is
-                # scaled up (x240: one real second of animation ~ four minutes of sky) -- override with an
-                # explicit 'time_scale' in sky_keys, or freeze the clouds with 'time_s': 0.
-                if "time_s" not in sky_static:
-                    sky_static_frame = dict(sky_static)
-                    scale_t = float(sky_static_frame.pop("time_scale", 240.0))
-                    sky_static_frame["time_s"] = t * scale_t
-                else:
-                    sky_static_frame = {k: v for k, v in sky_static.items() if k != "time_scale"}
-                frame_sky = self.sky_model(hour=float(sky_tl.sample("hour", t)), **sky_static_frame)
-                # a timelapse whose LIGHTING ignores the sky is two different times of day in one frame;
-                # if the caller gave no lights, the animated sky drives a dome so the ground follows the sky
-                if lights is None:
-                    frame_lights = [self.scene_light("dome", color=frame_sky, intensity=1.0)]
-            frames.append(np.asarray(render_preview(scene, camera, width=width, height=height,
-                                                    seed=seed, lights=frame_lights, sky=frame_sky,
-                                                    **render_kw), float))
-        if gif is not None:
-            from holographic.rendering.holographic_render import save_gif
-            save_gif(gif, frames, fps=fps)
-        return frames
-
-    def describe_to_scene(self, text, scene=None):
-        """Words -> the CANONICAL Scene document: 'a red cube on the left and a green sphere on the right'
-        becomes real, named, handled objects you can then texture, place, keyframe, and path-trace.
-
-        WHY A BRIDGE, when build_scene already exists. leCore grew TWO scene systems that could not talk:
-        build_scene -> a SemanticScene (parses text, resolves 'on'/'beside'/'inside' into positions, renders
-        itself, adjusts by sentence) and new_scene -> the Scene DOCUMENT (handles, undo, selection -- the
-        thing scene_set_texture, place, render_animation, render_scene_document and the whole HTTP surface
-        operate on). Every parity capability of this arc landed on the document side, so an agent that
-        started from words was cut off from all of it: 8/8 audit phrasings for this conversion returned
-        nothing relevant. The parser and the layout heuristics are REUSED (interpret_description +
-        realize_scene), not reimplemented -- this is a join, and both halves keep their own behaviour.
-
-        Returns {scene, handles: {object name: handle}, unknown: [words the parser could not ground],
-        suggestions: [...]} -- unknown words are REPORTED rather than silently dropped, because 'a wooden
-        gnome' quietly becoming an empty scene is the kind of no-op that sends an agent debugging its
-        camera. Pass `scene=` to add into an existing document instead of a fresh one.
-
-        Parsed colours become per-object PBRMaterials (base colour + modest roughness), so 'red' survives
-        into the path tracer without the caller mapping words to library names.
-
-        KEPT NEGATIVES, inherited honestly from the halves rather than papered over:
-          * realize_scene's own limitation stands: rotation is not modelled -- 'diagonal' is an offset +
-            stretch, not a tilt. Fix it there if it matters; a bridge is the wrong layer.
-          * The realized SDFs arrive PRE-PLACED (position baked into the geometry), so each object's
-            document transform starts as identity. place()/keyframes still work -- they COMPOSE on top --
-            but scene_info reports position [0,0,0] for a freshly described object. Re-deriving the baked
-            offset to normalise it would mean probing the SDF for its own centre: guessy, and wrong for
-            'inside'. Reported as-is instead.
-          * The controlled vocabulary is the parser's (SHAPES/COLORS/RELATIONS in scene_semantic). This
-            bridge adds no words; `unknown` tells you what fell through."""
-        from holographic.simulation_and_physics.holographic_scene_semantic import (interpret_description,
-                                                                                   realize_scene)
-        import holographic.materials_and_texture.holographic_matlib as ML
-
-        parsed = interpret_description(text)
-        renderables = realize_scene(parsed["objects"]) if parsed["objects"] else []
-        sc = scene if scene is not None else self.new_scene()
-        handles = {}
-        for r in renderables:
-            col = tuple(r.get("color", (0.7, 0.7, 0.7)))
-            mat = r.get("mat_name") or ML.PBRMaterial(name="described:%s" % r["name"],
-                                                      base_color=col + (1.0,), roughness=0.6)
-            handles[r["name"]] = sc.add(name=r["name"], geometry=r["sdf"], material=mat)
-        return {"scene": sc, "handles": handles,
-                "unknown": list(parsed.get("unknown", ())),
-                "suggestions": list(parsed.get("suggestions", ()))}
-
-    def refine_scene(self, scene, target_image, max_steps=4, apply=True, geometry=False, focus=None,
-                     width=96, height=72):
-        """CLOSE THE LOOP: hand a described scene a TARGET IMAGE and let the engine improve itself toward
-        it -- the capability that goes past screenshot-and-hope. The reference Blender integration can show
-        an agent its render; it cannot score candidate edits against a goal and apply the best one. This
-        can, deterministically, with the trail on record.
-
-        `scene` is a SemanticScene (from build_scene / describe-side work); `target_image` is (H,W,3) --
-        MUST match `width` x `height`, because the critic compares like with like (a size mismatch used to
-        surface as a broadcast error from deep inside SSIM; it is checked HERE now, with the fix named).
-        apply=True runs the bounded greedy driver (refine_to_target) and returns {applied,
-        start_distance, final_distance, steps, history}; apply=False only SCORES (propose_edits) and
-        returns the ranked candidates without touching the scene -- the read-only critic an agent can
-        consult before deciding. geometry=True lets it also move/scale objects; `focus` scores a subject
-        region only.
-
-        Verified live before wiring: from 'a red sphere' toward a night-time target, distance 0.2625 ->
-        0.0000 in one applied edit -- the loop rediscovered 'make it night' by itself.
-
-        KEPT NEGATIVES: the edit vocabulary is the semantic scene's (lighting/brightness/material/colour,
-        coarse move/scale with geometry=True) -- it proposes from what it can say, not from arbitrary
-        parameter space; and it operates on the SEMANTIC scene, not the Scene document, because candidate
-        edits are sentences. Use describe_to_scene afterwards to promote the refined result. See
-        holographic_scene_semantic.SemanticScene.refine_to_target / propose_edits."""
-        import numpy as np
-        tgt = np.asarray(target_image, float)
-        if tgt.shape[:2] != (height, width):
-            raise ValueError("target_image is %dx%d but the critic renders %dx%d -- pass a target at the "
-                             "loop's own size (width=/height=), or set width/height to match the target"
-                             % (tgt.shape[1], tgt.shape[0], width, height))
-        if apply:
-            return scene.refine_to_target(tgt, max_steps=max_steps, geometry=geometry, focus=focus,
-                                          width=width, height=height)
-        return scene.propose_edits(tgt, geometry=geometry, width=width, height=height)
 
 
 def _selftest():

@@ -185,3 +185,55 @@ def test_merge_carries_the_int8_rung():
     for t in range(10):
         q = (A if t % 2 else B)[rng.integers(450)] + 0.05 * rng.standard_normal(32)
         assert [i for i, _ in iab.nearest(q, k=6)] == [i for i, _ in ref.nearest(q, k=6)]
+
+
+def test_an_unlabelled_merge_resolves_to_the_source_it_came_from():
+    """**Labels and _sources must share one coordinate system.**
+
+    merge() stated a LABEL WART -- unlabelled sides got LOCAL indices as labels --
+    and warned they collide on integer keys. The unstated consequence was worse:
+    `_sources` records GLOBAL spans (a: 0-300, b: 300-500) while labels stayed
+    local, so a hit from `b` came back as 29 and RESOLVING IT AGAINST THE INDEX'S
+    OWN PROVENANCE TABLE ATTRIBUTED IT TO `a`. Measured identically on exact,
+    forest, sphere and int8 -- the labels are assigned once in merge() and every
+    route reads them.
+    THIS ASSERTS PROVENANCE, NOT ORDER. A merged index that returns the right rows
+    with the wrong source is the failure mode, and it is invisible to any test that
+    only compares hit sets."""
+    import numpy as np
+
+    from holographic.caching_and_storage.holographic_index import Index
+
+    rng = np.random.default_rng(0)
+    A = rng.standard_normal((300, 32)).astype(np.float32)
+    A /= np.linalg.norm(A, axis=1, keepdims=True)
+    B = rng.standard_normal((200, 32)).astype(np.float32)
+    B /= np.linalg.norm(B, axis=1, keepdims=True)
+    both = np.vstack([A, B])
+    q = A[7]
+
+    for method in ("exact", "forest", "sphere", "int8"):
+        mg = Index(A, method=method).merge(Index(B, method=method),
+                                           source_self="a", source_other="b")
+        ref = Index(both, method="exact")
+        hits = mg.nearest(q, 3)
+        assert [i for i, _ in hits] == [i for i, _ in ref.nearest(q, 3)], (
+            "%s: merged keys differ from a full rebuild" % method)
+        saw_b = False
+        for i, score in hits:
+            spans = [nm for nm, lo, hi, _b0, _b1 in mg._sources if lo <= i < hi]
+            assert spans, "%s: key %d falls outside every source span" % (method, i)
+            truth = "a" if i < len(A) else "b"
+            saw_b = saw_b or truth == "b"
+            assert spans[0] == truth, (
+                "%s: key %d reported source %r but came from %r"
+                % (method, i, spans[0], truth))
+            assert abs(float(both[i] @ q) - score) < 1e-4, (
+                "%s: key %d does not index the vector that scored" % (method, i))
+        assert saw_b, "the fixture never produced a hit from the second corpus"
+
+    # a labelled side keeps the caller's own labels -- the default only fills in
+    ia = Index(A, method="exact", labels=["a%d" % i for i in range(len(A))])
+    ib = Index(B, method="exact", labels=["b%d" % i for i in range(len(B))])
+    lab = [l for l, _ in ia.merge(ib, "a", "b").nearest(q, 3)]
+    assert all(str(l)[0] in "ab" for l in lab), lab

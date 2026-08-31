@@ -134,18 +134,37 @@ def _derivational_stem(tok):
     return tok
 
 
+def tokenize_once(x):
+    """Normalise a string, or pass an ALREADY-NORMALISED token list through untouched.
+
+    WHY THIS EXISTS. `tokenize` is deliberately not idempotent -- 'settings' -> 'setting' -> 'sett',
+    'classes' -> 'class' -> 'clas' -- and 2.8% of a real vocabulary changes under a second pass.
+    Callers holding tokens used to write `" ".join(toks)` to satisfy a string-only API, which
+    re-normalised them and silently over-stemmed the index or the query. That produced a shipped
+    page that disagreed with the faculty on 8 of 60 queries, and a benchmark harness whose
+    "relative error" was 0.208 when the true error was 1.5e-07.
+
+    Passing tokens is now the supported path, so the join-and-re-tokenise workaround has no reason
+    to exist. Anything list-like is taken as final; only a string is normalised.
+    """
+    if isinstance(x, str):
+        return tokenize(x)
+    return list(x)
+
+
 class BM25:
     """Okapi BM25 over a fixed corpus of documents. Build once (fit the idf + lengths), then score any query in
     O(query_terms * postings). Pure NumPy/stdlib; deterministic. k1 controls term-frequency saturation (the
     first occurrences of a term matter most, later ones saturate); b controls document-length normalization
     (b=1 full, b=0 none). Defaults k1=1.5, b=0.75 are the standard Robertson values."""
 
-    def __init__(self, docs, k1=1.5, b=0.75, slim=False):
+    def __init__(self, docs, k1=1.5, b=0.75, slim=False, stats=None):
         """`docs` is a list of raw document strings (here: module 'name -- docstring' texts). Fits the corpus
         statistics: per-doc term counts, document lengths, average length, and idf per term."""
         self.k1 = float(k1)
         self.b = float(b)
-        self.docs_tokens = [tokenize(d) for d in docs]
+        # docs may be raw strings OR already-normalised token lists -- see tokenize_once.
+        self.docs_tokens = [tokenize_once(d) for d in docs]
         self.N = len(self.docs_tokens)
         self.doc_len = np.array([len(t) for t in self.docs_tokens], dtype=np.float64)
         self.avgdl = float(self.doc_len.mean()) if self.N else 0.0
@@ -161,6 +180,20 @@ class BM25:
                 df[t] = df.get(t, 0) + 1
         # idf with the BM25 (Robertson-Sparck-Jones) form; +1 inside the log keeps it non-negative
         self.idf = {t: math.log(1.0 + (self.N - n + 0.5) / (n + 0.5)) for t, n in df.items()}
+        # SHARDING SEAM. The per-(term, doc) weight below is baked from idf and avgdl AT FIT TIME,
+        # so a shard fitted on its own slice bakes LOCAL statistics and its scores are not
+        # comparable with another shard's. Measured on 6,000 documents: naive sharding reached
+        # max relative error 0.31 and top-1 agreement 0.76 against a single index, and patching
+        # .idf/.avgdl afterwards changed NOTHING because the weights were already baked.
+        # `stats` lets a caller fit a shard with the whole corpus's statistics:
+        #     stats = {"N": total_docs, "avgdl": corpus_avgdl, "idf": {term: idf}}
+        # Absent, behaviour is unchanged. corpus_stats() below produces the dict.
+        if stats:
+            if "avgdl" in stats:
+                self.avgdl = float(stats["avgdl"])
+            if "idf" in stats:
+                self.idf = dict(stats["idf"])
+            self._corpus_N = int(stats.get("N", self.N))
         # PRECOMPUTED POSTINGS (the VSA move: turn the per-query doc WALK into a few vector scatter-adds).
         # A term's contribution to a doc depends only on corpus statistics fixed at fit time, so the whole
         # idf * tf-saturation weight is computed HERE, once, with the SAME expression the reference loop uses
@@ -223,7 +256,17 @@ class BM25:
             return self.tf, self.docs_tokens
         return self._cold.get("tf"), self._cold.get("docs_tokens")
 
+    def corpus_stats(self):
+        """The statistics a SHARD must be fitted with to stay comparable: N, avgdl and idf.
+
+        Fit the shards with this and their scores live on one scale, so merging their top-k lists
+        is exact -- which is what T4 (tiled_max_eq_global) already promises for the merge itself.
+        Without it the merge silently ranks by which shard a document happened to land in.
+        """
+        return {"N": self.N, "avgdl": self.avgdl, "idf": dict(self.idf)}
+
     def scores(self, query, expand=False):
+        # `query` may be a string or an already-normalised token list; see tokenize_once.
         """BM25 score of `query` against every document, via precomputed postings: a few NumPy scatter-adds
         instead of a Python walk over all docs per term. Bit-identical to _scores_reference (the original
         loop, shipped beside it flat_recall-style so the claim stays re-checkable, not taken on trust): the
@@ -235,7 +278,7 @@ class BM25:
         delta < 0.002) but on ArguAna's passage queries (121.6 mean tokens, 0.230 repeat rate) it discards
         real signal: +5.7 nDCG@10. Counter is insertion-ordered, so accumulation order is also deterministic
         without a hashseed pin -- set() iteration was not, a latent determinism hole this closes."""
-        q_terms = tokenize(query)
+        q_terms = tokenize_once(query)
         out = np.zeros(self.N, dtype=np.float64)
         if not q_terms:
             return out
@@ -265,7 +308,7 @@ class BM25:
         """The ORIGINAL per-doc Python loop, kept as the correctness reference scores() must equal bit-for-bit
         (the flat_recall precedent: ship the baseline beside the fast path so the comparison can be re-run).
         Slow on purpose; use scores(). Counts query terms (Counter) to match scores() -- see its docstring."""
-        q_terms = tokenize(query)
+        q_terms = tokenize_once(query)
         out = np.zeros(self.N, dtype=np.float64)
         if not q_terms:
             return out
@@ -310,6 +353,67 @@ class BM25:
         return ranked
 
 
+def prf_expand(query, docs, top_f=3, top_t=8, k1=1.5, b=0.75, bm=None):
+    """Harvest expansion terms by PSEUDO-RELEVANCE FEEDBACK (Rocchio 1971 / RM3): run BM25 once,
+    treat the top `top_f` docs AS IF relevant, and pick their best `top_t` terms by
+    count-in-feedback x idf -- query terms excluded, because re-adding what the query already said
+    only re-weights it (the benchmark's phase-8 rule, lifted verbatim). Deterministic term order:
+    ties break alphabetically, the same (-weight, term) sort the measured 0.3442 nDCG run used.
+    Returns {"terms": [...], "feedback": [doc indices], "ranked": bm25 first-pass ranking} so the
+    caller can rescore without a second fit. `bm` lets a caller reuse a fitted BM25 (a corpus fit
+    is the expensive half); passing docs alone fits one here.
+    KEPT NEG: PRF cannot rescue gold OUTSIDE the first pass -- feedback docs are the horizon."""
+    bm = bm if bm is not None else BM25(docs, k1=k1, b=b)
+    ranked = bm.rank(query, top=None)
+    # A doc scoring ZERO shares no term with the query: the first pass says nothing about it,
+    # so "pseudo-relevant" cannot stretch to cover it. On the measured benchmark shape (200+
+    # docs, small F) this filter is a no-op -- it exists for small corpora, where top_f would
+    # otherwise sweep off-topic docs into feedback and amplify them.
+    fb = [i for i, sc in ranked[:int(top_f)] if sc > 0.0]
+    q_terms = set(tokenize_once(query))
+    cnt = {}
+    for i in fb:
+        for t in bm.docs_tokens[i]:
+            if t not in q_terms:
+                cnt[t] = cnt.get(t, 0) + 1
+    idf = getattr(bm, "idf", {})
+    terms = sorted(cnt, key=lambda t: (-cnt[t] * float(idf.get(t, 0.0)), t))[:int(top_t)]
+    return {"terms": terms, "feedback": fb, "ranked": ranked}
+
+
+def prf_rank(query, docs, alpha=0.3, top_f=3, top_t=8, k1=1.5, b=0.75, top=None):
+    """PSEUDO-RELEVANCE FEEDBACK re-ranking (Rocchio 1971 / RM3): a second bounce where the first
+    pass's top docs relight the query. Pure counting, zero learned weights, zero model calls.
+    MEASURED (benchmarks/beir phase 8, test-once): NFCorpus nDCG@10 0.3371 -> 0.3442.
+
+    ALPHA=0 IS BIT-IDENTICAL to BM25(docs).rank(query) BY CONSTRUCTION: the second pass is never
+    run, the first-pass ranking is returned unchanged -- opt-in, not a silent default shift.
+    alpha>0 min-normalizes both passes and interpolates (1-alpha)*first + alpha*second, the exact
+    phase-8 formula, with the deterministic topk tie rule riding through BM25.rank.
+
+    Returns {"ranked": [(doc_index, score)...], "expansion": [terms], "alpha", "feedback"}.
+    KEPT NEG: cannot rescue gold OUTSIDE the first pass; a corpus where the top-F docs are all
+    off-topic makes the expansion off-topic too -- PRF amplifies the first pass, right or wrong."""
+    a = float(alpha)
+    bm = BM25(docs, k1=k1, b=b)
+    if a <= 0.0:
+        # The identity contract: no second scoring pass exists to perturb ties or floats.
+        return {"ranked": bm.rank(query, top=top), "expansion": [], "alpha": 0.0, "feedback": []}
+    ex = prf_expand(query, docs, top_f=top_f, top_t=top_t, k1=k1, b=b, bm=bm)
+    s1 = np.array([sc for _, sc in sorted(ex["ranked"], key=lambda p: p[0])], dtype=np.float64)
+    # Second pass: the expanded query is original terms + harvested terms (token-level, so the
+    # non-idempotent tokenize trap pinned in _selftest cannot bite -- we never re-join to a string).
+    q2 = tokenize_once(query) + list(ex["terms"])
+    s2 = np.asarray(bm.scores(q2), dtype=np.float64)
+    r1 = float(s1.max() - s1.min()); r2 = float(s2.max() - s2.min())
+    s = (1.0 - a) * (s1 - s1.min()) / (r1 if r1 > 0 else 1.0) \
+        + a * (s2 - s2.min()) / (r2 if r2 > 0 else 1.0)
+    from holographic.misc.holographic_determinism import topk_det
+    order = topk_det(s, top) if top else np.lexsort((np.arange(len(s)), -s))
+    ranked = [(int(i), float(s[i])) for i in order]
+    return {"ranked": ranked, "expansion": ex["terms"], "alpha": a, "feedback": ex["feedback"]}
+
+
 def reciprocal_rank_fusion(ranked_lists, k=60, top=None, weights=None):
     """Fuse several ranked lists into one by Reciprocal Rank Fusion (Cormack et al. 2009). Each list is a
     sequence of item ids in rank order (best first); an item's fused score is sum over lists of w_l/(k + rank),
@@ -351,6 +455,60 @@ def reciprocal_rank_fusion(ranked_lists, k=60, top=None, weights=None):
 def _selftest():
     """Assert the REAL contract: BM25 exact-matches a query term the way dense embeddings cannot, and RRF fuses
     two lists so an item ranked well by BOTH rises above one ranked well by only one. Numeric, fails loudly."""
+
+    # PRF, three planted truths.
+    _pd = ["laplacian mesh smoothing averages vertex positions",
+           "taubin smoothing for meshes without shrinkage",
+           "fluid solver pressure projection on a grid",
+           "smoothing kernels and mesh fairing energies"]
+    # 1) ALPHA=0 IDENTITY, bit-for-bit: no second pass may exist to perturb a float or a tie.
+    _r0 = prf_rank("mesh smoothing", _pd, alpha=0.0)
+    assert _r0["ranked"] == BM25(_pd).rank("mesh smoothing") and _r0["expansion"] == [], \
+        "alpha=0 must be BIT-IDENTICAL to bm25 rank -- PRF is opt-in by construction"
+    # 2) Expansion harvests from FEEDBACK docs only, zero-score docs excluded: the off-topic
+    #    fluid doc scores 0.0 on this query, so its vocabulary must not leak into the expansion.
+    _rx = prf_rank("mesh smoothing", _pd, alpha=0.5, top_f=3)
+    assert _rx["expansion"] and all(t not in ("fluid", "solver", "pressure") for t in _rx["expansion"]), \
+        "zero-score docs leaked into feedback: %r" % (_rx["expansion"],)
+    # 3) KEPT NEGATIVE pinned: gold OUTSIDE the first pass is not rescued. A doc sharing no term
+    #    with query OR expansion stays at score 0 whatever alpha does.
+    assert all(sc == 0.0 for i, sc in _rx["ranked"] if _pd[i].startswith("fluid")), \
+        "PRF must not invent relevance for a doc the first pass never touched"
+
+    # SHARDING, pinned in both directions. Shards fitted WITH the corpus statistics must be
+    # BIT-IDENTICAL to a single index -- that is what makes merging their top-k lists exact, which
+    # T4 already promises for the merge itself. Shards fitted WITHOUT must still be visibly wrong,
+    # or this seam is doing nothing: measured on 6,000 documents, naive sharding reached max
+    # relative error 0.31-0.51 and top-1 agreement 0.76-0.84.
+    _sd = [tokenize(t) for t in
+           ["smooth a bumpy surface", "a fluid solver on a torus", "holographic memory recall",
+            "bumpy surface normals", "recall from a noisy cue", "torus fluid pressure"]]
+    _one = BM25(_sd)
+    _st = _one.corpus_stats()
+    _q = tokenize("bumpy surface recall")
+    _ref = _one.scores(_q)
+    _with = np.concatenate([BM25(_sd[:3], stats=_st).scores(_q), BM25(_sd[3:], stats=_st).scores(_q)])
+    _without = np.concatenate([BM25(_sd[:3]).scores(_q), BM25(_sd[3:]).scores(_q)])
+    assert np.array_equal(_with, _ref), "shards fitted with corpus stats must be BIT-IDENTICAL"
+    assert not np.allclose(_without, _ref), (
+        "shards fitted WITHOUT corpus stats must still differ -- if they stopped differing, the "
+        "weights are no longer baked at fit time and this seam needs re-measuring")
+
+    # DOUBLE-TOKENISATION TRAP, pinned in both directions. tokenize is NOT idempotent, so a caller
+    # that holds tokens and joins them back into a string gets a DIFFERENT index than one that
+    # passes the tokens. That has now cost this project three separate bugs, so both the trap and
+    # the fix are asserted here rather than described in a comment somewhere.
+    _toks = [tokenize("the settings of these classes"), tokenize("a process for meshing surfaces")]
+    _joined = BM25([" ".join(t) for t in _toks])
+    _direct = BM25(_toks)
+    assert _direct.docs_tokens == _toks, "passing tokens must not re-normalise them"
+    assert _joined.docs_tokens != _toks, (
+        "tokenize became idempotent -- that is a BEHAVIOUR CHANGE to be re-measured, not a bug "
+        "fix; see the P1.11 measurement before adopting it")
+    _q = tokenize("classes setting")
+    assert list(_direct.scores(_q)) == list(_direct.scores(_q)), "scores must be deterministic"
+    assert not np.allclose(_direct.scores(_q), _joined.scores(" ".join(_q))), (
+        "the join-and-re-tokenise path must remain visibly DIFFERENT, or this pin is asleep")
     docs = [
         "holographic_meshsmooth smooth a bumpy surface by averaging vertex normals Taubin",   # 0
         "holographic_denoise denoising as manifold projection Plug-and-Play Milanfar",         # 1

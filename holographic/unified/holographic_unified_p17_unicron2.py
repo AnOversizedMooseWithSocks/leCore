@@ -49,12 +49,30 @@ class _UnifiedPart17:
         Nothing here reproduces that, and leCore still has no result on any external
         agentic benchmark -- which the competitive note already says plainly. The claim is
         that the MECHANISM is present and correct. See holographic_actr."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
         from holographic.agents_and_reasoning.holographic_actr import (
             rank, forget, fit_rung_weights, base_level)
+        # FIT-ONLY MODE FIRST (cp97, field-caught by audit.bat): calling with
+        # half_lives= and no items is the DOCUMENTED weight-fitting mode --
+        # the install audit's R^2 0.99858 pin comes from exactly this call.
+        # The no-lying-defaults guard (right in spirit) was inserted ABOVE
+        # this branch and made it unreachable; a guard that blocks a
+        # documented mode is itself a signature that lies.
+        if items is None and half_lives is not None and forget_below is None:
+            return fit_rung_weights(half_lives)
+        if items is None:
+            raise ValueError(
+                "unicron_actr needs items= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to (or pass half_lives= "
+                "alone\nfor the weight-fitting mode).")
         if forget_below is not None:
             return forget(items, now, forget_below)
-        if items is None and half_lives is not None:
-            return fit_rung_weights(half_lives)
         return rank(items, now, half_lives=half_lives, threshold=threshold)
 
     def unicron_nullspace(self, runtime=None, ids=None, layer=None, delta=None,
@@ -127,6 +145,17 @@ class _UnifiedPart17:
         does not learn to use one. State tracking becomes a capability the model CAN BE
         GIVEN, not one it acquires -- the same boundary as the write policy: mechanism
         installed, policy supplied. See holographic_statetrack."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if symbols is None:
+            raise ValueError(
+                "unicron_state_track needs symbols= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.agents_and_reasoning.holographic_statetrack import (
             tracker, run_automaton)
         if symbols is None or transition is None:
@@ -202,6 +231,17 @@ class _UnifiedPart17:
         WHAT IT DOES NOT DO: change a weight, learn anything, or make the model CHOOSE to
         consult the store. It is a SCHEDULE over installed mechanisms, which is the same
         boundary every capability in this arc has landed on. See holographic_lecorerun."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if runtime is None:
+            raise ValueError(
+                "unicron_runtime needs runtime= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.io_and_interop.holographic_lecorerun import (
             LeCoreRuntime)
         # RETURN A HANDLE, NOT THE OBJECT. A LeCoreRuntime is not JSON
@@ -308,6 +348,17 @@ class _UnifiedPart17:
         NOT A REPLACEMENT for the safetensors output -- other people's loaders need every
         declared tensor at full size. This is the leCore-native form for storing,
         versioning and sending an install. See holographic_recipe."""
+        # A `=None` DEFAULT ON A REQUIRED ARGUMENT IS A SIGNATURE THAT LIES.
+        # Calling this with defaults died as "'NoneType' object is not
+        # iterable" several frames down, naming neither the faculty nor the
+        # argument -- the caller sees a crash in someone else's code. Found by
+        # CALLING every zero-argument faculty rather than reading them: 391
+        # called, 22 raised, 11 raised without saying what was missing.
+        if base_weights is None:
+            raise ValueError(
+                "unicron_recipe needs base_weights= -- it has a None default so it can be\n"
+                "passed positionally or by keyword, but there is no\n"
+                "meaningful empty case to fall back to.")
         from holographic.io_and_interop.holographic_recipe import (
             build, expand, cost)
         if rules is not None and arrays is not None:

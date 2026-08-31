@@ -17,6 +17,7 @@ This PROMOTES two shipped things into one home: the auto-listing of the mind's p
 is the richer home (does/example/native + find); `seed_from_mind` reuses the faculty walk so every faculty is
 findable, and `to_rows` can still hand the entries to the SQL table path. NumPy-free, stdlib only.
 """
+import inspect
 import re
 
 # small stop-word list so a problem sentence matches on its CONTENT words, not "how do I ..." scaffolding
@@ -280,35 +281,7 @@ class Catalog:
             hit = [self._by_name[n] for n in self._fc_memo[mk] if n in self._by_name]
             if len(hit) == len(self._fc_memo[mk]):
                 return hit
-        q_phrase = " ".join((problem or "").lower().split())        # normalised whole query, for exact-alias hits
-        # FILLER-STRIPPED FORM, restored: the split kept q_phrase but dropped this and the alias comparison
-        # that used it, silently deleting the fix. BOTH forms are tested, never just the stripped one --
-        # four shipped aliases THEMSELVES begin with a filler ("how do I get from points to a mesh"), so
-        # stripping the query alone would destroy the very +5.0 bonus this exists to protect. Testing both
-        # can only ADD a match, never remove one.
-        q_stripped = _strip_filler(problem)
-        scored = []
-        for cap in self._by_name.values():
-            # S3 pre-filter: skip a capability whose declared shape is incompatible. Untagged (empty) = always shown.
-            if accepts is not None and cap.consumes and accepts not in cap.consumes:
-                continue
-            if produces is not None and cap.produces and produces not in cap.produces:
-                continue
-            name_words = cap._nw
-            hay = cap._hay
-            overlap = len(q & hay)
-            if overlap == 0:
-                continue
-            score = overlap + 0.5 * len(q & name_words)              # a name-word hit counts extra
-            # EXACT-ALIAS bonus: if the whole query IS one of this cap's aliases, that is the strongest possible
-            # signal -- a stranger typed the exact phrase we anticipated. Without this, a cap with the exact alias
-            # ties with siblings that merely scatter the same words across their prose, and the alphabetical
-            # tie-break can bury it below k (measured: ascii_view, exact alias 'render image to terminal', lost to
-            # ascii_animate/field/sdf all tied at 3.0). Additive -- only raises exact matches, never demotes.
-            if any(q_phrase == a or q_stripped == a for a in cap._al):
-                score += 5.0
-            scored.append((score, cap.name, cap))
-        scored.sort(key=lambda s: (-s[0], s[1]))                     # best score first, then name (stable)
+        scored = self._score_all(problem, q, accepts=accepts, produces=produces)
         out = [cap for _, _, cap in scored[:k]]
         self._fc_memo[mk] = [c.name for c in out]
         if len(self._fc_memo) % 32 == 1:                             # amortised, atomic-enough
@@ -399,8 +372,16 @@ class Catalog:
         _n = cache[key][2] if len(cache[key]) > 2 else None
         p = float((int((_n >= top).sum()) + 1) / (len(_n) + 1)) if _n is not None else None
         if z < float(z_min):
+            # D1 -- THE ABSTAIN CARRIES ITS EVIDENCE. `hits` stays EMPTY so no caller can accidentally
+            # act on a route the gate refused; `refused` reports the ranking it refused, so the
+            # decision is auditable and appealable instead of unmeasurable. MEASURED, and this is why:
+            # on 10 catalog probes, 3 abstained and ALL THREE had the CORRECT capability at RANK 1 --
+            # including "unmix a superposition", which is a capability's own title verbatim, refused
+            # at z=0.36. With hits=[] and nothing else, that was undetectable from the gate's output;
+            # it took scoring find_capability separately to see it. A GATE THAT DISCARDS ITS EVIDENCE
+            # CANNOT BE CALIBRATED. Additive: existing callers reading `hits` are unaffected.
             return {"abstain": True, "z": float(z), "score": float(top), "null_mean": mu, "null_std": sd,
-                    "p": p,
+                    "p": p, "refused": list(real),
                     "hits": [], "reason": "top score %.2f does not clear the in-vocabulary noise floor "
                                           "(null %.2f +/- %.2f, z=%.1f < %.1f) -- no capability matches"
                                           % (top, mu, sd, z, z_min)}
@@ -409,6 +390,43 @@ class Catalog:
                 "hits": real, "reason": "top score clears the noise floor (z=%.1f)" % z}
 
 
+    def _score_all(self, problem, q, accepts=None, produces=None):
+        """THE ONE SCORER (dedup sweep): every ranking read -- find_capability,
+        find_scored, and anything future -- delegates here. Promoted because
+        the twin loops drifted TWICE (the +5 exact-alias bonus landed in one
+        and not the other; then the graded bonus had to be mirrored by hand)
+        and the lockstep test only catches drift after it ships.
+
+        Scoring: word overlap with the cap's hay + 0.5 per NAME-word hit
+        (a strong signal), then the GRADED exact-alias bonus -- +5.0 when the
+        RAW normalised query IS an alias (the anticipated-phrase signal),
+        +4.0 when only the FILLER-STRIPPED residue is ('how do I start'
+        strips to 'start', which collided with a bare 'start' alias and the
+        name-word bonus outranked the card that anticipated the whole phrase;
+        measured 6.5 vs 6.0). Both query forms are tested because four
+        shipped aliases THEMSELVES begin with a filler. accepts/produces are
+        the S3 io-shape pre-filter (untagged is never filtered).
+        Returns [(score, name, cap)] best first, ties by name."""
+        q_phrase = " ".join((problem or "").lower().split())
+        q_stripped = _strip_filler(problem)
+        scored = []
+        for cap in self._by_name.values():
+            if accepts is not None and cap.consumes and accepts not in cap.consumes:
+                continue
+            if produces is not None and cap.produces and produces not in cap.produces:
+                continue
+            overlap = len(q & cap._hay)
+            if overlap == 0:
+                continue
+            score = overlap + 0.5 * len(q & cap._nw)
+            if any(q_phrase == a for a in cap._al):
+                score += 5.0
+            elif any(q_stripped == a for a in cap._al):
+                score += 4.0
+            scored.append((score, cap.name, cap))
+        scored.sort(key=lambda s: (-s[0], s[1]))
+        return scored
+
     def find_scored(self, problem, k=3):
         """Like find_capability, but returns [(capability, score)] best-first -- so an agentic layer can turn the raw
         match scores into a CONFIDENCE (how dominant the top hit is). Same scoring, same deterministic tie-break."""
@@ -416,25 +434,10 @@ class Catalog:
         q = set(_tokens(problem))
         if not q:
             return []
-        q_phrase = " ".join((problem or "").lower().split())        # normalised whole query, for exact-alias hits
-        # FILLER-STRIPPED FORM, restored: the split kept q_phrase but dropped this and the alias comparison
-        # that used it, silently deleting the fix. BOTH forms are tested, never just the stripped one --
-        # four shipped aliases THEMSELVES begin with a filler ("how do I get from points to a mesh"), so
-        # stripping the query alone would destroy the very +5.0 bonus this exists to protect. Testing both
-        # can only ADD a match, never remove one.
-        q_stripped = _strip_filler(problem)
-        scored = []
-        for cap in self._by_name.values():
-            name_words = cap._nw
-            hay = cap._hay
-            overlap = len(q & hay)
-            if overlap == 0:
-                continue
-            score = overlap + 0.5 * len(q & name_words)
-            if any(q_phrase == a.lower() or q_stripped == a.lower() for a in cap.aliases):  # see find_capability
-                score += 5.0
-            scored.append((score, cap.name, cap))
-        scored.sort(key=lambda s: (-s[0], s[1]))
+        # ONE SCORER (dedup sweep): the twin of this loop in find_capability
+        # drifted twice and each fix had to be mirrored BY HAND ("a fix lands
+        # in BOTH or neither"). It now cannot drift: both delegate.
+        scored = self._score_all(problem, q)
         return [(cap, float(sc)) for sc, _, cap in scored[:k]]
 
     def suggest_pipeline(self, start_kind, goal_kind, max_len=4, require_step=False):
@@ -743,7 +746,16 @@ _METHOD_ALIASES = {
                              "what should go in memory",
                              "pick the important parts of a passage",
                              "which tokens surprised the model"),
+    # THE WORKING INVOCATION, because there was no caller anywhere in the tree and
+    # the config keys it needs (n_layers, rms_eps) are NOT what a HuggingFace
+    # config.json provides -- passing text_config straight in dies three modules
+    # deep on KeyError. load_runtime()/load_weights_dir() build the normalized
+    # pair; nothing else does.
     "unicron_early_exit": ("skip layers when the answer is already decided",
+                           "speed up inference by exiting early",
+                           "how do I make the model faster",
+                           "stop climbing the layers",
+                           "where in the model is the answer already known",
                            "make the model faster without changing it",
                            "shortcut through the layers",
                            "which tokens need the whole model"),
@@ -930,6 +942,121 @@ _METHOD_ALIASES = {
                 "sample a growth at a point in time",
                 "the state of a grower at progress t",
                 "scrub a growth animation"),
+    # THE FRONT DOOR WAS DARK. `lecore.autoboot()` is the documented way to start
+    # -- it is in the README -- and find_capability("boot up lecore") returned
+    # holographic_boot (a MODEL boot record, unrelated) with autoboot nowhere.
+    # It is a MODULE function, not a mind method, so nothing auto-registered it:
+    # the catalog only sees the mind's surface, and the one call a newcomer makes
+    # first lives outside that surface.
+    "autoboot": ("boot up lecore",
+                 "start lecore with its memory",
+                 "the one call that gets me going",
+                 "load doctrine and memory and a model",
+                 "how do I start"),
+    # EXTERNAL MEMORY: the phrase a user says, pointed at the pair that does it.
+    # learning_load/learning_save ARE the external memory -- a .lecore container
+    # partition on disk that survives the process -- and neither surfaced for
+    # "external memory", "memory that persists between runs" or "load and save
+    # what I have learned". The mechanism was fine and the WORDS were missing.
+    "learning_load": ("external memory",
+                      "load what I have learned",
+                      "memory that persists between runs",
+                      "restore a saved mind",
+                      "read a lecore partition"),
+    "learning_save": ("save what I have learned",
+                      "write my memory to disk",
+                      "persist the mind between runs",
+                      "make a lecore partition"),
+    "teach": ("teach it a fact",
+              "tell lecore something to remember",
+              "add knowledge by hand",
+              "pin an established answer"),
+    # BARE GENERIC NAMES ARE SHADOWED BY DESCRIPTIVELY-TITLED SIBLINGS, and the
+    # buried audit catches them the moment ranking shifts -- which is what
+    # happened when auto-registered examples grew from "mind.x(...)" to the real
+    # signature. The capability did not change; the search text around it did.
+    # THE FIX THE TEST ASKS FOR IS ALIASES, not a shorter example: a one-word
+    # name has nothing for a stranger's phrasing to match on.
+    "answer": ("just answer my question",
+               "route a question to the right place",
+               "who should handle this question"),
+    "api_use": ("call an endpoint I taught it",
+                "use a learned api",
+                "invoke a remembered service",
+                # sweep 103 merge: the duplicate-key audit caught a second api_use entry
+                # SHADOWING this one (dict literal: later key wins) -- phrasings merged
+                # here, duplicate deleted. An alias map is a dict; grep before adding.
+                "call a learned api endpoint", "source data from an api",
+                "query an external service", "call the forecasting service",
+                "robotics service call"),
+    "capabilities": ("what can this mind do",
+                     "list everything available",
+                     "introspect the capability registry"),
+    "do": ("just do this task",
+           "one call to get a job done",
+           "orchestrate this for me"),
+    "learn": ("teach it one labelled example",
+              "show it a training pair",
+              "the base learning verb"),
+    "restore": ("clean up a degraded measurement",
+                "denoise and deblur together",
+                "plug and play restoration"),
+    "shape_of": ("what does this return",
+                 "how do I actually call this",
+                 "show me the return shape"),
+    # REPAIR FOR A PARTITION THAT GREW. The doctrine-duplication fix stops new
+    # growth; it cannot reclaim rows already written, and there was no faculty
+    # that could. Aliases from the mouth of someone staring at a bloated file.
+    "learning_compact": ("clean up my memory file",
+                         "remove duplicate memories",
+                         "compact the partition",
+                         "my lecore file keeps growing",
+                         "dedupe the taught store"),
+    # PRUNE's diagnostic for sequential editing. An install writes the same
+    # tensors eight times over; perplexity and drift both miss a matrix that is
+    # holding its accuracy while becoming numerically fragile.
+    "unicron_edit_health": ("is my install degrading the model",
+                            "condition number of an edited matrix",
+                            "did sequential edits make the weights fragile",
+                            "check weight health after installing",
+                            "prune condition number check"),
+    # Tombstone reclamation. UPDATE is tombstone-and-reinsert, so a table that is
+    # written to only ever grows -- 400 rows became 1,260 after five updates.
+    # Aliases from the mouth of someone watching a table bloat.
+    # DO NOT ASK A MODEL TO MULTIPLY -- it emits the likeliest next token, which
+    # is not arithmetic. check_math computes the claims instead.
+    "explain_pair": ("why are these two similar",
+                     "compare two records role by role",
+                     "what do these two have in common"),
+    "manifold_chart": ("flatten curved data to a chart",
+                       "my embedding is curved not flat",
+                       "isomap",
+                       "laplacian eigenmaps"),
+    "check_math": ("check the math in an answer",
+                   "did the model do the arithmetic right",
+                   "verify a calculation",
+                   "the numbers look wrong"),
+    "do_math": ("actually calculate this",
+                "evaluate an arithmetic expression",
+                "compute it instead of guessing"),
+    "table_vacuum": ("my table keeps growing",
+               "remove deleted rows permanently",
+               "reclaim tombstones",
+               "vacuum a table",
+               "compact a table after updates"),
+    "db_vacuum_idle": ("clean up dead rows automatically",
+                       "vacuum every bloated table",
+                       "my database is full of dead rows",
+                       "sweep tombstones across a database"),
+    # THE STALE-REFERENCE PROBLEM. A fact about code stays at T0 while the code
+    # moves; nothing connected a memory to the file it describes.
+    "teach_about": ("remember this about a file",
+                    "teach a fact tied to source code",
+                    "record what this module does"),
+    "stale_facts": ("which of my notes are out of date",
+                    "what did I write about code that has changed",
+                    "find stale references in memory",
+                    "is my memory still current with the codebase"),
     "unicron_bios": ("what kind of model is this",
                      "probe a checkpoint before touching it",
                      "will this fit in my model", "enumerate a model's layout",
@@ -1331,6 +1458,17 @@ _METHOD_ALIASES = {
     "is_deterministic": ('is this function deterministic', 'does it return the same result every time', 'check determinism', 'bit-identical repeatability', 'is the output reproducible'),
     "light": ('add a light to a scene', 'directional or point light', 'sun light source', 'scene lighting object', 'place a light'),
     "make_cloud": ('render a volumetric cloud', 'make a cloud image', 'volumetric cloud in one call', 'draw a cloud', 'cloud render'),
+    "serve": ('serve this query preemptively', 'answer from memory or a tool first',
+              'try the substrate before the model', 'preemptive answer without an llm',
+              'serve results from a learned tool'),
+    "api_learn": ('learn an api from its spec', 'hook up a non llm model', 'connect a timesfm style forecaster',
+                  'teach lecore a new web service', 'register an external service', 'learn an openapi spec'),
+    "api_toolbox": ('list learned apis', 'which external services do I know', 'learned api roster',
+                    'what apis can I call', 'show my learned services'),
+    "lookup": ('look up a word in the dictionary', 'define this word', 'word definition and synonyms',
+               'english dictionary lookup', 'what does this word mean'),
+    "study": ('comprehend a directory in one call', 'walk and digest a tree', 'study this folder',
+              'one call code and doc comprehension', 'macro study of a repository'),
     "make_observer": ('custom sensor from sensitivity curves', 'build an observer', 'spectral sensor with channels', 'define a camera response', 'per-channel sensor'),
     "make_scene": ('build a scene from nested objects', 'assemble a scene from a list', 'scene from objects', 'construct a nested scene', 'scene builder from parts'),
     "make_table": ('ingest tabular data', 'load a table of records', 'rows into a vsa table', 'tabular data to vectors', 'make a table from dicts'),
@@ -1588,7 +1726,21 @@ def seed_from_mind(catalog, mind):
         # dark method names (D1). infer_semantic ABSTAINS rather than guess -- a wrong branch files a capability
         # under a verb nobody will look for and, unlike a missing one, looks done.
         from holographic.caching_and_storage.holographic_semantictag import infer_semantic
-        catalog.register_capability(name, doc or name, example="mind.%s(...)" % name, native=True,
+        # THE EXAMPLE SHOWS THE REAL SIGNATURE, not "(...)". 2,116 of 2,753
+        # method capabilities carried `mind.<name>(...)`, which RESOLVES (so
+        # skill_lint passes it) and tells a caller nothing -- not the argument
+        # names, not which are required, and CRUCIALLY not which implementation
+        # they get when a name is defined in two parts. explain, ask, agent_loop
+        # and levers are each defined twice and the MRO silently picks one; the
+        # placeholder made that invisible at the exact place a reader would look.
+        # inspect.signature is already the source of truth here; printing it
+        # costs nothing and makes the entry self-documenting.
+        try:
+            _sig = str(inspect.signature(getattr(mind, name))).replace("self, ", "")
+            _ex = "mind.%s%s" % (name, _sig)
+        except (TypeError, ValueError):
+            _ex = "mind.%s(...)" % name
+        catalog.register_capability(name, doc or name, example=_ex, native=True,
                                     consumes=cons, produces=prod,
                                     semantic=_SEMANTIC_OVERRIDES.get(name) or infer_semantic(name, doc),
                                     aliases=_METHOD_ALIASES.get(name, ()))   # D1: bare method-names were dark w/o these
@@ -1620,6 +1772,13 @@ def default_catalog():
     holographic_catalog_p04.register_p04(c)
     holographic_catalog_p05.register_p05(c)
     holographic_catalog_p06.register_p06(c)
+    # p07 originally used `from PKG import MODULE` -- the EXACT form the comment above
+    # declares invisible to wiring_report, added directly beneath the warning (cp27 CI
+    # simulation caught it: the gate reported p07 dark while it was loaded every boot).
+    import holographic.caching_and_storage.holographic_catalog_p07 as holographic_catalog_p07
+    holographic_catalog_p07.register_p07(c)
+    import holographic.caching_and_storage.holographic_catalog_p08 as holographic_catalog_p08
+    holographic_catalog_p08.register_p08(c)
     return c
 
 
