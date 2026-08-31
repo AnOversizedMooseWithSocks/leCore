@@ -2,7 +2,7 @@
 #
 # On a push or a pull request it runs only the tests AFFECTED by the changed files (see the "Run the test suite"
 # step). A docs- or config-only change runs no tests at all. As a safety net, the WHOLE suite -- slow tests
-# included, watchdog lifted -- runs weekly (schedule), on demand (the "Run workflow" button), and on a version
+# included, budget kept: unmarked tests 15 s, slow-marked the long budget -- runs weekly (schedule), on demand (the "Run workflow" button), and on a version
 # tag, as a MATRIX of 4 shard jobs (see `full-suite` at the bottom): timeout-minutes is per JOB, so sharding is
 # what lets the true full run fit GitHub's budget at all. The job only goes green if every test that ran passes.
 #
@@ -62,7 +62,7 @@ jobs:
     # This job now handles ONLY the per-change path (a push or a PR): affected-test selection + the gates below.
     # The FULL suite (schedule / manual / version tag) moved to the sharded `full-suite` matrix job at the bottom --
     # GitHub's timeout-minutes budget is PER JOB, so one 20-minute job could never hold the true full run
-    # (slow tests selected, watchdog lifted), but four parallel shard jobs give it 4x the budget. Branch protection
+    # (slow tests selected, budget kept: unmarked tests 15 s, slow-marked the long budget), but four parallel shard jobs give it 4x the budget. Branch protection
     # is unaffected: pushes and PRs still produce this same "pytest" check.
     needs: [gates]                 # cheap checks first -- see the comment above
     if: (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request'
@@ -118,7 +118,7 @@ jobs:
           set -e
           EVENT="${{ github.event_name }}"
 
-          # The FULL suite (slow tests selected, watchdog lifted) lives in the sharded `full-suite` job now -- it
+          # The FULL suite (slow tests selected, budget kept: unmarked tests 15 s, slow-marked the long budget) lives in the sharded `full-suite` job now -- it
           # cannot fit one job's 20-minute budget. This job's fallback for an unscopable change is the FAST suite
           # (the default `-m 'not slow'` from pyproject.toml): complete coverage of the fast tests, and the weekly
           # sharded run remains the safety net for the slow ones.
@@ -276,7 +276,7 @@ jobs:
         run: python servicedoc.py
 
   # ---------------------------------------------------------------------------------------------------------
-  # The TRUE full suite: every test, slow ones included, watchdog lifted (--run-slow). One job's 20-minute
+  # The TRUE full suite: every test, slow ones included, budget kept: unmarked tests 15 s, slow-marked the long budget (--run-slow). One job's 20-minute
   # budget can't hold it -- timeout-minutes is PER JOB, so a matrix of 4 shard jobs runs 1/4 of the suite each,
   # in parallel, with 4x the total budget. tools/shard_tests.py partitions the test files DETERMINISTICALLY
   # (sorted, integer weights, greedy largest-first; slow-marked tests weighted ~20x since they dominate wall
@@ -362,7 +362,7 @@ jobs:
         # never again balance by proxy. --ci-factor 1.0 because the seconds are measured HERE.
         run: python tools/shard_tests.py --selfcheck --num-shards 20 --budget 1140 --ci-factor 1.0 --min-coverage 0
 
-      - name: Run shard ${{ matrix.shard }} of 20 (slow tests included, watchdog lifted)
+      - name: Run shard ${{ matrix.shard }} of 20 (slow-marked tests included with the long budget; unmarked tests keep the 15 s budget)
         run: |
           # MUST MATCH THE MATRIX LENGTH ABOVE. A matrix of ten with a smaller shard count asks
           # for slices 0..9 of a narrower partition: the high shards come back EMPTY and most of

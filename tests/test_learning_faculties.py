@@ -2,6 +2,7 @@
 UnifiedMind actually work END-TO-END through the mind, not merely import. Per the project's rule that
 wiring is proven by a cross-faculty test, not an import check."""
 import numpy as np
+import pytest
 from holographic.misc.holographic_unified import UnifiedMind
 
 _MIND = UnifiedMind(dim=1024, seed=0)   # built once; both faculties run on the mind's own dim/seed
@@ -115,6 +116,9 @@ def test_import_does_not_treat_a_blank_local_answer_as_a_conflict(tmp_path):
         "on_conflict='flag' must keep the local answer"
 
 
+@pytest.mark.slow   # critical-but-slow (sweep 118): autoboot loads the full partition; measured ~225 s locally.
+                    # Under the budget rule an UNMARKED test this long is skipped in CI; the marker is what
+                    # declares it critical and buys it the long budget. It guards the tier contract (P0-adjacent).
 def test_an_abstention_stays_an_abstention_however_often_it_is_asked():
     """**T0 is the contract that an answer came from memory. A blank must not wear it.**
 

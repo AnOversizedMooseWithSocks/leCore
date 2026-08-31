@@ -84668,3 +84668,44 @@ files, knowledge + MCP inside, dictionary loads 144,539 == manifest,
 both entry points on PATH, lecore-mcp --selftest passes. Packaging /
 techstack / word-index / corpus tests green. The sweep-115 PyPI
 pending-publisher note is VOID.
+
+--------------------------------------------------------------------------------
+SWEEP 118 -- THE BUDGET IS THE RULE: LONG TESTS ARE SKIPPED UNLESS CRITICAL
+
+THE BRIEF (Moose, second cancelled shard: 17 of 20 at 84%): long-running
+tests are supposed to be skipped unless they are critical.
+
+THE CONFLICT, named: the full-suite job ran with --run-slow, and
+--run-slow LIFTED THE 15 s BUDGET FOR EVERY TEST ("watchdog lifted" in
+the step name). So any unmarked test that had quietly grown to minutes
+ran to completion -- or to the job's death. Twenty shards were
+arithmetic headroom against a rule the run was not applying.
+
+THE RULE, now in tests/conftest.py:
+- UNMARKED tests keep the 15 s budget ALWAYS -- under --run-slow too --
+  and are SKIPPED on overrun with a message that names the remedy
+  ("mark it @pytest.mark.slow if it is critical; otherwise make it
+  fast"). Skipped, never run to completion, never a shard hang.
+- SLOW-MARKED tests -- the declared critical-but-slow ones -- get the
+  long budget under --run-slow (_SLOW_BUDGET_SECONDS, default 600,
+  LECORE_SLOW_BUDGET overrides) and EVEN THEY have that ceiling: no
+  single test can take a shard down.
+- --run-slow still SELECTS the slow-marked tests; it no longer disarms
+  the watchdog.
+MEASURED with a 2 s probe budget across all three regimes: default
+(unmarked overrun skipped), --run-slow (unmarked overrun STILL skipped;
+slow-marked passes under the long budget), and a 1 s long budget
+(slow-marked skipped at the ceiling).
+
+FOLLOW-THROUGH: the abstention regression test (~225 s; autoboot loads
+the full partition) was UNMARKED and is critical -- it now carries
+@pytest.mark.slow with the reason. In CI the first full run under the
+rule will SKIP every other unmarked test over 15 s, each with the
+remedy in its skip message: grep the shard logs for 'per-test budget'
+and mark the ones that are critical; the rest are the tests that had
+been silently spending the matrix's time. ci.yml step names no longer
+say "watchdog lifted".
+
+Sweep-116 machinery stands (20 shards, --budget guard, durations
+capture + merge job); with the budget enforced, the packer's measured
+seconds become bounded by construction.
