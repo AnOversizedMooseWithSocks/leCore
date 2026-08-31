@@ -57,3 +57,37 @@ Measured speed tiers: memory bypass **97×**; exit-L7 **3.0×**.
 ## Self-explanation
     m.explain("drift sentinel")          # docs-derived card
     m.tool_find("scan a signal")         # 2,200+ faculty docstrings are the index
+
+## The agent substrate (sweeps 93-122)
+    m.orient(topic="forecast a series")            # live compass: workflow + top-3 doors
+    m.serve("what is the capital of x")            # memory -> tool reflex -> honest escalate
+    m.tool_reflex_teach("convert 25 celsius to fahrenheit", "convertd", "c_to_f",
+                        extract_numbers=["celsius"])   # after api_learn(spec, name="convertd")
+    st = m.study("holographic"); st["ask"]("how does the ladder climb")   # citations, honest refusal
+    m.bequeath("measure before building", author="model-a")   # wisdom outlives the model
+    m.wisdom(author="model-a")                     # inherit, attributed
+    m.contribute(dest, author="user-a")            # privacy-screened commons bundle + review sheet
+    m.commons_pool([b1, b2], root)                 # conflicts flagged, never resolved
+    m.api_learn(openapi_spec, name="forecastd"); m.api_use("forecastd", "forecast_series", params={...})
+    m.merge_trees(ours, theirs, apply=True)        # sha census + safe apply
+    m.learning_save(root, audit="regen")           # ~195x smaller for pure-taught minds
+    m.partition_report(root)                       # where the bytes went
+    m.table_analyze(rows, "price", tasks=("regimes", "forecast"))   # a column IS a series
+Everything above is pinned in tests/test_mcp_server.py (one test per sweep) and, as
+runnable examples, in FEATURE_GUIDE §10 -- `tests/test_guide_examples.py` runs them.
+
+## Housekeeping you can feel
+    lecore-mcp --selftest                          # the MCP server is on PATH after pip install
+    # toolmemo is ONE holographic container (store.lecore), not a shard per call
+    # the per-test budget is always on: unmarked tests skip past 15 s even under --run-slow
+
+## Why a holographic VM (the swarm view)
+    # docs/WHY_A_HOLOGRAPHIC_VM.md -- shared / partitioned / distilled memory, group learning,
+    # many models, api_learn, skill synthesis by io-kind chaining -- all as CI-run blocks
+    m.suggest_pipeline("image", "mesh")            # a skill assembled from the ones you have
+    m.shared_workspace()                           # swarm roles coordinate through slots
+
+## Three swarms (use cases that run)
+    m.serve(q); m.escalations(); m.resolve(q, a, by="jane", propagate=bundle)   # service swarm learns from humans
+    m.codebase_sync(root); m.stale_facts(root=root); m.codebase_sync(root, only_stale=True)  # dev swarm, one understanding
+    m.role("reporter", "findings", handler, emit="reports"); m.roles()             # lab roles on one bus, one memory

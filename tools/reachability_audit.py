@@ -76,9 +76,13 @@ _KNOWN_NEGATIVES = {
 #                              A mind faculty per part would be nonsense; every capability they register is
 #                              already discoverable through the one door they exist to fill.
 _KNOWN_INFRASTRUCTURE = {
-    "holographic_service", "holographic_toolclient", "holographic_uri", "holographic_sync", "holographic_farm",
-    "holographic_provenance", "holographic_determinism", "holographic_query_durable", "holographic_queryfolder",
-    "holographic_querygraph", "holographic_queryprog", "holographic_querytime",
+    # sweep 125: the registry's bare-name alias TABLE, split out as data by the sibling line
+    # (wiring_report already classifies it as infrastructure); imported by holographic_catalog,
+    # never a faculty of its own.
+    "holographic_catalog_aliases",
+    "holographic_service", "holographic_uri", "holographic_sync", "holographic_farm",
+    "holographic_provenance", "holographic_query_durable", "holographic_queryfolder",
+    "holographic_querygraph", "holographic_queryprog",   # querytime/reasoning/brdf/determinism/toolclient wired in sweep 123 (p24)
     # A SHARED PARSE CACHE, not a faculty: codehealth / codemap / orphanaudit all reach it, and each of THOSE
     # is wired (audit_complexity, code_search/code_similar, audit_orphans). Giving it its own mind method
     # would publish a cache-warming detail as a user-facing verb; declaring it keeps the import-only list
@@ -90,13 +94,11 @@ _KNOWN_INFRASTRUCTURE = {
     "holographic_objectref",
     "holographic_catalog_p01", "holographic_catalog_p02", "holographic_catalog_p03",
     "holographic_catalog_p04", "holographic_catalog_p05", "holographic_catalog_p06",
-    "holographic_bpe",   # restored in the sweep-97 branch merge (was declared on our line)
-    "holographic_brdf",   # restored in the sweep-97 branch merge (was declared on our line)
+    "holographic_bpe",   # restored in the sweep-97 branch merge (was declared on our line)   # restored in the sweep-97 branch merge (was declared on our line)
     "holographic_catalog_p07",   # restored in the sweep-97 branch merge (was declared on our line)
     "holographic_lexicon",   # restored in the sweep-97 branch merge (was declared on our line)
     "holographic_lightcache",   # restored in the sweep-97 branch merge (was declared on our line)
-    "holographic_mcp",   # restored in the sweep-97 branch merge (was declared on our line)
-    "holographic_reasoning",   # restored in the sweep-97 branch merge (was declared on our line)
+    "holographic_mcp",   # restored in the sweep-97 branch merge (was declared on our line)   # restored in the sweep-97 branch merge (was declared on our line)
     "holographic_tableindex",   # restored in the sweep-97 branch merge (was declared on our line)
     "holographic_testkit",   # restored in the sweep-97 branch merge (was declared on our line)
 }

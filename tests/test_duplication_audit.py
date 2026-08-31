@@ -53,7 +53,6 @@ KNOWN_DUPLICATES = {
     # p16._feats are parallel nested word-feature helpers that evolved on separate
     # branches -- unification is backlogged, the duplication is DECLARED not hidden.
     (frozenset({"__init__"}), frozenset({"conditioning", "soprunner"})),
-    (frozenset({"_feats", "feats"}), frozenset({"lexicon", "unified_p16_unicron"})),
 
     # READ, NOT A REAL DUPLICATE (the FileEntry/MilkPreset precedent): edithistory.EditOp.__init__
     # (name/apply/invert/params) vs vault.VaultDoc-style (path/title/body/meta) -- two unrelated
@@ -64,10 +63,8 @@ KNOWN_DUPLICATES = {
     # local weights/seed, so delegation needs a shared helper beside read_seeded -- the
     # silhouette_mask precedent applies: accepted, UNIFY when a third battery appears.
     (frozenset({"_addressed", "_seeded_is_addressed"}), frozenset({"harden", "install"})),
-    (frozenset({"_reply"}), frozenset({"coordinator", "distbus"})),
     (frozenset({"damage_mask"}), frozenset({"archive", "image"})),
     (frozenset({"_occlusion"}), frozenset({"cosamp", "iht"})),
-    (frozenset({"_f1", "_f1f"}), frozenset({"cosamp", "iht", "occlusion"})),
     (frozenset({"_face_normal", "_newell_normal"}), frozenset({"meshcurvature", "meshverbs"})),
     # READ, NOT A REAL DUPLICATE: filemap.FileEntry.__init__ (relpath/path/size/mtime/sha256/kind) vs
     # milkdrop.MilkPreset.__init__ (settings/init/frame/pixel/warp_shader/comp_shader). Two unrelated plain

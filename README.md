@@ -128,6 +128,12 @@ leCore has grown large, so here's the **generalized** view — the families of c
 
 - **Stay honest and reversible.** Compression that decompresses exactly, error-correction that survives lost data, and a measurement layer that reports uncertainty rather than bluffing.
 
+- **Remember across sessions, models and machines.** Memory lives in a *partition* that outlives any process or model: sessions inside it are a privacy boundary (pinned by a cross-session probe battery), generations roll over, pure-taught partitions save ~195× smaller by replaying text on load, and knowledge travels between partitions only through a privacy-screened **commons** — with a model's **wisdom** (lessons bequeathed with the author's name in their provenance) riding the same rails. Two minds fed the same stream produce byte-identical partitions.
+
+- **Serve agents and swarms.** `orient()` is a live compass for any model; `serve()` answers from memory, then from a taught **tool reflex** (an API called with deterministically extracted arguments), then escalates honestly; `api_learn` turns any OpenAPI spec — a forecaster, a robot — into discoverable tools that survive save/load; `escalations`/`resolve` let a service swarm learn from its humans; `codebase_sync` gives a development swarm one understanding of the code that goes stale exactly when the code changes; `role()` puts focused agents on one bus with one memory. All of it rides the **MCP server** (`lecore-mcp`) to ten harnesses and openzoo, with the workflow contract in the `initialize` banner.
+
+- **Read code and data, with citations.** `study(root)` digests a whole tree into a persistent handle and answers with the source file and symbol, or refuses off-corpus; repo maps, grep/view/replace with a syntax check, `merge_trees` with a sha census; and the analyst doors — regimes, forecasts, formulas, drift, fact checking — so a column of numbers is a series and a claim is checkable.
+
 You don't have to use all of it. Each capability works on its own; the point is that they *share one space*, so they compose.
 
 **You don't have to memorize any of it, either.** The engine keeps a searchable catalog of what it can do, so a plain-English description of your problem finds the right tool — `mind.find_capability("search a big pile of vectors")`, or `mind.suggest("edit an image")` for ranked options with the call to make, or `mind.route("render a scene")` which either hands you the call (when it's sure) or a short list of choices (when it isn't). The full plain-language menu — every capability, what it does, and the one line that gets you started — lives in **[`CAPABILITIES.md`](CAPABILITIES.md)**, and it's generated from that same catalog by CI so it never goes stale.
@@ -161,6 +167,7 @@ It's a plain Python library. The core needs **only NumPy** — nothing else is e
 ```bash
 pip install leos-core              # installs the engine (+ NumPy)
 python -c "import lecore; print(lecore.UnifiedMind)"
+lecore-mcp --selftest              # the MCP server lands on your PATH with the base install
 ```
 
 **Or work from a clone** (what you want if you're hacking on the engine or running the tour/UI):
@@ -177,6 +184,8 @@ python app.py                      # then open the browser UI and click "Run ful
 ```bash
 # from PyPI (no clone):                     # from a clone (the dot = this folder):
 pip install "leos-core[ui]"                 # pip install .[ui]        the browser UI + image I/O   (Flask, Pillow)
+pip install "leos-core[service]"            # pip install .[service]   the HTTP service, lecore-service on PATH (Flask)
+pip install "leos-core[mcp]"                # pip install .[mcp]       the stdio MCP server: NO extra deps, named for intent
 pip install "leos-core[jit]"                # pip install .[jit]       numba-compiled fast paths     (numba)
 pip install "leos-core[symbolic]"           # pip install .[symbolic]  design-time gradients         (SymPy)
 pip install "leos-core[zig]"                # pip install .[zig]       native batch kernels, 2-5x     (ziglang -- whole
@@ -302,9 +311,9 @@ hashes match bit-for-bit. Every call through the MCP/HTTP surface returns a rece
 zero-knowledge proof systems for LLM inference cost hundreds of seconds to days per
 generation; here the whole engine being deterministic makes the proof free.
 
-## The six levers: how walls fall here
+## The seven levers: how walls fall here
 
-When blocked, the codebase walks six levers **in order** before declaring anything
+When blocked, the codebase walks seven levers **in order** before declaring anything
 impossible — each carries measured kills:
 
 1. **Bake once, sample O(1).** A compiled gather rule answers in one dot product: 182,010×
@@ -327,6 +336,22 @@ impossible — each carries measured kills:
    hierarchy.** This is also why the codebase nests: the VM installs inside model weights,
    the swarm coordinator installs inside weights, ladders serve ladders — "as above, so
    below" is the sixth lever's operating manual.
+7. **Spend accumulated experience.** Amortise across *similarity*, not identity: a trace of
+   what worked serves the next task that merely resembles it (`tool_predict`, tool reflexes,
+   the `serve()` door) -- the lever that turns usage into speed. `mind.levers()` is the live
+   source of truth for this list; the wheel's smoke test pins the floor at six.
+
+**Why a holographic virtual machine at all?** `docs/WHY_A_HOLOGRAPHIC_VM.md` -- the case, what
+it can do, swarm memory (shared / partitioned / distilled), group learning, many models, and
+skill synthesis, every claim as a block that runs in CI.
+
+**Three swarms that run:** `docs/USE_CASES.md` -- customer service that learns from its humans
+(escalate, resolve, propagate), a development swarm sharing one understanding of the code
+(`codebase_sync` + `stale_facts`), and a lab of focused roles on one bus and one memory.
+
+**For agents and harnesses:** FEATURE_GUIDE §10 ("The substrate for agents") is the runnable
+tour of `orient`, `serve`, `study`, wisdom + the commons, `api_learn`, `merge_trees` and lean
+partitions; `integrations/openzoo/PLATFORM_GUIDE.md` is the operator's version.
 
 ## The machine inside the machine
 
@@ -417,6 +442,11 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 
 ## Learning more
 
+- **[`docs/WHY_A_HOLOGRAPHIC_VM.md`](docs/WHY_A_HOLOGRAPHIC_VM.md)** — **why run one, and what a swarm does with it**: the case, swarm memory (shared / partitioned / distilled), group learning, many models, importing and *synthesizing* skills. Every claim is a block that runs in CI.
+- **[`docs/USE_CASES.md`](docs/USE_CASES.md)** — **three swarms that run**: customer service that learns from its humans, a development swarm with one understanding of the codebase, a lab of focused roles on one bus and one memory.
+- **[`integrations/openzoo/PLATFORM_GUIDE.md`](integrations/openzoo/PLATFORM_GUIDE.md)** — the **platform operator's guide** (openzoo and any harness): booting, isolation, exposing faculties, teaching, sharing, faster inference.
+- **[`docs/WHATS_NEW.md`](docs/WHATS_NEW.md)** — **feature by feature, one example each**, newest first.
+- **[`docs/PACKAGING.md`](docs/PACKAGING.md)** — **how the wheel is built and published**: one distribution, opt-in extras, auto-publish on every green merge, the `lecore-mcp` / `lecore-service` entry points.
 - **[`FEATURE_GUIDE.md`](FEATURE_GUIDE.md)** — a **hands-on how-to** for the most recently added features: composable
   materials/textures, the describe-a-scene authoring flow (naming, texturing, external files), external-asset
   relocation and the queryable file map, the message-bus + optional-agent harness, and the opt-in language layer. Every
@@ -462,7 +492,10 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 - The module docstrings — every `holographic_*.py` file opens with a plain-language "why this exists" (and
   those are exactly what `REFERENCE.md` gathers up for you).
 
-**How the docs stay honest.** Three of the files above are *generated* from the code and *gated* in CI, so they can't
+**How the docs stay honest.** Every code block on this page runs in CI (`tests/test_readme_examples.py`), and so does
+every block marked `# guide-check` in `FEATURE_GUIDE.md`, `docs/WHY_A_HOLOGRAPHIC_VM.md`, `docs/USE_CASES.md` and the
+openzoo guide (`tests/test_guide_examples.py`). `tools/doc_coverage.py` measures which of the engine's ~2,300 mind verbs
+no human document mentions, and CI refuses to let that number grow. Three of the files above are *generated* from the code and *gated* in CI, so they can't
 quietly fall out of date: `REFERENCE.md` (from module docstrings), `API_QUICKREF.md` and `CAPABILITIES.md` (from the
 catalog). `SERVICE.md` is mostly hand-written, but its endpoint table is checked against the service's real route
 registry, so a new or renamed endpoint can't ship undocumented. On top of the test suite, CI also runs two small checks
@@ -473,7 +506,7 @@ and forget to document or register it, CI tells you which one.
 
 ## Status
 
-Active research engine, and a large one — hundreds of modules and thousands of tests, all green in CI. It's real and it runs, but it's a research project under steady development, not a finished product. Expect sharp edges, expect it to keep growing, and expect every surprising result to come with the measurement that earned it.
+Active research engine, and a large one — 780+ `holographic_*` modules, ~2,300 mind verbs behind ~3,700 catalog capabilities, and 6,600+ collected tests, all green in CI (the full suite runs sharded, with a per-test budget that skips anything slow unless it is marked critical). It's real and it runs, but it's a research project under steady development, not a finished product. Expect sharp edges, expect it to keep growing, and expect every surprising result to come with the measurement that earned it.
 
 ## License
 

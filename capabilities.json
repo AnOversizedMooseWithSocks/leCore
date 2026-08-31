@@ -3719,6 +3719,25 @@
     },
     {
       "aliases": [
+        "check that two runs are byte identical",
+        "top k with a fixed tie rule",
+        "call the tools on another lecore node",
+        "deterministic number from a key",
+        "evaluate a physically based brdf",
+        "release readiness determinism check"
+      ],
+      "consumes": [],
+      "does": "mind.deterministic_topk(scores, k) and mind.hash_unit(*keys) are the ISA-1 determinism contract as verbs (fixed tie rule; hashlib never hash()); mind.determinism_report(n_facts=) runs the twins probe -- two minds, identical teaching, byte-compare the saved partitions -- a False is a stop-the-release finding. mind.remote_tools(url) / mind.remote_call(url, name, args=) call another leCore node the way leCore is served. mind.brdf_terms(n.h, n.v, n.l, roughness, base_color=, metallic=) returns the GGX D, Smith G, F0 and Schlick F terms.",
+      "example": "import lecore; m=lecore.UnifiedMind(); print(m.deterministic_topk([0.5,0.9,0.9,0.1],2), m.determinism_report(n_facts=20)['byte_identical'])",
+      "method": "deterministic_topk",
+      "name": "Determinism, node client and BRDF doors (the rest of the import-only list)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
         "plot a chart",
         "bar chart from numbers",
         "line plot of a series",
@@ -9594,6 +9613,24 @@
     },
     {
       "aliases": [
+        "calibrated prediction interval",
+        "how sure can I be about this prediction",
+        "is the evidence sparse or contested",
+        "steer a query toward what worked",
+        "measure disagreement between two vectors"
+      ],
+      "consumes": [],
+      "does": "mind.conformal_interval(residuals, prediction, alpha=) wraps a point prediction in a distribution-free (1-alpha) band from held-out residuals (batch split-conformal; adaptive_conformal is the online cousin). mind.epistemic_map(density_a, density_b, disagreement) names the kind of not-knowing -- void / contested / confident -- so a model gathers, arbitrates, or answers; mind.vector_disagreement(a, b) feeds it. mind.semantic_compass() records what worked and steers queries toward it. Wired in sweep 123 from the import-only list: reachable by import was never reachable.",
+      "example": "import lecore, numpy as np; m=lecore.UnifiedMind(); print(m.conformal_interval(np.abs(np.random.default_rng(0).normal(size=100)), 5.0))",
+      "method": "conformal_interval",
+      "name": "Reasoning kit doors (conformal intervals, epistemic map, semantic compass)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Scenes you can describe & adjust"
+    },
+    {
+      "aliases": [
         "is the approximate index accurate on my data",
         "forest recall guarantee",
         "nested descent retrieval",
@@ -12382,6 +12419,25 @@
     },
     {
       "aliases": [
+        "customer service swarm that learns from humans",
+        "escalate to a human and remember the answer",
+        "shared understanding of the codebase across agents",
+        "sync the swarm's knowledge of the code",
+        "a lab of agents on one bus and one memory",
+        "focused agent role reacting to a topic"
+      ],
+      "consumes": [],
+      "does": "Three compositions on existing rails. SERVICE: serve() records what it could not answer; escalations() lists it; resolve(q, a, by=, propagate=) teaches the human's answer with provenance human:<by>, clears the ledger, and contributes to a commons bundle so every other agent serves it next. DEVELOPMENT: codebase_sync(root, only_stale=) teaches file-fingerprinted digests that persist across restarts; stale_facts names files that changed; only_stale re-syncs just those. LAB: role(name, pattern, handler, emit=) subscribes a focused handler on the bus, sharing one memory; roles chain by topic.",
+      "example": "import lecore; m=lecore.UnifiedMind(); m.serve('unknown thing'); print(m.escalations()[0]['question'])",
+      "method": "serve",
+      "name": "Swarm use-case doors (service escalation, shared codebase sync, bus roles)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
         "symbolic regression",
         "find a formula",
         "factor a vector",
@@ -12403,6 +12459,24 @@
       "produces": [],
       "semantic": null,
       "theme": "Data analysis & signals"
+    },
+    {
+      "aliases": [
+        "what did this table look like before",
+        "version history of a table",
+        "undo changes to a table",
+        "create a writable table I own",
+        "diff two versions of a table"
+      ],
+      "consumes": [],
+      "does": "mind.user_table(name, columns, dim=, seed=) is the constructor door the WRITABLE table never had; mind.table_history(table) opens a timeline (works on make_table snapshots too); table_commit(h, table, note=) snapshots; table_as_of(h, version, sql) queries the past; table_diff(h, a, b, pk_col=) names added/removed/changed rows; table_revert(h, version) restores; table_versions(h, pk_col, key) is one row's history. Sweep 123 wired holographic_querytime and caught its first bug the moment it became reachable (it assumed fields a snapshot Table never had).",
+      "example": "import lecore; m=lecore.UnifiedMind(); u=m.user_table('t',['id','v'],dim=256); u.insert({'id':1,'v':1}); h=m.table_history(u); print(m.table_commit(h,u,'first'))",
+      "method": "user_table",
+      "name": "Table history doors (a git-like timeline for a user table)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -18123,7 +18197,7 @@
       "theme": "More capabilities"
     }
   ],
-  "count": 797,
+  "count": 801,
   "schema_version": "1.1",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

@@ -571,7 +571,150 @@ fetch("/game", {method: "POST", body: JSON.stringify({world: "demo",
 `advance=1` (default) makes the stream the world's designated clock; run extra viewers with
 `advance=0`. Start the service with `serve(threads=True)` -- an open stream must never block input.
 
+## 10. The substrate for agents: ask first, remember forever, share wisely
+
+Everything in this section is what an agent harness (openzoo, an MCP client, a script)
+should reach for *before* asking a model. Every block here opens with `# guide-check`
+and runs verbatim in CI (`tests/test_guide_examples.py`); blocks elsewhere in this guide
+are fragments that build on names introduced by their surrounding prose.
+
+**The front door.** `orient()` is generated live from the catalog, so it cannot rot like
+a static skill file: the five-move workflow and the top three existing doors for a topic.
+
+```python
+# guide-check
+import lecore
+mind = lecore.UnifiedMind(dim=256, seed=0)
+o = mind.orient(topic="merge two directory trees")
+assert "merge" in o["directed_to"][0]["name"].lower()
+print(o["workflow"][0])          # serve(query) -- ask before anything; escalation is honest
+```
+
+**Ask before anything.** `serve()` answers from memory, then from a taught *tool reflex*
+(a learned API called with deterministically extracted arguments), then escalates with
+the reason. The model is called only when the substrate cannot serve.
+
+```python
+# guide-check
+import lecore
+mind = lecore.UnifiedMind(dim=256, seed=0)
+mind.teach("what is the boiling point of water at sea level", "100 C, 212 F")
+assert mind.serve("what is the boiling point of water at sea level")["via"] == "memory"
+r = mind.serve("what colour is a quark")
+assert not r["served"] and "escalate" in r["via"] and r["reason"]
+```
+
+**Virtually limitless context, with citations.** `study(root)` digests a directory and
+answers with the source file (and symbol, for code) or refuses off-corpus honestly.
+
+```python
+# guide-check
+import lecore, os, tempfile
+d = tempfile.mkdtemp()
+open(os.path.join(d, "law.md"), "w").write("# Tension\n\n" + "The rope tension law states pull scales with the winch drum radius. " * 4)
+st = lecore.UnifiedMind(dim=256, seed=0).study(d)
+a = st["ask"]("what does the rope tension law state")
+assert a["answerable"] and a["citations"][0].endswith("law.md")
+assert not st["ask"]("recipe for banana bread")["answerable"]
+```
+
+**Wisdom that outlives the model, and a commons that respects privacy.** `bequeath` records
+a lesson with the author's name in its provenance; `wisdom` inherits it in any later mind.
+`contribute` screens a user's shared rows (session-salted rows never leave; path, email,
+phone and key shapes are rejected with reasons on a review sheet); `commons_pool` merges
+bundles with conflicts flagged.
+
+```python
+# guide-check
+import lecore, os, tempfile
+t = tempfile.mkdtemp()
+a = lecore.UnifiedMind(dim=256, seed=0)
+a.teach("what is the derivative of x squared", "2x")
+a.teach("my email", "moose@example.com")
+a.bequeath("write the failure down louder than the win", author="model-a", topic="discipline")
+sheet = a.contribute(os.path.join(t, "a"), author="user-a")
+assert sheet["kept"] == 2 and any("email" in why for _q, why in sheet["rejected"])
+pool = a.commons_pool([os.path.join(t, "a")], os.path.join(t, "commons"))
+b = lecore.UnifiedMind(dim=256, seed=0)
+b.memory_import(os.path.join(t, "commons"))
+assert b.ask("what is the derivative of x squared")["tier"] == "T0"
+assert b.wisdom()["authors"] == ["model-a"] and b.ask("my email")["tier"] != "T0"
+```
+
+**Non-LLM backends.** `api_learn(spec)` turns an OpenAPI spec -- a forecaster, a robot's
+status endpoint -- into callable, discoverable tools that survive save/load; `api_use`
+calls them. A tool reflex then lets `serve()` answer from the tool with no model call.
+
+```python
+# guide-check
+import lecore, json, threading, http.server, socketserver, time, tempfile
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0)); req = json.loads(self.rfile.read(n) or b"{}")
+        body = json.dumps({"fahrenheit": float(req.get("celsius", 0)) * 9 / 5 + 32}).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
+srv = socketserver.TCPServer(("127.0.0.1", 0), H); threading.Thread(target=srv.serve_forever, daemon=True).start(); time.sleep(0.2)
+spec = {"openapi": "3.0.0", "info": {"title": "convertd", "version": "1"}, "servers": [{"url": "http://127.0.0.1:%d" % srv.server_address[1]}],
+        "paths": {"/c2f": {"post": {"operationId": "c_to_f", "summary": "celsius to fahrenheit", "responses": {"200": {"description": "f"}}}}}}
+mind = lecore.UnifiedMind(dim=256, seed=0)
+mind.api_learn(spec, name="convertd")
+mind.tool_reflex_teach("convert 25 celsius to fahrenheit", "convertd", "c_to_f", extract_numbers=["celsius"])
+r = mind.serve("convert 100 celsius to fahrenheit")
+assert r["via"] == "tool-reflex" and r["result"]["fahrenheit"] == 212.0
+root = tempfile.mkdtemp(); mind.learning_save(root)
+again = lecore.UnifiedMind(dim=256, seed=0); again.learning_load(root)
+assert again.serve("convert -40 celsius to fahrenheit")["result"]["fahrenheit"] == -40.0   # the reflex survived a restart
+srv.shutdown()
+```
+
+**Lean partitions, honest fallbacks.** `learning_save(root, audit="regen")` drops the audit
+arrays and replays taught text on load (~195x smaller for pure-taught minds); when a mind
+holds non-taught rows the guard falls back and `audit_regen_reason` says why.
+`partition_report(root)` tells you where the bytes went.
+
+```python
+# guide-check
+import lecore, tempfile, os, glob
+mind = lecore.UnifiedMind(dim=256, seed=0)
+for i in range(30):
+    mind.teach("lean fact %d" % i, "answer %d" % i)
+root = tempfile.mkdtemp()
+r = mind.learning_save(root, audit="regen")
+assert r["audit_regen"] is True
+assert os.path.getsize(glob.glob(os.path.join(root, "**", "state.lecore"), recursive=True)[0]) < 5000
+back = lecore.UnifiedMind(dim=256, seed=0); back.learning_load(root)
+assert back.ask("lean fact 7")["answer"] == "answer 7"
+```
+
+**Merging trees without losing anything.** `merge_trees` gives a sha census with verdicts
+(`ours_is_base`, `theirs_is_base`, `both_changed`) and applies only the unambiguous ones.
+The lesson on record from a real merge: after *any* three-way merge, census definitions
+and signatures against the pre-merge tree -- a "clean" diff3 will silently honour the
+other side's deletions.
+
+```python
+# guide-check
+import lecore, os, tempfile, shutil
+a, b = tempfile.mkdtemp(), tempfile.mkdtemp()
+open(os.path.join(a, "same.py"), "w").write("X = 1\n"); shutil.copy(os.path.join(a, "same.py"), b)
+open(os.path.join(b, "new.py"), "w").write("Y = 2\n")
+r = lecore.UnifiedMind(dim=256, seed=0).merge_trees(a, b, apply=True)
+assert r["identical"] == 1 and os.path.exists(os.path.join(a, "new.py"))
+```
+
+**Over the wire.** The same doors ride the MCP server: `lecore-mcp` is on PATH after
+`pip install leos-core`; `study` / `study_ask` / `wisdom_record` / `wisdom_ask` are curated
+tools, and `lecore_invoke` reaches every faculty. The `initialize` banner carries the
+workflow contract to every connected model.
+
 ## Where to look next
+
+- `docs/WHY_A_HOLOGRAPHIC_VM.md` -- why run one; swarm memory topologies; group learning;
+  many models; importing and synthesizing skills. Runnable, like §10.
+- `docs/USE_CASES.md` -- three swarms that run in CI: a customer-service swarm that learns
+  from its humans, a development swarm with one understanding of the codebase, a lab of
+  focused roles on one bus and one memory.
 
 - **`mind.find_capability("...")`** — ask the engine, in plain English, which call does what.
 - **`CAPABILITIES.md`** — the full menu of capability "homes" (auto-generated from the catalog).

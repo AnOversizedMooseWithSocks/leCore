@@ -36,6 +36,10 @@ _NEGATIVE_MARKERS = ("KEPT NEGATIVE", "KEPT NO-OP")
 EXEMPT = {
     "holographic_unified": "the top-level facade: it imports everything, nothing imports it",
     "holographic_catalog": "the discoverability registry itself",
+    # sweep 124: the bare-name ALIAS MAP moved out of holographic_catalog.py as a DATA module when the
+    # table pushed the file over the giant budget; imported by exactly one engine file (the registry),
+    # which this report treats as "catalog-only" -- the same status as the registry's own parts.
+    "holographic_catalog_aliases": "the registry's bare-name alias table, split out as data",
     # THE REGISTRY, SPLIT. Same status as holographic_catalog above and for the same reason -- these are
     # its body, not independent modules: holographic_catalog.default_catalog() calls each part's
     # register(c) in order, and nothing else may import them. Exempting them here rather than raising a

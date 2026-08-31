@@ -50,6 +50,32 @@ import numpy as np
 from holographic.agents_and_reasoning.holographic_ai import random_vector, cosine
 
 
+
+def word_feats(word):
+    """CHARACTER + MORPHOLOGY FEATURES of one word: the <boundary> character 3/4/5-grams, one
+    stripped prefix (PRE:), one stripped suffix (SUF:), and the residual STEM:. The ONE home
+    (sweep 123): this body lived byte-identically as a nested helper in Lexicon and in
+    unified_p16_unicron -- the duplicate the audit budget carried for many checkpoints; both
+    now delegate here, so an improvement to the morphology list propagates to both."""
+    t = "<" + word + ">"
+    out = [t[i:i + n] for n in (3, 4, 5) for i in range(len(t) - n + 1)]
+    s = word
+    for p in ("un", "re", "in", "dis", "pre", "con", "com", "de", "ex", "sub",
+              "inter", "trans", "over", "under", "mis"):
+        if s.startswith(p) and len(s) - len(p) >= 3:
+            out.append("PRE:" + p)
+            s = s[len(p):]
+            break
+    for q in ("ation", "ment", "ness", "ity", "ive", "ous", "able", "less",
+              "ful", "ing", "ed", "er", "ly", "al", "ic", "s"):
+        if s.endswith(q) and len(s) - len(q) >= 3:
+            out.append("SUF:" + q)
+            s = s[:-len(q)]
+            break
+    out.append("STEM:" + s)
+    return out
+
+
 class Lexicon:
     """Builds word-meaning vectors from definitions (a {word: [definition words]}
     map), by fixed-point iteration on the definition graph. Pass your own
@@ -147,24 +173,7 @@ class Lexicon:
         if not donors or not targets:
             return self
 
-        def feats(word):
-            t = "<" + word + ">"
-            out = [t[i:i + n] for n in (3, 4, 5) for i in range(len(t) - n + 1)]
-            s = word
-            for p in ("un", "re", "in", "dis", "pre", "con", "com", "de", "ex", "sub",
-                      "inter", "trans", "over", "under", "mis"):
-                if s.startswith(p) and len(s) - len(p) >= 3:
-                    out.append("PRE:" + p)
-                    s = s[len(p):]
-                    break
-            for q in ("ation", "ment", "ness", "ity", "ive", "ous", "able", "less", "ful",
-                      "ing", "ed", "er", "ly", "al", "ic", "s"):
-                if s.endswith(q) and len(s) - len(q) >= 3:
-                    out.append("SUF:" + q)
-                    s = s[:-len(q)]
-                    break
-            out.append("STEM:" + s)
-            return out
+        feats = word_feats                      # promoted (sweep 123): one home, above
 
         counts = {}
         for w in donors:

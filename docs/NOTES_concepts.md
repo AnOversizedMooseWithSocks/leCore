@@ -84834,3 +84834,328 @@ or stronger form; the one design it did better is now ours too. The
 residual diff is wording.
 
 All gates + regen --check green.
+
+--------------------------------------------------------------------------------
+SWEEP 122 -- THE OLDER BRANCH (ALREADY OURS), AND OPENZOO TOLD ABOUT ITS
+OWN DOORS
+
+THE BRIEF (Moose): another branch zip -- forked-from or unmerged? -- and
+make sure openzoo takes advantage of what the merges added/improved.
+
+THE ZIP, by measurement: an OLDER point on the same sibling line the
+sweep-120 zip came from (that zip extends it in 7 files and carries 10
+files it lacks). Against ours: 0 files it purely extends. Three
+censuses: (1) definitions missing anywhere in ours: NONE; (2) the
+'1,734 their-only lines' in p20 were MOVED code -- 139/151 of its
+functions exist with byte-identical bodies elsewhere in ours (p20b/
+p21/p22/p23); (3) the 20 functions with differing bodies, read one by
+one: our newer versions (polymorphic explain, agent_loop's
+RuntimeError, record_every, levers 7, regen export) or docstring
+wording; their alias-phrase scorer (_strip_filler / q_phrase exact
+alias hits) is ALREADY ours; their manifold_chart(isomap) lives in our
+p23. VERDICT: nothing to merge. It is where the sibling line forked
+from, plus polish that the sibling carried forward and sweep 120/121
+absorbed.
+
+OPENZOO: integrations/openzoo/PLATFORM_GUIDE.md is the operator's
+manual -- and it named NONE of the doors built since sweep 93, in the
+very sections that ask for them. Now it does, each as a RUNNABLE
+snippet where a claim is made: orient() at the front door (sec 4);
+serve() first + tool reflexes + api_learn for non-LLM backends +
+audit='regen' saves (sec 5); bequeath/wisdom + the commons with its
+review sheet and opt-out (sec 6); study() with citations as the
+cheapest inference (sec 7); the session guard, pinned (sec 3).
+UN-ROTTABLE: tests/test_platform_guide_examples.py runs every
+`# guide-check` block in its own subprocess -- the README rule applied
+to the guide. First run caught an unclosed code fence swallowing the
+next paragraph. 4 blocks, all green.
+
+All gates + regen --check green.
+
+--------------------------------------------------------------------------------
+SWEEP 123 -- THE DOCUMENTATION SWEEP: MEASURED, THEN MOVED
+
+THE BRIEF (Moose): docs up to date, thorough, covering the diverse
+capabilities.
+
+WHAT WAS TRUE (measured first):
+- The GENERATED layer was current by construction: capdoc/docgen/
+  regen_docs --check (9 outputs) refuse drift; every faculty has a
+  card, an example that runs, a docstring (reachability 0/0).
+- The HUMAN layer was not: of the doors built across sweeps 93-122
+  (orient, serve, study, bequeath/wisdom, contribute/commons_pool,
+  api_learn, tool_reflex_teach, merge_trees, partition_report,
+  audit='regen', table_analyze), only ONE human document mentioned any
+  of them -- the openzoo guide written the day before. README's lever
+  section said SIX; the engine has seven. FEATURE_GUIDE's 31 code
+  blocks were run by NO test -- and run sequentially they fail at
+  block 3 on names the prose never defines (mat_a, w_mask): the guide
+  is prose-with-fragments, and nothing said so.
+
+SHIPPED:
+- FEATURE_GUIDE §10 'The substrate for agents': orient, serve +
+  reflex, study with citations, wisdom + the commons, api_learn +
+  restart-proof reflexes, lean partitions with honest fallback,
+  merge_trees with the def/signature-census lesson, the wire. SEVEN
+  blocks, every one runnable, every one asserting its claim.
+- THE CONVENTION, stated in the guide: blocks opening with
+  `# guide-check` run verbatim in CI; other blocks are fragments that
+  build on their section's prose. tests/test_guide_examples.py (the
+  sweep-122 test generalised) runs every guide-check block in both
+  guides in its own subprocess: 7 + 4, green.
+- README: seven levers (the engine's levers() is the source of truth;
+  the wheel smoke pins the floor at six), lever 7 written up, and a
+  'for agents and harnesses' pointer to §10 and the openzoo guide.
+- docs/WHATS_NEW.md: the agent substrate, one line per door, and the
+  housekeeping users can feel (lecore-mcp on PATH, one memo container,
+  the always-on per-test budget).
+- All generated docs regenerated after the human edits; regen --check
+  green.
+
+THE INSTRUMENT: tools/doc_coverage.py -- which UnifiedMind verbs does
+NO human document mention? MEASURED: 2,318 verbs, 240 mentioned (10%),
+2,078 unmentioned; 761 of 894 native-card verbs unmentioned. Gate
+(tests/test_doc_coverage.py): the unmentioned count may only SHRINK
+(budget recorded at 2,078). KEPT NEGATIVE: the first draft gated
+'every native door documented' -- a 761-item bar on day one; a bar
+nobody clears is a bar nobody runs. Reported loudly, gated where it
+can be honoured.
+
+NEXT RUNGS (measured, ordered): convert FEATURE_GUIDE's 27 fragment
+blocks into guide-check blocks section by section (each conversion
+lowers the fragment count and can be pinned); drive the 2,078 down by
+family -- one guide section per family with runnable examples
+(rendering and mesh first: the largest verb families with the thinnest
+human coverage); the door-level gate returns when the number is
+honest.
+
+--------------------------------------------------------------------------------
+SWEEP 124 -- THREE SWEEPS (SEMANTIC, UNIFIED WIRING, VSA APPLICATIONS)
+AND THE POLISH BACKLOG
+
+1. SEMANTIC SYSTEM -- MEASURED, THEN MOVED.
+   The live instrument is tools/semantic/catalog_exam.py (35 stranger
+   asks over 3,753 capabilities). Start: token baseline top-1 13/35,
+   top-5 23/35, median 2.0, worst 51. Twelve golds were INVISIBLE (rank
+   61 of 60) -- and for most, a DESCRIPTIVE card for the same faculty
+   sat at top-1 while the bare faculty name the exam wants was dark:
+   the sweep-92 wave, again. Fix: twelve bare-name alias-map entries
+   from the user's mouth (holographic_coldstore, brep_boolean,
+   mesh_qem_decimate, points_to_mesh, map_bind, unbind_keys,
+   learn_cleanup, find_capability, file_replace, rigid_body,
+   denoise_tensor, advect_field). AFTER: top-1 23/35, top-5 34/35,
+   median 1.0. One ask still worst-51; next alias sweep's first target.
+   The DENSE routing index shipped in lecore_data (index_128d.npz) is
+   STALE: 620 entries vs 784 modules -- self-healing: the semantic
+   workflow commits the refreshed index (semantic-bot) once it runs
+   green on this line, which the sweep-113 docstring fix unblocks.
+   THE SPLIT: the alias-map growth pushed holographic_catalog.py to
+   2,013 lines (fifth giant). Split, not re-baselined: the table now
+   lives in holographic_catalog_aliases.py as a DATA module (the
+   duplicate-key audit globs holographic_catalog*.py, so it stays
+   watched; wiring_report knows it as catalog-only, like the parts).
+   catalog.py 1,014 lines; 294 alias entries; catalog 816 cards.
+
+2. UNIFIED MIND WIRING -- MEASURED CLEAN, ONE INSTRUMENT REVIVED.
+   28 parts, 2,385 methods, ZERO names defined in more than one part
+   (the explain/ask shadowing class is gone); reachability 0/0;
+   wiring_report green; check_part green on every part; the two
+   module-level collisions (validate_c, void_probe) are budgeted.
+   tools/delegation_drift.py could not import lecore -- an audit that
+   cannot run is an audit nobody runs. Fixed (repo root on sys.path).
+   It reports 99 likely-drifted wrapper signatures at overlap >= 0.80,
+   report-only by its own design: a real, now-visible backlog.
+
+3. VSA APPLICATIONS -- THE MACHINERY IS ALIVE; THE LIBRARY DOES NOT
+   EXIST. vsarun / vsabake / query_programs / signalprogram selftests
+   all run (two SKIPPED-SUBJECT without a model, correctly). Six
+   application-shaped asks route to real faculties (VM, demux_series,
+   extract_roles, composite_layers, procedural textures, spectral
+   PDE). But there is NO curated collection of end-to-end, named,
+   runnable applications -- no examples/ or applications/ dir; GALLERY
+   .md has five sections; writing_vsa_programs.md is an ISA manual, not
+   a cookbook.
+
+THE POLISH BACKLOG (measured targets; each an honest sweep):
+ A. VSA APPLICATIONS LIBRARY -- applications/<domain>/<name>.py, each
+    a runnable, selftested, catalogued program with a guide-check
+    snippet, one per domain, seeded from the asks above:
+    - advanced algorithms: resonator factoring at scale; Physarum
+      maze on user topology; WoS/Laplace solvers; loop subdivision on
+      hypervector sequences; the abstraction ladder on a real corpus.
+    - math: exact spectral PDE solve; symbolic term-ridge solver;
+      conformal prediction; the capacity-law calculator.
+    - search / parse / decompose: role extraction of a sentence;
+      resonator decomposition of a composite record; query programs
+      over a taught partition; BM25 + gate cascade over a corpus.
+    - demux: demux_series on a mixed signal; dataset_decompose;
+      signalprogram refusals on noise.
+    - 3D: points_to_mesh -> mesh_qem_decimate -> mesh_uv_unwrap ->
+      texture -> scene_render -> GIF; brep_boolean; rigid_body sim.
+    - 2D art: procedural texture menu -> composite_layers ->
+      denoise -> style transfer -> chart_svg; the fountain/fractal
+      apps already in app.py as CLI-runnable programs.
+    Each lands with: catalog card + aliases (exam battery), a mind
+    verb (`mind.app_run(name)` dispatcher, Rule 0 first), a GALLERY.md
+    entry with the produced artefact, and a doc_coverage-visible
+    mention.
+ B. SEMANTIC: the worst-51 ask; a catalog-exam ask per FAMILY (the 35
+    asks cover ~8 families; mesh/rendering/simulation are thin);
+    knowledge_index accept-sets reviewed against the new splits (p03b/
+    p09b/p20b names); the per-module routing bones after the index
+    refresh; the semantic= tagging drive (599 cards, gated on the
+    ComfyUI nodegen consumer).
+ C. UNIFIED MIND: burn down the 99 delegation drifts family by family
+    and flip delegation_drift to --gate; part-cap watch (p16 at 1,977,
+    p14 at 1,946 -- split before touching); per-tier session-guard
+    probe battery (T1 kb_search etc.); orient() as a callable MCP tool.
+ D. DOCS (from sweep 123): convert FEATURE_GUIDE's 27 fragment blocks
+    to guide-check blocks; one runnable guide section per family;
+    drive the 2,078 unmentioned verbs down; return the door-level gate
+    when the number is honest.
+ E. ENGINE WALLS (from the gauntlets): RAM/fact at load (per-row
+    attribution + cold tier + regen-replay); baked BM25 handles past
+    10k cards; reflex trace-confidence gate; api_learn $ref resolution;
+    study paging past the 800-chunk cap; uniform MCP error envelope;
+    deterministic journal timestamps.
+
+All gates + regen --check green; exam/duplication/split/battery
+tests green (64 passed).
+
+--------------------------------------------------------------------------------
+SWEEP 124 -- WHY A HOLOGRAPHIC VM: THE CASE, THE SWARM, THE SYNTHESIS
+
+THE BRIEF (Moose): documentation for WHY one would run a holographic
+virtual machine and WHAT can be done with it; swarms with shared or
+partitioned memory that distil wisdom to every partition; group
+learning and self-improvement at swarm scale; many models; learning
+new APIs; importing skills and tools and SYNTHESIZING new ones from
+what exists and what the task needs.
+
+RULE 0 FIRST -- every claim named a real faculty before a word was
+written: HoloMachine (define/assemble/run/CALL -- programs as data),
+shared_workspace (roles coordinate through slots), farm +
+distributed_bus (across machines), commons_pool + contribute +
+bequeath/wisdom (distillation across partitions), agent_benchmark +
+alias_gaps + serve (measured improvement loops), agent_boot /
+remote_llm / zoo_attach / the ten harnesses / api_learn (many models,
+non-LLM included), suggest_pipeline over io kinds (SKILL SYNTHESIS by
+consumes->produces chaining) and VM define/CALL (skills built from
+skills). One thing found NOT to exist as named: a verb called
+'skill_synthesize' -- the capability is suggest_pipeline + the
+machine's define/CALL, and the document says so rather than inventing
+a name.
+
+SHIPPED: docs/WHY_A_HOLOGRAPHIC_VM.md -- six sections (why; what;
+swarm memory shared / partitioned / distilled / across machines; group
+learning; many models; import / discover / synthesize), SIX
+`# guide-check` blocks: a VM program that defines and CALLs a stored
+function (bind recovered by cosine, trace checked); orient's counts;
+THREE partitions distilling into a commons that a fourth,
+never-taught partition draws -- facts at T0, wisdom attributed,
+private rows refused; roles through workspace slots; a member learns
+and serve() names what it cannot yet serve; pipelines synthesized
+image->mesh and mesh->image from declared io kinds. Wired into
+tests/test_guide_examples.py; pointed to from README, FEATURE_GUIDE
+'Where to look next', and WHATS_NEW.
+
+TWO SIGHTINGS while writing (both probed, both fixed before the
+blocks were called honest): bind/cosine live in holographic_ai, not a
+guessed holographic_ops; suggest_pipeline's consumes/produces are
+LISTS, not strings. The guide test caught both -- exactly its job.
+
+Coverage: unmentioned verbs 2,078 -> 2,075; budget lowered. All
+gates + regen --check green.
+
+--------------------------------------------------------------------------------
+SWEEP 125 -- THREE SWARMS THAT RUN, AND THE THIRD FACE OF THE MERGE LESSON
+
+THE BRIEF (Moose): support three users -- a customer-service swarm that
+answers what it knows, escalates the rest to a human, learns the
+resolution and propagates it; a development swarm with ONE shared,
+persistent understanding of the codebase that updates when code
+changes; a lab of focused agents on one workspace and one memory
+(answerers, researchers, reporters, experimenters) that learn together
+but stay on task.
+
+RULE 0: the rails all existed -- serve/teach/commons (service),
+study + teach_about + stale_facts (an edit flips a file's facts stale;
+measured), bus.subscribe(pattern, handler) (roles). What was missing
+was three DOORS, each a thin composition, in a new part
+(holographic_unified_p25_swarm_roles -- p24 already existed on the
+sibling line; the number collided and check_part said so):
+- escalations() + resolve(q, a, by=, propagate=): serve() now records
+  every ask it could not serve (the ledger); a human resolve() teaches
+  the answer with provenance human:<by>, clears the ledger, and
+  contributes to a commons bundle so other agents serve it next.
+- codebase_sync(root, only_stale=): study the tree once; teach each
+  file's digest FINGERPRINTED to the file; persists across restarts in
+  the partition; stale_facts names changed files; only_stale re-syncs
+  just those.
+- role(name, pattern, handler, emit=) + roles(): a focused handler on
+  the shared bus with the mind in hand; roles chain by topic.
+ACCEPTANCE (all measured): served / escalated / resolved by 'jane' /
+served by a DIFFERENT agent after the pool with provenance intact;
+sync 2 files -> restart -> second agent at T0 -> edit -> exactly
+auth.py stale -> re-sync 1 file, skip 1; four lab roles handled
+2/2/2/1 messages, three reports on the bus.
+
+SHIPPED: docs/USE_CASES.md (three CI-run scenarios, in the guide
+test), the sweep-125 pin, a card (595 chars, first try under 600 --
+the arithmetic habit holds), alias entries for the five new verbs.
+
+THE THIRD FACE OF THE MERGE LESSON (sweep 120's diff3, still teaching):
+the buried audit tripped on role/roles because the alias-map ANCHOR
+was gone from holographic_catalog.py -- it had shrunk 1,983 -> 1,014
+lines in a 'clean' merge. Neither the def-name census nor the
+signature census can see DATA. A LINE-COUNT census (any file shrinking
+>10%) found three files. Then the correction to my own reflex: the
+catalog's 970 lines were NOT lost -- the sibling line had MOVED the
+alias table into holographic_catalog_aliases.py (294 entries, the
+union) and the merged catalog imports it; my wholesale restore
+reverted their improvement, so the merged catalog went back and the
+new aliases landed in the data module. The other two shrinks (install
+_lecore -155 non-definition lines; assimilation/README's --galvatron
+docs) WERE our newer content -- restored. RULE, complete now: after a
+merge, census DEFINITIONS, SIGNATURES, and LINE COUNTS; and before
+restoring a shrunk file, check whether the content MOVED. reachability:
+the data module declared infrastructure.
+
+Suite 26+1; battery green (70 passed with the new pins); audits 0/0/0;
+regen --check green; coverage budget 2,074.
+
+--------------------------------------------------------------------------------
+SWEEP 126 -- THE README, BROUGHT LEVEL WITH THE ENGINE
+
+THE BRIEF (Moose): the README must be up to date and cover everything
+offered.
+
+MEASURED FIRST: the README's skeleton was sound (20 sections, its own
+blocks CI-run), but its 'What can it do?' families predated the agent
+substrate entirely -- no persistence-across-models, no serve/reflex/
+api_learn/escalation/codebase_sync/roles, no MCP entry point, no study
+with citations; 'How do you use it?' named neither lecore-mcp nor the
+service/mcp extras; 'Learning more' listed none of the three newest
+documents; 'Status' said 'hundreds of modules and thousands of tests'.
+
+SHIPPED, each edit anchored on the live numbers:
+- Three new capability families in the user's language: 'Remember
+  across sessions, models and machines' (partitions, session guard,
+  rollover, regen, commons, wisdom, byte-identical twins); 'Serve
+  agents and swarms' (orient, serve, reflexes, api_learn, escalations/
+  resolve, codebase_sync, role, lecore-mcp, ten harnesses + openzoo);
+  'Read code and data, with citations' (study, repo maps, file tools,
+  merge_trees, analyst doors).
+- Install: `lecore-mcp --selftest` after the base install; the
+  [service] and [mcp] extras in the extras table.
+- Learning more: WHY_A_HOLOGRAPHIC_VM, USE_CASES, the openzoo
+  PLATFORM_GUIDE, WHATS_NEW, PACKAGING -- above FEATURE_GUIDE.
+- How the docs stay honest: the README blocks, the guide-check blocks
+  in four guides, and the doc-coverage budget -- all named as the CI
+  gates they are.
+- Status: MEASURED -- 788 holographic_* modules (written as 780+),
+  2,323 mind verbs (~2,300), 3,761 catalog capabilities (~3,700),
+  6,661 collected tests (6,600+), the sharded full suite with the
+  always-on per-test budget.
+README blocks still run (test_readme_examples); coverage budget holds
+(2,074, mentioned verbs 240 -> 249); regen --check green.

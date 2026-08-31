@@ -68,13 +68,15 @@ from holographic.unified.holographic_unified_p21_codetools import _UnifiedPart21
 # moved methods resolve from p22/p23 with byte-identical bodies.
 from holographic.unified.holographic_unified_p22_zoo2 import _UnifiedPart22
 from holographic.unified.holographic_unified_p23_zoo3 import _UnifiedPart23
+from holographic.unified.holographic_unified_p24_wired import _UnifiedPart24
+from holographic.unified.holographic_unified_p25_swarm_roles import _UnifiedPart25
 # MERGE 2026-08: upstream shipped its OWN _UnifiedPart19 (p19_verify -- answer
 # verification faculties). Both live here: upstream's rides as _UnifiedPart19V, ours
 # keeps the alias; MRO puts our arc first (p20 > p19_lever7 > p19_verify > base parts).
 from holographic.unified.holographic_unified_p19_verify import _UnifiedPart19 as _UnifiedPart19V
 
 
-class UnifiedMind(_UnifiedPart21, _UnifiedPart22, _UnifiedPart23, _UnifiedPart20, _UnifiedPart20B, _UnifiedPart19, _UnifiedPart19V, _UnifiedPart01, _UnifiedPart02, _UnifiedPart03, _UnifiedPart03B, _UnifiedPart04, _UnifiedPart05, _UnifiedPart06, _UnifiedPart07, _UnifiedPart08, _UnifiedPart09, _UnifiedPart09B, _UnifiedPart10, _UnifiedPart11, _UnifiedPart12, _UnifiedPart13, _UnifiedPart14, _UnifiedPart15, _UnifiedPart16, _UnifiedPart17, _UnifiedPart18):
+class UnifiedMind(_UnifiedPart21, _UnifiedPart22, _UnifiedPart23, _UnifiedPart20, _UnifiedPart20B, _UnifiedPart19, _UnifiedPart19V, _UnifiedPart01, _UnifiedPart02, _UnifiedPart03, _UnifiedPart03B, _UnifiedPart04, _UnifiedPart05, _UnifiedPart06, _UnifiedPart07, _UnifiedPart08, _UnifiedPart09, _UnifiedPart09B, _UnifiedPart10, _UnifiedPart11, _UnifiedPart12, _UnifiedPart13, _UnifiedPart14, _UnifiedPart15, _UnifiedPart16, _UnifiedPart17, _UnifiedPart18, _UnifiedPart24, _UnifiedPart25):
     """Perceive once, into one space; remember, organize, recall, and decide over it.
 
     THE THREE MINDS -- one division of labour, so this never gets confusing again:
