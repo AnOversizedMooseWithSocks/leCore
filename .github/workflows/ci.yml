@@ -35,7 +35,10 @@ on:
 # "superseding" push for a schedule anyway.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) }}
+  # sweep 119: cancelling in-progress PUSH runs is what produced the 'skipped because a higher-priority
+  # request exists' runs Moose had to re-run by hand -- including runs cancelled during their post-steps.
+  # A branch build now always runs to its own verdict; only superseded PR runs are cancelled.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # GATES FIRST, THEN TESTS. `gates` (docs drift, apiquickref, skill_lint,
@@ -395,7 +398,11 @@ jobs:
   # balances by CI seconds, and the sanity step's --budget guard has real numbers to guard with.
   durations:
     needs: full-suite
-    if: always() && github.event_name != 'pull_request'
+    # sweep 119: `always()` here ran this job on every PUSH, where full-suite is SKIPPED by design (it is
+    # weekly / manual / tag-only) -- no artifacts, the shell glob passed the literal 'shard_*.log' as one
+    # 'log', the merge exited 1, and the whole `tests` workflow went red, which blocks publishing. Run
+    # only when the suite actually ran (success or a partial run with cancelled shards still yields logs).
+    if: ${{ !cancelled() && contains(fromJSON('["success","failure"]'), needs.full-suite.result) && github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -415,7 +422,11 @@ jobs:
           pattern: durations-*
           merge-multiple: true
       - name: Merge into tools/test_durations.json
-        run: python tools/shard_tests.py --merge-logs shard_*.log
+        run: |
+          shopt -s nullglob
+          logs=(shard_*.log)
+          if [ ${#logs[@]} -eq 0 ]; then echo "no shard logs downloaded -- nothing to merge"; exit 0; fi
+          python tools/shard_tests.py --merge-logs "${logs[@]}" || echo "::warning::no durations parsed from the shard logs"
       - name: Commit the refreshed durations
         run: |
           git config user.name  "docs-bot"
