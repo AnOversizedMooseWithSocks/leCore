@@ -73,6 +73,117 @@ def test_delegate_and_ux_sweep_79(tmp_path):
         assert "nothing similar" in str(e)
 
 
+def test_release_audit_sweep_123(tmp_path):
+    """Sweep-123 pin -- the release audit's deliverables, end to end: (1) the dark doors
+    are real mind faculties (reasoning kit, table history + user_table, determinism,
+    BRDF, node client); (2) table history works on BOTH table shapes (the bug the wiring
+    exposed); (3) the determinism twins report says byte-identical; (4) digits at the
+    reflex belt are exact-match (the sweep-109 residual is gone); (5) a bad MCP argument
+    comes back as a STRUCTURED error naming the tool's real parameters."""
+    import json, os, sys, subprocess, time
+    import numpy as np
+    import lecore
+    m = lecore.UnifiedMind(dim=256, seed=0)
+    lo, hi = m.conformal_interval(np.abs(np.random.default_rng(0).normal(size=200)), 10.0, alpha=0.1)
+    assert lo < 10.0 < hi
+    assert m.epistemic_map(1, 5, 0.3) != m.epistemic_map(4, 4, 0.01)
+    u = m.user_table("t", ["id", "v"], dim=256, seed=0)
+    u.insert({"id": 1, "v": 10})
+    h = m.table_history(u)
+    v1 = m.table_commit(h, u, "first")
+    u.insert({"id": 2, "v": 20})
+    v2 = m.table_commit(h, u, "second")
+    assert m.table_diff(h, v1, v2, pk_col="id")["added"], "history must see the insert"
+    snap = m.make_table([{"id": 1, "v": 10}], roles=["id", "v"], dim=256, seed=0)
+    assert m.table_commit(m.table_history(snap), snap, "snap") == 0, "snapshot tables too"
+    assert list(m.deterministic_topk([0.5, 0.9, 0.9, 0.1], 2)) == [1, 2], "the fixed tie rule"
+    assert m.hash_unit("a", 1) == m.hash_unit("a", 1)
+    assert set(m.brdf_terms(0.9, 0.8, 0.7, 0.4, base_color=[0.8, 0.2, 0.1], metallic=0.5)) == {"D", "G", "F0", "F"}
+    assert m.determinism_report(n_facts=40)["byte_identical"], "STOP THE RELEASE"
+    m3 = lecore.UnifiedMind(dim=256, seed=0)
+    for s in range(3):
+        m3._session = "user-%d" % s
+        for i in range(2):
+            m3.teach("secret %d of session %d" % (i, s), "payload-%d-%d" % (s, i))
+    m3._session = "user-1"
+    for s in (0, 2):
+        a = str(m3.ask("secret 0 of session %d" % s).get("answer") or "")
+        assert not a.startswith("payload-"), "digit aliasing served a wrong row: %r" % a
+    assert m3.ask("secret 0 of session 1").get("answer") == "payload-1-0"
+    srv = subprocess.Popen([sys.executable, "holographic_mcp.py"], stdin=subprocess.PIPE,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                           env=dict(os.environ, PYTHONHASHSEED="0"), text=True, bufsize=1)
+    try:
+        srv.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 0, "method": "initialize",
+                                    "params": {}}) + chr(10))
+        srv.stdin.flush()
+        srv.stdout.readline()
+        srv.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                    "params": {"name": "memory_write",
+                                               "arguments": {"content": "wrong name"}}}) + chr(10))
+        srv.stdin.flush()
+        while True:
+            line = srv.stdout.readline()
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            if r.get("id") == 1:
+                break
+        body = json.loads(r["result"]["content"][0]["text"])
+        assert r["result"]["isError"] and body["type"] == "KeyError"
+        assert "text" in body.get("expected_arguments", []), body
+    finally:
+        srv.terminate()
+
+
+def test_swarm_use_cases_sweep_125(tmp_path):
+    """Sweep-125 pin -- three swarm use cases end to end: (1) service: a served question,
+    an escalated one on the ledger, a human resolve() that clears it and propagates so a
+    DIFFERENT agent serves it from memory; (2) development: codebase_sync teaches
+    file-fingerprinted digests that survive a restart, an edit marks exactly that file
+    stale, only_stale re-syncs one file; (3) lab: roles chained on the bus (chat ->
+    researcher -> findings -> reporter -> reports; data -> experimenter) sharing one mind."""
+    import os, time, lecore
+    t = str(tmp_path)
+    a = lecore.UnifiedMind(dim=256, seed=0)
+    a.teach("how do I reset my password", "use the login-page link")
+    assert a.serve("how do I reset my password")["via"] == "memory"
+    assert a.serve("can I transfer my subscription")["via"] == "escalate"
+    assert [e["question"] for e in a.escalations()] == ["can I transfer my subscription"]
+    r = a.resolve("can I transfer my subscription", "yes, support moves it", by="jane",
+                  propagate=os.path.join(t, "b"))
+    assert r["taught"] and r["cleared"] and a.escalations() == []
+    a.commons_pool([os.path.join(t, "b")], os.path.join(t, "commons"))
+    b = lecore.UnifiedMind(dim=256, seed=0)
+    b.memory_import(os.path.join(t, "commons"))
+    assert b.serve("can I transfer my subscription")["via"] == "memory"
+    repo = os.path.join(t, "repo", "pkg"); os.makedirs(repo)
+    # study harvests docstrings longer than 60 chars -- real modules pass; stubs must too
+    open(os.path.join(repo, "billing.py"), "w").write(
+        '"""Billing: computes invoices from metered usage and applies the customer plan discount."""\n')
+    open(os.path.join(repo, "auth.py"), "w").write(
+        '"""Auth: verifies session tokens and refreshes them shortly before they expire."""\n')
+    d1 = lecore.UnifiedMind(dim=256, seed=0)
+    assert d1.codebase_sync(os.path.join(t, "repo"))["taught"] == 2
+    d1.learning_save(os.path.join(t, "part"))
+    d2 = lecore.UnifiedMind(dim=256, seed=0); d2.learning_load(os.path.join(t, "part"))
+    assert d2.ask("what does pkg/billing.py do")["tier"] == "T0"
+    time.sleep(1.1)
+    open(os.path.join(repo, "auth.py"), "a").write("def revoke(t):\n    return None\n")
+    assert d2.stale_facts(root=os.path.join(t, "repo"))["stale"] == ["what does pkg/auth.py do"]
+    s2 = d2.codebase_sync(os.path.join(t, "repo"), only_stale=True)
+    assert s2["taught"] == 1 and s2["skipped"] == 1
+    lab = lecore.UnifiedMind(dim=256, seed=0)
+    lab.teach("who runs the lab", "dr. moose")
+    lab.role("answerer", "chat", lambda p, mind: mind.serve(str(p)), emit="answers")
+    lab.role("reporter", "answers", lambda p, mind: {"report": str(p.get("answer"))}, emit="reports")
+    lab.bus().publish("chat", "who runs the lab")
+    handled = {r_["name"]: r_["handled"] for r_ in lab.roles()}
+    assert handled == {"answerer": 1, "reporter": 1}
+    assert len(lab.bus().history("reports")) == 1
+
+
 def test_toolmemo_single_store_sweep_111(tmp_path):
     """Sweep-111 pin (updated sweep 112 -- .lecore, not .json, per the holographic-
     format rule): the memo is ONE container file, not a shard farm. Legacy per-call

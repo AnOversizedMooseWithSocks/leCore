@@ -8,8 +8,9 @@ download is anonymous by construction).
 Linux / macOS:
 
     ./assimilation/assimilate.sh --eval    # 1. download + assimilate + MEASURE
-    ./assimilation/chat.sh --both          # 2. same prompt to both models, side by side
-    ./assimilation/chat.sh                 # 3. just talk to the assimilated one
+    ./assimilation/install.sh              # 2. leCore INTO the assimilated model
+                                           #    (-> work/galvatron = the point)
+    ./assimilation/chat.sh --both --galvatron   # 3. untouched vs Galvatron, timed
 
 Windows (same flags, same behaviour):
 
@@ -47,3 +48,15 @@ failed run.
 Nothing here touches the leCore engine's dependencies: torch/transformers live
 only in this folder's venv, as the measurement-and-runtime instrument. The
 engine that rewrites the weights remains NumPy + stdlib.
+
+## The chat has a mind now (external memory, cp86)
+
+Every chat mode boots a leCore memory beside the model (default
+`assimilation/work/chat_memory`, or `--memory DIR`, or `$LECORE_PARTITION`;
+`--no-memory` for the old raw behaviour). Taught knowledge answers FIRST with
+provenance -- `[MEMORY taught] ...` -- before any tokens are spent; unknowns fall
+through to the model honestly. In-chat verbs: `teach: q = a` (stored and saved
+immediately), `wrong: q` / `veto: q` (tombstoned across restarts). This is the
+same job a harness like OpenWebUI's store performs, played by the engine itself:
+numpy + stdlib, no new dependencies in the venv, continuity between sessions
+verified (teach -> restart -> answers; veto -> restart -> stays dead).

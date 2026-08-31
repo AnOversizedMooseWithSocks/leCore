@@ -415,11 +415,17 @@ class _UnifiedPart13:
                                        f" the old regime stale.")
         return choice
 
-    def describe(self):
+    def describe(self, name=None):
         """A human-readable one-line summary of what this mind currently HOLDS: how many memory prototypes over how
         many labels, the size of the recall index, the decision brain and its action set, and any learned sequence
         generators. Takes no arguments and returns a string -- handy for logging or a quick 'what do you know?' check.
         (For a machine-readable skill card of a method or capability, use describe_skill(name) instead.)"""
+        # POLYMORPHIC (sweep 123, the 'describe() arity trap' from the backlog): a caller who
+        # writes describe("serve") wants the SKILL CARD, and got a TypeError instead. With a
+        # name this routes to describe_skill(name); bare describe() is byte-for-byte unchanged.
+        if name is not None:
+            return self.describe_skill(name)
+
         parts = [f"memory of {self.memory.live.size()} prototypes over "
                  f"{len(self.memory.live.counts_by_label())} labels"]
         if self._recall is not None:

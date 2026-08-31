@@ -40,9 +40,17 @@ class TableHistory:
     """A git-like version timeline for one query Table. commit() snapshots it; the P7-P12 verbs read the timeline."""
 
     def __init__(self, table):
-        self.name = table.name
-        self.dim = table.dim
-        self.seed = table.seed
+        # a Table built by mind.make_table carries no .name -- this layer was never
+        # exercised against the engine's own tables until sweep 123 wired it as a faculty
+        # (the import-only family's bug, found the moment it became reachable)
+        self.name = getattr(table, "name", None) or "table"
+        # a snapshot Table (mind.make_table / from_rows) has no dim/seed fields; derive them
+        # so history works on BOTH table shapes the engine builds
+        self.dim = getattr(table, "dim", None) or int(getattr(table, "records", [[0]]).shape[1]
+                                                     if hasattr(getattr(table, "records", None), "shape") else 0)
+        self.seed = getattr(table, "seed", None)
+        if self.seed is None:
+            self.seed = getattr(table.role_vocab, "seed", 0)
         self.roles = list(table.roles)
         self._role_vocab = table.role_vocab           # keep the SAME (deterministic) encoding across versions
         self._value_vocab = table.value_vocab

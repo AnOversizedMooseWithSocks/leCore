@@ -1055,6 +1055,14 @@ import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mem
 ```
 *Find it by:* how many pairs fit in a vector, associative memory size, store facts in one hypervector, key value bundle capacity, what dimension do I need for N items, allocate dimension before storing, iterative cleanup decoder, interference cancellation recall
 
+### Swarm use-case doors (service escalation, shared codebase sync, bus roles)
+Three compositions on existing rails. SERVICE: serve() records what it could not answer; escalations() lists it; resolve(q, a, by=, propagate=) teaches the human's answer with provenance human:<by>, clears the ledger, and contributes to a commons bundle so every other agent serves it next. DEVELOPMENT: codebase_sync(root, only_stale=) teaches file-fingerprinted digests that persist across restarts; stale_facts names files that changed; only_stale re-syncs just those. LAB: role(name, pattern, handler, emit=) subscribes a focused handler on the bus, sharing one memory; roles chain by topic..
+
+```python
+import lecore; m=lecore.UnifiedMind(); m.serve('unknown thing'); print(m.escalations()[0]['question'])
+```
+*Find it by:* customer service swarm that learns from humans, escalate to a human and remember the answer, shared understanding of the codebase across agents, sync the swarm's knowledge of the code, a lab of agents on one bus and one memory, focused agent role reacting to a topic
+
 ### The machine model (leCore's hardware units + memory tiers)
 THE SPEC SHEET, and the first thing to read before building anything that smells like a cache, a kernel, a scheduler or a lookup -- the odds are the unit already exists and has a measured cost model. mind.machine_map() lists every COMPUTE unit (SIMD lanes, SIMT width, texture unit, gather, kernel fusion, batched operator power, RT core, per-thread RNG, atomics-free wave scheduler, occupancy gate) and every MEMORY tier (compiled operator, fat-margin cache, baked grid, content-addressed cache, compressed RAM, cold store, durable delta chain), each with the real module+symbol, its setup cost, its marginal cost, how that marginal cost SCALES, and the conditions under which it must NOT be used. mind.machine_place(...) answers the only question that matters -- does the work amortize the setup -- and returns break_even_n = inf when a unit can NEVER pay. mind.machine_spec_sheet() re-MEASURES all 17 units on your box (a spec sheet that cannot re-measure itself is a rumour), and mind.machine_place_unit(name, baseline_ns, n_calls) runs the placement on those MEASURED numbers rather than on ones you remembered. CAVEAT, and it is the program's oldest error: `baseline_ns` must be the cost of what the unit REPLACES -- kernel_fusion replaces N passes, gather replaces N fetches. Priced against a raw array read (130 ns) almost every unit correctly reports NEVER; if everything says never, check the denominator. KEPT NEGATIVE, measured: the textbook latency ladder (registers < L1 < L2 < RAM) is FALSE here -- a dense array index (132 ns) beats the fat-margin cache (3,485 ns) and the texture unit (376,032 ns) on a single scalar access, because NONE of these is a scalar unit. They are BATCH units: BakedGrid costs 61,765 ns/point at N=1 and 274 ns/point at N=10,000, and `gather`'s marginal cost is CONSTANT in N (182,010x at N=2,048 -- when the rule is reused)..
 
@@ -1524,6 +1532,14 @@ DEPTH MAP -> a CLEAN triangulated HEIGHT-FIELD MESH for single-view photo-to-3D 
 import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.zeros((40,60,3)); yy,xx=np.mgrid[0:40,0:60]; img[:]=(0.3+0.5*yy/39.0)[...,None]; d=m.fuse_depth(img); mesh,vcol=m.depth_to_mesh(d, colour=img, discontinuity=0.1); (mesh.n_vertices>0, vcol is not None)
 ```
 *Find it by:* depth map to mesh, height field mesh from depth, mesh a depth map, photo to a clean mesh, triangulate a depth image, relief mesh from a photo, turn a depth map into geometry
+
+### Determinism, node client and BRDF doors (the rest of the import-only list)
+mind.deterministic_topk(scores, k) and mind.hash_unit(*keys) are the ISA-1 determinism contract as verbs (fixed tie rule; hashlib never hash()); mind.determinism_report(n_facts=) runs the twins probe -- two minds, identical teaching, byte-compare the saved partitions -- a False is a stop-the-release finding. mind.remote_tools(url) / mind.remote_call(url, name, args=) call another leCore node the way leCore is served. mind.brdf_terms(n.h, n.v, n.l, roughness, base_color=, metallic=) returns the GGX D, Smith G, F0 and Schlick F terms..
+
+```python
+import lecore; m=lecore.UnifiedMind(); print(m.deterministic_topk([0.5,0.9,0.9,0.1],2), m.determinism_report(n_facts=20)['byte_identical'])
+```
+*Find it by:* check that two runs are byte identical, top k with a fixed tie rule, call the tools on another lecore node, deterministic number from a key, evaluate a physically based brdf, release readiness determinism check
 
 ### Do the two SDF emitters agree? (both executed, not asserted)
 holographic_sdf.to_glsl and sdfemit.sdf_dialect both emit a map() for one tree, and sdfemit's own header warns that TWO TABLES FOR ONE CONCEPT WILL DISAGREE -- but only one was ever executed, so agreement was narrative. mind.sdf_emitters_agree(tree) now RUNS both: the GLSL through a vec3 shim under g++ (no GL runtime needed), the C dialect under cc, each compared to the Python tree. Bars differ on purpose: C must be EXACT, GLSL gets 1e-5 because GLSL float is 32-bit and to_glsl writes 6-significant-digit literals (cos(0.7) -> 0.764842). MEASURED worst 4.3e-7; they agree..
@@ -3153,6 +3169,14 @@ POST /invoke new_scene used to return '<Scene object at 0x7fe17ba58fe0>' -- a me
 import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); h=m.scene_add(s, name='ball', geometry=m.shape('sphere')); print(m.scene_info(s)['n_objects'])
 ```
 *Find it by:* add an object to my scene, put a sphere into the scene document, change an object I already added, delete an object from the scene, undo my last scene edit, insert an object and get its handle, keep a python object between two api calls, reference a returned object in the next call
+
+### Reasoning kit doors (conformal intervals, epistemic map, semantic compass)
+mind.conformal_interval(residuals, prediction, alpha=) wraps a point prediction in a distribution-free (1-alpha) band from held-out residuals (batch split-conformal; adaptive_conformal is the online cousin). mind.epistemic_map(density_a, density_b, disagreement) names the kind of not-knowing -- void / contested / confident -- so a model gathers, arbitrates, or answers; mind.vector_disagreement(a, b) feeds it. mind.semantic_compass() records what worked and steers queries toward it. Wired in sweep 123 from the import-only list: reachable by import was never reachable..
+
+```python
+import lecore, numpy as np; m=lecore.UnifiedMind(); print(m.conformal_interval(np.abs(np.random.default_rng(0).normal(size=100)), 5.0))
+```
+*Find it by:* calibrated prediction interval, how sure can I be about this prediction, is the evidence sparse or contested, steer a query toward what worked, measure disagreement between two vectors
 
 ### Refine a scene toward a target image (the self-improving loop)
 hand a described scene a TARGET IMAGE and the engine improves itself toward it -- past screenshot-and-hope: Blender's integration shows an agent its render but cannot score candidate edits against a goal and apply the best. apply=True runs the bounded greedy loop (applied/start/final/history); apply=False only SCORES, ranked, touching nothing. Verified live: 'a red sphere' toward a night target, 0.2625 -> 0.0000 -- it rediscovered 'make it night' itself. Deterministic. KEPT NEG: edits are sentences, so it works on SemanticScene; promote via describe_to_scene after.
@@ -5405,6 +5429,13 @@ trace the intersection curve of two implicit surfaces f=0, g=0 (K2, the kernel k
 import numpy as np, lecore; m=lecore.UnifiedMind(); sA=lambda P: np.linalg.norm(np.asarray(P,float),axis=1)-1.0; sB=lambda P: np.linalg.norm(np.asarray(P,float)-np.array([1.,0,0]),axis=1)-1.0; len(m.surface_intersect(sA,sB,(-1.5,-1.5,-1.5),(2,1.5,1.5)))
 ```
 
+### Table history doors (a git-like timeline for a user table)
+mind.user_table(name, columns, dim=, seed=) is the constructor door the WRITABLE table never had; mind.table_history(table) opens a timeline (works on make_table snapshots too); table_commit(h, table, note=) snapshots; table_as_of(h, version, sql) queries the past; table_diff(h, a, b, pk_col=) names added/removed/changed rows; table_revert(h, version) restores; table_versions(h, pk_col, key) is one row's history. Sweep 123 wired holographic_querytime and caught its first bug the moment it became reachable (it assumed fields a snapshot Table never had)..
+
+```python
+import lecore; m=lecore.UnifiedMind(); u=m.user_table('t',['id','v'],dim=256); u.insert({'id':1,'v':1}); h=m.table_history(u); print(m.table_commit(h,u,'first'))
+```
+
 ### Tapered sweep (varying-radius tube along a path)
 sweep a circular cross-section whose RADIUS varies along the path, in a rotation-minimizing frame so the ring does not spin on a curve. The shipped sweep_tube takes one profile for the whole tube and so cannot taper -- which is the one thing every organic appendage does, and why every part in the creature library is built on this.
 
@@ -6219,4 +6250,4 @@ from holographic.caching_and_storage.holographic_substrate import write_multicha
 
 ---
 
-*797 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*801 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

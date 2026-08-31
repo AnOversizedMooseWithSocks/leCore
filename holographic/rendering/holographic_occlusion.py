@@ -182,6 +182,17 @@ def occlusion_recall_forest(cue, codebook, m, forest=None, beam=4, n_trees=4, se
     return out
 
 
+def recall_f1(rec, true_set):
+    """F1 of a recalled (index, weight) list against the true index set -- the ONE metric the
+    sparse-recovery family scores itself with (sweep 123 promotion: this body lived in cosamp,
+    iht AND here). Precision over what was returned, recall over what was planted."""
+    got = set(i for i, _ in rec)
+    tp = len(got & true_set)
+    prec = tp / max(len(got), 1)
+    rc = tp / max(len(true_set), 1)
+    return 2 * prec * rc / max(prec + rc, 1e-12)
+
+
 def occlusion_recall(cue, codebook, m=None, min_share=0.05, max_iter=512, gram=None):
     """Recover the components present in `cue` (a bundle / superposition of `codebook` atoms) by an ordered,
     saturating front-to-back readout: repeatedly take the most-relevant atom, record its share (its projection on the
@@ -328,10 +339,7 @@ def _selftest():
     assert len(gc) <= 2, "GramCache must stay LRU-bounded"
 
     # --- SPEED-2: forest-routed selection -- the N-factor is REAL (sub-linear comparisons) but a regression at scale ---
-    def _f1f(rec, true_set):
-        got = set(i for i, _ in rec); tp = len(got & true_set)
-        p = tp / max(len(got), 1); r = tp / max(len(true_set), 1)
-        return 2 * p * r / max(p + r, 1e-12)
+    _f1f = recall_f1                              # promoted (sweep 123): one home, module level
     # accurate at moderate N (the forest compares enough to find the true atoms)
     rng2 = np.random.default_rng(0)
     cbN = rng2.standard_normal((800, 256)); cbN = cbN / np.linalg.norm(cbN, axis=1, keepdims=True)

@@ -32,6 +32,19 @@ import urllib.error as _urlerr
 from holographic.misc.holographic_bus import MessageBus
 
 
+
+def send_json(handler, code, obj):
+    """Write one JSON reply on a BaseHTTPRequestHandler: status, content-type, content-length,
+    body. The ONE home (sweep 123 promotion): distbus and the coordinator each carried this
+    body byte-identically as a handler method; both now delegate here."""
+    import json as _json
+    body = _json.dumps(obj).encode("utf-8")
+    handler.send_response(code)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+
 class DistributedBus(MessageBus):
     """A MessageBus whose publishes also reach subscribers on peer nodes. Local behaviour is identical to MessageBus;
     the only addition is the fan-out to `peers` and the receive path (deliver_remote)."""
@@ -88,12 +101,7 @@ def _make_bus_handler(bus, token):
             return (not token) or self.headers.get("Authorization", "") == "Bearer %s" % token
 
         def _reply(self, code, obj):
-            body = _json.dumps(obj).encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            send_json(self, code, obj)                # promoted (sweep 123): one home, module level
 
         def do_GET(self):
             if not self._authed():

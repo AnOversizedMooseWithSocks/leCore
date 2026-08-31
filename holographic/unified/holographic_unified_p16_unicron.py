@@ -910,24 +910,7 @@ class _UnifiedPart16:
                              "donors": len(donors), "targets": len(tgt)}
 
         # Same featurizer as Lexicon.bootstrap_by_form, so the two stay in step (cp118).
-        def _feats(word):
-            t = "<" + word + ">"
-            out = [t[i:i + n] for n in (3, 4, 5) for i in range(len(t) - n + 1)]
-            s = word
-            for p in ("un", "re", "in", "dis", "pre", "con", "com", "de", "ex", "sub",
-                      "inter", "trans", "over", "under", "mis"):
-                if s.startswith(p) and len(s) - len(p) >= 3:
-                    out.append("PRE:" + p)
-                    s = s[len(p):]
-                    break
-            for q in ("ation", "ment", "ness", "ity", "ive", "ous", "able", "less",
-                      "ful", "ing", "ed", "er", "ly", "al", "ic", "s"):
-                if s.endswith(q) and len(s) - len(q) >= 3:
-                    out.append("SUF:" + q)
-                    s = s[:-len(q)]
-                    break
-            out.append("STEM:" + s)
-            return out
+        from holographic.agents_and_reasoning.holographic_lexicon import word_feats as _feats  # promoted (sweep 123)
 
         dwords = [w for _, w in donors]
         counts = {}

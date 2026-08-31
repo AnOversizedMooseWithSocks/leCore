@@ -91,12 +91,7 @@ def cosamp_recall(cue, codebook, K, iters=15, tol=1e-10, stats=None):
 # =====================================================================================================
 # Self-test -- perfect across coherence (where occlusion/IHT degrade), exact coefficients, the M/D cliff.
 # =====================================================================================================
-def _f1(rec, true_set):
-    got = set(i for i, _ in rec)
-    tp = len(got & true_set)
-    prec = tp / max(len(got), 1)
-    rc = tp / max(len(true_set), 1)
-    return 2 * prec * rc / max(prec + rc, 1e-12)
+from holographic.rendering.holographic_occlusion import recall_f1 as _f1   # promoted (sweep 123)
 
 
 def _occlusion(cue, cb, m):

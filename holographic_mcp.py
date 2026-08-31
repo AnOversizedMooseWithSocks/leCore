@@ -1905,8 +1905,24 @@ class MCPServer:
                 # MCP convention: tool-level failures ride in content with isError, so the
                 # HOST's model sees the message and can adapt -- a JSON-RPC error would
                 # hide it from the model entirely.
+                # UNIFORM ENVELOPE (sweep 123; the sweep-107 finding): the text was bare
+                # prose ("KeyError: 'text'") while math_eval's errors were structured JSON,
+                # so a client parsing tool text as JSON crashed on the one path it most
+                # needed to read. Every tool error is now the SAME JSON shape, and a
+                # missing-argument KeyError names the tool's real parameters -- the
+                # remedy in the message, not a guess.
+                import json as _ej
+                err = {"error": "%s: %s" % (type(e).__name__, e), "tool": str(tool),
+                       "type": type(e).__name__}
+                if isinstance(e, KeyError):
+                    schema = next((t.get("inputSchema", {}) for t in _TOOLS
+                                   if t.get("name") == tool), {})
+                    props = list((schema.get("properties") or {}).keys())
+                    if props:
+                        err["expected_arguments"] = props
+                        err["hint"] = "missing argument %s; this tool takes: %s" % (e, ", ".join(props))
                 return {"jsonrpc": "2.0", "id": rid, "result": {
-                    "content": [{"type": "text", "text": "%s: %s" % (type(e).__name__, e)}],
+                    "content": [{"type": "text", "text": _ej.dumps(err, default=str)}],
                     "isError": True}}
         return {"jsonrpc": "2.0", "id": rid,
                 "error": {"code": -32601, "message": "method %r not found" % method}}

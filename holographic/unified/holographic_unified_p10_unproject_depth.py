@@ -130,6 +130,15 @@ class _UnifiedPart10:
         from holographic.agents_and_reasoning.holographic_query import explain_program
         return explain_program(machine, program_vec, init_acc=init_acc)
 
+    def user_table(self, name, columns, dim=1024, seed=0):
+        """A WRITABLE query table you own (sweep 123 -- UserTable had no constructor door;
+        table_vacuum / table_analyze / table_history all consumed one that callers could only
+        build by import). CREATE with its columns as role vectors, then .insert(row) /
+        .update / .delete on the handle; run_sql over it; commit versions with
+        table_history. See holographic_query.UserTable."""
+        from holographic.agents_and_reasoning.holographic_query import UserTable
+        return UserTable(str(name), list(columns), dim=int(dim), seed=int(seed))
+
     def make_table(self, rows, roles, dim=1024, seed=0):
         """Query Interface (Phase 1): ingest tabular data (a list of {column: value} dicts) into a VSA Table --
         each row becomes a role-bound record, with the exact values kept beside the vectors. Pair with `query`.

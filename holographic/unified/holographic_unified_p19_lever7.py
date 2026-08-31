@@ -268,6 +268,14 @@ class _UnifiedPart19:
                         "uses": best["uses"], "hits": best["hits"]}
             return {"served": False, "via": "escalate",
                     "reason": "reflex tool call failed: %s" % str(out)[:120]}
+        # ESCALATION LEDGER (sweep 125): every ask the substrate could not serve is
+        # recorded so a service swarm can route it to a human and resolve() it back
+        # into memory with provenance -- the swarm's honest list of what it does not know.
+        led = getattr(self, "_escalations", None) or {}
+        e = led.setdefault(str(query), {"reason": "no memory hit and no confident tool reflex",
+                                        "count": 0})
+        e["count"] += 1
+        self._escalations = led
         return {"served": False, "via": "escalate",
                 "reason": "no memory hit and no confident tool reflex -- the next "
                           "level up decides"}

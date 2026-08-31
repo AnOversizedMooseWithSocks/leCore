@@ -97,6 +97,8 @@ def _params(fn):
 
 def audit(verbose=False, min_overlap=0.8):
     """Compare every faculty that names a delegate against that delegate's signature."""
+    import os, sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # sweep 124: runnable from anywhere
     import lecore
     mind = lecore.UnifiedMind(dim=32, seed=0)
 

@@ -541,12 +541,8 @@ def _make_worker_handler(node):
             return self.headers.get("Authorization", "") == "Bearer %s" % node.token
 
         def _reply(self, code, obj):
-            body = _json.dumps(obj).encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            from holographic.scene_and_pipeline.holographic_distbus import send_json
+            send_json(self, code, obj)                # promoted (sweep 123): one home in distbus
 
         def _read_json(self):
             n = int(self.headers.get("Content-Length", 0) or 0)

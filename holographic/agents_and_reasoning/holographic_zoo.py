@@ -224,6 +224,20 @@ class AnswerLadder:
                 jac = len(a_ & b_) / max(len(a_ | b_), 1)
                 if jac < 0.75:
                     payload = None                        # vetoed -- not the same question.
+                else:
+                    # DIGITS ARE NOT NEAR-SYNONYMS (sweep 123; the sweep-109 residual):
+                    # 'secret 0 of session 0' and 'secret 0 of session 1' are one token
+                    # apart and pass 0.75 -- and served the WRONG row inside a session.
+                    # Numbers in a question are identifiers, quantities, versions: the
+                    # multiset of numeric tokens must match exactly or this is a
+                    # different question. Text equality on digits, zero new state.
+                    import re as _re_d
+                    da = sorted(_re_d.findall(r"\d+(?:\.\d+)?", str(query)))
+                    db = sorted(_re_d.findall(r"\d+(?:\.\d+)?", str(stored_q)))
+                    if da != db:
+                        self.ledger.by_tier["digit_veto"] = \
+                            self.ledger.by_tier.get("digit_veto", 0) + 1
+                        payload = None
                     # THRESHOLD HISTORY (measured, not guessed): 0.34 separated the sota
                     # siblings (2-3 distinct terms of ~5) but bench_ladder exposed that
                     # ONE-word-different questions share jaccard 0.6 and served each
