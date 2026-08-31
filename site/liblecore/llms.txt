@@ -1,0 +1,14 @@
+# liblecore
+
+> Portable C11 kernels for leCore's caller-supplied-vector algebra.
+
+liblecore provides raw HRR bind and unbind, normalization, bundle, cosine,
+permutation, deterministic cleanup, batch operations, and mixed f64-query/f32-corpus
+scoring. It supports C, C++, Rust, Python, and WebAssembly hosts.
+
+Status: ABI-0 preview. Pin the exact version. liblecore does not generate atoms,
+own a vocabulary, choose application policy, or replace the full leCore engine.
+
+Documentation: https://github.com/AnOversizedMooseWithSocks/leCore/tree/main/native/liblecore
+Product contract: https://github.com/AnOversizedMooseWithSocks/leCore/blob/main/PRD.md
+Source: https://github.com/AnOversizedMooseWithSocks/leCore

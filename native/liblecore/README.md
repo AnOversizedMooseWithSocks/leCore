@@ -2,6 +2,8 @@
 
 *Portable C11 kernels for leCore's caller-supplied-vector algebra. Status: ABI-0 preview.*
 
+**Website:** [anoversizedmoosewithsocks.github.io/leCore](https://anoversizedmoosewithsocks.github.io/leCore/)
+
 `liblecore` makes the small, frozen HRR algebra in leCore usable from C, C++, Rust, WebAssembly, and other hosts
 without importing Python. It is a semantic interoperability layer first: the direct backend follows
 [`docs/ISA.md`](../../docs/ISA.md) and the definitional Python implementation in
