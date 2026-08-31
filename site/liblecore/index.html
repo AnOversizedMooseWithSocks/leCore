@@ -26,207 +26,81 @@
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
 
-    <header class="site-header">
-      <a class="wordmark" href="#top" aria-label="liblecore home">
-        <span aria-hidden="true">◉</span>
-        liblecore
-      </a>
+    <header>
+      <a class="wordmark" href="#top" aria-label="liblecore home"><span aria-hidden="true">●</span> liblecore</a>
       <nav aria-label="Main navigation">
-        <a href="#contract">Contract</a>
-        <a href="#performance">Performance</a>
-        <a href="#adoption">Adoption</a>
         <a href="https://github.com/AnOversizedMooseWithSocks/leCore/tree/main/native/liblecore">Docs</a>
+        <a href="https://github.com/AnOversizedMooseWithSocks/leCore">GitHub ↗</a>
       </nav>
-      <a class="header-cta" href="https://github.com/AnOversizedMooseWithSocks/leCore">GitHub ↗</a>
     </header>
 
     <main id="main">
       <section class="hero" id="top">
         <div class="hero-copy">
-          <p class="eyebrow"><span>ABI-0 preview</span> Portable C11 · MIT</p>
+          <p class="eyebrow">ABI-0 · C11 · MIT</p>
           <h1>One vector algebra.<br><em>Every runtime.</em></h1>
-          <p class="lede">
-            The frozen core of leCore’s holographic algebra, rebuilt as a small native library for
-            C, C++, Rust, Python, and WebAssembly. No Python runtime. No hidden policy. No hot-path allocation.
-          </p>
-          <div class="hero-actions">
-            <a class="button button-primary" href="https://github.com/AnOversizedMooseWithSocks/leCore/tree/main/native/liblecore">Explore the source <span>↗</span></a>
-            <a class="button button-secondary" href="https://github.com/AnOversizedMooseWithSocks/leCore/blob/main/PRD.md">Read the product contract</a>
-          </div>
-          <ul class="runtime-list" aria-label="Supported host environments">
-            <li>C11</li>
-            <li>C++</li>
-            <li>Rust</li>
-            <li>Python</li>
-            <li>WASM</li>
+          <p class="lede">Bind, bundle, and retrieve with the same frozen HRR semantics in C, C++, Rust, Python, and WebAssembly.</p>
+          <a class="primary-link" href="https://github.com/AnOversizedMooseWithSocks/leCore/tree/main/native/liblecore">Explore the source <span>↗</span></a>
+          <ul class="facts" aria-label="Core facts">
+            <li><strong>f32 + f64</strong><span>numeric profiles</span></li>
+            <li><strong>0</strong><span>hot-path allocations</span></li>
+            <li><strong>5</strong><span>runtime paths</span></li>
           </ul>
         </div>
 
-        <div class="proof-panel" aria-labelledby="proof-title">
-          <div class="panel-header">
+        <div class="demo" aria-labelledby="demo-title">
+          <div class="demo-head">
             <div>
-              <p class="panel-kicker">LIVE ALGEBRA / 32D</p>
-              <h2 id="proof-title">Bind. Unbind. Recover.</h2>
+              <p>LIVE · 32D</p>
+              <h2 id="demo-title">Bind. Unbind. Recover.</h2>
             </div>
-            <button class="icon-button" id="reseed" type="button" aria-label="Generate a new deterministic vector example">↻</button>
+            <button id="reseed" type="button" aria-label="Generate a new deterministic vector example">↻</button>
           </div>
           <canvas id="vector-demo" width="680" height="440" aria-label="A live diagram showing a role vector and value vector being bound and recovered"></canvas>
-          <div class="proof-readout" aria-live="polite">
-            <div>
-              <span>cos(value, recovered)</span>
-              <strong id="similarity">0.000000</strong>
-            </div>
-            <div>
-              <span>seed</span>
-              <strong id="seed">0007</strong>
-            </div>
+          <div class="readout" aria-live="polite">
+            <span>cos(value, recovered)</span>
+            <strong id="similarity">0.000000</strong>
+            <span>seed <b id="seed">0007</b></span>
           </div>
-          <p class="panel-note">Runs locally in your browser. Same circular-convolution idea; tiny dimension for the diagram.</p>
         </div>
       </section>
 
-      <section class="proof-strip" aria-label="Key product facts">
-        <div><strong>2</strong><span>numeric profiles<br>f64 + f32</span></div>
-        <div><strong>0</strong><span>allocations in<br>the numeric hot path</span></div>
-        <div><strong>5</strong><span>host paths<br>C · C++ · Rust · Python · WASM</span></div>
-        <div><strong>1</strong><span>declared semantic<br>contract</span></div>
-      </section>
-
-      <section class="section section-intro" id="contract">
-        <div class="section-label">01 / THE CONTRACT</div>
-        <div class="section-heading">
-          <h2>Small on purpose.</h2>
-          <p>
-            <code>liblecore</code> carries the reusable math. Your application keeps the meaning, rules, storage, and final say.
-          </p>
-        </div>
+      <section class="contract" aria-labelledby="contract-title">
+        <p class="eyebrow">THE CONTRACT</p>
+        <h2 id="contract-title">Small core. Clear boundary.</h2>
         <div class="contract-grid">
-          <article>
-            <span class="card-index">01</span>
-            <h3>Semantics before speed</h3>
-            <p>Direct kernels follow the Python reference. Faster backends ship only when values stay within bounds and observable decisions agree.</p>
-          </article>
-          <article>
-            <span class="card-index">02</span>
-            <h3>Exact decisions</h3>
-            <p>Cleanup scans in a declared order. Exact ties select the lowest index. Unsupported acceleration fails loudly.</p>
-          </article>
-          <article>
-            <span class="card-index">03</span>
-            <h3>The host owns policy</h3>
-            <p>The library does not generate atoms, choose actions, own a vocabulary, or mutate application state.</p>
-          </article>
+          <p><strong>Deterministic.</strong> Declared math, scan order, ties, and errors.</p>
+          <p><strong>Honest.</strong> Acceleration ships only when measured decisions agree.</p>
+          <p><strong>Host-owned.</strong> Your app keeps meaning, storage, state, and final authority.</p>
         </div>
+        <p class="operations"><code>bind</code><code>unbind</code><code>bundle</code><code>cleanup</code><code>cosine_many</code></p>
       </section>
 
-      <section class="section operations">
-        <div class="section-label">THE FROZEN SURFACE</div>
-        <div class="operation-list">
-          <div><code>bind(a, b)</code><span>Associate two vectors with circular convolution.</span></div>
-          <div><code>unbind(trace, role)</code><span>Recover a value with involution-based correlation.</span></div>
-          <div><code>bundle(a, b)</code><span>Superpose information in one shared representation.</span></div>
-          <div><code>cleanup(query, codebook)</code><span>Choose deterministically from caller-owned candidates.</span></div>
-          <div><code>cosine_many(query, corpus)</code><span>Score an ordered corpus without taking result authority.</span></div>
-        </div>
+      <section class="evidence" aria-label="Measured evidence and adoption">
+        <article>
+          <p class="eyebrow">MEASURED</p>
+          <h2>13.43 μs</h2>
+          <p>f32 bind at 1,024 dimensions on the recorded Apple arm64 run. Direct: <strong>62.52 μs</strong>. Maximum delta: <strong>1.043e−7</strong>.</p>
+          <a href="https://github.com/AnOversizedMooseWithSocks/leCore/blob/main/native/liblecore/BENCHMARKS.md">Method and limits →</a>
+        </article>
+        <article>
+          <p class="eyebrow">FIRST PROVING GROUND</p>
+          <h2>Signal</h2>
+          <p>Shadow native and WASM replay against the existing 1,024D memory. Adopt only when every legal action agrees.</p>
+          <span class="status">Pilot planned</span>
+        </article>
       </section>
 
-      <section class="section performance" id="performance">
-        <div class="performance-copy">
-          <div class="section-label">02 / MEASURED, NOT MARKETED</div>
-          <h2>Fast where the evidence says so.</h2>
-          <p>
-            On the recorded Apple arm64 run, the portable radix-2 backend completed a 1,024-dimensional f32 bind in
-            <strong>13.43 μs</strong>. The ordered direct backend took <strong>62.52 μs</strong>.
-          </p>
-          <p class="caveat">
-            This is one machine and one operation—not a universal speed claim. AUTO still chooses the direct backend until adopter workloads earn a crossover rule.
-          </p>
-          <a class="text-link" href="https://github.com/AnOversizedMooseWithSocks/leCore/blob/main/native/liblecore/BENCHMARKS.md">Read the method and kept limits →</a>
-        </div>
-        <div class="benchmark-card">
-          <div class="benchmark-title">
-            <span>f32 bind · Apple arm64</span>
-            <span>median μs / call</span>
-          </div>
-          <div class="bar-row">
-            <span>Direct</span>
-            <div class="bar-track"><div class="bar bar-direct" style="--bar: 100%"></div></div>
-            <strong>62.52</strong>
-          </div>
-          <div class="bar-row">
-            <span>Radix-2</span>
-            <div class="bar-track"><div class="bar bar-radix" style="--bar: 21.48%"></div></div>
-            <strong>13.43</strong>
-          </div>
-          <div class="benchmark-footer">
-            <span>dimension 1024</span>
-            <span>max delta 1.043e−7</span>
-          </div>
-        </div>
-      </section>
-
-      <section class="section adoption" id="adoption">
-        <div class="section-label">03 / BUILT TO LEAVE THE LAB</div>
-        <div class="section-heading">
-          <h2>One substrate.<br>Real adopters.</h2>
-          <p>The next proof is not another synthetic demo. It is replay evidence from software that already depends on vector math.</p>
-        </div>
-        <div class="adoption-grid">
-          <article class="adopter adopter-featured">
-            <p class="adopter-type">FIRST ADOPTER · C11 + WASM</p>
-            <h3>Signal</h3>
-            <p>Shadow its 1,024-dimensional holographic pilot memory, preserve normalized legacy behavior, and compare every legal action across deterministic native/WASM replay.</p>
-            <span class="status-pill">Pilot planned</span>
-          </article>
-          <article class="adopter">
-            <p class="adopter-type">RUST PACKAGING</p>
-            <h3>NoSQLite</h3>
-            <p>Prove ordered mixed f64-query/f32-corpus scoring while Rust keeps document IDs, storage, ties, and result authority.</p>
-            <span class="status-pill">Next wave</span>
-          </article>
-          <article class="adopter">
-            <p class="adopter-type">BROWSER RUNTIME</p>
-            <h3>Zero LM</h3>
-            <p>Measure a small C11/WASM exact-memory path without changing its encoder, fixed capacity, or public host ABI.</p>
-            <span class="status-pill">Candidate</span>
-          </article>
-        </div>
-      </section>
-
-      <section class="section get-started">
-        <div>
-          <div class="section-label">BUILD THE PREVIEW</div>
-          <h2>From source to first bind.</h2>
-          <p>The preview builds with CMake and the platform C math library. Pin the exact revision while ABI-0 is active.</p>
-        </div>
-        <div class="terminal" aria-label="Build commands">
-          <div class="terminal-top">
-            <span><i></i><i></i><i></i></span>
-            <button id="copy-command" type="button">Copy</button>
-          </div>
-          <pre><code id="build-command">git clone https://github.com/AnOversizedMooseWithSocks/leCore
-cd leCore
-cmake -S native/liblecore -B build/liblecore \
-  -DLECORE_BUILD_TESTS=ON
-cmake --build build/liblecore --parallel
-ctest --test-dir build/liblecore --output-on-failure</code></pre>
-        </div>
-      </section>
-
-      <section class="final-cta">
-        <p class="eyebrow"><span>ABI-0 preview</span> Make the semantics explicit.</p>
-        <h2>Stop rewriting the same algebra.</h2>
-        <div class="hero-actions">
-          <a class="button button-primary" href="https://github.com/AnOversizedMooseWithSocks/leCore/tree/main/native/liblecore">Read the native guide <span>↗</span></a>
-          <a class="button button-secondary" href="https://github.com/AnOversizedMooseWithSocks/leCore/pull/30">See the implementation review</a>
-        </div>
+      <section class="closing">
+        <p class="eyebrow">ABI-0 PREVIEW</p>
+        <h2>Use one kernel.<br>Keep your policy.</h2>
+        <a class="primary-link" href="https://github.com/AnOversizedMooseWithSocks/leCore/tree/main/native/liblecore">Read the native guide <span>↗</span></a>
       </section>
     </main>
 
     <footer>
-      <a class="wordmark" href="#top"><span aria-hidden="true">◉</span> liblecore</a>
-      <p>Portable C11 kernels for leCore’s caller-supplied-vector algebra.</p>
-      <div><a href="https://github.com/AnOversizedMooseWithSocks/leCore">GitHub</a><a href="https://github.com/AnOversizedMooseWithSocks/leCore/blob/main/LICENSE">MIT License</a></div>
+      <a class="wordmark" href="#top"><span aria-hidden="true">●</span> liblecore</a>
+      <p>Portable C11 HRR kernels · MIT</p>
     </footer>
   </body>
 </html>
