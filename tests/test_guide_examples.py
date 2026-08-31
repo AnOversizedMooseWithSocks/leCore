@@ -16,11 +16,17 @@ import sys
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _GUIDES = [os.path.join(_REPO, "FEATURE_GUIDE.md"),
            os.path.join(_REPO, "docs", "WHY_A_HOLOGRAPHIC_VM.md"),
-           os.path.join(_REPO, "docs", "USE_CASES.md"),
-           os.path.join(_REPO, "integrations", "openzoo", "PLATFORM_GUIDE.md")]
+           os.path.join(_REPO, "docs", "USE_CASES.md")]
+# integrations/openzoo/PLATFORM_GUIDE.md is gitignored by design (private platform material); when it
+# is present locally its blocks are checked too, but CI must never depend on it (sweep 128).
+_OPTIONAL_GUIDES = [os.path.join(_REPO, "integrations", "openzoo", "PLATFORM_GUIDE.md")]
 
 
 def _checked_blocks(path):
+    assert os.path.exists(path), (
+        "guide missing from the checkout: %s -- it exists in the delivery zip; `git add` it "
+        "(sweep 127: CI lacked integrations/openzoo/PLATFORM_GUIDE.md, which also shifted the "
+        "doc-coverage count by the verbs only that guide mentions)" % os.path.relpath(path, _REPO))
     text = open(path, encoding="utf-8").read()
     blocks = re.findall(r"```python\n(.*?)```", text, flags=re.S)
     return [b for b in blocks if b.lstrip().startswith("# guide-check")]
@@ -33,7 +39,7 @@ def test_guide_check_blocks_exist():
 
 def test_every_guide_check_block_runs():
     env = dict(os.environ, PYTHONHASHSEED="0", PYTHONPATH=_REPO)
-    for g in _GUIDES:
+    for g in _GUIDES + [o for o in _OPTIONAL_GUIDES if os.path.exists(o)]:
         for i, block in enumerate(_checked_blocks(g)):
             p = subprocess.run([sys.executable, "-c", block], cwd=_REPO, env=env,
                                capture_output=True, text=True, timeout=240)

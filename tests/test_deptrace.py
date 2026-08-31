@@ -72,7 +72,13 @@ def test_naive_tracing_balloons_and_the_engine_is_already_lazy(mind):
     """The refutation, pinned: the balloon is real and large, and it is NOT caused by try/except accelerators --
     guarded edges are a rounding error next to deferred ones."""
     core = mind.import_footprint("lecore")
-    assert core["required"] < 60, core["required"]           # the honest footprint is small
+    # The honest footprint is small -- but every UnifiedMind PART is one required module, and parts
+    # are split deliberately whenever one crosses the 2,000-line cap (sweeps 114, 125). So the ceiling
+    # is on the footprint MINUS the parts: the engine outside the mind's own slices. Measured (sweep 127):
+    # 60 required, 29 of them parts -> 31 non-part modules; ceiling 36 leaves room for honest growth
+    # while a stray heavyweight import (numba, scipy, flask at import time) still trips it.
+    n_parts = sum(1 for x in core["required_modules"] if "holographic_unified_p" in str(x))
+    assert core["required"] - n_parts < 36, (core["required"], n_parts)
     assert core["naive"] > 400, core["naive"]               # a blind tracer drags in essentially everything
     assert core["ratio"] > 5.0, core["ratio"]
     kinds = core["edges_by_kind"]

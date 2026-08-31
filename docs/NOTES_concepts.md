@@ -85159,3 +85159,56 @@ SHIPPED, each edit anchored on the live numbers:
   always-on per-test budget.
 README blocks still run (test_readme_examples); coverage budget holds
 (2,074, mentioned verbs 240 -> 249); regen --check green.
+
+--------------------------------------------------------------------------------
+SWEEP 127 -- THREE CI REDS: ONE UNTRACKED FILE, ONE PIN THAT NEEDED THE
+RIGHT UNIT
+
+1. integrations/openzoo/PLATFORM_GUIDE.md is in every delivery zip and
+   under no ignore rule -- but the CI checkout does not have it: it is
+   UNTRACKED in the repo (the integrations/openzoo/ folder holds only
+   that file). That single absence produced TWO reds: the guide test
+   crashed on FileNotFoundError, and doc_coverage measured a smaller
+   corpus (the +6 verbs only that guide mentions) and failed its budget
+   with no hint why. FIX ON MOOSE'S SIDE: `git add integrations/
+   openzoo/PLATFORM_GUIDE.md` (or `git add -A` after unzipping). FIX ON
+   OURS so the cause names itself: the guide test asserts the file
+   exists with the `git add` remedy in the message; doc_coverage now
+   declares its REQUIRED_DOCS and fails first with 'required human doc
+   missing' -- proven by moving the guide away and reading the message.
+   The budget never silently measures a different corpus again.
+2. test_deptrace pinned import_footprint('lecore')['required'] < 60;
+   sweep 125's part p25 made it exactly 60. The unit was wrong: every
+   UnifiedMind PART is one required module and parts are split BY
+   POLICY at the 2,000-line cap. The pin now counts the footprint MINUS
+   the parts (measured: 60 required, 29 parts -> 31) with a ceiling of
+   36 -- still trips on a stray heavyweight import, never on a
+   deliberate split.
+All three files' tests green (12 passed).
+
+--------------------------------------------------------------------------------
+SWEEP 128 -- THE GITIGNORE WAS THE ANSWER: PRIVATE DOCS ARE NOT A TEST CORPUS
+
+Moose's canonical .gitignore (uploaded) explicitly ignores
+integrations/openzoo/PLATFORM_GUIDE.md and a set of docs/*.md (panel
+reviews, plans, the openzoo primer, claude_lecore_state.lecore): private
+platform and panel material, BY DESIGN. Sweep 127's diagnosis ('an
+untracked file -- git add it') was wrong in its remedy: the file must
+NOT be added. The tests were leaning on material CI is never meant to
+have.
+
+FIXED:
+- .gitignore adopted verbatim as ours (the delivery zip excludes exactly
+  what it excludes, so the zip and git now agree; the private guide and
+  docs stay in Moose's working tree, not in the archive).
+- tools/doc_coverage.py measures ONLY tracked docs: it reuses
+  make_repo_zip's gitignore matcher (one parser in the repo; sighting:
+  load_rules takes a Path, and a swallowing `except` hid that for one
+  round). Result: 2,080 unmentioned -- EXACTLY the number CI reported --
+  budget re-recorded at 2,080. The openzoo guide left REQUIRED_DOCS.
+- tests/test_guide_examples.py: the openzoo guide is OPTIONAL -- checked
+  when present locally, never required; the three tracked guides are
+  the contract. CI simulated by hiding the guide: 3 passed.
+The sweep-127 deptrace fix (footprint minus parts) stands.
+LESSON: 'the file is missing in CI' has two remedies -- add it, or stop
+depending on it -- and the .gitignore decides which. Read it first.
