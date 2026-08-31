@@ -102,30 +102,9 @@ def grow_channel(weights, cfg, a_log=-4.0, gain=0.0, layers=None, seed=0):
         else:
             A = np.asarray(w[pre + "in_proj_qkv.weight"], np.float64)
             s = float(np.std(A)) * 0.5
-            if str(c.get("qkv_order", "grouped")) == "flat":
-                # THE USER'S BUG, REPRODUCED AND FIXED (cp100): split-qkv
-                # checkpoints (real Qwen3.5) are FLAT -- [all q][all k][all v]
-                # sections, the layout the conv reads -- and the loader sets
-                # qkv_order=flat for them. Tail-appending a grouped [q,k,v]
-                # block into a flat tensor lands the new q rows after the v
-                # section, so raised-count slicing shifts EVERY existing head:
-                # measured relative 1.1e+00 on the field model, 1.185e+00 on
-                # the split fixture -- outputs decorrelated. Same fix the conv
-                # already carries: SPLICE at the OLD section boundaries.
-                # Measured after: 0.0 exact. Grouped keeps the tail append,
-                # which measured 0.0 all along.
-                _qe = Kh * dk
-                _ke = 2 * Kh * dk
-                w[pre + "in_proj_qkv.weight"] = np.vstack(
-                    [A[:_qe], _rows(dk, s),
-                     A[_qe:_ke], _rows(dk, s),
-                     A[_ke:], _rows(r * dv, s)]).astype(
-                    np.asarray(weights[pre + "in_proj_qkv.weight"]).dtype)
-            else:
-                block = np.vstack([_rows(dk, s), _rows(dk, s),
-                                   _rows(r * dv, s)])
-                w[pre + "in_proj_qkv.weight"] = np.vstack([A, block]).astype(
-                    np.asarray(weights[pre + "in_proj_qkv.weight"]).dtype)
+            block = np.vstack([_rows(dk, s), _rows(dk, s), _rows(r * dv, s)])
+            w[pre + "in_proj_qkv.weight"] = np.vstack([A, block]).astype(
+                np.asarray(weights[pre + "in_proj_qkv.weight"]).dtype)
             Z = np.asarray(w[pre + "in_proj_z.weight"], np.float64)
             w[pre + "in_proj_z.weight"] = np.vstack(
                 [Z, _rows(r * dv, s)]).astype(

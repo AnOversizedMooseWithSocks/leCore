@@ -2,9 +2,9 @@
 
 ## Resident swarm (per organ group)
 
-- agents_and_reasoning         104 modules, 104 import, 88 with selftests
+- agents_and_reasoning         103 modules, 103 import, 87 with selftests
 - caching_and_storage          56 modules, 56 import, 54 with selftests
-- io_and_interop               90 modules, 90 import, 87 with selftests
+- io_and_interop               89 modules, 89 import, 86 with selftests
 - materials_and_texture        18 modules, 18 import, 18 with selftests
 - mesh_and_geometry            111 modules, 111 import, 109 with selftests
 - misc                         151 modules, 151 import, 130 with selftests

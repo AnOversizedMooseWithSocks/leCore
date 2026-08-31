@@ -79,7 +79,7 @@ class KnowledgeStore:
     KINDS = ("turn", "document", "note", "output")
     # long documents get companion digest notes at or above this many characters
     # (sweep 114); None disables. Kept a class attribute so a test can set the control.
-    DIGEST_THRESHOLD = 20000
+    DIGEST_THRESHOLD = 64_000            # their measured floor: below this, chunks navigate themselves
 
     def __init__(self, root, session=None):
         # REFUSE A NON-PATH. `str(root)` accepts ANY object and makedirs then
@@ -170,25 +170,20 @@ class KnowledgeStore:
         if (kind == "document" and new_ids and self.DIGEST_THRESHOLD is not None
                 and len(str(text)) >= int(self.DIGEST_THRESHOLD)):
             try:
-                from holographic.io_and_interop.holographic_docforge import digest_document
-                d = digest_document(str(text))
-                notes = []
-                toc = [str(t) for t in (d.get("toc") or [])]
-                if toc:
-                    notes.append("digest toc of %s: %s" % (source, " | ".join(toc[:40])[:1500]))
-                neg = [str(n) for n in (d.get("negatives") or [])]
-                if neg:
-                    notes.append("digest kept negatives of %s: %s" % (source, " | ".join(neg[:40])[:1500]))
-                sig = d.get("signatures") or {}
-                # digest_document's signatures are a DICT (section -> terms);
-                # a list-shaped assumption here silently killed every note once.
-                sig_items = list(sig.items()) if isinstance(sig, dict) else [(str(s), "") for s in sig]
-                if sig_items:
-                    notes.append("digest signature terms of %s: %s" % (
-                        source, "; ".join("%s: %s" % (k, v) for k, v in sig_items[:30])[:600]))
-                for n_ in notes[:3]:
-                    self.add(n_, kind="note", source=str(source), author=author,
-                             tags=tuple(tags) + ("digest",), session=session, save=False)
+                # PORTED from the sibling branch (sweep 121): ONE navigable companion note,
+                # rendered by docforge's own digest_markdown (toc + kept negatives +
+                # signature terms in the reader's order), instead of three raw notes --
+                # their sweep-71 lesson: chunking alone turns a big doc into soup with no
+                # navigation, so the structure the author wrote is indexed AT INGESTION,
+                # with no model in the loop. 'digest'-tagged input never digests again.
+                if "digest" not in tuple(tags):
+                    from holographic.io_and_interop.holographic_docforge import (
+                        digest_document, digest_markdown)
+                    nav = digest_markdown(digest_document(str(text)), max_bytes=8_000)
+                    if nav and str(nav).strip():
+                        self.add("digest of %s\n\n%s" % (source, nav), kind="note",
+                                 source=str(source), author=author,
+                                 tags=tuple(tags) + ("digest",), session=session, save=False)
             except Exception:
                 pass                                   # a digest is a courtesy, never a failure
         if save:

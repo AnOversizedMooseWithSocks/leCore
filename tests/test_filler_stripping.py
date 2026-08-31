@@ -117,7 +117,12 @@ def test_find_scored_got_the_same_fix_as_find_capability(mind):
     # find_scored's own docstring promises "same scoring". A fix applied to one path and not the other
     # would make them disagree on exactly the queries this change repairs -- the seam-defect shape the
     # work plan's 6.2 predicts.
-    cat = default_catalog()
+    # SAME CATALOG on both sides (merge sweep): the mind's catalog carries its
+    # auto method-cards; default_catalog() does not. Comparing across the two
+    # only pinned scorer parity while no method card topped these queries --
+    # luck, which ran out when the code-tools faculties landed. The contract
+    # is that the two SCORERS agree, so both draw from the mind's catalog.
+    cat = mind._capability_catalog()
     pairs = _fixture(n=40)
     for alias, want in pairs:
         q = "how do i " + alias

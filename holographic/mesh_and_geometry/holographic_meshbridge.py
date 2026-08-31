@@ -528,6 +528,29 @@ def mesh_distance_grid(mesh, bounds, res=48, band=None, method="shell"):
     a voxel; a signed field crosses zero LINEARLY, so |sample| near it is sub-voxel accurate. Returns (grid res^3,
     (xs,ys,zs)). KEPT HONEST: nearest-face-normal sign (can mis-sign deep concavities / non-watertight); far interior
     defaults to +band (use mesh_to_sdf_grid for a flood-filled, re-marchable SDF)."""
+    # TRIANGLES ONLY, AND SAY WHICH ARGUMENT IS WRONG. box() and the other
+    # primitives return QUAD faces; this builder indexes faces as triangles, so a
+    # quad mesh died several frames down as
+    #     ValueError: setting an array element with a sequence ...
+    #     inhomogeneous shape after 1 dimensions
+    # which names neither the mesh nor the face arity and READS LIKE A BOUNDS
+    # PROBLEM -- I tried three different bounds shapes before looking at the faces.
+    # AN ERROR THAT BLAMES THE WRONG ARGUMENT IS WORSE THAN NO ERROR.
+    # KEPT NEGATIVE: a first attempt read the arity with
+    # np.asarray(faces, dtype=object), which RAISES THE VERY ERROR IT REPLACES on
+    # a ragged list. len(faces[0]) needs no coercion and cannot raise on ragged
+    # input -- READ THE SHAPE, DO NOT CONVERT THE DATA.
+    _f = getattr(mesh, "faces", None)
+    try:
+        _arity = len(_f[0]) if _f is not None and len(_f) else 3
+    except Exception:
+        _arity = 3                      # unreadable: let the real path complain
+    if _arity != 3:
+        raise ValueError(
+            "mesh_distance_grid needs TRIANGLES, got %d-gon faces (%d of them). "
+            "Primitives like box() return quads -- triangulate first: "
+            "faces = np.vstack([F[:, [0,1,2]], F[:, [0,2,3]]])"
+            % (_arity, len(_f)))
     lo = np.asarray(bounds[0], float)
     hi = np.asarray(bounds[1], float)
     res = int(res)

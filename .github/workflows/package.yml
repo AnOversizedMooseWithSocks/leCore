@@ -80,6 +80,9 @@ jobs:
       - name: Build the package (copies essentials, strips tests, builds the wheel)
         run: sh build_package.sh
 
+      # sweep 120: the levers check was `== 6`; the engine grew a seventh lever (spend accumulated
+      # measurement) and the publish job failed on a bare AssertionError. Growth is not a regression --
+      # the floor is the doctrine's six, with a message naming what would have gone wrong.
       - name: Smoke-test the wheel (install it clean, in isolation, and exercise its bundled data)
         run: |
           python -m pip install dist/*.whl
@@ -102,7 +105,7 @@ jobs:
           # These are load-bearing entry points across the families; add to this list when a family gains one.
           python -c "import lecore; m = lecore.UnifiedMind(dim=64, seed=0); missing = [n for n in ('levers','ouroboros','optional_backends','composite_layers','live_session','container_kinds','semantic_to_scene','fem_simulate','wrap_to_field','pose_is_safe','make_corrective','lean_export','logic_prove','pipeline_map','suggest_pipeline','io_kinds','find_capability','invoke') if not callable(getattr(m, n, None))]; assert not missing, ('faculties missing from the wheel: %r' % missing); print('all %d checked faculties present in the wheel' % 18)"
           # And one that RUNS, because present != working: the levers list and the catalog answers a query.
-          python -c "import lecore; m = lecore.UnifiedMind(dim=64, seed=0); assert len(m.levers()) == 6; assert m.find_capability('what do I do when I hit a wall'); print('wheel faculties execute, not just import')"
+          python -c "import lecore; m = lecore.UnifiedMind(dim=64, seed=0); assert len(m.levers()) >= 6, ('the walls doctrine lost a lever: %d < 6' % len(m.levers())); assert m.find_capability('what do I do when I hit a wall'); print('wheel faculties execute, not just import')"
           python -c "import holographic.misc.holographic_dictionary as d; assert d.size() > 100000; print('dictionary works from the wheel:', d.size(), 'words')"
 
       - name: Upload the wheel + sdist as build artifacts

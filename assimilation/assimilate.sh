@@ -16,13 +16,7 @@
 # ============================================================================
 set -e
 cd "$(dirname "$0")/.."                    # repo root, same convention as serve.sh
-export PYTHONHASHSEED=0
-# GPU for the install pipeline (cp88): cupy engages the engine's gpu backend
-# under --device auto; wheel bundles the CUDA runtime; cpu numpy is the fallback.
-if command -v nvidia-smi >/dev/null 2>&1; then
-    "${VPY:-python3}" -c "import cupy; cupy.asarray([1.,2.,3.])[cupy.asarray([0,2])]" >/dev/null 2>&1 || \
-        "${VPY:-python3}" -m pip install --quiet "cupy-cuda12x[ctk]" 2>/dev/null || true
-fi                    # the engine is deterministic and relies on this
+export PYTHONHASHSEED=0                    # the engine is deterministic and relies on this
 export HF_HUB_DISABLE_TELEMETRY=1          # download only; report nothing anywhere
 
 # --- find a Python 3 interpreter (same probe serve.sh uses) ------------------

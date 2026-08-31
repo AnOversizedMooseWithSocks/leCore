@@ -84744,3 +84744,93 @@ success, which the push path now reaches whenever the tests pass.
 STANDING: full-suite (weekly/manual/tag) carries the 20-shard matrix,
 the budget rule (sweep 118), and the durations loop (116) -- and its
 merge job now runs exactly when it has something to merge.
+
+--------------------------------------------------------------------------------
+SWEEP 120 -- A SIBLING BRANCH MERGED (THREE-WAY, WITH TWO CENSUSES), AND
+THE PUBLISH SMOKE UNPINNED
+
+THE BRIEF (Moose): a branch zip that may not have been merged; the
+PyPI publish job failing.
+
+THE ZIP, identified by measurement: its NOTES end at their sweep 72;
+vs the preserved sweep-97 source it EXTENDS 8 files and diverges in
+46 -- a SIBLING of the line sweep 97 merged, not an ancestor. Vs ours:
+1,918 identical / 0 only-theirs / 29 we extended / 5 they extended /
+76 both_changed / 4 memory files.
+
+THE MERGE: with the sweep-97 source as a common base, `git merge-file`
+three-way per both_changed file (generated docs, workflows, .gitignore,
+memory, NOTES excluded): 54 clean, 12 conflicts (all files WE had
+rebuilt in sweeps 114-119; their edits added no definitions there --
+OURS kept, their deltas remain reviewable in the zip). Their 5 pure
+extensions taken. NOTES tail and memory partition: already unified by
+sweep 97 (0 lines, 0 rows new).
+
+THE KEPT NEGATIVE OF THE DAY, loud: a 'clean' three-way merge is not a
+safe merge on this codebase. TEN files lost definitions we depend on
+(delegate, body_animation, chart_svg, particle/smoke_animation,
+model_atlas, describe on the toolbelt, _locate_near_miss, ...) --
+their line had DELETED them and diff3 honoured the deletion cleanly.
+Caught by a def-name census against the pre-merge zip; then a
+signature-level census caught TWO more (fem_simulate lost the
+record_every passthrough -- the exact sweep-97 casualty, again; and
+remote_llm). All twelve restored to ours. RULE, now: after ANY merge,
+census definitions AND full signatures against the pre-merge tree
+before running a single test. Net: 47 of their files kept.
+
+VERIFIED: merged-surface tests 132 passed; mcp suite 25+1; wiring
+report green (chart_svg's caller back); all gates; regen --check;
+battery 93 passed.
+
+THE PUBLISH SMOKE: `assert len(m.levers()) == 6` -- bare, no message.
+The engine has SEVEN levers (the seventh: spend accumulated
+measurement). Growth is not a regression: the floor is now `>= 6` with
+a message naming the doctrine. Every smoke assertion re-run against a
+freshly built wheel in a clean venv: import, dictionary in the wheel,
+capabilities.json (797 records), all 18 faculties, levers 7 + the wall
+ask, dictionary 144,539 words. (The failed run built 0.2.18 from main;
+main's VERSION is CI's -- when this line lands, the bump continues
+from there.)
+
+--------------------------------------------------------------------------------
+SWEEP 121 -- THE SIBLING MERGE, AUDITED FOR COMPLETENESS: NOTHING LOST,
+ONE GENUINE PORT, THE REST ALREADY OURS
+
+THE BRIEF (Moose): make sure the sweep-120 merge lost nothing and that
+everything the branch added is fully integrated.
+
+THE AUDIT, three censuses vs the zip:
+1. Definitions they have that we lack ANYWHERE in the engine: none.
+   (p03/p09/p20 'additions' were the functions we SPLIT into p03b/
+   p09b/p20b; assimilation/chat.py's reply() and --both were already
+   ours; harden's expansion_deterministic was already ours.)
+2. Their lines vs the common base that are absent from ours, per file:
+   concentrated in 8 files, and each judged by reading it:
+   - gdnruntime (37): their device-residency fix -- same contract as
+     ours (follow the data by type; tied re-tie), different spelling;
+     their incremental KV decode = our step()/generate_fast().
+   - llmseam (35): prefix_route_decision / prefix_reuse_of -- present
+     in ours (restored), their docstring wording differs.
+   - p23 (12): idempotent learning_load -- ours is keyed PER FILE
+     (stricter); session_search -- ours has weighted=True (superset).
+   - holographic_mcp (7): corpus_ask question=/corpus= and args/
+     arguments aliases -- already ours (and kwargs= too).
+   - remotellm (17), harden (8), p22 (5): docstring/comment variants
+     and an older learning_save signature. Nothing to take.
+3. Their extensions to 4 test files: taken in sweep 120; green.
+
+THE ONE GENUINE PORT: KnowledgeStore's auto-digest now files ONE
+navigable companion note rendered by docforge's own digest_markdown
+(toc + kept negatives + signature terms in the author's order), at
+their measured 64 KB threshold -- their sweep-71 lesson ('chunking
+alone turns a big doc into soup with no navigation; index the author's
+structure at ingestion, no model in the loop'). Replaces my three raw
+notes. Dict-safety kept; digest-tagged input never re-digests. 39
+tests green.
+
+VERDICT: the branch is fully integrated. Every function it added
+exists in ours; every behaviour it improved exists in ours in an equal
+or stronger form; the one design it did better is now ours too. The
+residual diff is wording.
+
+All gates + regen --check green.

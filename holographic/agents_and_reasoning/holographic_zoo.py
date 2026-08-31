@@ -239,6 +239,17 @@ class AnswerLadder:
                         self.ledger.by_tier["calib_veto"] = \
                             self.ledger.by_tier.get("calib_veto", 0) + 1
                         payload = None
+            # AN EMPTY PAYLOAD IS AN ABSTENTION, NOT AN ANSWER. `is not None` lets
+            # "" through, so a blank recovered from the trace was served at T0
+            # with via="reflex" -- the second of two paths that did this. The
+            # first (reflex-exact) was fixed at its write site; this one recovers
+            # from the trace at READ time, so the guard has to be here.
+            # T0 is the contract that an answer came from memory. A caller that
+            # branches on tier == "T0" -- which is the whole point of the tier --
+            # gets a confident empty string. Falling through lets the ladder
+            # abstain honestly at T4.
+            if isinstance(payload, str) and not payload.strip():
+                payload = None
             if payload is not None:
                 self.ledger.record("T0", est_llm_tokens)
                 if not hasattr(self, "_payload_ok"):

@@ -141,7 +141,7 @@ def test_guards(mind):
     with pytest.raises(TypeError):
         AgentLoop(mind, 42)
     with pytest.raises(RuntimeError):
-        lecore.UnifiedMind(dim=64, seed=0).agent_loop("smooth a bumpy mesh")
+        lecore.UnifiedMind(dim=64, seed=0).tool_loop("smooth a bumpy mesh")
 
 
 def test_the_loop_is_discoverable(mind):
