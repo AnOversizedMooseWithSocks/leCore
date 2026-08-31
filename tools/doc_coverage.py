@@ -41,11 +41,35 @@ GENERATED = ("NOTES_concepts.md", "CAPABILITIES.md", "REFERENCE.md", "API_QUICKR
              "FACULTY_MAP.md", "DOC_MAP.md", "PIPELINE_MAP.md", "ZOO.md", "SERVICE.md")
 
 
+REQUIRED_DOCS = ["README.md", "FEATURE_GUIDE.md", "docs/WHY_A_HOLOGRAPHIC_VM.md", "docs/USE_CASES.md",
+                 "docs/WHATS_NEW.md"]        # the openzoo guide is gitignored by design -- not required
+
+
+def missing_required():
+    """The human docs this measurement DEPENDS on. Measured once (sweep 127): CI lacked one guide
+    that was untracked in git, the corpus shrank, and the budget check failed by +6 with no hint
+    why. A missing required doc is now the first line of the report."""
+    return [d for d in REQUIRED_DOCS if not os.path.exists(os.path.join(REPO, d))]
+
+
+def _tracked(rel):
+    """True when the repo's .gitignore does NOT exclude rel -- the corpus must be what CI can
+    see. Sweep 128: Moose's .gitignore ignores integrations/openzoo/PLATFORM_GUIDE.md and several
+    docs/*.md on purpose (private platform and panel material); counting them locally measured a
+    corpus CI never has. Reuses make_repo_zip's matcher: one gitignore parser in the repo."""
+    from pathlib import Path
+    sys.path.insert(0, os.path.join(REPO, "tools"))
+    import make_repo_zip as mz                       # load_rules takes a Path (sighting: str / str)
+    rules = mz.load_rules(Path(REPO))
+    return not mz.ignored(rel, False, rules)
+
+
 def human_text():
     out = []
     for p in HUMAN_DOCS:
         p = p if os.path.isabs(p) else os.path.join(REPO, p)
-        if os.path.exists(p) and not any(g in p for g in GENERATED):
+        rel = os.path.relpath(p, REPO)
+        if os.path.exists(p) and not any(g in p for g in GENERATED) and _tracked(rel):
             out.append(open(p, encoding="utf-8", errors="ignore").read())
     return "\n".join(out)
 
@@ -94,6 +118,11 @@ def main(argv):
     if "--check" in argv:
         budget = json.load(open(BUDGET))["unmentioned_budget"] if os.path.exists(BUDGET) else None
         bad = 0
+        miss = missing_required()
+        if miss:
+            print("FAIL: required human doc(s) missing from this checkout -- the corpus is not the one the "
+                  "budget was recorded on: %s (add them to git)" % miss)
+            bad = 1
         if budget is not None and r["unmentioned"] > budget:
             print("FAIL: unmentioned verbs grew %d -> %d; document the new ones or --rebase WITH A REASON"
                   % (budget, r["unmentioned"]))
