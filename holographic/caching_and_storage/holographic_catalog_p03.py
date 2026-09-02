@@ -55,7 +55,8 @@ def register_p03(c):
                           example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "x=np.cumsum(np.random.default_rng(0).normal(size=512)); "
                           "print(round(float(np.abs(np.fft.rfft(x)).sum() - np.abs(np.fft.rfft(m.phase_randomize(x))).sum()),3))",
-                          native=True, aliases=("phase randomized surrogate", "surrogate data null",
+                          native=True, method="phase_randomize",
+                          aliases=("phase randomized surrogate", "surrogate data null",
                                                 "null preserving autocorrelation", "continuous signal null model",
                                                 "is a time series more than autocorrelation",
                                                 "structure beyond the spectrum", "spectrum-preserving shuffle",

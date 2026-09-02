@@ -1033,14 +1033,118 @@ class _UnifiedPart07:
         return mandelbulb(power, iterations, bailout)
 
     def escape_time(self, width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=100,
-                    power=2.0, julia_c=None):
+                    power=2.0, julia_c=None, bounds_ratio=None, fast_square=False):
         """The 2D ESCAPE-TIME fractal FIELD (holographic_sdf) -- Mandelbrot (julia_c=None) or Julia (julia_c=(re,im)),
         the classic z -> z^power + c iteration in the complex plane. Returns a (height,width) float array of SMOOTH
         (continuous) escape counts in [0, max_iter], ready to feed a palette. The 2D sibling of mandelbulb: same
-        z^n+c recurrence read as a field. center/span frame the view. Vectorised, deterministic."""
+        z^n+c recurrence read as a field. center/span frame the view. Vectorised, deterministic.
+        `fast_square=True` uses z*z instead of np.power for power==2 -- 5.7x on the array op, OPT-IN because
+        the two are not bit-identical (max |diff| 3.55e-15 over 200k values) and this engine's rule is that a
+        silent bit change is forbidden however small. `bounds_ratio` was missing from this wrapper and is now
+        plumbed through -- a delegation drift the 0.80-overlap gate had not surfaced."""
         from holographic.mesh_and_geometry.holographic_sdf import escape_time
         return escape_time(width=width, height=height, center=center, span=span, max_iter=max_iter,
-                           power=power, julia_c=julia_c)
+                           power=power, julia_c=julia_c, bounds_ratio=bounds_ratio,
+                           fast_square=fast_square)
+
+    def aces_tonemap(self, hdr, exposure=1.0, auto=True, key=0.18):
+        """HDR -> viewable pixels: ACES filmic tonemap with optional auto-exposure. A physically-lit
+        render is FLOAT and clips to white without this, so it is the last step before anything is
+        looked at -- which is why the demo-scene review named it the highest value of the 18 cards
+        that were declared in the catalog and not callable over /invoke. Delegates to
+        holographic_gbuffer.aces_tonemap (which itself composes postfx's tone/exposure curves)."""
+        from holographic.rendering.holographic_gbuffer import aces_tonemap
+        return aces_tonemap(hdr, exposure=exposure, auto=auto, key=key)
+
+    def feedback_step(self, buffer, zoom=1.02, rotate=0.0, decay=0.98, inject=None, mix=0.0,
+                      centre=(0.5, 0.5)):
+        """ONE iterate of the oldest effect in the demo scene: magnify/rotate a frame about `centre`,
+        fade it, blend in new content -- frame N containing a transformed copy of frame N-1
+        (holographic_feedback). The video-feedback tunnel, and literally inception.
+        `decay` is THE control parameter: below 1 the buffer forgets, above 1 it compounds, and the
+        critical value is exactly 1.0 (mind.feedback_fixed_point measures which side you are on).
+        RANK DECIDES THE COSTUME and both are one operator. A 1-D input takes the SEQUENCE path, where
+        `rotate` is a cyclic shift in SAMPLES -- that is `permute`, the VSA sequence operator this
+        engine's own reservoir uses as its fixed recurrence, so feedback on a hypervector with decay<1
+        IS a leaky echo-state update. 2-D/3-D take the field path, byte-identically to before.
+        MEASURED (sweep 134): the critical decay is EXACTLY 1.0 in both costumes whenever the transform
+        is a PERMUTATION -- 2-D integer roll and 1-D cyclic roll both land on 1.0000000000. Rank is not
+        what matters; permutation-ness is. See mind.is_permutation.
+        `zoom` > 1 magnifies. Deterministic and non-mutating: nearest-neighbour, clamped edges, same
+        bytes every run, because a demo that renders differently twice is a broken demo.
+        MEASURED 2.1 ms at 320x180 -- 8 of a 16.7 ms frame left over.
+        See holographic_feedback.feedback_step."""
+        from holographic.rendering.holographic_feedback import feedback_step
+        return feedback_step(buffer, zoom=zoom, rotate=rotate, decay=decay, inject=inject, mix=mix,
+                             centre=centre)
+
+    def is_permutation(self, buffer, **step_kw):
+        """Does this feedback transform sample every source cell EXACTLY ONCE (holographic_feedback)?
+        -> {permutation, sampled_once, cells}.
+        THE PREDICATE THAT EXPLAINS THE NUMBER, and the reason to reach for it is a ratio that looks
+        wrong. A permutation is orthogonal, so `decay * T` has energy ratio exactly `decay` and critical
+        value exactly 1.0. When the ratio drifts, this says why.
+        MEASURED: a rounded rotation of 0.15 rad over a 48x64 frame samples only 2822 of 3072 cells
+        exactly once (1450 of 3072 at 45 degrees), and its critical decay sits 2.0e-04 above 1. A cyclic
+        roll -- in EITHER rank -- samples all of them and lands on 1.0 exactly.
+        KEPT NEG, and it killed two of my own hypotheses: the deviation is NOT rank (a 2-D integer roll
+        is exact) and NOT the edge policy (wrapped 1.0001997 vs clamped 1.0001981, indistinguishable).
+        It is nearest-neighbour ROUNDING, which is many-to-one. See holographic_feedback.is_permutation."""
+        from holographic.rendering.holographic_feedback import is_permutation
+        return is_permutation(buffer, **step_kw)
+
+    def feedback_fixed_point(self, buffer, steps=96, tol=1e-6, **step_kw):
+        """Does this feedback CONVERGE, CYCLE or DIVERGE -- and at what rate (holographic_feedback)?
+        The dynamical-systems question behind the effect, and more useful than whether one frame looked
+        nice: a buffer that diverges blows out to white, one that converges too fast has no trails.
+        Returns {verdict, steps_run, energy, ratio, period}; `ratio` is the geometric energy ratio
+        between successive frames, which for the linear part of the map IS `decay`.
+        MEASURED: decay 0.9 -> converged, 1.6 -> diverged, 1.0 -> steady with ratio 1.0 to 1e-9. The
+        critical value being exactly 1 is pinned in the module selftest on BOTH sides -- and in BOTH
+        COSTUMES: hand it a 1-D hypervector and it measures the same constant, because a cyclic permute
+        is orthogonal exactly as an integer pixel roll is. `ratio` is exact to 1e-12 when the transform
+        is a permutation and drifts by ~2e-4 when it is a rounded rotation (mind.is_permutation).
+        See holographic_feedback.feedback_fixed_point."""
+        from holographic.rendering.holographic_feedback import feedback_fixed_point
+        return feedback_fixed_point(buffer, steps=steps, tol=tol, **step_kw)
+
+    def zoom_floor(self, centre, width, span0=3.0):
+        """HOW DEEP CAN THIS VIEW ZOOM before float64 gives out (holographic_feedback)? ->
+        {span_floor, decades, distinct_at_floor, distinct_below_floor, verified}.
+        Detection, never a fake: pixels stop separating once span/width falls below the ulp of the
+        largest coordinate in play. The answer BRACKETS the wall -- distinct at the floor, colliding a
+        decade below it -- so the number is checked from both sides rather than asserted.
+        THE FLOOR DEPENDS ON WHERE YOU LOOK, which is the part a constant would hide: 13.8 decades at
+        the seahorse valley (-0.7436, 0.1318), more than 250 centred on the origin, because there the
+        largest coordinate shrinks with the span and there is no eps wall at all.
+        KEPT NEG: this tells you where the wall is; it CANNOT take you past it. That needs arbitrary
+        precision or a perturbation reference orbit -- a different and much larger build.
+        See holographic_feedback.zoom_floor."""
+        from holographic.rendering.holographic_feedback import zoom_floor
+        return zoom_floor(centre, width, span0=span0)
+
+    def deep_zoom(self, centre=(-0.743643887037151, 0.13182590420533), span0=3.0, rate=0.85,
+                  frames=24, width=320, height=180, max_iter=64, band=8, verify=False):
+        """A MANDELBROT DEEP ZOOM RENDERED BY THE FEEDBACK BUFFER -- the two effects are one operator,
+        and the unification is what buys real-time (holographic_feedback).
+        Zooming in means the new view is a magnified SUBSET of the old one, so the previous frame
+        already holds every pixel, only blurrier: magnify it (one resample) and recompute a narrow BAND
+        exactly. `band` is the refresh divisor, so every row is exact once per `band` frames and the
+        error cannot accumulate.
+        MEASURED at 320x180, max_iter=64: full recompute 101.3 ms/frame (9.9 fps, not real-time);
+        band=8 9.8 ms/frame -- 10.3x faster, INSIDE a 60 fps budget -- for mean |err| 1.15% of the
+        iteration range, max 1.48%. band=1 is the exact full recompute.
+        It STOPS at the float64 floor and says so in `stopped`, because a demo that keeps zooming into
+        arithmetic noise is showing you the float, not the fractal.
+        `verify=True` full-recomputes each frame to measure the error and is ~10x slower BY DESIGN --
+        that is the instrument, not the effect. See holographic_feedback.deep_zoom."""
+        from holographic.rendering.holographic_feedback import deep_zoom
+
+        def _escape(w, h, c, s, it):
+            return self.escape_time(width=w, height=h, center=c, span=s, max_iter=it)
+
+        return deep_zoom(_escape, centre=centre, span0=span0, rate=rate, frames=frames, width=width,
+                         height=height, max_iter=max_iter, band=band, verify=verify)
 
     def fold_fit(self, target, iterations=10, coarse=6, refine_steps=40):
         """INFER a fold RECIPE from an observed structure (holographic_foldfit) -- the inverse of fold_fractal.
@@ -1334,7 +1438,7 @@ class _UnifiedPart07:
         from holographic.misc.holographic_drives import DriveSystem
         return DriveSystem(weights=weights)
 
-    def drive_process(self, root, codebook, drives=None, energy=24, recog_thresh=0.5, policy="drive", seed=0):
+    def drive_process(self, root, codebook, drives=None, energy=24, recog_thresh=0.5, policy="drive", seed=0, denoise_beta=25.0):
         """Walk a NESTED/fractal process under homeostatic drives, choosing at each node whether to DENOISE,
         RECOGNISE, or DESCEND by which need is most starved (policy='drive'); 'denoise'/'recognize'/'descend' are
         fixed-priority baselines and 'random' is the naive control. Faculties are real (codebook cleanup + cosine
@@ -1344,7 +1448,7 @@ class _UnifiedPart07:
         make_nested_process."""
         from holographic.misc.holographic_drives import drive_process
         return drive_process(root, codebook, drives=drives, energy=energy, recog_thresh=recog_thresh,
-                             policy=policy, seed=seed)
+                             policy=policy, seed=seed, denoise_beta=denoise_beta)
 
     def abstract_program(self, examples, name=None, max_depth=2, threshold=0.9):
         """Abstract a reusable PROGRAM from a TRACE -- a set of (input_vec, output_vec) examples demonstrating one
@@ -1406,7 +1510,7 @@ class _UnifiedPart07:
                               seed=0, sky=None, default_material="matte_gray", return_stats=False, sss_dir=None,
                               sss_depth=0.6, sss_sigma=4.0, lights=None, dome_cache=False, demodulate=False, soft_light_cache=False,
                               indirect_cache=False, view=None, affine=False, sss_interior=False,
-                              emissive_mesh_lights=False):
+                              emissive_mesh_lights=False, distance_sdf=None, active=None, tol_scale=None):
         """Render the canonical SCENE DOCUMENT (holographic_scene_doc.Scene) -- the 'a modeling app builds a
         document, then renders it' path. The document is a table of objects (each a stable handle + transform +
         SDF geometry + library material); this flattens it to ONE scene SDF (nearest-object distance) plus a
@@ -1448,7 +1552,7 @@ class _UnifiedPart07:
                                      sss_depth=sss_depth, sss_sigma=sss_sigma, lights=lights, dome_cache=dome_cache,
                                      demodulate=demodulate, soft_light_cache=soft_light_cache,
                                      indirect_cache=indirect_cache, view=view, affine=affine,
-                                     sss_interior=sss_interior, emissive_mesh_lights=emissive_mesh_lights)
+                                     sss_interior=sss_interior, emissive_mesh_lights=emissive_mesh_lights, distance_sdf=distance_sdf, active=active, tol_scale=tol_scale)
 
     def render_preview(self, scene, camera, width=240, height=180, scale=0.5, max_bounce=1,
                        quality="draft", seed=0, sky=None, lights=None, view="display", **kw):

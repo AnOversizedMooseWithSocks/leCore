@@ -528,7 +528,8 @@ class _UnifiedPart17:
                                 bits=bits, group=group)
         return read_seeded(tensor, seed=seed, rate=rate, bits=bits, group=group)
 
-    def unicron_store_program(self, weights, machine, program, bits=1, read=False):
+    def unicron_store_program(self, weights, machine, program, bits=1, read=False,
+                              skip=("embed", "lm_head")):
         """PUT leCORE CODE IN THE MODEL, using the VM this project ALREADY HAS.
         Rule 0 first, and it mattered: `compile_program` and `vm_decode_plan` already
         exist, and HoloMachine is described in its own docstring as "a formatted
@@ -548,7 +549,9 @@ class _UnifiedPart17:
             store_program, load_program)
         if read:
             return load_program(weights, bits=bits)
-        return store_program(weights, machine, program, bits=bits)
+        # `skip` names the tensors the program must NOT be written into; it carries the
+        # delegate's own default, and was unreachable through this door until sweep 131.
+        return store_program(weights, machine, program, bits=bits, skip=tuple(skip))
 
     def unicron_store_route(self, points, dim=512, seed=0, extend=None,
                             model=None):
@@ -580,7 +583,8 @@ class _UnifiedPart17:
         return route(self, points, dim=dim, seed=seed)
 
     def unicron_resilient_store(self, weights, data=None, seed="leCore",
-                                overhead=2.5, bits=1, drop_fraction=0.0):
+                                overhead=2.5, bits=1, drop_fraction=0.0,
+                                skip=("embed", "lm_head")):
         """A PAYLOAD THAT SURVIVES LOSING PART OF ITS CARRIER -- leOS's answer, and the
         code was already in the tree, IMPORT-ONLY.
         Every storage channel here had a failure mode I had been documenting as
@@ -597,8 +601,10 @@ class _UnifiedPart17:
         from holographic.caching_and_storage.holographic_substrate import (
             write_resilient, read_resilient)
         if data is not None:
+            # `skip` (the delegate's own default) names the tensors the payload must not
+            # be spread across -- unreachable through this door until sweep 131.
             return write_resilient(weights, data, seed=seed, overhead=overhead,
-                                   bits=bits)
+                                   bits=bits, skip=tuple(skip))
         return read_resilient(weights, bits=bits, drop_fraction=drop_fraction)
 
     def unicron_fountain(self, data, block_size=256, overhead=2.5, seed=0):
@@ -1052,14 +1058,18 @@ class _UnifiedPart17:
         return _p.best_portable(weights, cfg, out_path, eval_tokens=eval_tokens,
                                 filter_model=filter_model, n_refine=n_refine)
 
-    def unicron_save_pack(self, path, weights, cfg, residents=(), notes=""):
+    def unicron_save_pack(self, path, weights, cfg, residents=(), notes="",
+                          like_dir=None):
         """Ship a Galvatron as a PACKAGE: plain safetensors (converts and runs anywhere,
         residents absent) plus galvatron.json -- a DECLARATIVE resident manifest that is
         data, never code (no pickle, no exec crossing a file boundary). The manifest
         states plainly what running the bare checkpoint gives up.
         See holographic_galvapack.save_pack."""
         from holographic.io_and_interop import holographic_galvapack as _p
-        return _p.save_pack(path, weights, cfg, residents=residents, notes=notes)
+        # `like_dir` copies the tokenizer/config sidecars from an existing checkout so the
+        # pack loads in other people's tooling; unreachable through this door until sweep 131.
+        return _p.save_pack(path, weights, cfg, residents=residents, notes=notes,
+                            like_dir=like_dir)
 
     def unicron_load_pack(self, path, lazy=False, with_mind=True):
         """Load a Galvatron package into a running model with its residents rebuilt from
@@ -1373,15 +1383,18 @@ class _UnifiedPart17:
         return capacity_report(runtime, token_ids, marks=tuple(marks))
 
     def unicron_memory_horizon(self, runtime, token_ids,
-                               marks=(8, 16, 32, 64, 128, 256), position=0):
+                               marks=(8, 16, 32, 64, 128, 256), position=0, delta=7):
         """How far back does a model's RECURRENT STATE actually remember? Change one
         token, then measure how far into the future the state still differs. Where it
         reaches zero, the boundary is carrying nothing -- a hard statement, since past
         that point the state is bit-identical whether or not the token existed.
         See holographic_holocap.memory_horizon."""
         from holographic.io_and_interop.holographic_holocap import memory_horizon
+        # `delta` is WHICH perturbation is applied to the probed token -- the independent
+        # variable of the whole measurement, and it was pinned at the delegate's 7 through
+        # this door until sweep 131.
         return memory_horizon(runtime, token_ids, marks=tuple(marks),
-                              position=position)
+                              position=position, delta=delta)
 
     def unicron_attention_waste(self, runtime, token_ids, layer=None,
                                 fractions=(0.9, 0.95, 0.99)):
@@ -1561,7 +1574,8 @@ class _UnifiedPart17:
         return {"label": label, "confidence": conf}
 
     def unicron_report(self, model, sample_layers=8, candidate_bases=None,
-                       roles=("mlp.gate_proj.weight", "self_attn.q_proj.weight")):
+                       roles=("mlp.gate_proj.weight", "self_attn.q_proj.weight"),
+                       progress=None):
         """ONE CALL, THE WHOLE PICTURE -- the front door over the entire Unicron arc.
         Hand it a checkpoint and get: a spectral regime census (which layers even have a
         filterable gap), blind head structure, per-role depth redundancy, optional
@@ -1575,8 +1589,11 @@ class _UnifiedPart17:
         if candidate_bases:
             cands = {n: (_u.load_model(c) if isinstance(c, str) else c)
                      for n, c in candidate_bases.items()}
+        # `progress` is the caller's callback for a report that walks a whole checkpoint;
+        # without it a long run is silent, and it was unreachable here until sweep 131.
         return _u.full_report(model, sample_layers=sample_layers,
-                              roles=tuple(roles), candidate_bases=cands)
+                              roles=tuple(roles), candidate_bases=cands,
+                              progress=progress)
 
     def unicron_lineage(self, model, candidates, k=64):
         """WHICH BASE was this fine-tune derived from? Ranked from WEIGHT EVIDENCE alone
@@ -1595,7 +1612,7 @@ class _UnifiedPart17:
         return _u.delta_lineage(model, cands, k=k)
 
     def unicron_delta_store(self, base, finetuned, energy=0.9999, bits=8,
-                            mode="lowrank"):
+                            mode="lowrank", tol=1e-12):
         """Store a fine-tune as a DELTA rather than a second model. Unchanged tensors
         cost ZERO; touched ones go low-rank at a rank discovered from the delta's own
         spectrum; a fat delta stays dense rather than paying factor overhead (earn your
@@ -1609,7 +1626,9 @@ class _UnifiedPart17:
         from holographic.io_and_interop import holographic_unicron as _u
         ms = [(_u.load_model(x) if isinstance(x, str) else x)
               for x in (base, finetuned)]
-        return _u.delta_encode(ms[0], ms[1], energy=energy, bits=bits, mode=mode)
+        # `tol` is the threshold below which a tensor counts as UNCHANGED and costs zero
+        # bytes -- the knob that decides the delta's whole size. Unreachable until sweep 131.
+        return _u.delta_encode(ms[0], ms[1], energy=energy, bits=bits, mode=mode, tol=tol)
 
     def unicron_delta_apply(self, base, delta, scale=1.0):
         """Rebuild a fine-tune from base + stored delta. scale<1 interpolates between

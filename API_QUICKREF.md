@@ -93,7 +93,7 @@
 - `cone(h=1.0, r=0.5)` -- A capped cone along Y: height `h` (apex at +h/2, base at -h/2), base radius `r`.
 - `ellipsoid(ax=1.0, ay=0.7, az=0.5)` -- An ellipsoid with semi-axes (`ax`,`ay`,`az`).
 - `octahedron(s=1.0)` -- A regular octahedron of 'radius' `s` (vertex distance along each axis).
-- `escape_time(width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=100, power=2.0, julia_c=None, bounds_ratio=None)` -- The 2D ESCAPE-TIME fractal FIELD -- Mandelbrot (`julia_c=None`) or Julia (`julia_c=(re,im)`), the classic z -> z^power + c iteration in the complex plane.
+- `escape_time(width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=100, power=2.0, julia_c=None, bounds_ratio=None, fast_square=False)` -- The 2D ESCAPE-TIME fractal FIELD -- Mandelbrot (`julia_c=None`) or Julia (`julia_c=(re,im)`), the classic z -> z^power + c iteration in the complex plane.
 - `to_callable(node)` -- Wrap an SDF tree as a plain `sdf(P)->dist` callable for mesh_from_sdf / marching.
 - `make_sdf_shape(kind='sphere', position=None, scale=None, rotate=None, **kw)` -- Build an SDF primitive by NAME, optionally placed -- the one door to the shapes above.
 - `dsl_grammar()` -- The SDF DSL, described well enough to WRITE one -- node kinds, parameter meanings, and an example.

@@ -139,23 +139,23 @@ class _UnifiedPart09:
         from holographic.scene_and_pipeline.holographic_dispatch import dispatch_field
         return dispatch_field(x, tags, ops, default=default)
 
-    def render_dispatch(self, sdf, camera, width, height, methods, colors, light, order=3, n=400):
+    def render_dispatch(self, sdf, camera, width, height, methods, colors, light, order=3, n=400, sun=(0.4, 0.7, 0.3), background=(0.55, 0.65, 0.82)):
         """RENDER by dispatching each hit to its best method and get a RELIGHT handle -- the pipeline form of "collapse
         on diffuse, trace on a mirror, switch on the fly". `methods` maps object id -> 'collapse' (PRT dot product) or
         'trace' (a mirror bounce whose diffuse hits themselves collapse). Returns (frame, relight, info): `relight(new
         light)` re-shades the collapsed parts for free, and `info` reports the dispatch counts. This is how PRT and the
         method dispatch are USED in a real render, not just measured. See holographic_dispatch.render_dispatch."""
         from holographic.scene_and_pipeline.holographic_dispatch import render_dispatch
-        return render_dispatch(sdf, camera, width, height, methods, colors, light, order=order, n=n)
+        return render_dispatch(sdf, camera, width, height, methods, colors, light, order=order, n=n, sun=sun, background=background)
 
-    def bake_scene(self, sdf, camera, width, height, methods, colors, order=3, n=400):
+    def bake_scene(self, sdf, camera, width, height, methods, colors, order=3, n=400, background=(0.55, 0.65, 0.82)):
         """PRECOMPUTE / BAKE a scene BEFORE any render, so the first render is already a relight, not a cold trace. Call
         this once at scene-load: it traces primary visibility, dispatches each hit to its method, and precomputes the
         PRT transfer for every diffuse hit and every diffuse surface behind a mirror bounce. Returns a BakedScene to hand
         to `render_baked(scene, light)` -- interactive relighting is then a dot product from frame one. See
         holographic_dispatch.bake_scene."""
         from holographic.scene_and_pipeline.holographic_dispatch import bake_scene
-        return bake_scene(sdf, camera, width, height, methods, colors, order=order, n=n)
+        return bake_scene(sdf, camera, width, height, methods, colors, order=order, n=n, background=background)
 
     def render_baked(self, scene, light):
         """Relight a BakedScene (from bake_scene) -- shade every pixel from its precomputed transfer, no tracing. Every
@@ -484,13 +484,13 @@ class _UnifiedPart09:
         return guided_upsample(low_color, guide_normal, guide_albedo=guide_albedo, guide_depth=guide_depth,
                                levels=levels, sigma_color=sigma_color)
 
-    def synthesize_texture(self, sample, out_h, out_w, psize=24, overlap=6, seed=0, seam="mincut"):
+    def synthesize_texture(self, sample, out_h, out_w, psize=24, overlap=6, seed=0, seam="mincut", candidates=24):
         """Inverse-rendering ST2: grow a larger texture from a small sample by Image Quilting -- lay overlapping
         patches chosen by a patch search (HoloForest recall_k), stitched along min-cut seams. For material synthesis
         and feeding IR1 auto-bump with tileable maps. Patch-copying (can repeat/seam), best for texture/material, not
         free-form restyle. See holographic_texturesynth.synthesize_texture."""
         from holographic.materials_and_texture.holographic_texturesynth import synthesize_texture
-        return synthesize_texture(sample, out_h, out_w, psize=psize, overlap=overlap, seed=seed, seam=seam)
+        return synthesize_texture(sample, out_h, out_w, psize=psize, overlap=overlap, seed=seed, seam=seam, candidates=candidates)
 
     def complete_object(self, archive, front, match_floor=0.85):
         """Inverse-rendering IR11: given a partial FRONT view of an object and an ObjectArchive of complete objects,
@@ -816,14 +816,14 @@ class _UnifiedPart09:
         a = np.asarray(rgb, float)
         return hough_lines(edges(to_gray(a) if a.ndim == 3 else a, quantile=quantile), ntheta=ntheta, top=top, nms=nms)
 
-    def image_colours(self, rgb, k=4, seed=0, as_float=False):
+    def image_colours(self, rgb, k=4, seed=0, as_float=False, sample=2000):
         """The k most common colours in an image (holographic_vision): k-means++ clustering over a pixel sample --
         the palette / dominant-colour readout. Deterministic per seed. Returns (palette[k,3], weights[k]).
         as_float=False (default) keeps the legacy uint8 0-255 palette; as_float=True returns float 0-1 to match the
         rest of the image ecosystem with no range conversion (recommended for image pipelines). Default is OFF only
         to avoid flipping existing callers. See holographic_vision.dominant_colours."""
         from holographic.misc.holographic_vision import dominant_colours
-        return dominant_colours(rgb, k=k, seed=seed, as_float=as_float)
+        return dominant_colours(rgb, k=k, seed=seed, as_float=as_float, sample=sample)
 
     def segment_image(self, rgb, k=5, seed=0, spatial_weight=0.35, split_components=True, min_fraction=0.006,
                       max_dim=None):
@@ -870,7 +870,7 @@ class _UnifiedPart09:
         return emergent_classes(images, k, seed=seed, standardize=standardize)
 
     def ascii_view(self, image, width=80, mode="ramp", ansi=None, ramp=None, gamma=1.0,
-                   invert=False, cell_aspect=0.5):
+                   invert=False, cell_aspect=0.5, edge_threshold=0.2):
         """Render any image to TEXT at `width` characters -- the terminal/log/SSH projection backend
         (holographic_ascii). Modes by detail-per-character: 'ramp' (luminance glyphs), 'edge' (oriented | / - \\
         glyphs on strong gradients), 'braille' (2x4 dots = 8 pixels per char, Bayer-dithered -- the max-detail
@@ -881,10 +881,10 @@ class _UnifiedPart09:
         ~5 ms). See holographic_ascii.ascii_render."""
         from holographic.rendering.holographic_ascii import ascii_render
         return ascii_render(image, width=width, mode=mode, ansi=ansi, ramp=ramp, gamma=gamma,
-                            invert=invert, cell_aspect=cell_aspect)
+                            invert=invert, cell_aspect=cell_aspect, edge_threshold=edge_threshold)
 
     def ascii_sdf(self, sdf, width=80, mode="ramp", z=4.0, fov=0.8, camera=None, lit=True,
-                  ansi=None, ramp=None, cell_aspect=0.5):
+                  ansi=None, ramp=None, cell_aspect=0.5, height=None):
         """Preview a 3-D SDF scene as TEXT -- raymarch + shade + ASCII in one call (holographic_ascii.ascii_sdf),
         the 'see my SDF over SSH' path with no manual render loop. `sdf` is a live SDF, a domain-warped scene, or
         its DSL text. Default camera looks down -z from `z`; pass (origin, forward) as `camera` to override. lit
@@ -892,7 +892,7 @@ class _UnifiedPart09:
         raymarcher and pass its image to ascii_view. See holographic_ascii.ascii_sdf."""
         from holographic.rendering.holographic_ascii import ascii_sdf
         return ascii_sdf(sdf, camera=camera, width=width, mode=mode, z=z, fov=fov, lit=lit,
-                         ansi=ansi, ramp=ramp, cell_aspect=cell_aspect)
+                         ansi=ansi, ramp=ramp, cell_aspect=cell_aspect, height=height)
 
     def ascii_field(self, field, bounds=(-1.0, 1.0), res=None, width=80, mode="ramp",
                     ansi=None, ramp=None, cell_aspect=0.5):
@@ -1026,13 +1026,13 @@ class _UnifiedPart09:
         from holographic.mesh_and_geometry.holographic_curveint import self_intersections
         return self_intersections(A, tol=tol)
 
-    def surface_intersect(self, f, g, lo, hi, res=24, step=None, tol=None):
+    def surface_intersect(self, f, g, lo, hi, res=24, step=None, tol=None, max_seeds=8):
         """SURFACE-SURFACE intersection (K2, the keystone): trace the intersection curve(s) of two implicit
         surfaces f=0, g=0 over the box [lo,hi] by a predict-correct FIELD MARCH (tangent = grad f x grad g,
         corrector = Newton projection onto both). Returns a list of (n,3) polylines. Fit a NURBS to a result for
         a trim loop. See holographic_surfint.surface_surface_intersect."""
         from holographic.mesh_and_geometry.holographic_surfint import surface_surface_intersect
-        return surface_surface_intersect(f, g, lo, hi, res=res, step=step, tol=tol)
+        return surface_surface_intersect(f, g, lo, hi, res=res, step=step, tol=tol, max_seeds=max_seeds)
 
     def trimmed_surface(self, surf_uv, outer, holes=None, u_range=(0.0, 1.0), v_range=(0.0, 1.0)):
         """TRIMMED SURFACE (K3): a surface surf_uv(u,v)->(x,y,z) restricted to trim loops in parameter space (inside

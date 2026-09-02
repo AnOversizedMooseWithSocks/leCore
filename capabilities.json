@@ -1130,6 +1130,28 @@
     },
     {
       "aliases": [
+        "preview a large result",
+        "truncate a big array for the prompt",
+        "how many bytes will this result cost",
+        "shorten a tool output",
+        "show me the first and last few items",
+        "summarize a huge list without printing all of it",
+        "avoid dumping a million numbers into my context",
+        "bound the response size",
+        "head and tail of a value"
+      ],
+      "consumes": [],
+      "does": "mind.bounded_preview(v) / mind.value_cost(v). A big result costs an agent its CONTEXT: /invoke serialised it whole, so a 1e6-float array left as 20 MB of JSON. The preview keeps the TYPE, the TRUE shape and dtype, a HEAD and TAIL sample, and the byte cost of both -- measured 20,269,744 B -> 364 B (55,686x); nested containers bounded RECURSIVELY. /invoke takes an optional budget: over it, this preview PLUS a ref handle to the live value; under it, today's bytes exactly. KEPT NEG: under ~16 floats the envelope costs MORE than the value.",
+      "example": "import lecore, numpy as np; m=lecore.UnifiedMind(dim=256, seed=0); print(m.bounded_preview(np.arange(1000000, dtype=float), max_bytes=512)['size'])",
+      "method": "bounded_preview",
+      "name": "Bounded previews at the /invoke boundary (what a big result costs a prompt)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "supply my own embedding model",
         "bring your own vector encoder",
         "plug in an external embedder",
@@ -4640,6 +4662,26 @@
     },
     {
       "aliases": [
+        "run a benchmark someone else wrote",
+        "score abstention on an external dataset",
+        "longmemeval",
+        "load a third party evaluation set",
+        "measure how often we correctly refuse to answer",
+        "is our abstention number self referential",
+        "did we answer a question about something that never happened"
+      ],
+      "consumes": [],
+      "does": "mind.external_abstention(records, retrieve=, floor=): score the MEMORY abstention gate on SOMEBODY ELSE'S task file -- LongMemEval schema, their `_abs` id convention, a FRESH mind per record. leCore has TWO abstentions and this measures the OTHER one: route_or_abstain abstains on 100% of that benchmark (z=-1.69). THE EXCHANGE RATE, 4-answerable/4-abstention: no rung recall 0.25 / abstention 1.00 / PAIRED 0.25; semantic rung at floor 0.50 gives 0.50 / 0.75 / PAIRED 0.50. The rung DOUBLES paired and BUYS it with abstention. QUOTE THE PAIRED RATE.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.agents_and_reasoning.holographic_extbench import _fixture; print(m.external_abstention(_fixture())['false_answer_rate'])",
+      "method": "external_abstention",
+      "name": "External-corpus abstention (score the memory gate on a task file leCore did not write)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
         "face",
         "facial landmarks",
         "head features",
@@ -7111,6 +7153,27 @@
     },
     {
       "aliases": [
+        "forget memories that stop being useful",
+        "curate a memory store, drop what is stale",
+        "which facts should I keep and which should I archive",
+        "reflect over past memories and write a summary",
+        "rank memories by how often and how recently they were used",
+        "clean up old facts without losing them",
+        "the same thing was taught twice, keep the newest",
+        "archive stale memories but be able to get them back"
+      ],
+      "consumes": [],
+      "does": "mind.memory_curate() -> a curator over the TAUGHT partition: ACT-R activation per fact (reuses holographic_actr), a bounded hot set, and re-taught questions consolidated so the newest answer is current. NO DELETE PATH -- unicron_turn_memory found that 'eviction is a loss', so it DEMOTES to a restorable archive, journals every reason, and plan() mutates nothing. Time is logical, never wall-clock. SELF-MEASURED (no public benchmark scores forgetting): vs a recency window +0.040 [0.032,0.048] at drift 0.5, and LOSES -0.031 [-0.041,-0.02] under a full topic switch. Robust middle, not dominant.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256, seed=0); m.teach('who wrote dune','frank herbert'); m.teach('who wrote dune','f. herbert'); print(m.memory_curate().plan(keep=1)['counts']['superseded'])",
+      "method": "teach",
+      "name": "Memory curation, decay and reflection (what to keep hot, what to archive, never delete)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
         "merge",
         "merge forks",
         "fork and merge",
@@ -8935,6 +8998,27 @@
       "produces": [],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "did the merge lose any functions",
+        "check nothing disappeared after a merge",
+        "a file shrank after merging, what went missing",
+        "did that code move somewhere else",
+        "compare two versions of a codebase for missing definitions",
+        "check a signature did not change after a merge",
+        "a function quietly lost a parameter",
+        "post merge census"
+      ],
+      "consumes": [],
+      "does": "mind.merge_census(base, new) -- the AFTER partner to merge_trees, which runs BEFORE and only at FILE level. Censuses DEFINITIONS, SIGNATURES and LINE COUNTS between two trees (or a git ref vs the worktree), then asks whether anything lost or shrunk merely MOVED. NOTES states that rule in capitals across sweeps 120/121/125 and nothing enforced it: a clean three-way merge once dropped 10 definitions. MEASURED on the sweep-122 merge -- merge_trees hands 28 files to a human as both_changed, this names 6 and resolves the catalog's 973 missing lines as MOVED. KEPT NEG: an import alias IS a def.",
+      "example": "import lecore, tempfile, os; m=lecore.UnifiedMind(dim=256, seed=0); a=tempfile.mkdtemp(); b=tempfile.mkdtemp(); open(os.path.join(a,'f.py'),'w').write('def kept():\\n    pass\\ndef gone():\\n    pass\\n'); open(os.path.join(b,'f.py'),'w').write('def kept():\\n    pass\\n'); print(m.merge_census(a,b,base_is_ref=False)['counts']['lost_unexplained'])",
+      "method": "merge_census",
+      "name": "Post-merge census: did the merge lose a definition, a parameter, or a file's content?",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -12821,6 +12905,27 @@
     },
     {
       "aliases": [
+        "is every capability reachable at every layer",
+        "above and below sweep",
+        "which capabilities are missing from the hosted tool list",
+        "check a feature exists in the engine the api and the chat",
+        "find capabilities that exist in the engine but nowhere else",
+        "audit the layers of the stack for gaps",
+        "does the catalog promise anything it cannot deliver",
+        "is this verb exposed over mcp"
+      ],
+      "consumes": [],
+      "does": "mind.above_below() -- is every DECLARED capability reachable at every layer? Population DERIVED from the catalog (718 cards, 651 doors) instead of a 21-row literal frozen at cp67; L0 engine / L1 facade / L2 /tools manifest / MCP tool / chat verb / pinned, all measured. Reachability is asked of everything, PROMOTION of nothing -- lecore_invoke runs any faculty, so a dedicated tool is a curation act and a bar nobody clears is a bar nobody runs. MEASURED sweep 133: 22 GENUINE gaps the old matrix scored 0 on -- 4 cards naming a door defined NOWHERE, 18 a module function no agent can /invoke.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256, seed=0); print(m.above_below()['counts']['genuine'])",
+      "method": "above_below",
+      "name": "The above/below sweep (is every declared capability reachable at every layer?)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "look at a render before outputting",
         "inner eye loop",
         "render critique iterate",
@@ -13933,6 +14038,26 @@
     },
     {
       "aliases": [
+        "retry a tool call when it returns nothing useful",
+        "enforce a return contract on a step",
+        "stop the loop accepting a bad result",
+        "typed return validation with retry",
+        "make the agent prove the step finished",
+        "bounded retry with the error fed back",
+        "validate what a step returned before moving on"
+      ],
+      "consumes": [],
+      "does": "mind.result_contract(v, c) / mind.validated_call(fn, c) / agent_loop(contracts=). leCore gates the ENTRY (abstain before acting, false-action 0.0%); this is the EXIT gate it lacked -- hold a step's RETURN to a CALLER-declared contract, retry bounded, feed the verdict back as a typed error. MEASURED on 5 executors: false passes 2 -> 0, at 5 -> 8 executor calls (+60%). A deliberate abstention ([]) is not a failure: false-retry rate 0.000. KEPT NEG: catches an ABSENT or MALFORMED return, never a WRONG one; a cached step is not re-validated.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256, seed=0); print(m.validated_call(lambda: None, {'retries': 2})['attempts'])",
+      "method": "validated_call",
+      "name": "Validated termination: hold a step's RETURN to a contract, retry bounded (the exit gate)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Learning & agents"
+    },
+    {
+      "aliases": [
         "measure across seeds",
         "mean spread and confidence interval",
         "is this result robust",
@@ -14504,6 +14629,27 @@
     },
     {
       "aliases": [
+        "append a line to a file without reading it",
+        "add text to the end of a big file",
+        "the file is too big to read, what now",
+        "tail the last lines of a log",
+        "how many lines are in this file",
+        "read a document larger than the size cap",
+        "page through a huge file a chunk at a time",
+        "grow a log file without loading it"
+      ],
+      "consumes": [],
+      "does": "mind.file_append(path, text) grows a file WITHOUT reading it; mind.file_stat(path) gives bytes+lines in O(1) memory. The wall they remove: appending one line to the 6.1 MB docs/NOTES_concepts.md over /invoke cost file_read_lines over the WHOLE file -- 85,602 lines, 6,451,243 B -- purely to learn where the end was, defeating the 1 MB read cap through the back door. MEASURED 6,451,243 -> 133 B (48,506x), 2 calls -> 1. file_read_lines/file_view take a NEGATIVE start for the tail (187x faster on 6 MB). The read cap is UNCHANGED and still refuses -- a loud refusal beats a silent context bomb.",
+      "example": "import lecore, tempfile, os; m=lecore.UnifiedMind(dim=256, seed=0); d=tempfile.mkdtemp(); m.set_file_root(d); m.file_write('n.md', 'one\\n'); m.file_append('n.md', 'two\\n'); print(m.file_stat('n.md')['lines'])",
+      "method": "set_file_root",
+      "name": "Working with files past the 1 MB read cap (append, stat, tail)",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "folder",
         "group tables",
         "namespace tree",
@@ -14572,7 +14718,7 @@
       ],
       "consumes": [],
       "does": "ACES filmic TONEMAP for an HDR buffer -- exposure + auto-key, the display transform a physically-lit render needs before pixels are viewable.",
-      "example": "from holographic.rendering.holographic_gbuffer import aces_tonemap",
+      "example": "import lecore, numpy as np; m=lecore.UnifiedMind(dim=64, seed=0); print(m.aces_tonemap(np.array([[[0.1, 0.5, 4.0]]]))[0][0][2] < 1.0)",
       "method": "aces_tonemap",
       "name": "aces_tonemap",
       "native": true,
@@ -14755,6 +14901,28 @@
       "produces": [],
       "semantic": null,
       "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
+        "run a named end to end example program",
+        "a library of runnable applications I can try",
+        "show me a worked example of what this engine does",
+        "cookbook of end to end programs",
+        "list the demo programs",
+        "try a sample application",
+        "what can this engine actually do, show me",
+        "example programs",
+        "run the demo"
+      ],
+      "consumes": [],
+      "does": "The APPLICATIONS LIBRARY: named end-to-end programs you can run, not snippets to read. mind.apps() lists them with what each PROVES; mind.app_run(name) runs one and returns the numbers it asserts plus its runtime. 4 domains, 0.29s total: spectral_heat (a PDE advanced to any horizon in ONE exact step, 4.4e-16), interleaved_sources (the stride of an unlabelled round-robin stream recovered for 2, 3 and 4 hidden senders), request_to_record (requests parsed to {action, object, quality}, unparseable ones refused), texture_composite (fields blended to a deterministic PNG). All through faculties.",
+      "example": "import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.apps(); mind.app_run('spectral_heat')",
+      "method": "app_run",
+      "name": "applications",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Navigation, planning & programs"
     },
     {
       "aliases": [
@@ -14987,7 +15155,7 @@
       "consumes": [],
       "does": "BOOT the substrate like firmware: POST with measured checks (levers, ladder honesty, container round-trip, calibration, Unicron spectral read), partition mount, doctrine load, machine inventory -- then os_prompt() hands the attached LLM its generated operating screen (syscalls, rules, contract).",
       "example": "import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rep = mind.boot(partition='/data/p1'); print(mind.os_prompt(rep))",
-      "method": "bios_boot",
+      "method": "boot",
       "name": "bios_boot",
       "native": true,
       "produces": [],
@@ -15320,6 +15488,27 @@
     },
     {
       "aliases": [
+        "faculty signature drifted from the function it delegates to",
+        "a mind verb is missing a parameter the module function has",
+        "fix a wrapper that lost an argument",
+        "which faculties cannot forward everything",
+        "wrapper signature audit",
+        "find crippled capabilities",
+        "parameter I cannot pass through the mind",
+        "check my faculty matches its module function"
+      ],
+      "consumes": [],
+      "does": "Which faculties have LOST a parameter their module function still accepts? mind.delegation_drift() audits the seam every other audit misses: a parameter added to a module and never plumbed through its wrapper leaves the capability reachable but crippled -- /tools lists it, /invoke calls it, part of it cannot be reached. Reports each faculty, its delegate, the lost parameters and the overlap, plus SUPPLIED: what a wrapper binds itself (mind=self, seed=self.seed), with its binding, because that is decided, not lost. KEPT NEG: names, not semantics. Needs a source checkout (logic is in tools/).",
+      "example": "import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.delegation_drift()",
+      "method": "delegation_drift",
+      "name": "delegation_drift",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "separate interleaved channels",
         "demultiplex a stream",
         "how many channels are interleaved",
@@ -15474,7 +15663,7 @@
       "consumes": [],
       "does": "Boot a fresh mind with the DISTILLED OPERATING DOCTRINE: 14 measured, provenance-tagged lessons (ladder use, agent loops, storage law, honest benchmarks) taught through the normal reflex gate. Opt-in so cold state stays honest.",
       "example": "import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.doctrine_load()",
-      "method": "doctrine_seedpack",
+      "method": "doctrine_load",
       "name": "doctrine_seedpack",
       "native": true,
       "produces": [],
@@ -15548,8 +15737,8 @@
       ],
       "consumes": [],
       "does": "The FLAME COLOR an element burns with (emission spectrum -> RGB) -- the flame-test palette the combustion renderer colors its fire from.",
-      "example": "from holographic.simulation_and_physics.holographic_elements import element_flame_color",
-      "method": "element_flame_color",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=64, seed=0); print(m.element('Na')['flame_color'])",
+      "method": "element",
       "name": "element_flame_color",
       "native": true,
       "produces": [],
@@ -15668,6 +15857,32 @@
       "produces": [],
       "semantic": null,
       "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "feedback buffer, feed the last frame back in",
+        "zoom into a mandelbrot forever",
+        "video feedback tunnel effect",
+        "infinite zoom demo",
+        "how deep can I zoom before float64 breaks",
+        "does my feedback buffer converge or blow up",
+        "demoscene effect",
+        "fractal zoom in real time",
+        "as above so below, same structure at every scale",
+        "the same operator on a field and on a sequence",
+        "feedback on a vector instead of an image",
+        "leaky integrator over hypervectors",
+        "decay a sequence and bundle new content into it"
+      ],
+      "consumes": [],
+      "does": "The demo-scene operator: ITERATE A PROJECTION. mind.feedback_step() is the video-feedback tunnel -- frame N holding a transform of frame N-1 -- and mind.deep_zoom() is a Mandelbrot deep zoom RENDERED BY it: 9.7 ms/frame at 320x180 vs 98.3 full, error ~1.1%. ONE OPERATOR, TWO COSTUMES: on a 1-D hypervector rotate becomes permute, a leaky echo-state update, and the critical decay is EXACTLY 1.0 in both whenever the transform is a permutation (mind.is_permutation). mind.zoom_floor() says where float64 ends -- 13.8 decades -- and deep_zoom STOPS there. KEPT NEG: detects that wall, cannot pass.",
+      "example": "import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.deep_zoom(frames=8, band=8)",
+      "method": "deep_zoom",
+      "name": "feedback_and_deep_zoom",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Geometry, modeling & rendering"
     },
     {
       "aliases": [
@@ -16806,7 +17021,7 @@
       "consumes": [],
       "does": "Seat the expert panel in the swarm realm: each member a named resident with its own scope in one SHARED store; deliberation follows the swarm's contrast law -- consensus is silent, only disagreement is recorded, authored per-expert.",
       "example": "import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.panel_seat(); mind.panel_deliberate(q, {'widrow': 'a', 'bau': 'b'})",
-      "method": "panel_realm",
+      "method": "panel_seat",
       "name": "panel_realm",
       "native": true,
       "produces": [],
@@ -16847,7 +17062,7 @@
       "consumes": [],
       "does": "the honest NULL for a CONTINUOUS, autocorrelated signal (holographic_surrogate) -- a phase-randomized surrogate has the SAME power spectrum (same autocorrelation) as the signal but random phases, so deterministic/nonlinear structure is destroyed while linear second-order stats are preserved (Theiler 1992). Unlike a permutation, it does NOT destroy the autocorrelation a trivial forecaster exploits. surrogate_zscore measures any structure statistic against this null -- a high z means structure BEYOND autocorrelation",
       "example": "import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); x=np.cumsum(np.random.default_rng(0).normal(size=512)); print(round(float(np.abs(np.fft.rfft(x)).sum() - np.abs(np.fft.rfft(m.phase_randomize(x))).sum()),3))",
-      "method": "phase_randomized_null",
+      "method": "phase_randomize",
       "name": "phase_randomized_null",
       "native": true,
       "produces": [],
@@ -18197,7 +18412,7 @@
       "theme": "More capabilities"
     }
   ],
-  "count": 801,
+  "count": 811,
   "schema_version": "1.1",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

@@ -158,6 +158,82 @@ space, 24 steps, projected to RGB.*
 
 *Image-processing output from the test suite.*
 
+![Layered procedural composite](gallery/texture_composite.png)
+
+*The output of `mind.app_run('texture_composite')` — three named procedural fields (marble, fBm, voronoi
+f2f1) tinted and blended through the engine's one shared composite kernel, written by the deterministic
+stdlib PNG encoder. **This picture is reproducible**: the same seed gives the same content hash
+(`sha256[:16]`), which the test suite checks rather than assumes. 192×192, 0.27 s, and it is a program
+you can run — `applications/art/texture_composite.py` — not a screenshot of one.*
+
+---
+
+## Demo scene: as above, so below
+
+![Mandelbrot deep zoom rendered by a feedback buffer](gallery/infinite_zoom.png)
+
+*`mind.app_run('infinite_zoom')` — a Mandelbrot deep zoom **rendered by a feedback buffer**, with
+feedback trails laid over it at the same zoom rate. One recursive idea at two scales: the coordinate
+window zooms by `rate` each frame, and so does the image raster — and because it does, the previous
+frame already holds every pixel the next one needs, so only a narrow band is recomputed exactly.*
+
+*The self-similarity is the **optimisation**, not the decoration. Measured at 320×180, max_iter=64:*
+
+| path | ms/frame | verdict |
+|---|---|---|
+| full recompute (`band=1`) | **102.2** | 9.8 fps — not real-time |
+| feedback, `band=4` | 18.7 | still over budget |
+| feedback, `band=8` | **10.7** | **60 fps**, 9.6× faster |
+
+*Fidelity cost of the reuse: mean \|err\| **1.1 %** of the iteration range (max 1.8 %) — and **bounded**,
+because the refresh band makes every row exact once every `band` frames, so error cannot compound.*
+
+*And it knows where it ends. `mind.zoom_floor()` puts the float64 wall at **13.8 decades** for this
+target — verified from both sides: all 320 x-coordinates still distinct at the floor, only 49 of 320 a
+decade below it. `deep_zoom` **stops there and says so** rather than zooming into arithmetic noise.
+**Kept negative:** it detects that wall, it cannot pass it — going deeper needs arbitrary precision or a
+perturbation reference orbit, which is a different and much larger build.*
+
+*One operator, two costumes — and the number that proves it.* Hand `feedback_step()` a 1-D hypervector
+and `rotate` becomes a cyclic **permute**: the VSA sequence operator, and the fixed recurrence
+`mind.reservoir` already uses. The demo scene's oldest effect and this engine's sequence recurrence are
+the same map — which is a claim you can only make honestly if **something is the same number in both**:
+
+| transform | rank | permutation? | critical decay |
+|---|---|---|---|
+| integer roll | 1-D (sequence) | yes — 256/256 cells | **1.0000000000** |
+| integer roll | 2-D (field) | yes — 3072/3072 cells | **1.0000000000** |
+| rounded rotate 0.15 rad | 2-D (field) | **no** — 2658/3072 | 1.0001981 |
+
+*The condition is sharper than "field vs sequence": the constant holds whenever the transform is a
+**permutation**, and rank is irrelevant. Two tidier hypotheses died on the way — that rank was the cause
+(a 2-D integer roll is exact, so no) and that the clamped edges were (wrapped 1.0001997 vs clamped
+1.0001981, indistinguishable). It is nearest-neighbour **rounding**, which is many-to-one.
+`mind.is_permutation()` reports it, so a ratio that looks wrong arrives with its reason.*
+
+---
+
+## The applications library
+
+Named, end-to-end programs you can run. `mind.apps()` lists them with what each one **proves**;
+`mind.app_run(name)` runs one and returns the numbers it asserts beside its measured runtime. First tranche — **five domains**:
+
+| application | domain | what it proves |
+|---|---|---|
+| `spectral_heat` | math | a linear PDE advanced to **any** horizon in ONE step, max\|err\| **4.4e-16** and flat in *t*; the explicit finite-difference baseline needs 231 steps to reach t=20 and lands at 5.0e-04 |
+| `interleaved_sources` | demux | the stride of an unlabelled round-robin stream recovered **exactly** for 2, 3 and 4 hidden senders, the de-interleaved series identical to the originals, and two phases of one source grouped back together |
+| `request_to_record` | parse | 8/8 in-vocabulary requests parsed to `{action, object, quality}` and 4/4 out-of-vocabulary ones **refused with `{}`** — zero fabricated roles |
+| `infinite_zoom` | demoscene | a Mandelbrot deep zoom rendered by a feedback buffer at **10.7 ms/frame** (60 fps) against 102.2 for full recompute, error bounded at 1.1 %, stopping exactly at the float64 wall (13.8 decades) |
+| `texture_composite` | art | three procedural fields blended to a deterministic PNG — identical content hash across runs, every channel in [0,1] |
+
+Every one reaches the engine **only through faculties** — never by importing `holographic.*` — which
+`tests/test_applications.py` enforces by parsing each file rather than by asking nicely.
+
+*Honest comparison:* Torchhd (JMLR 24), the reference open-source VSA/HDC library, ships an `examples/`
+directory and leCore shipped none — that gap is why this exists. It is **not** a like-for-like win:
+their examples are ML tasks scored on public datasets, these are end-to-end programs over leCore's own
+machinery. Different claims.
+
 ---
 
 ## Content-addressable memory & superposition

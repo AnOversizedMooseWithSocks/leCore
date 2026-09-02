@@ -1,0 +1,4 @@
+{
+ "missing_budget": 0,
+ "why": "sweep 131: the 99-drift backlog is CLEARED, floor lowered 7 -> 0. Of the original 107 (faculty, parameter) findings, 45 were never drift -- the tool now READS THE CALL SITE and reports them as SUPPLIED with their binding (seed=self.seed x18, mind=self x16, 6 derived, 3 positional renames, 2 private). The 62 real losses are all restored as appended passthroughs carrying the delegate's own default: 56 by agent-b across 14 mixins, the last 7 (nbody_step in p13, six unicron_* in p17) by agent-c. Proof on record: 0 backward-compat violations against git HEAD, every new default equal to the delegate's own by inspect, and delegate-spy confirmation that a caller's value actually arrives. A drift found from here is a REGRESSION, not a backlog item -- if this number rises, plumb the parameter or record the narrowing with its reason, do not raise the floor."
+}

@@ -80,6 +80,48 @@ class _UnifiedPart08:
         return self._capability_catalog().suggest_pipeline(start_kind, goal_kind, max_len=max_len,
                                                            require_step=require_step)
 
+    def apps(self):
+        """THE APPLICATIONS LIBRARY: named, end-to-end programs you can actually run -> [{name, domain,
+        proves, artefact, module}].
+        WHY IT EXISTS (sweep 124, backlog A, verbatim): "THE MACHINERY IS ALIVE; THE LIBRARY DOES NOT
+        EXIST." vsarun / vsabake / query_programs all selftest green and six application-shaped asks route
+        to real faculties -- and there was no curated collection of runnable programs anywhere, so every
+        phrasing of "show me a worked example" returned a fallback. Torchhd, the reference open-source
+        VSA/HDC library, ships an examples/ directory; leCore shipped none.
+        Each entry declares what it PROVES, because "it ran" is not a demonstration. Run one with
+        mind.app_run(name). Every application reaches the engine only through faculties -- never by
+        importing holographic.* -- which is enforced by AST in tests/test_applications.py, so an
+        "application" cannot quietly become a script that bypasses the surface every other audit protects.
+        MEASURED: the whole library is 4 applications across 4 domains in 0.29 s total.
+        KEPT NEG: the comparison with Torchhd is NOT like-for-like and must not be written as one -- their
+        examples are ML tasks scored on public datasets, these are end-to-end programs over leCore's own
+        machinery. Different claims. Source checkout only: applications/ sits beside the engine, so a
+        wheel install raises rather than reporting an empty library, which would read as "there are none".
+        See applications.apps."""
+        try:
+            from applications import apps
+        except ImportError as e:      # an empty list would be a WRONG answer, not a smaller one
+            raise ImportError("mind.apps() needs the applications/ directory of a source checkout "
+                              "(not shipped in the wheel): %s" % e)
+        return apps()
+
+    def app_run(self, name, **kw):
+        """Run one application from the library end to end -> {name, domain, proves, seconds, proved, ...}.
+
+        The dispatcher is what makes the library a CAPABILITY rather than a folder: a directory of scripts
+        nobody can reach through the engine does not exist by this repo's own rule. `proved` carries the
+        numbers the program asserts (max_error, strides_recovered, digest, ...) and `seconds` is measured
+        on the spot, because an example nobody can afford to run is a rotting example.
+        Names come from mind.apps(); an unknown one raises listing what IS available rather than returning
+        empty. `kw` is passed to the application (res=, n=, seed=, out_dir=).
+        See applications.run."""
+        try:
+            from applications import run
+        except ImportError as e:
+            raise ImportError("mind.app_run() needs the applications/ directory of a source checkout "
+                              "(not shipped in the wheel): %s" % e)
+        return run(self, name, **kw)
+
     def io_kinds(self):
         """The closed vocabulary of io DATATYPE kinds a capability can consume/produce (holographic_iokinds) --
         mesh, points, sdf, sdf_scene, field, image, hypervector, transform, selection, scalar, curve, skeleton.
@@ -660,7 +702,7 @@ class _UnifiedPart08:
             replay.append(s)
         return acc, trace, replay
 
-    def nystrom_field(self, points, sources, weights, sigma, m=None):
+    def nystrom_field(self, points, sources, weights, sigma, m=None, seed=0):
         """Approximate a kernel-weighted field f(p) = sum_j weights[j]*K(p, sources[j]) (Gaussian RBF) via m
         LANDMARK sources -- O((Np+Ns)*m) instead of the exact O(Np*Ns), for LARGE memory or physics sims
         (sources=particles+charges, or stored items+payload; points=where you sample). MEASURED ~13x at N=2000
@@ -668,7 +710,7 @@ class _UnifiedPart08:
         high-frequency field is full-rank and the landmark approximation degrades (corr ~0.2). See
         holographic_nystrom.nystrom_kernel_apply."""
         from holographic.sampling_and_signal.holographic_nystrom import nystrom_kernel_apply
-        return nystrom_kernel_apply(points, sources, weights, sigma, m=m)
+        return nystrom_kernel_apply(points, sources, weights, sigma, m=m, seed=seed)
 
     def consolidate_subspace(self, memories, k=8, landmarks=None):
         """The consolidated low-rank SUBSPACE of stored memories (top-k principal directions) + mean. With
@@ -677,13 +719,13 @@ class _UnifiedPart08:
         from holographic.agents_and_reasoning.holographic_dream import dream_subspace
         return dream_subspace(memories, k=k, landmarks=landmarks)
 
-    def dream(self, basis, mean, n=8, seed=0, noise=1.0, codebook=None):
+    def dream(self, basis, mean, n=8, seed=0, noise=1.0, codebook=None, beta=25.0):
         """DREAM = generative replay over the consolidated subspace: draw noise, project onto the subspace (the
         manifold denoiser run from noise), optionally clean -> samples ON the manifold (valid) yet NOVEL (not a
         stored item). Over the consolidated (composed) subspace this yields novel COMPOSITIONS, the interesting
         regime B10 flagged. Returns an (n, D) array. See holographic_dream.dream."""
         from holographic.agents_and_reasoning.holographic_dream import dream
-        return dream(basis, mean, n=n, seed=seed, noise=noise, codebook=codebook)
+        return dream(basis, mean, n=n, seed=seed, noise=noise, codebook=codebook, beta=beta)
 
     def holographic_value_head(self, n_actions, dim=None, routed=False, n_buckets=64):
         """The creature's value/policy AS a pure-VSA program. Returns a HolographicValueHead (or, with
@@ -1529,7 +1571,7 @@ class _UnifiedPart08:
             raise ValueError("call brick_ray_index(...) first to build the index and cache the scene")
         return _drm(ctx, obj_id, delta, brick_index, base_frame, camera)
 
-    def incremental_renderer(self, camera, width=256, height=256, sun="bright", sky="clear", ground=True, ss=1):
+    def incremental_renderer(self, camera, width=256, height=256, sun="bright", sky="clear", ground=True, ss=1, glass_tint=(0.75, 0.9, 0.85)):
         """A render SESSION: render the first frame, then re-render the SAME scene for FREE (cached), apply colour/
         material/light edits and geometry moves as bounded bit-exact DELTAS, and stream only the changed pixels. This
         is the path for repeated rendering / live editing / pixel streaming -- calling render_scene every frame re-does
@@ -1545,7 +1587,7 @@ class _UnifiedPart08:
             ys, xs, rgb = r.stream_delta(mask)     # the wire payload: only changed pixels
         """
         from holographic.rendering.holographic_rayindex import IncrementalRenderer
-        return IncrementalRenderer(camera, width, height, sun=sun, sky=sky, ground=ground, ss=ss)
+        return IncrementalRenderer(camera, width, height, sun=sun, sky=sky, ground=ground, ss=ss, glass_tint=glass_tint)
 
     def region_field(self, regions):
         """Compose a LABELLED REGION FIELD: a set of boundaries (SDFs), each tagging the points inside it with how to

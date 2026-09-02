@@ -379,7 +379,7 @@ class _UnifiedPart04:
         from holographic.misc.holographic_resonator import available_levels
         return [int(d) for d in available_levels(self.chunk_codebook(codebook), np.asarray(vocab, float))]
 
-    def recursive_factor(self, composite, codebook, vocab, arity=2, restarts=10, iters=300):
+    def recursive_factor(self, composite, codebook, vocab, arity=2, restarts=10, iters=300, tol=1e-06):
         """Factor a DEEP composite by solving a SHALLOW problem over composed chunks, then expanding by lookup.
         Tries each chunk level deepest-first, verifies each candidate by RE-COMPOSITION, and falls back one level
         on failure -- so the answer is verified correct or reported unsolved, never a silent guess.
@@ -392,7 +392,7 @@ class _UnifiedPart04:
         mind.learn_chunks: R3's one codebook family, second consumer. See holographic_resonator.recursive_factor."""
         from holographic.misc.holographic_resonator import recursive_factor as _rf
         return _rf(np.asarray(composite, float), self.chunk_codebook(codebook), np.asarray(vocab, float),
-                   arity=int(arity), restarts=int(restarts), iters=int(iters))
+                   arity=int(arity), restarts=int(restarts), iters=int(iters), tol=tol)
 
     def reduce_involution(self, leaves):
         """Reduce a leaf multiset modulo MAP's self-inverse binding: a leaf appearing twice CANCELS. Measured --
@@ -899,7 +899,7 @@ class _UnifiedPart04:
         return _se(matvec, n, c, seed=seed, dtype=dtype, on_matvec=on_matvec)
 
     def bisect_to_budget(self, probe, target, lo, hi, midpoint="arith", max_iters=20, tol=None,
-                         cmp=None, key=None, bracket=False, on_probe=None):
+                         cmp=None, key=None, bracket=False, on_probe=None, bracket_cap=4096):
         """Bisect a MONOTONE probe(knob) to hit a target budget -- the shared engine behind decimate_to (grid
         -> face count) and ratedistortion (scale -> cosine). midpoint "arith" ((lo+hi)//2) or "geom"
         (sqrt(lo*hi)); tol=None does a fixed max_iters sweep returning the final knob, a float best-tracks the
@@ -907,7 +907,7 @@ class _UnifiedPart04:
         count via on_probe. See holographic_numerics.bisect_to_budget."""
         from holographic.misc.holographic_numerics import bisect_to_budget as _b2b
         return _b2b(probe, target, lo, hi, midpoint=midpoint, max_iters=max_iters, tol=tol, cmp=cmp,
-                    key=key, bracket=bracket, on_probe=on_probe)
+                    key=key, bracket=bracket, on_probe=on_probe, bracket_cap=bracket_cap)
 
     def mesh_closest_point(self, mesh, points, cell_scale=1.0):
         """Closest point on `mesh` to each of `points` -- the shared correspondence machine behind uv/attribute
@@ -953,14 +953,14 @@ class _UnifiedPart04:
         import numpy as _np
         return _ms(_np.asarray(labels), report, _np.asarray(vertices, float), axis=axis, tol=tol)
 
-    def fpe_lattice_resonator(self, bound, bases, ranges, iters=80):
+    def fpe_lattice_resonator(self, bound, bases, ranges, iters=80, dim=None):
         """R6 (gated): factor a BOUND PRODUCT of fractional-power-encoded integer coordinates back into its
         integers via a Fourier-HRR resonator network -- for the HOLISTIC-ONLY regime where the coordinates are
         never observed directly, only the single bound product (VERIFIED 200/200 at 0.6 rad phase noise, where
         rounding is undefined). KEPT NEGATIVE: for direct noisy coords np.round dominates -- do not use this
         there. Returns (coords, report). See holographic_fpe.fpe_lattice_resonator."""
         from holographic.sampling_and_signal.holographic_fpe import fpe_lattice_resonator as _r
-        return _r(bound, bases, ranges, iters=iters)
+        return _r(bound, bases, ranges, iters=iters, dim=dim)
 
     def low_eigenvectors(self, matvec, n, c, k=8, seed=0, dtype=float, **kw):
         """The k lowest eigenvectors of a Hermitian PSD operator from its matvec alone, no scipy -- the band a
@@ -999,13 +999,13 @@ class _UnifiedPart04:
         from holographic.mesh_and_geometry.holographic_meshseq import seq_decode as _sd
         return _sd(H, length, dim=dim, seed=seed, vocab_size=vocab_size, chunk=chunk)
 
-    def worst_view(self, metric, mode="direct", maximize=True, max_evals=4000, eps=1e-4, lipschitz=None):
+    def worst_view(self, metric, mode="direct", maximize=True, max_evals=4000, eps=1e-4, lipschitz=None, start_level=1):
         """M16: find the GLOBAL worst view over S^2 without a dense sweep. mode="direct" (default) is
         Lipschitz-constant-free (safe when the metric jumps at occlusion); mode="certified" is Piyavskii
         branch-and-bound returning an optimality certificate (needs a Lipschitz bound). `metric` is a pure
         fn of a unit direction. Returns (best_dir, best_value, report). See holographic_worstview.worst_view."""
         from holographic.mesh_and_geometry.holographic_worstview import worst_view as _wv
-        return _wv(metric, mode=mode, maximize=maximize, max_evals=max_evals, eps=eps, lipschitz=lipschitz)
+        return _wv(metric, mode=mode, maximize=maximize, max_evals=max_evals, eps=eps, lipschitz=lipschitz, start_level=start_level)
 
     def stripe_pattern(self, mesh, direction_field, frequency=20.0):
         """Knoppel-Crane STRIPE PATTERNS: evenly-spaced stripes that follow a per-vertex tangent direction
@@ -1112,7 +1112,7 @@ class _UnifiedPart04:
 
     def surface_retopo(self, mesh, density=1.0, edge_length=None, guide_dirs=None, guide_weight=5.0,
                        iterations=20, boundary="natural", silhouette=0.95, max_density=4.0, topology=True,
-                       guard_iterations=None, fast=False, snap_singular=False, feature_sized=False):
+                       guard_iterations=None, fast=False, snap_singular=False, feature_sized=False, solver='auto', shrink=True):
         """SURFACE-ROUTE RETOPO: field-aligned quad-dominant topology whose vertices NEVER LEAVE the source
         surface, so the silhouette survives by construction. Use this for SCANS and dense meshes; auto_retopo
         voxelises and is for BLOCK-OUTS (measured: voxel_remesh alone fails the 0.95 gate at every affordable
@@ -1145,7 +1145,7 @@ class _UnifiedPart04:
             trial_it = int(guard_iterations) if guard_iterations is not None else int(iterations)
             out, rep = _sr(src, density=d, edge_length=edge_length, guide_dirs=guide_dirs,
                            guide_weight=guide_weight, iterations=trial_it, boundary=boundary, fast=fast,
-                           snap_singular=snap_singular, feature_sized=feature_sized)
+                           snap_singular=snap_singular, feature_sized=feature_sized, solver=solver, shrink=shrink)
             state[id(out)] = rep
             state.setdefault("_density_of", {})[id(out)] = d
             return out
@@ -1164,7 +1164,7 @@ class _UnifiedPart04:
             if chosen_d is not None:
                 out_full, rep_full = _sr(src, density=chosen_d, edge_length=edge_length, guide_dirs=guide_dirs,
                                          guide_weight=guide_weight, iterations=int(iterations), boundary=boundary, fast=fast,
-                                         snap_singular=snap_singular, feature_sized=feature_sized)
+                                         snap_singular=snap_singular, feature_sized=feature_sized, solver=solver, shrink=shrink)
                 state[id(out_full)] = rep_full
                 out = out_full
         rep = dict(state.get(id(out), {}))

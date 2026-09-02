@@ -258,7 +258,7 @@ import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); e=m
 ACES filmic TONEMAP for an HDR buffer -- exposure + auto-key, the display transform a physically-lit render needs before pixels are viewable..
 
 ```python
-from holographic.rendering.holographic_gbuffer import aces_tonemap
+import lecore, numpy as np; m=lecore.UnifiedMind(dim=64, seed=0); print(m.aces_tonemap(np.array([[[0.1, 0.5, 4.0]]]))[0][0][2] < 1.0)
 ```
 *Find it by:* tonemap an hdr image, filmic display transform, make hdr viewable
 
@@ -752,6 +752,14 @@ cbs, b = m.lincode_codebooks(n_factors=3, n_entries=24); m.factor_exact(cbs[0][0
 ```
 *Find it by:* factor a bound product exactly, exact factorization, solve for the factors, past the resonator wall, linear codes for factoring, recover indices from a product, factorize without searching, resonator fails at my factor count
 
+### External-corpus abstention (score the memory gate on a task file leCore did not write)
+mind.external_abstention(records, retrieve=, floor=): score the MEMORY abstention gate on SOMEBODY ELSE'S task file -- LongMemEval schema, their `_abs` id convention, a FRESH mind per record. leCore has TWO abstentions and this measures the OTHER one: route_or_abstain abstains on 100% of that benchmark (z=-1.69). THE EXCHANGE RATE, 4-answerable/4-abstention: no rung recall 0.25 / abstention 1.00 / PAIRED 0.25; semantic rung at floor 0.50 gives 0.50 / 0.75 / PAIRED 0.50. The rung DOUBLES paired and BUYS it with abstention. QUOTE THE PAIRED RATE..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.agents_and_reasoning.holographic_extbench import _fixture; print(m.external_abstention(_fixture())['false_answer_rate'])
+```
+*Find it by:* run a benchmark someone else wrote, score abstention on an external dataset, longmemeval, load a third party evaluation set, measure how often we correctly refuse to answer, is our abstention number self referential, did we answer a question about something that never happened
+
 ### Fat-margin cache (for a query that drifts)
 when a query DRIFTS -- a camera nudging forward, a cursor, an agent, a recall neighbourhood -- do not key the cache on the exact query: bake an ENLARGED region around it and serve everything that lands inside. Catto's enlarged AABB (he grows a moving body's box so it need not re-insert into the broadphase every frame), generalized past physics. mind.margin_cache(builder, margin).get(p) -> (value, hit); mind.drift_scale(queries) is the variation probe pointed at the QUERY STREAM instead of the data; mind.suggest_margin(queries, target) picks the smallest margin meeting a hit-rate target by REPLAYING the stream (empirical on purpose: a random walk's exit time scales like (R/sigma)^2 but the measured rebuilds sit ~1.8x off, so a fitted law is worse than a replay). MEASURED on a unit-step 2-D walk of 400 queries: margin 0 -> 0% hits / 400 rebuilds; 1.0 -> 35.5% / 258; 3.0 -> 85.0% / 60; 6.0 -> 95.0% / 20. KEPT NEGATIVE: this is NOT the sleep tracker's two-threshold hysteresis -- a margin cache has exactly ONE radius, because a cache entry has no state to hover at a bar and flicker between; an inner threshold would never be read. Cousins, not the same mechanism. WIRED (C4) into RenderSession.preview(reuse_margin=...), where the drifting query is the CAMERA POSE: 20 drifting frames at margin 0.12 give 19 hits and 1 rebuild. THE GATE IS NOT A HIT-RATE TARGET -- a hit serves a STALE value, and on a rendered frame the max error saturates at the FIRST reuse (0.5864, a silhouette edge) while the mean creeps 0.0001 -> 0.0051. Use mind.suggest_margin_for_error(queries, values, max_mean_error, max_abs_error=...) and mind.replay_margin_error(...): a value that jumps 0->1 passes a mean-only budget at margin 0.1929 and serves a completely wrong answer (max error 1.00), while the max-error bound stops at 0.094558 and 0.095158 is already catastrophic. The admissible margin is a CLIFF. SECOND CORRECTION: lightcache and domecache are NOT clients -- they are stateless per-frame screen-space stride caches with no query stream to drift..
 
@@ -843,6 +851,14 @@ keep the hot working set where the CPU can reach it fast: FFT spectrum residency
 from holographic.simulation_and_physics.holographic_memoryhome import Memory; Memory.bind_cached(a, b, cache)
 ```
 *Find it by:* memory, cache, residency, resident, spectrum cache, batch, bind_batch, backend
+
+### Memory curation, decay and reflection (what to keep hot, what to archive, never delete)
+mind.memory_curate() -> a curator over the TAUGHT partition: ACT-R activation per fact (reuses holographic_actr), a bounded hot set, and re-taught questions consolidated so the newest answer is current. NO DELETE PATH -- unicron_turn_memory found that 'eviction is a loss', so it DEMOTES to a restorable archive, journals every reason, and plan() mutates nothing. Time is logical, never wall-clock. SELF-MEASURED (no public benchmark scores forgetting): vs a recency window +0.040 [0.032,0.048] at drift 0.5, and LOSES -0.031 [-0.041,-0.02] under a full topic switch. Robust middle, not dominant..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256, seed=0); m.teach('who wrote dune','frank herbert'); m.teach('who wrote dune','f. herbert'); print(m.memory_curate().plan(keep=1)['counts']['superseded'])
+```
+*Find it by:* forget memories that stop being useful, curate a memory store, drop what is stale, which facts should I keep and which should I archive, reflect over past memories and write a summary, rank memories by how often and how recently they were used, clean up old facts without losing them, the same thing was taught twice, keep the newest, archive stale memories but be able to get them back
 
 ### Metered LLM seam (what the attached model costs, and replay for the deterministic ones)
 Wrap your callable, then attach: attach_llm(MeteredLLM(fn)) (holographic_llmseam) -- attach_llm itself never wraps (pinned: llm_tool's rationale depends on it). Counters always on, exact sha256 hash-replay opt-in, hard call budget that FAILS CLOSED. mind.llm_report() gives asked/calls/hits/hit_rate/chars/seconds. MEASURED on a 3-branch swarm workload: 360 asked -> 40 real calls, hit_rate 0.889. KEPT NEG: cache=False by default -- caching a SAMPLING model collapses N branches to one and manufactures a false consensus (pinned in the selftest)..
@@ -2854,6 +2870,14 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.escape_time(width=6
 ```
 *Find it by:* mandelbrot set, julia set, escape time fractal, mandelbrot field, 2d fractal escape count, complex z^2+c fractal, draw the mandelbrot set
 
+### feedback_and_deep_zoom
+The demo-scene operator: ITERATE A PROJECTION. mind.feedback_step() is the video-feedback tunnel -- frame N holding a transform of frame N-1 -- and mind.deep_zoom() is a Mandelbrot deep zoom RENDERED BY it: 9.7 ms/frame at 320x180 vs 98.3 full, error ~1.1%. ONE OPERATOR, TWO COSTUMES: on a 1-D hypervector rotate becomes permute, a leaky echo-state update, and the critical decay is EXACTLY 1.0 in both whenever the transform is a permutation (mind.is_permutation). mind.zoom_floor() says where float64 ends -- 13.8 decades -- and deep_zoom STOPS there. KEPT NEG: detects that wall, cannot pass..
+
+```python
+import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.deep_zoom(frames=8, band=8)
+```
+*Find it by:* feedback buffer, feed the last frame back in, zoom into a mandelbrot forever, video feedback tunnel effect, infinite zoom demo, how deep can I zoom before float64 breaks, does my feedback buffer converge or blow up, demoscene effect, fractal zoom in real time
+
 ### field_displace
 Displace a mesh's vertices along their normals by a SCALAR FIELD or SDF sampled at each vertex (holographic_autodisplace) -- the field-driven modifier. field is any .eval SDF (mandelbulb/fold_fractal) or a callable, so a FRACTAL drives the relief. An optional per-vertex weight MASK (from a texture map) gates it so detail grows only where the map paints -- the per-face fractal modifier. Generalizes auto_displace beyond RGB.
 
@@ -3554,6 +3578,14 @@ import lecore; m=lecore.UnifiedMind(); st=m.study('docs'); print(st['tree']['n_f
 ```
 *Find it by:* understand a whole directory in one call, study a codebase, digest a large folder for an agent, macro level code comprehension, answer questions from my files, substrate handles the steps
 
+### Validated termination: hold a step's RETURN to a contract, retry bounded (the exit gate)
+mind.result_contract(v, c) / mind.validated_call(fn, c) / agent_loop(contracts=). leCore gates the ENTRY (abstain before acting, false-action 0.0%); this is the EXIT gate it lacked -- hold a step's RETURN to a CALLER-declared contract, retry bounded, feed the verdict back as a typed error. MEASURED on 5 executors: false passes 2 -> 0, at 5 -> 8 executor calls (+60%). A deliberate abstention ([]) is not a failure: false-retry rate 0.000. KEPT NEG: catches an ABSENT or MALFORMED return, never a WRONG one; a cached step is not re-validated..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256, seed=0); print(m.validated_call(lambda: None, {'retries': 2})['attempts'])
+```
+*Find it by:* retry a tool call when it returns nothing useful, enforce a return contract on a step, stop the loop accepting a bad result, typed return validation with retry, make the agent prove the step finished, bounded retry with the error fed back, validate what a step returned before moving on
+
 ### run_game_shard
 one-shot JSON game-world run (holographic_gameshard.run_shard): the agent-invokable face of the game shard -- pass a command list, tick count, and optionally a saved state blob; returns final state, per-tick lockstep digests, region departures, and an optional area-of-interest snapshot. Stateless on the wire: the state travels with the caller, so any distributed farm worker can serve the next call..
 
@@ -4164,6 +4196,14 @@ import numpy as np, lecore; m=lecore.UnifiedMind(); tm=m.time_machine(); spec=tm
 ```
 *Find it by:* run the simulation backwards, jump to timestep t, time travel state, reverse the dynamics, many simulations one vector, ensemble in superposition, undo n steps
 
+### applications
+The APPLICATIONS LIBRARY: named end-to-end programs you can run, not snippets to read. mind.apps() lists them with what each PROVES; mind.app_run(name) runs one and returns the numbers it asserts plus its runtime. 4 domains, 0.29s total: spectral_heat (a PDE advanced to any horizon in ONE exact step, 4.4e-16), interleaved_sources (the stride of an unlabelled round-robin stream recovered for 2, 3 and 4 hidden senders), request_to_record (requests parsed to {action, object, quality}, unparseable ones refused), texture_composite (fields blended to a deterministic PNG). All through faculties..
+
+```python
+import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.apps(); mind.app_run('spectral_heat')
+```
+*Find it by:* run a named end to end example program, a library of runnable applications I can try, show me a worked example of what this engine does, cookbook of end to end programs, list the demo programs, try a sample application, what can this engine actually do, show me, example programs
+
 ## Run it as a service / distributed
 
 *stand leCore up as an HTTP app, and scale work across a farm with jobs you can pause and resume.*
@@ -4521,6 +4561,13 @@ mind.blend_corrective authors one blendshape target that displaces only vertices
 
 ```python
 import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); sph=lambda P: np.linalg.norm(P,axis=1)-1.0; msh=mind.mesh_from_sdf(sph,((-1.3,)*3,(1.3,)*3),res=18,vectorized=True); V=np.asarray(msh.vertices); s=int(np.argmax(V[:,1])); t=mind.blend_corrective(msh,s,0.8,'normal',0.2); print(mind.blend_locality_report(V,[t],msh,[s],[0.8])['max_overreach'])
+```
+
+### Bounded previews at the /invoke boundary (what a big result costs a prompt)
+mind.bounded_preview(v) / mind.value_cost(v). A big result costs an agent its CONTEXT: /invoke serialised it whole, so a 1e6-float array left as 20 MB of JSON. The preview keeps the TYPE, the TRUE shape and dtype, a HEAD and TAIL sample, and the byte cost of both -- measured 20,269,744 B -> 364 B (55,686x); nested containers bounded RECURSIVELY. /invoke takes an optional budget: over it, this preview PLUS a ref handle to the live value; under it, today's bytes exactly. KEPT NEG: under ~16 floats the envelope costs MORE than the value..
+
+```python
+import lecore, numpy as np; m=lecore.UnifiedMind(dim=256, seed=0); print(m.bounded_preview(np.arange(1000000, dtype=float), max_bytes=512)['size'])
 ```
 
 ### Bundle capacity as a measured load ratio
@@ -5174,6 +5221,13 @@ the STATE of polarized light as a Stokes vector [S0,S1,S2,S3] (holographic_stoke
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.stokes_report(m.stokes_circular(1.0, handedness=1))['docp'])
 ```
 
+### Post-merge census: did the merge lose a definition, a parameter, or a file's content?
+mind.merge_census(base, new) -- the AFTER partner to merge_trees, which runs BEFORE and only at FILE level. Censuses DEFINITIONS, SIGNATURES and LINE COUNTS between two trees (or a git ref vs the worktree), then asks whether anything lost or shrunk merely MOVED. NOTES states that rule in capitals across sweeps 120/121/125 and nothing enforced it: a clean three-way merge once dropped 10 definitions. MEASURED on the sweep-122 merge -- merge_trees hands 28 files to a human as both_changed, this names 6 and resolves the catalog's 973 missing lines as MOVED. KEPT NEG: an import alias IS a def..
+
+```python
+import lecore, tempfile, os; m=lecore.UnifiedMind(dim=256, seed=0); a=tempfile.mkdtemp(); b=tempfile.mkdtemp(); open(os.path.join(a,'f.py'),'w').write('def kept():\n    pass\ndef gone():\n    pass\n'); open(os.path.join(b,'f.py'),'w').write('def kept():\n    pass\n'); print(m.merge_census(a,b,base_is_ref=False)['counts']['lost_unexplained'])
+```
+
 ### Pre-payment corpus gate (answerable, or certified abstain, before the 402)
 mind.corpus_gate(query, docs): run the adaptive cascade over a bound corpus and return one flat gateway verdict -- {answerable, stage, margin, ranked, advice}. answerable=False is a CERTIFIED abstain: refuse pre-402 or downgrade and say so in the receipt. Also on the MCP server: corpus_ask(gate='dispatch'), default-off, classic BM25 path unchanged. KEPT NEG: abstain says the CORPUS cannot answer; the model still might from its own knowledge -- gate the corpus-grounded price tier, never the model..
 
@@ -5443,6 +5497,13 @@ sweep a circular cross-section whose RADIUS varies along the path, in a rotation
 import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); P = np.stack([np.zeros(6), np.zeros(6), np.linspace(0, 1, 6)], 1); m = mind.sweep_profile(P, np.linspace(0.1, 0.01, 6))
 ```
 
+### The above/below sweep (is every declared capability reachable at every layer?)
+mind.above_below() -- is every DECLARED capability reachable at every layer? Population DERIVED from the catalog (718 cards, 651 doors) instead of a 21-row literal frozen at cp67; L0 engine / L1 facade / L2 /tools manifest / MCP tool / chat verb / pinned, all measured. Reachability is asked of everything, PROMOTION of nothing -- lecore_invoke runs any faculty, so a dedicated tool is a curation act and a bar nobody clears is a bar nobody runs. MEASURED sweep 133: 22 GENUINE gaps the old matrix scored 0 on -- 4 cards naming a door defined NOWHERE, 18 a module function no agent can /invoke..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256, seed=0); print(m.above_below()['counts']['genuine'])
+```
+
 ### The installed generative model (HDRIFT head: model == one certified matrix)
 mind.drift_head(model): a drift generative model's readout is its (d+1) x D moment matrix [mu; nu_j] -- certified DENSE at 0.0, so the model ships as ONE weight matrix. MODEL ARITHMETIC IN WEIGHT SPACE, exact: head(A)+head(B) == head(compose(A,B)) at 0.0; subtract == ablate; transport == a certified linear action on rows (3.6e-16). drift_head_load inverts (field bit-identical). HONEST BOUNDARY: the sampling recurrence is nonlinear -- the projector refuses it (residual 8e-2); enc = host-feature lane, generation stays host-shape..
 
@@ -5653,6 +5714,13 @@ mind.bequeath(lesson, author, topic=) records a lesson on the durable taught rai
 import lecore; m=lecore.UnifiedMind(); m.bequeath('measure before building', author='model-a'); print(m.wisdom()['authors'])
 ```
 
+### Working with files past the 1 MB read cap (append, stat, tail)
+mind.file_append(path, text) grows a file WITHOUT reading it; mind.file_stat(path) gives bytes+lines in O(1) memory. The wall they remove: appending one line to the 6.1 MB docs/NOTES_concepts.md over /invoke cost file_read_lines over the WHOLE file -- 85,602 lines, 6,451,243 B -- purely to learn where the end was, defeating the 1 MB read cap through the back door. MEASURED 6,451,243 -> 133 B (48,506x), 2 calls -> 1. file_read_lines/file_view take a NEGATIVE start for the tail (187x faster on 6 MB). The read cap is UNCHANGED and still refuses -- a loud refusal beats a silent context bomb..
+
+```python
+import lecore, tempfile, os; m=lecore.UnifiedMind(dim=256, seed=0); d=tempfile.mkdtemp(); m.set_file_root(d); m.file_write('n.md', 'one\n'); m.file_append('n.md', 'two\n'); print(m.file_stat('n.md')['lines'])
+```
+
 ### Write a WAV audio file
 mind.write_wav(path, samples, rate) writes float samples in [-1,1] to 16-bit PCM -- the OUT half of read_wav, shipped in holographic_audio all along but never wired to the mind (a generation pipeline that cannot emit audio is not a pipeline). Round-trips read_wav to 1/32768.
 
@@ -5779,6 +5847,13 @@ the shared DECISION step for any classify/match (holographic_relations): given r
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.decide_or_abstain([('a',0.9),('b',0.4)], margin=0.1))
 ```
 
+### delegation_drift
+Which faculties have LOST a parameter their module function still accepts? mind.delegation_drift() audits the seam every other audit misses: a parameter added to a module and never plumbed through its wrapper leaves the capability reachable but crippled -- /tools lists it, /invoke calls it, part of it cannot be reached. Reports each faculty, its delegate, the lost parameters and the overlap, plus SUPPLIED: what a wrapper binds itself (mind=self, seed=self.seed), with its binding, because that is decided, not lost. KEPT NEG: names, not semantics. Needs a source checkout (logic is in tools/)..
+
+```python
+import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.delegation_drift()
+```
+
 ### docs_generate
 Generate a deterministic markdown REFERENCE for any python/js/c tree: every file, every definition with signature and line number, plus the author's own first docstring sentence where present -- docgen generalized from leCore's tree to arbitrary roots..
 
@@ -5804,7 +5879,7 @@ import lecore; m=lecore.UnifiedMind(dim=256, seed=0); print(m.document_outline('
 The FLAME COLOR an element burns with (emission spectrum -> RGB) -- the flame-test palette the combustion renderer colors its fire from..
 
 ```python
-from holographic.simulation_and_physics.holographic_elements import element_flame_color
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); print(m.element('Na')['flame_color'])
 ```
 
 ### evaluate_candidates
@@ -6250,4 +6325,4 @@ from holographic.caching_and_storage.holographic_substrate import write_multicha
 
 ---
 
-*801 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*811 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

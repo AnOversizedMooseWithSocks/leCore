@@ -166,14 +166,14 @@ class _UnifiedPart16:
 
     def render_critique_loop(self, machine, formation_program, init_params, members, eye,
                              target_embed, width, height, satisfy=0.99, max_rounds=32,
-                             host_fallback=False):
+                             host_fallback=False, workspace=None):
         """H1: design -> INSTALLED render -> look with the (injectable) eye -> critique in EYE
         SPACE -> iterate -> speak the PGM. Reference semantics for the on-laptop swarm+tower
         loop. See holographic_innereye.render_critique_loop."""
         from holographic.agents_and_reasoning.holographic_innereye import render_critique_loop
         return render_critique_loop(machine, formation_program, init_params, members, eye,
                                     target_embed, width, height, satisfy=satisfy,
-                                    max_rounds=max_rounds, host_fallback=host_fallback)
+                                    max_rounds=max_rounds, host_fallback=host_fallback, workspace=workspace)
 
     def drift_head(self, model):
         """The installed view of a generative drift model: its (d+1) x D moment matrix --
@@ -275,14 +275,14 @@ class _UnifiedPart16:
         import holographic.agents_and_reasoning.holographic_compileinstall as _ci
         return _ci.compile_installed(machine, program, tol=tol)
 
-    def project_faculty(self, f, dim, n_check=24, tol=1e-8, seed=0):
+    def project_faculty(self, f, dim, n_check=24, tol=1e-8, seed=0, scale=1.0):
         """MEASURE a callable into installed form or refuse (F34 T1): probe f with basis vectors,
         certify on held-out inputs, detect structure most-specific-first (permutation -> circulant
         -> dense; a roll is BOTH, so order matters -- caught by the selftest). The refusals ARE the
         core/shell boundary, discovered by measurement. See holographic_projector.probe_project;
         apply with holographic_projector.apply_projected."""
         import holographic.io_and_interop.holographic_projector as _pj
-        return _pj.probe_project(f, dim, n_check=n_check, tol=tol, seed=seed)
+        return _pj.probe_project(f, dim, n_check=n_check, tol=tol, seed=seed, scale=scale)
 
     def unicron_forward_runtime(self, model, cfg):
         """OWN the forward pass: a NumPy runtime for GDN-hybrid (Qwen3-Next / Qwen3.5
@@ -425,7 +425,7 @@ class _UnifiedPart16:
         return autoscale_memory(weights, cfg, target_tokens=target_tokens,
                                 scales=scales, gain=gain, shortest=shortest)
 
-    def unicron_hrnn_grow(self, weights, cfg, a_log=-4.0, gain=0.0, layers=None):
+    def unicron_hrnn_grow(self, weights, cfg, a_log=-4.0, gain=0.0, layers=None, seed=0):
         """ADD a holographic memory channel instead of stealing a trained head -- leCore's
         fourth lever (when capacity binds, add dimensions) applied to the architecture
         itself.
@@ -443,7 +443,7 @@ class _UnifiedPart16:
         ordinary checkpoint any runtime can load.
         See holographic_hrnngrow.grow_channel."""
         from holographic.io_and_interop.holographic_hrnngrow import grow_channel
-        return grow_channel(weights, cfg, a_log=a_log, gain=gain, layers=layers)
+        return grow_channel(weights, cfg, a_log=a_log, gain=gain, layers=layers, seed=seed)
 
     def unicron_hrnn_bake(self, weights, cfg, heads=(0,), a_log=-4.0, layers=None):
         """THE MODEL'S OWN HEADS ARE HOLOGRAPHIC RNNs -- retune them instead of adding a

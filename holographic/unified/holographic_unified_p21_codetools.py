@@ -110,6 +110,33 @@ class _UnifiedPart21:
                            "rows need a per-file decision -- diff them with the sheet's "
                            "unique-line counts as the guide")}
 
+    def merge_census(self, base, new, shrink_pct=10.0, base_is_ref=None,
+                     move_gate=0.5, max_rows=200):
+        """DID THE MERGE LOSE ANYTHING? The AFTER partner to merge_trees, which runs BEFORE.
+
+        merge_trees censuses two trees by sha256 and both-direction unique-LINE counts at the
+        FILE level, as a decision sheet for what to apply. It cannot see a definition that
+        vanished inside a file it merely calls 'differ'. NOTES states the rule in capitals across
+        sweeps 120, 121 and 125 -- after ANY merge, census DEFINITIONS, SIGNATURES and LINE
+        COUNTS, and before restoring a shrunk file check whether the content MOVED -- and until
+        now nothing enforced it. Sweep 120 is why: a CLEAN three-way merge silently dropped ten
+        definitions the engine depended on, because diff3 honoured the other side's deletions
+        cleanly.
+
+        `base` is a directory OR a git ref resolved against `new`; a string that is both, or
+        neither, is REFUSED rather than guessed (pass base_is_ref=). Returns
+        {counts, lost, signature_changed, shrunk, files_deleted, unparseable, verdict, advice}
+        with verdict CLEAN / REVIEW / LOSSES FOUND.
+
+        Read the report in this order: `lost` rows with an EMPTY moved_to are hard losses;
+        rows with a moved_to are refactors, not damage. `shrunk` rows carry moved_into -- the
+        sweep-125 lesson is that the catalog's missing 970 lines had MOVED, and restoring the
+        file wholesale would have reverted the other line's improvement.
+        See holographic_codestructure.merge_census."""
+        from holographic.io_and_interop.holographic_codestructure import merge_census
+        return merge_census(base, new, shrink_pct=shrink_pct, base_is_ref=base_is_ref,
+                            move_gate=move_gate, max_rows=max_rows)
+
     def study(self, root, budget_lines=120, max_docs=12, max_text_bytes=200000,
               question=None, ladder=False):
         """MACRO-LEVEL comprehension of a large directory in ONE call (sweep 93): the

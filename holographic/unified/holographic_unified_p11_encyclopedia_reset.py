@@ -151,13 +151,35 @@ class _UnifiedPart11:
 
     def file_read_lines(self, path, start=1, end=None):
         """Read lines [start, end] (1-based inclusive) of a file as a list of strings -- look at a region before
-        editing it. See holographic_codeedit.Editor.read_lines."""
+        editing it. A NEGATIVE start is the TAIL: start=-50 gives the last 50 lines, read by seeking from the
+        end rather than reading the file (measured 0.0004 s vs 0.0467 s on the 6.1 MB notebook), so the end of
+        a file past the read cap is one cheap call. See holographic_codeedit.Editor.read_lines."""
         return self._editor.read_lines(path, start=start, end=end)
 
     def file_view(self, path, start=1, end=None):
         """Read lines [start, end] as one string WITH LINE NUMBERS -- the located form to look at before targeting
-        an edit (pairs with file_replace_lines / file_insert / file_delete_lines). See Editor.view."""
+        an edit (pairs with file_replace_lines / file_insert / file_delete_lines). A NEGATIVE start is the TAIL
+        (start=-50 = last 50 lines) and the numbers stay ABSOLUTE, so the coordinates still point at the right
+        end of the file. See Editor.view."""
         return self._editor.view(path, start=start, end=end)
+
+    def file_append(self, path, text, ensure_newline=True):
+        """Add text to the END of a file WITHOUT reading it -- O(1) in the file's size, so it works on
+        the artifacts that are past the 1 MB read cap. The close-out operation: appending one line to
+        docs/NOTES_concepts.md used to cost file_read_lines over the whole 6.1 MB file (85,602 lines,
+        6,457,933 bytes over the wire) purely to learn where the end was. `ensure_newline` stops the
+        first appended line welding onto the last existing one. Undo-able: the undo record is the prior
+        SIZE, so reversing a 6 MB append costs four bytes. See holographic_codeedit.Editor.append."""
+        return self._editor.append(path, text, ensure_newline=ensure_newline)
+
+    def file_stat(self, path, read_cap=1_000_000):
+        """How big is this file -- bytes, LINES, whether a whole-file read still fits, and its sha256.
+        The measurement that had no door: `file_read` refuses past the cap and `file_read_lines`
+        answered "how many lines?" only by returning all of them, which is why `wc -l` in a shell had
+        got into the close-out procedure of a system whose premise is that the agent works through the
+        mind. Counts newlines over binary chunks -- no decode, no splitlines, O(1) memory.
+        See holographic_codeedit.Editor.stat."""
+        return self._editor.stat(path, read_cap=read_cap)
 
     def file_read_many(self, paths, max_bytes=1_000_000):
         """Read several files at once -> {path: text} (a bad path maps to an "<error: ...>" string). Gathers
@@ -199,12 +221,16 @@ class _UnifiedPart11:
         holographic_codeedit.Editor.delete_lines."""
         return self._editor.delete_lines(path, start, end)
 
-    def file_grep(self, pattern, path=".", suffix=".py", max_hits=200, regex=False):
+    def file_grep(self, pattern, path=".", suffix=".py", max_hits=200, regex=False,
+                  before=0, after=0):
         """Search across files under `path` (filtered by `suffix`). Returns [{file, line, text}] -- the 'where is X
         used' an agent needs constantly. `regex=False` (default) is a plain SUBSTRING match, so `(` and `*` mean
-        themselves; `regex=True` compiles the pattern with `re`. Additive and default-off.
-        See holographic_codeedit.Editor.grep."""
-        return self._editor.grep(pattern, relpath=path, suffix=suffix, max_hits=max_hits, regex=regex)
+        themselves; `regex=True` compiles the pattern with `re`. `before`/`after` are grep's -B/-A and add a
+        `context` list of {line, text} to each hit, so finding a passage and READING AROUND IT is one call instead
+        of a grep followed by a file_view. Both default to 0, which emits the old three-key hit unchanged.
+        Additive and default-off. See holographic_codeedit.Editor.grep."""
+        return self._editor.grep(pattern, relpath=path, suffix=suffix, max_hits=max_hits, regex=regex,
+                                 before=before, after=after)
 
     def file_list(self, path=".", recursive=False, suffix=None):
         """List files under a directory (relative paths); skips __pycache__/hidden. See
@@ -555,13 +581,13 @@ class _UnifiedPart11:
         from holographic.rendering.holographic_globalillum import read_cache
         return read_cache(cache, query_points, k=k)
 
-    def caustics(self, sdf, light_dir=(0, -1, 0), receiver_y=-0.9, extent=2.0, res=128, ior=1.5, n_side=200):
+    def caustics(self, sdf, light_dir=(0, -1, 0), receiver_y=-0.9, extent=2.0, res=128, ior=1.5, n_side=200, seed=0):
         """Caustics by forward light tracing: shoot parallel light rays, refract them through the object, and
         SPLAT where they land on the receiver plane with np.add.at -- the scatter that is the engine's bundle.
         Where refracted rays converge the bundle piles up: the caustic. Returns a (res,res) intensity map.
         See holographic_globalillum.caustics."""
         from holographic.rendering.holographic_globalillum import caustics
-        return caustics(sdf, light_dir=light_dir, receiver_y=receiver_y, extent=extent, res=res, ior=ior, n_side=n_side)
+        return caustics(sdf, light_dir=light_dir, receiver_y=receiver_y, extent=extent, res=res, ior=ior, n_side=n_side, seed=seed)
 
     def morph_scene(self, img_a, img_b, steps=9, method="dct", post=None):
         """Morph between two images. method='dct' (default) blends in the DCT-coefficient domain (structure

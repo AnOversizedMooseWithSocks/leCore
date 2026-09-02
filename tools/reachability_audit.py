@@ -209,26 +209,60 @@ def audit(root):
     # codeedit's capped read (1 MB) exists to protect context windows; internal callers read uncapped. This
     # census is a NON-GATING warning at 80% of the cap so the next crossing is seen approaching instead of
     # discovered when a tool refuses -- which is exactly how holographic_unified.py's crossing was discovered.
+    #
+    # SWEEP 132: IT WALKED `holographic/**/*.py` AND NOTHING ELSE, so it reported 0 while THREE of the
+    # repo's most important files sat past the cap -- docs/NOTES_concepts.md (6.19 MB, the notebook every
+    # close-out must append to), REFERENCE.md (2.54 MB, the generated module reference) and
+    # capabilities.json (1.09 MB, what DEVELOPMENT_STRATEGY calls "the machine-readable contract other
+    # tools ingest"). An alarm set at 80% of a threshold that never looked at the files which crossed it.
+    # Now it walks the whole repo and CLASSIFIES, because the other way to fail here is to cry wolf: a
+    # generated 2.5 MB reference is not a defect, it is a fact to know. Only SOURCE is called out as
+    # actionable -- that is the C7 lesson, a module growing until the tools that edit it start refusing.
     cap = 1_000_000
+    generated = {"REFERENCE.md", "CAPABILITIES.md", "capabilities.json", "API_QUICKREF.md",
+                 "FACULTY_MAP.md", "DOC_MAP.md", "PIPELINE_MAP.md", "ZOO.md", "SERVICE.md",
+                 "pipelines.json"}
+    append_only = {"NOTES_concepts.md", "researchLog.md"}
+    text_ext = (".py", ".md", ".json", ".txt", ".csv", ".html", ".js", ".css", ".yml", ".yaml", ".toml")
+    skip_dirs = {".git", "__pycache__", ".pytest_cache", "node_modules", ".lecore_archive",
+                 "gallery", "figures", "archive", "data"}
     watch = []
-    for dirpath, _dirs, files in os.walk(os.path.join(root, "holographic")):
-        for fn in files:
-            if fn.endswith(".py"):
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d not in skip_dirs and not d.startswith("."))
+        for fn in sorted(files):
+            if not fn.endswith(text_ext):
+                continue
+            try:
                 sz = os.path.getsize(os.path.join(dirpath, fn))
-                if sz >= int(cap * 0.8):
-                    watch.append((sz, fn))
+            except OSError:
+                continue
+            if sz < int(cap * 0.8):
+                continue
+            kind = ("generated" if fn in generated else
+                    "append-only" if fn in append_only else
+                    "source" if fn.endswith(".py") else "document")
+            watch.append((sz, os.path.relpath(os.path.join(dirpath, fn), root), kind))
+    over = [w for w in watch if w[0] > cap]
+    actionable = [w for w in over if w[2] == "source"]
     print()
-    print("  SIZE CANARY (>= 80%% of the 1 MB agent-read cap; non-gating heads-up): %d" % len(watch))
-    for sz, fn in sorted(watch, reverse=True):
+    print("  SIZE CANARY (>= 80%% of the 1 MB agent-read cap; non-gating heads-up): %d "
+          "(%d over the cap, %d of them source)" % (len(watch), len(over), len(actionable)))
+    for sz, rel, kind in sorted(watch, reverse=True):
         # Over the cap, ONLY the whole-file reads refuse -- that is the cap doing its one job (protecting a
-        # context window). Every bounded-output tool works: view/read_lines (a slice), count_occurrences (an
-        # int), and every WRITE (replace/insert/replace_lines/delete_lines) read uncapped, so a big module
-        # stays fully agent-navigable and agent-EDITABLE. That was not true until the cap-scope fix: view and
-        # all four writes were capped too, so unified.py could not be edited through the mind at all -- pinned
-        # now by tests/test_codeedit_cap_scope.py. Size alone is therefore a heads-up, not a capability loss.
-        over = " -- OVER the cap: whole-file read() refuses BY DESIGN; view/read_lines/count/edits all work" \
-               if sz > cap else ""
-        print("      %s  %d bytes (%.0f%%)%s" % (fn, sz, 100.0 * sz / cap, over))
+        # context window). Every bounded-output tool works: view/read_lines (a slice, and a NEGATIVE start
+        # gives the tail by seeking), stat (bytes+lines, O(1) memory), append (grows a file without reading
+        # it), count_occurrences (an int), and every WRITE reads uncapped. That was not true until the
+        # cap-scope fix (view and all four writes were capped too, so unified.py could not be edited through
+        # the mind at all -- pinned by tests/test_codeedit_cap_scope.py) and file_append/file_stat did not
+        # exist at all until sweep 132. Size alone is a heads-up, not a capability loss.
+        note = "" if sz <= cap else \
+            " -- OVER: whole-file read() refuses BY DESIGN; view/read_lines(-N tail)/stat/append/edits work"
+        print("      %-13s %-42s %9d bytes (%.0f%% of cap)%s" % ("[" + kind + "]", rel, sz,
+                                                                 100.0 * sz / cap, note))
+    if actionable:
+        print("      ACTIONABLE: %d SOURCE file(s) over the cap -- that is the C7 shape (a module grows "
+              "until the tools that edit it refuse). Generated and append-only files over the cap are "
+              "expected and are listed to be KNOWN, not fixed." % len(actionable))
     # DUPLICATE FACULTY DEFINITIONS (F24 -- the blind spot that let THREE silently-shadowed
     # faculties through at 0/0/0): same-name `def` twice in one class body means Python keeps
     # the second silently and the first becomes dead code with a live-looking docstring. AST

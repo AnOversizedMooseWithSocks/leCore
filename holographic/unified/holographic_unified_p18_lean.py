@@ -146,7 +146,7 @@ class _UnifiedPart18:
                               int(max_args), sym, bind, unbind, nearest, floor=floor)
 
     def logic_fact_capacity(self, dim=None, n_symbols=32, n_preds=4, arity=2,
-                            loads=(1, 2, 4, 8, 16, 32), seeds=6):
+                            loads=(1, 2, 4, 8, 16, 32), seeds=6, floor=0.25):
         """PLATE'S QUESTION measured on OUR construction: how many facts survive in one
         bundled trace at dimension D (exact whole-atom recall, mean + bootstrap CI per load)?
         THE MEASURED VERDICT, kept loud: recall follows the 1/sqrt(M)-independent-of-D law
@@ -157,7 +157,7 @@ class _UnifiedPart18:
         from holographic.agents_and_reasoning import holographic_lean as _L
         d = int(dim) if dim else self.encoder.dim
         return _L.fact_capacity(d, n_symbols=n_symbols, n_preds=n_preds, arity=arity,
-                                loads=tuple(loads), seeds=range(int(seeds)))
+                                loads=tuple(loads), seeds=range(int(seeds)), floor=floor)
 
     def logic_induce(self, background, positives, negatives, target, body_preds,
                      max_body=2, max_vars=3, theorem_name="conjecture"):
@@ -383,7 +383,7 @@ class _UnifiedPart18:
 
     def fem_simulate(self, positions, tets, steps=200, mu=1.0, lam=10.0, fibers=None,
                      rest_lengths=None, activation=1.0, k_muscle=10.0, gravity=0.0,
-                     pinned=None, rest=None, record_every=0):
+                     pinned=None, rest=None, record_every=0, step0=0.01):
         """F4: quasistatic STABLE NEO-HOOKEAN solve over a tet mesh, with optional muscle
         fibers. Uses Smith/De Goes/Kim 2018 rather than the classical log-J neo-Hookean
         because log J is UNDEFINED for inverted elements and generated meshes DO invert --
@@ -398,7 +398,7 @@ class _UnifiedPart18:
                            steps=int(steps), mu=float(mu), lam=float(lam), fibers=fibers,
                            rest_lengths=rest_lengths, activation=activation,
                            k_muscle=float(k_muscle), gravity=float(gravity),
-                           pinned=pinned, rest=rest, record_every=int(record_every))
+                           pinned=pinned, rest=rest, record_every=int(record_every), step0=step0)
 
     def fem_select_fibers(self, positions, tets, axis=0, fraction=0.25):
         """Choose muscle fibers as the tet edges best ALIGNED with an axis (deterministic).
@@ -502,7 +502,7 @@ class _UnifiedPart18:
                                       _np.asarray(codebook, float), beta=float(beta),
                                       steps=int(steps), bins=int(bins))
 
-    def shape_memory_probe(self, n_shapes=3, n_cells=45, noise=0.35, trials=6, seed=0):
+    def shape_memory_probe(self, n_shapes=3, n_cells=45, noise=0.35, trials=6, seed=0, bins=8):
         """THE EXPERIMENT, not a demo: does recovery depend on the STORED PATTERN or merely
         on a well existing? Reports accuracy against a DEPTH-MATCHED SCRAMBLED control.
         MEASURED: noise 0.1 -> 1.00 vs control 0.00; 0.3 -> 0.80 vs 0.07; 0.6 -> 0.47 vs
@@ -512,7 +512,7 @@ class _UnifiedPart18:
         See holographic_morphogen.shape_memory_probe."""
         from holographic.simulation_and_physics import holographic_morphogen as _M
         return _M.shape_memory_probe(n_shapes=int(n_shapes), n_cells=int(n_cells),
-                                     noise=float(noise), trials=int(trials), seed=int(seed))
+                                     noise=float(noise), trials=int(trials), seed=int(seed), bins=bins)
 
     def tier_certify_plan(self, tiers, plan, forbid_tiers=(), min_recall=None):
         """D1: certify a memory plan against TIER CONTRACTS before it runs -- {pre} plan
@@ -559,7 +559,7 @@ class _UnifiedPart18:
         from holographic.caching_and_storage import holographic_tiercontract as _T
         return _T.samples_for_confidence(int(n_cells), int(k_corrupt), float(confidence))
 
-    def differential_agreement(self, implementations, cases, tol=1e-9, reference=None):
+    def differential_agreement(self, implementations, cases, tol=1e-9, reference=None, compare=None):
         """THE TWO-INSTRUMENT PATTERN, NAMED ONCE (house rule: consolidate at three
         customers; this had five -- SDF emitters, the logic fuzzer, the tetmesh certificate
         vs an independent flood fill, seminaive-vs-naive equality, and query-vs-fixpoint).
@@ -575,7 +575,7 @@ class _UnifiedPart18:
         meaning is right. See holographic_tiercontract.differential_agreement."""
         from holographic.caching_and_storage import holographic_tiercontract as _T
         return _T.differential_agreement(dict(implementations), list(cases),
-                                         tol=float(tol), reference=reference)
+                                         tol=float(tol), reference=reference, compare=compare)
 
     def schedule_certify(self, waves, resources):
         """D4: certify that no two tasks in the SAME wave share a declared resource, and
@@ -1035,7 +1035,7 @@ class _UnifiedPart18:
         from holographic.mesh_and_geometry import holographic_furshell as _FS
         return _FS.shell_is_valid(float(length), float(reach))
 
-    def surface_lfs(self, sdf, points, normals=None, iters=24, r0=None):
+    def surface_lfs(self, sdf, points, normals=None, iters=24, r0=None, eps=0.002):
         """LOCAL FEATURE SIZE by the shrinking-ball algorithm -- the correct definition of how
         much room a surface has locally, and the right input to fur_shell_is_valid.
 
@@ -1053,7 +1053,7 @@ class _UnifiedPart18:
         exact on slabs (0.00% error), 0.5% on a unit sphere.
         See holographic_offsetreach.shrinking_ball_lfs."""
         from holographic.mesh_and_geometry import holographic_offsetreach as _OR
-        return _OR.shrinking_ball_lfs(sdf, points, normals=normals, iters=int(iters), r0=r0)
+        return _OR.shrinking_ball_lfs(sdf, points, normals=normals, iters=int(iters), r0=r0, eps=eps)
 
     def head_spec(self, params=None):
         """A skull skeleton FROM PARAMETERS -- the head equivalent of quadruped_spec, and the
