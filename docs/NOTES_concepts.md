@@ -85237,3 +85237,1150 @@ It earned its keep on the first two runs:
    Removed, with the WHY at the top of the table.
 Result: 297 verbs, 1,450 aliases, none inert, all real. Budget test,
 buried audit, skill_lint, catalog exam, regen --check: green.
+
+--------------------------------------------------------------------------------
+SWEEP 130 -- THE AGENT SOCKET'S TWO OPEN ITEMS, CLOSED; AND THE MERGE RULE
+FINALLY GETS AN INSTRUMENT
+
+THE BRIEF (Moose): boot leCore on external memory, audit leCore WITH leCore,
+attach two more agents to the SAME workspace and memory, and run a self-
+improvement loop -- continuing the plan if one exists. Mid-sweep: the silly
+branch moved; pull, merge, and repeat the exercise.
+
+THE PLAN WAS ALREADY WRITTEN, AND NOBODY HAD RUN IT. docs/COMPETITIVE_NOOA.md
+section 6 has been the standing ordered plan since 2026-07-26, its first two
+items flagged "the ones that actually matter". Sweeps 114-128 were CI,
+packaging, merge hygiene, docs and swarm roles. Items 1 and 2 had been open
+the whole time. This sweep closes both.
+
+THE SWARM, AND WHY IT IS ONE. One mind autobooted on the shared partition and
+served over HTTP (holographic_service.serve(mind=...)); three agents drove THAT
+mind through /invoke, coordinated on /bus, and shared the workspace through
+file_* and SWARM_PLAN.md. MEASURED, and it is the reason for the shape: autoboot
+costs 262 s on this box; a bare UnifiedMind(dim=256) costs 0.23 s. The whole cost
+is the partition load. Three independent autoboots would have paid it three times
+AND given each agent a private memory -- which is not a swarm, it is three
+strangers. So: one service for memory + discovery + bus, fast local minds for
+file work and verification, and the ONE service restarted to prove the round trip.
+
+ITEM A -- BOUNDED PREVIEWS AT THE /invoke BOUNDARY (NOOA "pass by reference").
+The gap was HALF-BUILT and the half that existed hid it. _jsonable(o, refs)
+already minted an ObjectRefs handle for objects JSON cannot carry -- but for
+objects JSON CAN carry it serialised them WHOLE (ndarray -> tolist(), lists
+recursed element by element). So the boundary was symmetric for a Scene and
+catastrophic for an array. NEW: holographic_boundedpreview (532 lines) ->
+mind.bounded_preview / mind.value_cost; _jsonable grew an OPT-IN budget.
+MEASURED, baseline = today's _jsonable on the same object, response bytes:
+    ndarray  1e3   20,244 ->   351      57.7x
+    ndarray  1e6   20,269,744 -> 364    55,686x   (0.723 s -> 0.0007 s)
+    nested   1e6   20,271,855 -> 1,453  13,952x
+BYTE-IDENTITY OF THE DEFAULT PATH PROVEN, not asserted: the pre-change _jsonable
+extracted from git HEAD, 28-value corpus, 1,830,536 bytes compared, 0 mismatches;
+plus a 24-entry GOLDEN corpus of literal expected strings captured before the
+edit, so the test cannot be satisfied by two new paths agreeing with each other.
+
+ITEM B -- VALIDATED TERMINATION (NOOA "typed I/O"). leCore had the ENTRY gate
+(abstain before acting, false-action 0.0%) and not the EXIT gate. Now:
+postcheck grew normalize_contract / check_contract / validated_call /
+wrap_executors (+471 lines, NO new module -- a sibling would have been 80%
+postcheck and a discoverability tax), and agent_loop grew contracts=.
+MEASURED on 5 deterministic executors, ground truth taken from what each
+executor LAST RETURNED, not from what the loop marked:
+    WITHOUT  5 calls, 4 marked done, 2 TRUE pass, 2 FALSE PASS
+    WITH     8 calls, 3 marked done, 3 TRUE pass, 0 FALSE PASS
+The old loop scored {"error": "backend down"} as done. Price written down:
+5 -> 8 executor calls, +60%.
+THE PROPERTY THAT HAD TO SURVIVE, and it did: false-retry rate on a correctly
+ABSTAINING executor is 0.000 over 8 trials with retries=3 declared. A retry loop
+that treats hits: [] as failure would have turned this engine's headline safety
+property into a retry storm.
+BACKWARD COMPAT PROVEN against git HEAD: HEAD's agent_loop and
+new(contracts=None) compared as sorted JSON on identical fresh minds -> EXACTLY
+equal; with contracts=None nothing is even imported.
+
+ITEM C -- THE MERGE RULE, INSTRUMENTED AT LAST. Sweeps 120, 121 and 125 wrote
+the rule in capitals -- after ANY merge census DEFINITIONS, SIGNATURES and LINE
+COUNTS, and before restoring a shrunk file check whether the content MOVED --
+and no tool enforced any of it. merge_trees censuses by sha256 and unique-line
+counts at the FILE level, BEFORE a merge, as a decision sheet; it cannot see a
+lost definition, a dropped parameter, or a move. NOW: codestructure grew
+merge_census (+508) and p21 wired it NEXT TO merge_trees. Synthetic fixture with
+8 injected faults: 8/8 detected, 0 false positives.
+THE ROW THAT IS SWEEP 125, REPRODUCED BY THE INSTRUMENT: on the real merge,
+merge_trees reports holographic_catalog.py as {"unique_lines": {"ours": 973,
+"theirs": 5}, "verdict": "both_changed"} -- a number whose obvious reading is
+RESTORE IT, which is exactly the mistake sweep 125 made and caught by hand.
+merge_census reports 1983 -> 1014 lines, 48.9% shrink, and all 973 missing lines
+present in holographic_catalog_aliases.py at fraction 1.000, verdict MOVED. Of
+the 28 files merge_trees hands a human with no structure, the census names 6
+structurally and is silent on the other 22 (bodies and comments only).
+Cost: 1.1 s -> 7.7 s. Dogfooded on this sweep's own work: CLEAN.
+
+ITEM D -- THE DOC-COVERAGE GATE, BROKEN BY US AND THEN BEATEN. Our five new
+verbs put doc_coverage at 2,085 against a budget of 2,080 -- RED, and ours to
+fix by writing documentation, never by re-baselining. Fixed (-5), then took
+sweep 123's own NEXT RUNG in the same pass: FEATURE_GUIDE section 11 "Meshes,
+end to end", eight subsections covering all 92 mesh verbs, six CI-run pipelines.
+Family chosen BY MEASUREMENT, not taste: unicron has the most unmentioned verbs
+(142) and ZERO native doors -- documenting it would be a name-dump; mesh is 92
+unmentioned with 38 doors, the largest door-bearing family. Budget 2,080 ->
+1,984.
+
+THE KEPT NEGATIVES, LOUD
+1. AN IMPORT ALIAS IS A DEFINITION, OR THE CENSUS CRIES WOLF. The first census
+   reported upstream sweep 123's two `def _f1` -> `from ... import recall_f1 as
+   _f1` promotions as LOST DEFINITIONS: two false HARD ERRORs on a refactor that
+   removed nothing. A census that cries wolf is a census the next session stops
+   running. Pinned at 0 in both the module selftest and a named test.
+2. 63 OF THE 101-VERB DOC-COVERAGE DROP IS PUNCTUATION. doc_coverage counts a
+   reference to the CALLABLE (`name(` or `.name`), not the name. Ninety-two mesh
+   verbs written as `mesh_weld` moved the number by 33; the same references
+   rewritten as `mesh_weld()` moved a further 63 with no new documentation at
+   all. The prose was written either way -- but a budget drop is evidence a doc
+   was WRITTEN, never evidence it was READ, and any future session can hit any
+   budget by listing names in call form. If the door-level gate returns, that
+   loophole should close with it.
+3. BOUNDING LOSES ON SMALL VALUES, AND THE CROSSOVER IS MEASURED. The envelope
+   costs 200-1,400 B: a 15-float array is 308 B whole vs 322 B previewed; an 8x8
+   nested list 1,308 vs 1,382. Dicts cross over between 10 and 100 keys, strings
+   between 200 and 1,000 chars. The seam therefore bounds ONLY what is already
+   over budget. Pinned by a test named as a kept negative so nobody "optimises"
+   it into bounding by reflex.
+4. A PREVIEW IS LOSSY AND THE HANDLE IS THE ONLY ESCAPE HATCH. With no refs
+   registry the omitted middle is gone permanently. And every bounded result
+   mints a handle into a 512-slot oldest-first registry -- 512 budgeted big
+   results evicted a held ref in a direct test. A result that FITS mints zero.
+5. THE EXIT GATE CATCHES AN ABSENT OR MALFORMED RETURN, NEVER A WRONG ONE.
+   Inherited from result_usable, not fixed. A cached step is never re-validated.
+   A contract on an expensive step is a budget decision, not a free safety net.
+6. THE CENSUS SEES NAMES AND SHAPES, NEVER SEMANTICS. A def that survives with
+   its signature intact but whose body was gutted to `pass` passes every leg.
+   Default VALUES are not compared, only presence. The move join is line-exact,
+   so a block that moved AND was reformatted reads `unexplained` -- a false alarm
+   in the safe direction.
+7. COUNTING PRE-EXISTING UNPARSEABLE FILES PINNED THE VERDICT AT REVIEW FOREVER
+   (tools/tour.py has an f-string this interpreter rejects, in BOTH trees). Only
+   a NEWLY unparseable file is a merge finding now. A permanent yellow light is a
+   light nobody reads.
+8. A SKIPPED GUARD GUARDS NOTHING. Nine new guide-check blocks pushed
+   test_guide_examples past conftest's 15 s per-test budget and the watchdog
+   SKIPPED it -- the guide could have started lying in silence. @pytest.mark.slow
+   is the wrong remedy (deselected by default: the same silence with better
+   manners), so it was made fast per conftest's own rule: one 8.1 s LOD block
+   re-asserted on a smaller mesh (8.1 -> 0.5 s) AND the independent subprocesses
+   pooled (15.8 -> 8.3 -> 5.0 s). Both were needed; the pool alone left 3.7 s of
+   headroom the next block would have eaten.
+9. mind.validated_call and mind.guarded_call take a CALLABLE, so they are listed
+   in /tools and are NOT invokable over HTTP. Only result_contract is fully JSON
+   round-trippable, and that is the one proven over a socket.
+10. A predicate in a contract is in-process only and is excluded from
+   contract_digest, so two contracts differing only by predicate share an id.
+
+FOUND, NOT FIXED BY US
+- DEVELOPMENT_STRATEGY.md step 4's static check named `reorganize_repo`, which
+  does not exist in this tree: every session following the strategy literally got
+  a ModuleNotFoundError and may have skipped static checking entirely. Replaced
+  with `compileall` + `tools/audit_imports.py` (green: 0 BROKEN, 0 FLAT). THE SAME
+  DEAD COMMAND IS IN THE PROJECT'S OWN SESSION INSTRUCTIONS -- fix it there too.
+- merge_trees' unique-line tests run BEFORE its prefix test, so a pure append
+  scores `ours_is_base` and the `append_extension_*` verdicts are unreachable in
+  the no-base path. Outcome unchanged (theirs wins); a labelling observation,
+  now characterized by a test.
+- result_usable, guarded_call and the zoo agent_loop had NO test in tests/ at all
+  before this sweep -- their only coverage was module selftests.
+- THE NOTEBOOK IS PAST ITS OWN READ CAP. docs/NOTES_concepts.md is 6.1 MB, so
+  mind.file_read REFUSES it (max_bytes 1 MB) -- the one file every close-out must
+  append to cannot be read by the engine's own file faculty. file_insert at the
+  last line still works, which is how this entry landed, but there is no
+  file_append verb and the reachability SIZE CANARY only watches .py modules.
+- docs/WHATS_NEW.md claimed everything listed is pinned in test_mcp_server.py
+  (one test per sweep). Not true for the five new doors; a parenthetical now says
+  so rather than over-claiming. Someone should add the five.
+
+MEASUREMENTS AND STATE
+tests +81 (test_boundedpreview 37, test_agentloop_validate 22, test_merge_census
+22); suite collects 6,741. mind verbs 2,328. holographic_* modules 789. catalog
+3,770. Audits: reachability 0 no-docstring / 0 import-only / 0 duplicate;
+catalog_gaps 0; skill_lint 0 hard gaps, 0 new does-length regressions;
+doc_coverage 1,984 within budget. regen_docs: 9 outputs from 7 generators.
+POST-MERGE CENSUS of origin/silly b0fc0ca (10 commits, 50 files, +3653/-1616):
+0 files deleted, 0 definitions lost, 4 signature changes all reviewed additive.
+HTTP ROUND TRIP PROVEN on the shared service for bounded_preview, value_cost,
+result_contract and merge_census; discoverability 8/8 top-1 on stranger
+phrasings for the two round-1 entries and 9/9 for the census.
+
+WHAT REMAINS OF THE NOOA PLAN, unchanged in priority: item 3, an EXTERNAL
+benchmark result (Terminal-Bench most tractable) -- still the only one that
+makes any leCore number non-self-referential; item 4, code-as-action, which
+still collides with the no-exec-REPL decision and must not be started without
+revisiting it; item 5, memory curation/decay/reflection, for which NOOA's
++11.8 RHAE remains the strongest published evidence on the list.
+
+SECOND MERGE, SAME SWEEP: origin/main (6 commits, v0.2.20). Two conflicts:
+REFERENCE.md (generated -- regenerated, not hand-resolved) and the notebook
+itself, where BOTH lines had numbered their entry SWEEP 129. Theirs was
+published first, so theirs keeps 129 and this one moved to 130 -- a duplicate
+sweep number would make every later back-reference ambiguous.
+THE CENSUS RAN ON ITS OWN MERGE, over HTTP, through the faculty this sweep
+built: base_files 1969 -> 1969, files deleted 0, DEFINITIONS LOST 0, signature
+changes 0, shrunk 0, newly-unparseable 0. VERDICT: CLEAN.
+AND THE LIMIT IT DEMONSTRATED, honestly: upstream's change to
+holographic_catalog_aliases.py REMOVED TWO DICT KEYS ('autoboot' and
+'holographic_coldstore'). The census did not report them and could not --
+it sees definitions, signatures and line counts, never DATA, which is exactly
+the blind spot sweep 125 named when it said "neither the def-name census nor
+the signature census can see DATA". The line-count leg is the intended cover
+and it did not fire either: the file did not shrink past the threshold. A data
+table's contract is enforced by ITS OWN SELFTEST -- which is precisely what
+upstream's sweep 129 added, on the same file, in the same week. The two halves
+found each other by accident; note it so the next session does not expect the
+census to do the data module's job.
+PUBLISHED WHEEL VERIFIED, not assumed: pip install leos-core==0.2.20 in a clean
+venv -> 2,323 mind verbs, capabilities.json present in lecore_data (1,080,925
+bytes), both console entry points on PATH, `lecore-mcp --selftest` green. The
+five verbs of this sweep are correctly ABSENT from it -- they are unmerged
+local work, and the wheel is honest about that.
+
+--------------------------------------------------------------------------------
+SWEEP 131 -- THE 99-DRIFT BACKLOG CLEARED, MEMORY LEARNS TO CURATE, AND THREE
+TESTS THAT FAILED BECAUSE THE WORK SUCCEEDED
+
+THE BRIEF (Moose, same standing brief as sweep 130): boot on external memory,
+audit leCore WITH leCore, attach two more agents to the SAME workspace and
+memory, continue the plan.
+
+THE PLAN CAME FROM THREE PLACES IN THIS REPO, none invented here: sweep 124's
+POLISH BACKLOG item C ("burn down the 99 delegation drifts family by family and
+flip delegation_drift to --gate"); COMPETITIVE_NOOA section 6 item 5 (memory
+curation/decay/reflection, +11.8 RHAE, "the strongest published evidence for any
+single item on this list"); and sweep 130's own leftovers.
+
+ITEM E -- DELEGATION DRIFT: 99 -> 0, AND 45 OF THE 99 WERE NEVER DRIFT.
+A drift is a mind verb that has LOST a parameter its delegate accepts: the
+faculty lists itself in /tools, answers /invoke, and part of the capability is
+unreachable -- while every other audit passes, because the module has a
+docstring, the example runs and nothing is unwired.
+TRIAGED PER PARAMETER, not per faculty (99 faculties carry 107 findings):
+    GENUINE                                   62 params / 55 faculties
+    BUDGET  self-supplied at the call site    34   (seed=self.seed x18, mind=self x16)
+    FALSE   derived from a better parameter    6   (fit_camera takes width/height,
+                                                    derives aspect)
+    FALSE   positional rename                  3
+    FALSE   private underscore plumbing        2
+THE FAMILY THAT WOULD HAVE BEEN THE EASY WIN: p15_hdrift is 22 of the 99 and is
+22/22 self-supplied -- one deliberate convention (this engine seeds from the
+mind), zero drift. Widening it would have broken the determinism rule to make a
+number go down. Untouched.
+THE INSTRUMENT WAS THE REAL BUG. Its own docstring defines a drift as a parameter
+being UNREACHABLE, and a signature-only check cannot tell unreachable from
+DECIDED. It now AST-reads the wrapper's delegate call -- keyword, positional-by-
+index, aliased imports, readable **kw dicts -- and reports those as SUPPLIED with
+their binding expression, visible and counted, out of the score.
+TWO DEFECTS IN THAT READER, FOUND BY ITS AUTHOR AND FIXED: alias imports were
+missed (3 faculties that plainly supply mind=self still read as drift); and
+assuming **kw covers everything HID creature_tree's tip_inset/mount_flare -- a
+false negative is the exact silence this tool exists to break, so an unreadable
+forward now binds nothing.
+BURNED DOWN: 56 params across 48 faculties in 14 mixins (agent-b), then the last
+7 in p13/p17 (agent-c, in files agent-b had promised not to touch). PROOF, not
+assertion: 0 backward-compat violations against git HEAD (old params unchanged in
+name/order/default, new ones strictly appended, every new default EQUAL to the
+delegate's own by inspect), and delegate-spy confirmation that a caller's
+sentinel actually arrives at the delegate.
+THE ONE THAT WOULD HAVE BEEN WORSE THAN THE DRIFT: creature_tree defaults to
+groups=True and forwards **kw, so the mechanical patch made both restored params
+a SILENT NO-OP for most callers. Caught by the spy, fixed by hand into the kw
+dict. A passthrough that arrives nowhere is worse than a parameter you know you
+cannot reach.
+AND THE INSTRUMENT ITSELF WAS UNDISCOVERABLE. find_capability on three phrasings
+of "a mind verb is missing a parameter its delegate has" returned shape probes
+and mesh weld -- delegation_drift was a tools/ script, uncatalogued, measuring a
+99-item backlog. Now mind.delegation_drift(), catalogued, all three phrasings
+top-1. --gate is live at floor 0.
+
+ITEM F -- MEMORY CURATION: THE MATHS WAS ALREADY HERE AND HAD NOTHING TO POINT AT.
+holographic_actr (base_level, rank) existed. It takes {name: [use_times]} from its
+caller -- and the ladder records NO access data at all: no _hits, no access_log,
+no hit_count, no last_used. Activation ranking was an instrument aimed at nothing.
+BUILT: holographic_memcurate (584 lines) -- a use journal over the real partition
+on a LOGICAL clock, plan/apply/reflect/restore, wired as mind.memory_curate.
+THE DESIGN ANSWERS A RECORDED ARGUMENT rather than walking into it.
+unicron_turn_memory is on record: "ACT-R eviction made that survivable... but
+eviction is a loss, and a flat file is the reason it was needed." So the module
+HAS NO DELETE PATH. Enforced three ways: a test asserts the source contains no
+def delete/evict/drop; a conservation law is pinned (rows_after + archived ==
+rows_before, always); apply() demotes into a restorable archive and journals every
+action with its reason, and restore() puts the taught_log back byte-identical.
+Time is logical (asserted at source level: no import time/datetime/perf_counter);
+fact ids are sha256, stable across PYTHONHASHSEED 0/1/99999 in subprocess.
+MEASURED, 20 seeds, paired bootstrap 95% CI, hit rate of a 40-of-200 hot set:
+    drift  keep-all  random  recency  frequency  ACTIVATION   winner
+    0.00    1.0000   0.2000  0.6915    0.7437     0.7397      frequency
+    0.25    1.0000   0.2000  0.6080    0.6584     0.6538      frequency
+    0.50    1.0000   0.2000  0.5939    0.6246     0.6340      activation
+    0.75    1.0000   0.2000  0.6020    0.6100     0.6399      activation
+    1.00    1.0000   0.2000  0.6915    0.6224     0.6610      RECENCY
+vs the recency window: +0.048/+0.046/+0.040/+0.038 at drift 0.00-0.75, every
+interval clear of zero -- and -0.031 [-0.041, -0.020] at drift 1.00, A SIGNIFICANT
+LOSS. vs frequency: a genuine TIE on a stationary process.
+STATED THE WAY IT MUST BE STATED: activation is the robust middle, not a dominant
+policy. Under a complete topic switch a plain recency window beats it; on a
+stationary workload plain hit-counting is just as good. The loss has its own named
+test (test_activation_LOSES_to_a_recency_window_under_a_full_topic_switch) so it
+cannot quietly stop being reported.
+AND THE HARNESS BUG THAT CAME FIRST, kept loud because it is the better lesson:
+v1 made `drift` a fraction of RANK SLOTS. Under Zipf(1.1) the top 25 of 200 ranks
+carry 71% of traffic, so "drift=0.25" moved 71% of future queries onto the facts
+that had been COLDEST -- history was not uninformative, it was ANTI-PREDICTIVE,
+and all three policies scored 0.086-0.13 against a 0.20 RANDOM baseline. Three
+policies losing to chance is a broken generator, not a result about policies. A
+random baseline is now in every row and both the selftest and a test assert every
+policy beats it. On the record, because the harness was redesigned AFTER seeing
+results: the redesign was justified by the below-chance diagnostic, not by which
+policy won.
+
+ITEM G -- THE EXTERNAL BENCHMARK, AND WHY THIS SWEEP DID NOT DELIVER ONE.
+COMPETITIVE_NOOA now carries a section 7 stating the plan's true status: items 1,
+2 DONE (sweep 130), item 5 PARTIAL (this sweep), item 4 NOT STARTED BY DECISION,
+ITEM 3 STILL OPEN. Written into the doc in as many words: items 1, 2 and 5 were
+all measured on leCore's OWN harnesses, which is exactly the criticism section 3
+made of leCore's benchmark, and closing three capability gaps does not answer it.
+The honest summary of sweeps 130-131 is "the capability table is less lopsided",
+NOT "leCore has caught up".
+RESEARCHED, and it sharpens item 3: the agent-memory benchmarks that matter are
+LoCoMo, LongMemEval and BEAM (Mem0's published bests 92.5 / 94.4 / 64.1 / 48.6).
+LongMemEval is the on-target one for a specific reason -- ABSTENTION IS ONE OF ITS
+FIVE MEASURED CAPABILITIES ("correctly declining to answer about events that never
+occurred"). That is leCore's single genuine lead, defined by someone else, on
+someone else's data, where every abstention number in this repo today comes from a
+no-tool set built BY REMOVAL FROM leCore'S OWN CATALOG. Two obstacles recorded with
+it: a full run needs a model rung while leCore's abstention arm is model-free by
+design, so the scoping decides whether you measure the gate or the model; and the
+field's own survey says there is NO widely adopted public benchmark scoring
+forgetting/decay/consolidation directly, so item F cannot be validated externally
+at all today and must stay labelled self-measured.
+
+THREE TESTS THAT FAILED BECAUSE THE WORK SUCCEEDED -- the sweep's own lesson.
+1. tests/test_delegation_drift.py asserted r["missing"][0] to inspect a record's
+   shape. The same sweep that made the instrument reachable took the backlog to
+   zero, so the assertion went red BECAUSE the burn-down worked.
+2. FEATURE_GUIDE's guide-check block for the same faculty did the same thing, and
+   CI runs that block verbatim -- so the DOCUMENTATION rotted on success too.
+3. Both now check shape on whichever section HAS rows and assert the goal state
+   (total_missing == 0) instead.
+RULE: an assertion that a BACKLOG EXISTS is an assertion with an expiry date. Pin
+the contract (rows are named dicts), never the size of the mess.
+
+FOUND AND FIXED IN CLOSE-OUT
+- tools/tour.py HAS NEVER COMPILED ON PYTHON 3.11 -- five f-strings reuse the outer
+  quote inside their expression, legal only from 3.12 (PEP 701). FEATURE_GUIDE
+  advertises it as "a runnable tour". Fixed line-scoped (a blind quote swap would
+  have corrupted 7,700 lines of prose between the braces); py_compile green.
+- delegation_drift's report says "Fix a drift and --rebase, WITH A REASON" and its
+  --rebase help says "a budget without a reason is a mute button" -- and the CLI
+  had no --reason flag, so every rebase wrote the placeholder. The tool installed
+  the mute button it warns about. --reason added and REQUIRED with --rebase.
+- Budget rebased 7 -> 0 with the real reason recorded. A drift from here is a
+  regression, not a backlog item.
+
+MEASUREMENTS AND STATE
+tests 6,741 -> 6,775 collected (+34). mind verbs 2,330. delegation_drift 99 -> 0,
+--gate live at floor 0. Audits: reachability 0/0/0; catalog_gaps 0; skill_lint 0
+hard gaps, 0 new does-length regressions; doc_coverage 1,981 vs budget 1,984
+(THREE UNDER -- both agents documented their own verbs in the same pass, which is
+the habit sweep 130 asked for); wiring_report 0 dark / 0 catalog-only;
+audit_imports 0 broken / 0 flat; regen --check green, 9 outputs.
+
+STILL OPEN, unchanged in priority: COMPETITIVE_NOOA item 3 (an external benchmark
+result -- LongMemEval's abstention arm is the cheapest honest route); item 4
+(code-as-action, which must not start without revisiting the no-exec-REPL
+decision); sweep 124 backlog A (the VSA applications library -- Torchhd, the
+reference open-source VSA library, ships an examples/ directory and leCore still
+has none), B (semantic), D (docs), E (engine walls).
+CARRIED FROM SWEEP 130 AND STILL TRUE: there is no file_append verb and
+docs/NOTES_concepts.md is past the 1 MB agent-read cap, so the one file every
+close-out must append to cannot be read by the engine's own file faculty.
+
+--------------------------------------------------------------------------------
+SWEEP 132 -- THE APPLICATIONS LIBRARY EXISTS, THE ENGINE CAN READ ITS OWN
+CONTRACT, AND grep GREW THE FLAG ITS OWN AUTHOR KEPT LEAVING FOR A SHELL
+
+THE BRIEF (Moose, standing): boot on external memory, audit leCore WITH leCore,
+attach two more agents to the SAME workspace and memory, continue the plan.
+Merged origin/main 1ad0d54 -> 87c1dc0 first: v0.2.21, a release bump and a CI
+durations refresh, no code, no conflicts.
+
+ITEM H -- THE VSA APPLICATIONS LIBRARY (sweep 124 backlog A, first tranche).
+Sweep 124's verdict was "THE MACHINERY IS ALIVE; THE LIBRARY DOES NOT EXIST", and
+the audit confirmed it unchanged: eight phrasings, all fallbacks; app_run / apps /
+run_app / examples / demo all absent; applications/ and examples/ absent.
+SHIPPED: applications/<domain>/<name>.py x4, a registry, and mind.apps() /
+mind.app_run(name) on p08_bake (chosen on evidence -- it already hosts run_pipeline
+/suggest_pipeline, the "assemble and run a composed program" family; p23_zoo3 was
+considered and rejected because its own header says it is a mechanical split of the
+model zoo).
+    spectral_heat        a linear PDE advanced to ANY horizon in ONE step:
+                         max|err| 4.44e-16, FLAT in t. The FD baseline needs 231
+                         steps to reach t=20 and lands at 5.02e-04.       0.013 s
+    interleaved_sources  stride recovered EXACTLY for K=2,3,4 from the mixture
+                         alone; de-interleaved series element-identical.  0.007 s
+    request_to_record    8/8 in-vocabulary requests parsed to {action,object,
+                         quality}; 4/4 OUT-of-vocabulary refused with {};
+                         0 fabricated.                                    0.001 s
+    texture_composite    3 procedural fields -> one composite kernel -> a
+                         deterministic PNG, identical sha256 across runs. 0.272 s
+Whole library 0.29 s, asserted in the tests rather than hoped for.
+THE RULE THAT MAKES IT A LIBRARY AND NOT A FOLDER: every application reaches the
+engine ONLY through mind.<verb>() and imports nothing from holographic.*, enforced
+BY AST in tests/test_applications.py -- and the detector is checked against known
+violations first, because a rule nobody has watched fail is a rule that quietly
+stopped being enforced.
+THREE THINGS THE MEASUREMENT CHANGED, all kept in the docstrings:
+1. A NEGATIVE I PREDICTED AND THE MEASUREMENT REFUTED. Having seen three different
+   sources return three singleton groups, demux grouping was written off as "the
+   weak half". The twin-phase case then MERGED, correctly -- the singletons had
+   been the right answer. Both sides are asserted now; asserting only the first
+   would pass for a grouper that never merges anything.
+2. The FD step count in the first draft was a GUESS (66,000) and wrong. It is 231,
+   corrected with the grid quoted, because the count scales as N^2.
+3. preview_texture is O(res^2) in Python: 4.9 / 19.6 / 47.7 s at res 64/128/192.
+   proc_texture() returns a VECTORIZED callable and does the same 192^2 field in
+   0.21 s -- 240x less. preview_texture is right for a swatch of a composed graph
+   and wrong for an image; the app uses the fast path.
+A REAL SEAM BUG, FOUND AND FIXED: POST /invoke app_run {"name":"nope"} returned
+HTTP 500 -- _load raised KeyError and the service maps only ValueError to
+{ok:false,error}. A mistyped name is a CALLER error (the rule ObjectRefs already
+states for a bad handle), so it raises ValueError with the available names in the
+message. Pinned by a test asserting it is NOT a KeyError.
+
+ITEM I -- THE ENGINE COULD NOT READ ITS OWN CONTRACT.
+MEASURED, and this is why it was an item and not a convenience: mind.file_read
+against leCore's own artifacts --
+    docs/NOTES_concepts.md   6,190,497 B   REFUSED (> max_bytes 1,000,000)
+    REFERENCE.md             2,536,909 B   REFUSED
+    capabilities.json        1,088,368 B   REFUSED
+The engine could not read its own generated module reference, could not read the
+lab notebook EVERY CLOSE-OUT IS REQUIRED TO APPEND TO, and could not read
+capabilities.json -- which DEVELOPMENT_STRATEGY calls "the machine-readable
+contract other tools ingest" and which CI drift-gates on every merge.
+AND THE ALARM BUILT FOR EXACTLY THIS WAS BLIND: reachability_audit's SIZE CANARY
+("at 80% of the 1 MB agent-read cap") reported 0, because it walked
+holographic/**/*.py and nothing else. Three files had crossed the cap and the
+canary never looked at them.
+THE DIAGNOSIS THAT SHAPED THE FIX: the cap is a guard on OUTPUT size, not file
+size. read() returns the whole file so it is capped; read_lines, view, count,
+python_check and all four writes pass max_bytes=None because their output is a
+slice, an int or a small dict. SO -- reported rather than papered over --
+file_read_lines and file_view ALREADY worked past the cap and no second reader
+was built. What was missing was the LINE COUNT: appending one line to the notebook
+over /invoke meant file_read_lines (85,602 lines, 6,451,243 B across the wire) and
+then file_insert. 6.4 MB of context to add one line, the read cap defeated through
+the back door by the one faculty that answers "how long is it?" with every line.
+SHIPPED: mind.file_append and mind.file_stat, negative-start (tail) on read_lines
+and view, and a canary that walks the repo and CLASSIFIES.
+    append, bytes across /invoke      6,451,243 -> 133 B      48,506x
+    tail 40 lines                     6,454,023 -> 2,520 B     2,561x, 187x faster
+    canary                            0 -> 6 (4 over the cap, 0 of them source)
+Two calls become one in every row. The canary found a fourth over-cap file nobody
+had listed (pages/cloth_three.html, 1.17 MB) and now flags tools/tour.py at 87%,
+which is the approaching-crossing warning it exists for.
+THE DESIGN POINT THAT MADE APPEND CHEAP: _atomic_write snapshots PRIOR CONTENTS for
+undo -- 6.1 MB per append, 100 deep, 610 MB of undo stack to add one line. An
+append's exact inverse is TRUNCATE TO n BYTES, so it records an integer. Undoing a
+6 MB append costs four bytes.
+THE NON-GOAL, PINNED: file_read's cap is untouched and still refuses.
+test_the_read_cap_still_refuses carries the reason -- making it pass by lifting the
+cap is REMOVING THE GUARD, not fixing it; a loud refusal beats a silent 6 MB
+context bomb.
+
+ITEM J (close-out, and the sweep's sharpest small lesson) -- grep GREW -B/-A
+BECAUSE ITS OWN AUTHOR KEPT REACHING FOR A SHELL.
+Reported at the end of item I: file_grep has no context option, so finding a
+passage in the 6.1 MB notebook and reading around it is a grep for the line number
+and THEN a view for the window -- two round trips where `grep -A6 -B12` is one --
+and the agent who hit it hardest was the one EDITING THE FILE FACULTIES, falling
+back to Bash to do it. A faculty whose own maintainer works around it is the
+clearest possible signal.
+SHIPPED: before=/after= on Editor.grep and mind.file_grep, streamed (a bounded ring
+of `before` lines plus a countdown of `after`, never the file), attaching a
+`context` list to each hit. Default 0/0 emits the old three-key hit unchanged --
+verified, not asserted.
+KEPT NEGATIVE, FOUND BY THE FIRST TEST AND PINNED: the first implementation
+returned the instant max_hits was reached, handing back a hit whose `after` lines
+had not been read yet -- A WINDOW SILENTLY MISSING ITS TAIL, which is worse than
+no window because the caller cannot tell a short window from a short file. Caught
+by pointing it at the notebook with max_hits=1, the exact call the parameter was
+added for. It now stops only when the last window is full.
+DECLARED, not accidental: windows are per-hit and NOT merged, so two hits three
+lines apart repeat the lines between them. Merging would make a hit no longer
+self-contained, and an agent reading ONE hit wants its own window rather than a
+range to reconstruct.
+
+THE PATTERN THIS SWEEP KEPT HITTING: every item came from a wound the engine
+inflicted on its own maintainers. The notebook could not be read by the faculty
+that must append to it. The canary could not see the files it was built to watch.
+grep could not do the one thing its author kept shelling out for. None of these
+were found by reading code; all three were found by USING the engine to work on
+the engine, which is the whole argument for the dogfooding rule.
+
+FOUND, NOT FIXED -- named so the next session can pick them up
+- tools/showcase.py is a flagship (AGENTS.md points at it as the proof) and its
+  catalog card shells out via subprocess with module=None, method=None -- so it is
+  NOT reachable through the mind. The same shape as delegation_drift before sweep
+  131.
+- study's 800-chunk cap is NOT served by this sweep's work, and item I's author
+  checked before assuming: that is a COVERAGE cap over a corpus of many documents
+  (measured dropping 52% of cards; bm25_rank 9/12 vs study 4/12), not a size cap on
+  one file. Paging it means ranking chunks across documents. One design does not
+  serve both, and saying it did would be tidier than true.
+- The applications library is a FIRST TRANCHE: four of the six domains sweep 124
+  lists. 3-D (points_to_mesh -> decimate -> unwrap -> render) and advanced
+  algorithms (resonator factoring, Physarum) are not here. Backlog A is not closed.
+- applications/ and tools/delegation_drift are source-checkout only: a wheel raises
+  a legible ImportError rather than reporting an empty library, because an empty
+  list would read as "there are none", a different and wrong answer.
+
+THE COMPETITIVE CLAIM, STATED CAREFULLY. Torchhd (JMLR 24) is the reference
+open-source VSA/HDC library and it ships an examples/ directory; leCore shipped
+none, which is the whole case for item H. It is NOT like-for-like: their examples
+are ML tasks scored on public datasets, these are end-to-end programs over leCore's
+own machinery. That sentence is in the module docstring, the catalog card, GALLERY
+and the guide, so it cannot be quoted without it.
+
+MEASUREMENTS AND STATE
+tests 6,775 -> 6,821 collected (+46). mind verbs 2,334. Audits: reachability
+0 no-docstring / 0 import-only / 0 duplicate, SIZE CANARY 0 -> 6 (4 over cap, 0 of
+them source); catalog_gaps 0; skill_lint 0 hard gaps, 0 new does-length
+regressions; doc_coverage 1,977 vs budget 1,984 (SEVEN under -- both agents
+documented their own verbs unprompted, which is now the habit); wiring_report 0
+dark / 0 catalog-only; delegation_drift --gate OK at floor 0 (held across a
+signature change to BOTH sides of a delegation this sweep); audit_imports 0/0;
+regen --check green, 9 outputs.
+
+STILL OPEN, unchanged in priority: COMPETITIVE_NOOA item 3, an EXTERNAL benchmark
+result -- LongMemEval's abstention arm remains the cheapest honest route and the
+only thing that makes any leCore number non-self-referential; item 4 code-as-action
+(do not start without revisiting the no-exec-REPL decision); sweep 124 backlog A
+(the remaining two domains), B (semantic), D (docs), E (engine walls -- study
+paging is the live one).
+
+ITEM K (close-out, found BY the HTTP proof) -- A CALLER'S MISTAKE WAS PRESENTING
+AS A SERVER FAULT.
+While proving item I over /invoke, `file_read` on the 6.2 MB notebook came back
+HTTP 500. SERVICE.md's own contract says "a bad request returns HTTP 400 ... an
+unexpected error 500", and only ValueError was honouring it: EditError -- whose
+message names the file, the size AND the remedy -- fell through to the 500 branch.
+So the agent that most needs to read that file saw a server fault instead of its
+own mistake, and a 500 is the one thing an agent cannot act on. This is the SAME
+seam agent-b fixed for app_run three hours earlier in this sweep (KeyError on a
+mistyped name), in a second family.
+FIXED: the /invoke except now resolves its caller-error types lazily and includes
+EditError. Proven over HTTP -- over-cap read and an escaped path both return
+{ok:false,error} at 200; an unknown kwarg still returns 500.
+KEPT NEGATIVE, and it is the whole design: this widens BY TYPE and deliberately
+does NOT catch Exception. A genuine bug inside a faculty must stay a 500, because
+turning every crash into a tidy 400 is how a broken node starts looking healthy.
+
+--------------------------------------------------------------------------------
+SWEEP 133 -- THE DEMO SCENE LED, AND THE ABOVE/BELOW SWEEP WAS AUDITED AGAINST
+ITSELF: 18 GENUINE GAPS WHILE IT REPORTED ZERO
+
+THE BRIEF (Moose): the standing swarm brief, plus three additions -- the DEMO
+SCENE EXPERT leads the changes; make sure nothing is being missed that an
+above/below sweep would normally catch; and remember fractals, inception, layers,
+as above so below.
+
+THE ABOVE/BELOW SWEEP, RUN FIRST, AND WHY ITS GREEN WAS NOT ONE.
+    python3 tools/swarm_audit.py
+    swarm: 12 groups, 0 import failures | matrix: 21 capabilities, 0 unintended gap(s)
+CAPS is a HAND-WRITTEN LITERAL of 21 tuples frozen at cp67. MEASURED before
+assigning anything: of 36 doors sampled from what the engine gained since --
+the whole agent substrate (orient, serve, study, bequeath, wisdom, contribute,
+commons_pool, api_learn, tool_reflex_teach, merge_trees, partition_report, role,
+roles, shared_workspace, codebase_sync, escalations, resolve, table_analyze,
+suggest_pipeline, delegate, agent_loop, find_capability, teach_about,
+stale_facts, file_grep) plus everything sweeps 129-132 added --
+    36 OF 36 EXIST ON THE MIND AND APPEAR IN NO MATRIX ROW.
+The instrument that asks "is every capability present at every layer" had never
+been asked across the capability set. THIRD INSTANCE OF THE SAME FAMILY: sweep
+131 found delegation_drift measuring a 99-item backlog while being itself
+undiscoverable; sweep 132 found the SIZE CANARY watching .py only while three
+files sailed past its cap. The audits keep failing to audit themselves.
+
+AND THE PREMISE NEEDED CORRECTING -- the corrected version is the better finding.
+The instrument CLAIMED to measure reachability and MEASURED PROMOTION. Its L2/L3
+markers are substring probes for DEDICATED TOOL NAMES, and holographic_mcp hosts
+lecore_invoke(name, args) -> run any public faculty. So L2 reachability is
+universal by construction; the forward direction it probed COULD NOT have found a
+gap. Verified rather than assumed: all 617 resolving doors are in the /tools
+manifest, and all 36 named doors dispatch through mind.invoke -- 36/36, 0 refused.
+L1 WAS WORSE THAN FROZEN: `fac and ("UnifiedMind" in facade)` is a CONSTANT. All
+21 rows have reported L1:+ since cp67 while measuring nothing at all.
+
+THE NUMBER: 22 GENUINE GAPS WHILE THE AUDIT REPORTED ZERO.
+Population derived from the catalog (719 cards -> 652 doors), because registering
+a card is the engine's OWN act of declaring a capability and the build loop does
+it every sweep -- it grows without anyone editing a literal.
+    no_floor      4   the card names a door defined NOWHERE in the repo
+    unreachable  18   names a module-level function: importable in-process,
+                      NOT callable over /invoke -- "present below, unreachable above"
+    object method 13   reachable via an object the mind returns -- NOT MEANINGFUL,
+                      classified out rather than counted
+    facade_lie / l1_gap / l2_gap: 0
+THE DESIGN JUDGEMENT, and it is the part that makes the instrument survive: ASK
+REACHABILITY OF EVERYTHING; ASK PROMOTION OF NOTHING. Promotion (a dedicated MCP
+tool or chat verb -- 15 and 3 of 652) is a curation decision; scoring 637
+unpromoted doors as defects is sweep 123's bar nobody clears, again. Kept intact:
+CAPS, DELIBERATE with its stated reasons, resident_swarm, the L0-L4 layering, and
+failing only on gaps nobody chose.
+AND skill_lint DOES NOT COVER THIS: it validates mind.X inside catalog EXAMPLES,
+never the card's own method= field. A card can promise a door that has never
+existed and every audit stays green.
+
+THE FOUR no_floor CARDS, FIXED AT CLOSE-OUT -- and none was a missing capability.
+Each card is named after a CONCEPT, method= defaults to the card name, and the
+door the card's OWN EXAMPLE already calls has a different name:
+    bios_boot            -> boot            (example calls mind.boot / os_prompt)
+    doctrine_seedpack    -> doctrine_load   (example calls mind.doctrine_load)
+    panel_realm          -> panel_seat      (example calls mind.panel_seat)
+    phase_randomized_null-> phase_randomize (example calls m.phase_randomize)
+So capabilities.json -- "the machine-readable contract other tools ingest" -- was
+promising four methods that resolved to nothing, and an agent doing
+find_capability -> read the card -> call method= got a hole. 22 -> 18; L0/L1/
+L2-reachable 617 -> 620. Budget rebased to 18 WITH the reason; --reason required.
+
+ITEM L -- THE DEMO SCENE LED, AND THE ANSWER WAS ONE OPERATOR, NOT TWO.
+The audit found three absences in the demoscener's core loop: no feedback buffer,
+no deep zoom, no beat detection (audio_param_bus exists -- a wire with nothing on
+the other end). The design question was whether feedback and zoom are the same
+operator. THE MEASUREMENT SAID YES, AND MORE STRONGLY THAN THE ANALOGY DID: THE
+FEEDBACK BUFFER COMPUTES THE ZOOM. Zooming in means the new view is a magnified
+SUBSET of the old one, so the previous frame already holds every pixel, just
+blurrier -- magnify it (one resample) and recompute one narrow band exactly.
+THE SELF-SIMILARITY IS THE OPTIMISATION, NOT THE DECORATION: the same zoom factor
+applied to the coordinate window and to the image raster, and applying it to the
+raster is what makes applying it to the window affordable. That is as-above-so-
+below with teeth.
+    320x180, max_iter 64      full recompute (band=1)   102.2 ms   9.8 fps
+                              feedback band=4            18.7 ms   over budget
+                              feedback band=8            10.5 ms   60 fps, 9.5x
+Fidelity cost of the reuse: 1.1% mean / 1.8% max of the iteration range, and
+BOUNDED -- the band makes every row exact once per `band` frames, so error cannot
+compound. band=1 is exactly 0.0 error, pinned, or every other number here would
+be meaningless.
+FEEDBACK AS A DYNAMICAL SYSTEM: `decay` is the control parameter and the critical
+value is EXACTLY 1.0 -- 0.9 converges, 1.6 diverges, 1.0 steady with energy ratio
+1.0 to 1e-9, measured ratio matching the parameter to within 2%. Pinned on BOTH
+sides, because a classifier that only ever says "decaying" would pass a one-sided
+test.
+THE PRECISION WALL: 13.8 DECADES for the seahorse target, verified from both
+sides (all 320 x-coordinates still distinct AT the floor, only 49 of 320 a decade
+BELOW it -- a floor that were merely conservative would also pass a one-sided
+check). And the floor is a property of WHERE YOU LOOK, which a single constant
+would hide: centred on the origin it exceeds 250 decades, because there the
+largest coordinate shrinks with the span and there is no eps wall at all.
+CAN IT GO PAST? NO, AND IT IS NOT FAKED. That needs arbitrary precision or a
+perturbation reference orbit. deep_zoom stops at the floor and says so -- this
+engine's abstention discipline applied to arithmetic.
+
+FOUR MEASUREMENT ERRORS MADE, CAUGHT AND KEPT AS WHY-COMMENTS
+1. Dithered refresh: escape_time can only render a CONTIGUOUS band, so dithered
+   rows meant computing a full frame and slicing it -- the "accelerated" path ran
+   SLOWER than the baseline (223 vs 101 ms).
+2. Instrument inside the stopwatch: timed the verify=True run (which full-
+   recomputes every frame) against the baseline and reported a 0.71x "speedup" --
+   the acceleration measured as a slowdown.
+3. Unfair baseline: ran it over frames//4 shallow frames -> 6.1x. Escape cost
+   GROWS with depth, so the baseline must cover the same span range. Corrected to
+   9.5x.
+4. THE FLAKY REAL-TIME TEST, and the most useful one. The selftest asserted
+   ms_per_frame < 16.7 outright. It passed alone and FAILED under pytest -n 4:
+   four workers contending for the same cores are not the box the number was
+   quoted on. The gate is now the SPEEDUP RATIO (two measurements under the same
+   load, so contention cancels) with a generous absolute ceiling behind it.
+   A WALL-CLOCK ASSERTION IS A CLAIM ABOUT A MACHINE, AND CI IS A DIFFERENT
+   MACHINE EVERY TIME.
+
+ROUND 1 AND ROUND 5 COMPOSED WITHOUT EITHER KNOWING ABOUT THE OTHER: deep_zoom
+returns a full frame, 140,217 response bytes over /invoke; with sweep 130's budget
+hook ({"budget": 2048}) it comes back as a bounded preview at 577 bytes, 243x
+smaller, the frame still reachable by handle.
+
+ITEM N (close-out) -- THE FAST PATH THE DEMO SCENE ASKED FOR, AND THE
+MICROBENCHMARK THAT LIED BY 4.7x.
+Handed over as "found, not fixed": escape_time's inner loop is np.power(z, power)
+on a complex array -- a complex exp/log per iteration where z*z would do.
+MEASURED FIRST, because this repo forbids a silent bit change: np.power(z, 2.0) is
+NOT bit-identical to z*z -- 57,908 of 200,000 random complex128 values differ, max
+|diff| 3.55e-15. So the flag MUST be opt-in however small the delta; a change
+bit-identical to 1e-12 has still flipped a creature's trajectory.
+AND THEN THE HONEST NUMBER. The isolated array op is 5.7x. The FUNCTION is 1.20x
+(95.4 -> 79.5 ms at 320x180x64), because z[live] fancy-indexing, np.abs, the mask
+ops and out[now] dominate. THE MICROBENCHMARK OVERSTATED THE REAL WIN BY 4.7x --
+believe the measurement over the narrative, and quote the one that includes the
+whole function. In the escape field the difference reaches 3.8e-9 across 38,316 of
+57,600 pixels, because the iteration AMPLIFIES it: further vindication of opt-in.
+DEFAULT PATH PROVEN BIT-IDENTICAL to git HEAD across Mandelbrot/Julia x power 2/3,
+and fast_square proven inert for power != 2.
+ALSO RESTORED: the escape_time wrapper was missing bounds_ratio entirely -- a
+delegation drift the 0.80-overlap gate had NOT surfaced. Now plumbed, with a test.
+
+THE UP/DOWN/SIDEWAYS CHECK, RUN AND PINNED (Moose asked for it by name).
+    DOWN     a component of its own input -- a 32x32 TILE of a frame:  WORKS
+             the degenerate component, a 1x64 STRIP:                   WORKS
+    UP       its input as a component of something larger -- a
+             (64,64,3) COLOUR frame:                                   WORKS
+             (measured, not designed: it was built for a single field)
+    SIDEWAYS the SEQUENCE costume -- a 1-D hypervector:                FAILS
+             ValueError: not enough values to unpack (expected 2, got 1)
+THE MISSED FACULTY, NAMED: feedback_step wears the FIELD costume and, by accident,
+the layered-field costume. It does not wear the SEQUENCE costume. And the mapping
+is already obvious -- on a sequence `rotate` IS `permute` (the VSA sequence
+operator), `zoom` is a resample along the one axis, and `decay` at zoom=1.0 is a
+leaky bundle. WHICH MAKES THE DEMO-SCENE FEEDBACK BUFFER AND THIS ENGINE'S OWN
+SEQUENCE RECURRENCE THE SAME OPERATOR IN TWO COSTUMES. Deliberately NOT patched at
+close-out into a module its author had just finished; the current limit is asserted
+by a test named for it, so whoever builds the 1-D path changes that test on purpose
+with the measurement in hand. All three working directions are pinned so an
+optimisation cannot remove them by accident.
+
+MEASUREMENTS AND STATE
+tests 6,821 -> 6,857 collected. Audits: reachability 0 no-docstring / 0
+import-only / 0 duplicate, canary 6 (4 over cap, 0 source); catalog_gaps 0;
+skill_lint 0; doc_coverage 1,976 vs budget 1,984 (EIGHT under, with new verbs
+added by both agents); wiring 0 dark / 0 catalog-only; delegation_drift --gate 0;
+swarm_audit --gate 18 (was a false 0); audit_imports 0/0; regen --check green.
+
+FOUND, NOT FIXED -- named for the next session
+- THE 18 REMAINING above/below gaps: catalog cards naming MODULE-LEVEL functions,
+  importable in-process and not callable over /invoke. Each needs a judgement
+  (wire the function as a verb, or re-point the card at the object that already
+  reaches it); doing 18 blind across files nobody owns is how a sweep breaks
+  someone else's work.
+- skill_lint does not validate a card's method= field. It validates the EXAMPLE.
+  Four cards promised methods that resolved to nothing and every gate stayed green
+  until an audit outside skill_lint went looking.
+- BEAT DETECTION was dropped mid-round, deliberately: one coherent measured result
+  beat two half ones. audio_param_bus is still a wire with nothing on the other
+  end, and it is the obvious next demo-scene rung.
+- The 60 fps figure belongs to an unloaded box; band=4 is 18.7 ms and already over
+  budget BEFORE the 2.1 ms trail pass. Stated, not hidden behind an average.
+- Nearest-neighbour resampling in the feedback path: exactly reproducible with no
+  edge-weighting ambiguity, at a visible cost of stair-stepping in trails at high
+  zoom rates. Bilinear looks better and costs more.
+- The derived above/below audit was 52.8 s before its own author found that 651
+  regex searches over 4.85 MB of tests/ were 43.6 s of it; one tokenisation
+  instead -> 10.5 s, identical results. An audit that slow is one nobody runs after
+  every change, which is exactly how a gate gets disabled.
+
+A FOURTH TEST FAILED BECAUSE THE WORK SUCCEEDED -- and this is now a named pattern
+of this session, not an incident.
+    sweep 130   tests/test_delegation_drift.py indexed missing[0] to check a
+                record's shape; the burn-down took the backlog to 0 and the
+                assertion went red BECAUSE the work worked.
+    sweep 130   FEATURE_GUIDE's guide-check block for the same faculty did the
+                same thing -- so the DOCUMENTATION rotted on success too, in CI.
+    sweep 133   tests/test_swarm_audit.py asserted the no_floor LIST was non-empty,
+                using the four real defects AS ITS FIXTURE. Close-out fixed all
+                four, the class emptied, and the test went red for the right
+                reason.
+THE RULE, stated once and for all: A TEST WHOSE FIXTURE IS A REAL BUG DIES THE DAY
+SOMEBODY FIXES IT. Pin the CONTRACT, never the size of the mess. The classifier is
+now exercised on a SYNTHETIC card -- always available, never dependent on the repo
+still being broken -- and the real rows, when there are any, are still checked. Zero
+is the GOAL state, not a broken test.
+This is the same shape as the audits that could not audit themselves (sweeps 131,
+132, 133): an instrument that only works while the thing it measures is still wrong.
+
+--------------------------------------------------------------------------------
+SWEEP 134 -- THE SIDEWAYS DIRECTION CLOSED, AND THE CONSTANT IS THE SAME IN BOTH
+COSTUMES (BUT NOT FOR THE REASON ANYONE GUESSED)
+
+THE BRIEF (Moose, standing): the swarm brief, the demo scene expert leading, the
+above/below sweep, and fractals / inception / layers / as above so below.
+Both items were named by SWEEP 133's OWN findings -- this round is the follow-through.
+
+ITEM O -- THE SIDEWAYS DIRECTION, AND THE CLAIM MADE EMPIRICAL.
+Sweep 133's up/down/sideways check found feedback_step wearing the FIELD costume and
+not the SEQUENCE one (a 1-D hypervector raised on the shape unpack), and left it
+named rather than patched. The mapping looked obvious: on a sequence `rotate` IS
+`permute`, `zoom` is a resample, `decay` at zoom=1.0 is a leaky bundle. The brief
+was: do not assert they are the same because it sounds good -- find the NUMBER that
+is the same in both.
+IT IS. THE CRITICAL DECAY IS EXACTLY 1.0 IN BOTH COSTUMES:
+    integer roll      1-D sequence   permutation 256/256 cells    1.0000000000
+    integer roll      2-D field      permutation 3072/3072        1.0000000000
+    rounded rot 0.15  2-D field      NOT a permutation 2658/3072  1.0001981
+Energy ratio equals `decay` to 1e-12 in both costumes, verified in-process and over
+HTTP (1.1e-16).
+AND THE CONDITION IS NOT RANK -- IT IS PERMUTATION-NESS. A permutation is
+orthogonal, so decay*T puts every eigenvalue on a circle of radius `decay` and the
+scalar is all that is left. THAT is why the field and the sequence agree: not
+because they are both "feedback", but because both transforms are permutations.
+TWO TIDIER HYPOTHESES DIED ON THE WAY, and both are kept:
+1. "The costumes differ because of RANK." WRONG -- a 2-D INTEGER roll hits 1.0
+   exactly.
+2. "They differ because of clamped edges; wrapping will fix it." WRONG, and
+   plausible enough that the wrapped variant was BUILT to check: wrapped 1.0001997
+   vs clamped 1.0001981 -- indistinguishable.
+   The actual cause: NEAREST-NEIGHBOUR ROUNDING IS MANY-TO-ONE. At 0.15 rad only
+   2658 of 3072 source cells are sampled exactly once; at 45 degrees only 1450.
+   Shipped as mind.is_permutation() so a ratio that looks wrong arrives WITH ITS
+   REASON instead of as a mystery.
+RULE 0 REJECTED THE OFFERED REUSE, with a reason. holographic_reproject was read
+first as instructed and NOT extended: est_dx/reproject solve the INVERSE problem
+(estimate an unknown transform between two frames by unbind); feedback_step solves
+the FORWARD one (apply a known transform). An inverse/forward pair is not two
+costumes, and folding them would blur the one distinction that makes each useful.
+THE JOIN THAT IS REAL WAS ALREADY IN THE TREE, in mind.reservoir's own docstring:
+"permute (a cyclic shift) is norm-preserving (orthogonal), which is exactly the
+echo-state property." Same statement, same constant. A 1-D feedback_step with
+decay < 1 IS a leaky echo-state update -- pinned as a test. The demo scene's oldest
+effect and this engine's sequence recurrence are one operator, and the evidence is
+a number that matches to 1e-12 rather than an analogy.
+2-D and 3-D paths proven BYTE-IDENTICAL to git HEAD by executing the previous
+module side by side.
+
+ITEM P -- THE 18, AND THE BLIND SPOT THAT LET THE CLASS EXIST.
+HALF ONE, done first: skill_lint now has a CARD-CONTRACT gate -- a card whose
+method= resolves nowhere AND whose own example never mentions it is promising
+something it cannot show you how to reach. 0.07 s over 719 cards, no repo walk, and
+it GATES. 0 today, which is the goal state.
+OWNERSHIP DECIDED AND WRITTEN INTO BOTH DOCSTRINGS, because two gates saying the
+same thing in different words is how one of them gets ignored: skill_lint asks
+whether a CARD can reach the door it names, from the card alone, cheaply.
+swarm_audit --gate owns reachability ACROSS LAYERS -- it AST-walks the repo to
+split an unresolved method= into an object method (fine), a module function (its
+`unreachable` floor), or nothing. So the card contract DELIBERATELY does not
+re-report the module-function cards: their example does show a way in (by import),
+so they are not lying -- they are unreachable, which is the other instrument's
+floor.
+HALF TWO: 18 -> 15 -> 13.
+    WIRED (agent-c)      3   barrier_wall, gas_pressure, is_flammable on p10,
+                             beside their already-wired siblings quantum_dot_well /
+                             ideal_gas / burn_object
+    WIRED (close-out)    1   aces_tonemap -- the demo-scene review's own pick as the
+                             highest value per line of all 18: a physically-lit
+                             render is FLOAT and clips to white, so this is the last
+                             step before anything is viewable
+    RE-POINTED           1   element_flame_color -- mind.element('Na')['flame_color']
+                             ALREADY returns it, so wiring would have added a
+                             REDUNDANT door: a discoverability tax, worse than the
+                             mis-pointed card it would have "fixed"
+    LEFT WITH REASONS    4   compress_arrays / export_all are operator acts over
+                             model directories; merge_drift / route_question take
+                             `mind` first and each duplicates an existing door
+    DEFERRED             7   the rendering toolkit -- see below
+L0/L1/L2-reachable 617 -> 625.
+THE MEASUREMENT THAT MADE THE TRIAGE HONEST: the 18 are EXACTLY the cards whose
+example is a bare `from <mod> import <name>` -- 18 such in 825, all 18 unwired, and
+no other card has that shape. Not a convention with a population; 18 anomalies.
+
+A STRUCTURAL FINDING ABOUT THE SWARM ITSELF, worth more than the number.
+All 18 cards live in catalog_p07, which agent-c did not own this round. So
+"RE-POINT the card" -- the correct remedy for several of them -- was unavailable
+for every single one, while "WIRE a verb" needed no card edit and was always
+available. THE FILE-OWNERSHIP DISCIPLINE THAT KEEPS TWO AGENTS FROM COLLIDING ALSO
+BIASES A NON-OWNING SWEEP TOWARD ADDING VERBS OVER CORRECTING CARDS -- and adding
+verbs costs doc_coverage while correcting cards costs nothing. Agent-c left the
+floor at 15 rather than bank work it had not done; close-out, owning no files by
+convention, did the two card-side fixes. Ownership is a safety property with a
+measurable bias, and this is the first time it has been written down.
+
+THE FIFTH INSTANCE OF THE FIXTURE-IS-A-REAL-BUG PATTERN, and it landed twice
+before it stuck. Sweep 133's close-out fixed agent-c's TEST FILE, which asserted
+the no_floor list was non-empty using the four real defects as its fixture. The
+SELFTEST in swarm_audit had the same flaw (`genuine >= 4`, `no_floor >= 1`) and
+was not checked when the test file was flagged -- it went red on the same fix and
+was only caught by the verification pass. Both now assert the classes are WIRED
+and the floor HOLDS; zero in every class is the goal state.
+
+THE AUDIT SET CAUGHT AN AGENT MID-SWEEP, which is the loop working: delegation_
+drift --gate went 0 -> 1 on a newly wired barrier_wall that did not forward the
+delegate's gap=None. A barrier with a hole in it IS the double slit -- the wall had
+shipped without the experiment. Plumbed with the delegate's own default; gate back
+to 0. file_python_check then caught a docstring broken while fixing that, on the
+very next edit.
+
+THE UP/DOWN/SIDEWAYS CHECK ON THIS ROUND'S OWN WORK
+    feedback_step   1-D sequence (16,) | 2-D field (8,8) | 3-D colour (8,8,3)
+                    ALL THREE. The direction sweep 133 named is CLOSED, and a test
+                    now names it so a future change cannot drop it silently.
+    aces_tonemap    DOWN one pixel (1,1,3) | UP a batch of frames (2,1,2,3) |
+                    SIDEWAYS a bare RGB triple (3,)
+                    All three by construction (it is elementwise) -- asserted rather
+                    than assumed, because an "optimisation" that reshapes to (H,W,3)
+                    would silently take two of them away.
+
+MEASUREMENTS AND STATE
+tests 6,857 -> 6,876 collected. Eight audits: reachability 0 no-docstring / 0
+import-only / 0 duplicate, canary 6 (4 over cap, 0 source); catalog_gaps 0;
+skill_lint 0 INCLUDING 0 broken card contracts (a new class); doc_coverage 1,972 vs
+budget 1,984 -- TWELVE UNDER, and better than the round started despite four new
+verbs; wiring 0 dark / 0 catalog-only; delegation_drift --gate 0; swarm_audit
+--gate 13 (from 18, rebased with the reason); audit_imports 0/0; regen --check
+green. HTTP /invoke proven for feedback_step in BOTH ranks, is_permutation,
+aces_tonemap and above_below.
+
+FOUND, NOT FIXED -- named, with the demo-scene review's own judgement attached
+- THE SEVEN RENDERING CARDS, and this is the note that should survive: take
+  aces_tonemap FIRST (done), then splat_denoise, then add_caustics (the
+  crowd-pleaser, but check its real signature -- it likely wants a scene/light
+  argument). write_multichannel matters disproportionately because it is THE ONLY
+  ONE OF THE SEVEN THAT GETS DATA OUT. aniso_render / chain_transport /
+  from_components read like internal plumbing -- check whether they are genuinely
+  caller-facing, because "importable but not a door" is sometimes the CORRECT
+  answer and a budgeted negative beats a forced faculty.
+- THE 2e-4 EXCESS IS REAL AND UNFIXED. Rounded rotation is not a permutation and
+  was not made into one; bilinear or an exact shear decomposition would, at a cost
+  nobody measured. is_permutation REPORTS the condition rather than repairing it.
+- `rotate` CHANGES UNITS WITH RANK -- radians on a field, samples on a sequence.
+  Deliberate (reusing the name carries the identity; a second name would hide it)
+  but it is a wart and it is in the docstring.
+- zoom != 1 breaks exactness in the SEQUENCE costume too, same cause, both ranks.
+- THE CARD-CONTRACT CHECK IS NARROW BY CONSTRUCTION: it cannot see a card whose
+  method= names a REAL BUT WRONG door. The name resolves, so the contract holds
+  while the card still misleads. Catching that needs semantic comparison of the
+  card's prose against the door's behaviour, which no cheap check does.
+- No new application this round, deliberately: the result is a faculty-level
+  identity with a number, not a new effect, and adding a second demo to have
+  something to show would have been decoration.
+- COORDINATION FAILED ON THE SEVEN. agent-c asked on swarm.request and agent-b had
+  already posted ROUND 6 COMPLETE. Not a technical blocker, a timing one -- and the
+  first time in six rounds that the bus did not close a loop.
+
+--------------------------------------------------------------------------------
+SWEEP 135 -- THE RESEARCH CASHED IN: AN EXTERNAL-CORPUS BENCHMARK, AND THE
+CORRECTION IT FORCED TO OUR OWN COMPETITIVE CLAIM
+
+THE BRIEF (Moose): boot on external memory and make changes based on the research.
+The research was sweeps 130-133's SOTA pass: NOOA's ordered plan (items 1, 2 done,
+5 partial, 3 STILL OPEN), Torchhd as the reference VSA library, and the agent-memory
+benchmarks -- LoCoMo 92.5 / LongMemEval 94.4 / BEAM-1M 64.1 / BEAM-10M 48.6 (Mem0).
+COMPETITIVE_NOOA section 7 named item 3 as the only thing that makes any leCore
+number non-self-referential, and named LongMemEval's ABSTENTION ability as the
+cheapest honest route because abstention is leCore's one genuine lead.
+
+THE CORRECTION THAT HAD TO COME FIRST, AND IT IS THE SWEEP'S REAL RESULT.
+Section 7 was right about the benchmark and WRONG ABOUT WHICH OF OUR GATES IT
+MEASURES. leCore has TWO abstentions:
+    route_or_abstain   "no CAPABILITY matches this request"   <- the 0.0% false-action
+                                                                 number this repo leads with
+    serve              "I hold no FACT that answers this"     <- never benchmarked
+LongMemEval's abstention ability is the SECOND one. Its questions ask about events
+that never happened in a user's chat history -- ordinary English about a life, not
+about a capability catalog. MEASURED BEFORE BUILDING ANYTHING:
+    route_or_abstain("What did I say about my sister's wedding in March?")
+        -> abstain=True, z = -1.69
+    route_or_abstain("Which capability compresses a float series?")  (control)
+        -> abstain=True, z = -1.15
+Pointing the ROUTING gate at that benchmark would abstain on 100% of it, scoring a
+meaningless perfect on the abstention split and zero on the answerable one. A
+CATEGORY ERROR, NOT A RESULT. So the headline this engine leads with is not the
+property an external memory benchmark would validate -- it stays true and stays
+self-referential, and item 3 is not closed by measuring a different gate well.
+The routing gate's own docstring had already said why, and nobody had joined it up:
+"a genuine query in words the catalog never uses abstains CORRECTLY -- the fix is
+aliases, not a lower line."
+
+BUILT: holographic_extbench + mind.external_abstention(records).
+The task file is a PARAMETER. That is the entire point: every abstention figure in
+this repo before today came from a set built BY REMOVAL FROM leCore'S OWN CATALOG --
+a genuinely hard construction, and still a set leCore wrote for itself.
+    SCHEMA      LongMemEval's, published: question_id, question, answer,
+                haystack_sessions (sessions of {"role","content"} turns).
+    CONVENTION  THEIRS TOO: a question_id ending in `_abs` is an abstention question,
+                an event that never happened, no ground-truth answer location.
+    ISOLATION   A FRESH MIND PER RECORD, taught with that record's own haystack.
+                Deliberate and expensive: reusing one mind leaks facts between
+                questions, which is the easiest way to answer an abstention question
+                correctly for the wrong reason.
+    INDEXING    DECLARED, NOT HIDDEN: consecutive (user, assistant) turn pairs taught
+                as one fact each. LongMemEval's own framework names indexing as one of
+                three stages precisely because a different indexing gives a different
+                number, so the choice travels in every returned dict.
+    IDENTITY    sha256 corpus digest, never hash() -- a benchmark identifier that
+                changes between processes is not an identifier.
+    FAILURE     A malformed instance RAISES. A benchmark that quietly drops what it
+                cannot parse reports a number for a set nobody chose.
+
+MEASURED -- and the second measurement is the one that matters.
+1. SCHEMA FIXTURE, 2 answerable / 2 abstention:
+       recall 1.00 | abstention 1.00 | false-answer 0.00 | paired 1.00
+2. NEAR-MISS PROBE, because the fixture's abstention questions are easy (boat vs
+   bike) and LongMemEval's are about PLAUSIBLE-but-absent events. Asked "dentist
+   appointment on THURSDAY" against a taught TUESDAY, "my SISTER'S bike" against a
+   taught "my bike", "park the BIKE" against a taught "park the CAR":
+       4/4 declined, false-answer 0.00. The gate holds one word from a taught fact.
+3. THE FIVE-ABILITY PROBE, shaped like LongMemEval's OTHER four abilities:
+       single-session   served    (memory)
+       knowledge-update DECLINED  (escalate)
+       multi-session    DECLINED  (escalate)
+       temporal         DECLINED  (escalate)
+       abstention       DECLINED  (escalate)   <- correct
+       recall 0.25 | abstention 1.00 | false-answer 0.00 | PAIRED 0.40
+
+THE CAVEAT, AND IT IS NOW A PINNED TEST: A SYSTEM THAT ANSWERS NOTHING SCORES 100%
+ABSTENTION. Both halves of line 3 are true and only the PAIR is honest -- which is
+exactly what paired_benchmark already argues internally ("a PAIR counts only if BOTH
+are right"), now carried out to an external corpus where it matters MORE, not less.
+Mem0's published LongMemEval 94.4% is dominated by recall, so the comparison leCore
+has to survive is the paired one, and ON THIS EVIDENCE RECALL IS THE BINDING
+CONSTRAINT, NOT ABSTENTION. `paired_rate` is therefore in the returned dict and the
+card says QUOTE THE PAIRED RATE.
+test_THE_CAVEAT_a_system_that_answers_nothing_scores_perfect_abstention pins
+recall == 0.25 with the instruction in its own docstring: if someone improves recall
+this test FAILS and must be UPDATED WITH THE NEW NUMBER, never deleted. It exists so
+nobody can quote the abstention rate without meeting the recall rate.
+
+WHAT WAS NOT DONE, LOUDLY: THE REAL 500-QUESTION SET WAS NOT RUN. What ran is a
+corpus built to the published schema. The harness is proven; the score is not
+claimed, and the selftest's own output line says so in as many words.
+
+ITEM 3 REFRAMED, in COMPETITIVE_NOOA section 8: the cheapest honest external result
+is no longer "show the abstention lead on someone else's data" -- it is "SHOW THE
+PAIR", and the pair needs retrieval work this engine has not done. That is a harder
+target than section 7 implied and a truer one.
+
+MEASUREMENTS AND STATE
+tests 6,876 -> 6,882 collected (+6). Catalog 719 -> 720 cards, 651 -> 652 doors,
+L0/L1/L2-reachable 625 -> 626. Eight audits: reachability 0 no-docstring / 0
+import-only / 0 duplicate; catalog_gaps 0; skill_lint 0 including 0 broken card
+contracts; doc_coverage within budget; wiring 0 dark / 0 catalog-only;
+delegation_drift --gate 0; swarm_audit --gate 13; audit_imports 0/0; regen --check
+green. Discoverability 5/5 top-1 including "longmemeval" and "is our abstention
+number self referential". HTTP /invoke proven.
+
+FOUND, NOT FIXED
+- The card's does-field came out at 663 chars on the first draft, over the 600
+  budget, and skill_lint would have caught it as a regression -- caught by counting
+  before inserting instead. The arithmetic habit holds.
+- Getting the real dataset needs a download this environment did not attempt; the
+  adapter is written and tested against the published schema so that step is now a
+  data problem, not an engineering one.
+- Recall is the open work: knowledge-update, multi-session and temporal all decline
+  today. That is the retrieval stage LongMemEval's framework names between indexing
+  and reading, and leCore has faculties in that space (bm25_rank, study, recall) that
+  the harness does not yet route through -- the next rung, and it now has a number to
+  beat: 0.25.
+
+--------------------------------------------------------------------------------
+SWEEP 136 -- THE RETRIEVAL RUNG, AND THE FIRST PRICE THIS ENGINE HAS PUT ON ITS
+OWN HEADLINE PROPERTY
+
+THE BRIEF (Moose): another round of changes. Sweep 135 closed by naming the next
+rung and leaving a number to beat: "recall is the open work: knowledge-update,
+multi-session and temporal all decline today... leCore has faculties in that space
+(bm25_rank, study, recall) that the harness does not yet route through -- the next
+rung, and it now has a number to beat: 0.25."
+
+RULE 0 found the rung already built, twice over:
+    bm25_rank(query, docs, k1, b, top, expand)     lexical, RAW Okapi weights
+    recall_semantic(query, k=5, floor=0.22)        cosine, WITH an abstention floor
+    session_search(query, sessions, k, weighted)
+So nothing new was needed in retrieval -- only the wiring, and the measurement.
+
+PROBED BEFORE BUILDING, and the probe is the reason the design is a FLOOR rather
+than a lookup. On the five-ability fixture:
+    recall_semantic("what did I name the cat")  -> "what did I name the dog", sim 0.4714
+    bm25_rank("what did I name the cat")        -> the same wrong document, score 2.73
+BOTH RUNGS ANSWER A QUESTION ABOUT AN EVENT THAT NEVER HAPPENED. Retrieval recovers
+recall and SPENDS abstention; there is no version of this that is free.
+
+SHIPPED: retrieve= and floor= on holographic_extbench.run and mind.external_
+abstention. DEFAULT None reproduces sweep 135's numbers exactly (pinned by a test).
+The rung is tried ONLY AFTER serve declines, never instead of it -- a memory hit is
+a fact the user taught, a retrieval hit is the nearest thing in the haystack, and
+conflating them would stop the recall number meaning "answered from what it was
+told".
+
+THE EXCHANGE RATE, measured on a 4-answerable / 4-abstention fixture. NOTE THE
+CORPUS: it is WIDER than sweep 135's, so its no-rung paired rate is 0.25 and NOT the
+0.40 sweep 135 reported. A rate is comparable only within one corpus digest, which
+is why the digest is in every report.
+    rung        floor   recall  abstention  false-answer  PAIRED
+    none          -      0.25      1.00         0.00       0.25
+    semantic     0.20    0.75      0.00         1.00       0.00
+    semantic     0.30    0.75      0.25         0.75       0.25
+    semantic     0.45    0.50      0.50         0.50       0.50
+    semantic     0.50    0.50      0.75         0.25       0.50   <- peak
+    semantic     0.55    0.25      1.00         0.00       0.25
+    semantic     0.70    0.25      1.00         0.00       0.25
+    bm25         0.5     1.00      0.25         0.75       0.25
+    bm25         2.5     0.75      0.50         0.50       0.50
+    bm25         3.0     0.50      0.75         0.25       0.50   <- same peak
+    bm25         3.5     0.25      1.00         0.00       0.25
+
+THE RESULT, and it is the first time this repo has PRICED its headline property:
+THE 0.00 FALSE-ANSWER RATE WAS PURCHASED AT RECALL 0.25. Spending a quarter of the
+abstention buys a DOUBLING of the paired rate, 0.25 -> 0.50. Both halves of that
+sentence are asserted by tests, because quoting either alone is exactly what makes
+a benchmark dishonest.
+
+TWO THINGS THE CURVE SAYS THAT A SINGLE NUMBER WOULD NOT.
+1. THE FLOOR IS THE WHOLE DESIGN. At 0.20 the engine answers every abstention
+   question -- it INVENTS. At 0.70 nothing clears the bar -- it DECLINES. Only the
+   interior is useful, and both ends are pinned by a test so the shape cannot be
+   quoted from one end.
+2. BM25 REACHES THE SAME PEAK AT FLOOR 3.0 RATHER THAN 0.50. Two rungs agreeing on
+   the peak is evidence the peak belongs to the CORPUS rather than to one scorer.
+   Floors differing by 6x is the warning that NEITHER FLOOR IS A CONSTANT TO COPY:
+   bm25 returns raw Okapi weights, corpus- and length-dependent, and a floor tuned
+   on one corpus does not transfer. Said in the docstring rather than discovered by
+   whoever ports it.
+
+THE PROXY IS NAMED, not buried: LongMemEval ships no PAIRED instances, so paired_
+rate pairs over the SPLIT -- how many complete (answered, declined) pairs the two
+halves can form. It is the honest reading available from an unpaired corpus and it
+is NOT the same statistic as a benchmark that ships twins. Comparing it to one that
+does would be the error this file was written to stop.
+
+STILL NOT DONE, and it has not moved: THE REAL 500-QUESTION SET HAS NOT BEEN RUN.
+0.50 paired on an eight-question fixture is a MECHANISM result, not a score. Item 3
+stays open, and it is now open for a better-understood reason than it was two sweeps
+ago.
+
+MEASUREMENTS AND STATE
+tests 6,882 -> 6,888 collected (+6, all in the curve). Catalog 720 cards / 652 doors
+unchanged (the rung is parameters on an existing door, not a new one -- so it cost
+doc_coverage nothing). Eight audits: reachability 0 no-docstring / 0 import-only / 0
+duplicate; catalog_gaps 0; skill_lint 0 including 0 broken card contracts and 0
+does-length regressions (card rewritten at 550/600); doc_coverage within budget;
+wiring 0 dark / 0 catalog-only; delegation_drift --gate 0 (both sides of the
+delegation grew the same two parameters); swarm_audit --gate 13; audit_imports 0/0;
+regen --check green. HTTP /invoke proven for both retrieve=None and
+retrieve="semantic".
+
+FOUND, NOT FIXED
+- The peak is flat between floor 0.45 and 0.50 on this fixture -- eight questions is
+  not enough resolution to choose between them, and picking one would be false
+  precision. 0.50 is quoted because it holds more abstention at the same paired rate.
+- session_search and study were NOT tried as rungs. Two scorers already agree on the
+  peak; a third would add cost without adding evidence until the corpus is bigger.
+- The rung ranks and returns a score; it does not READ. LongMemEval's framework names
+  indexing, retrieval and reading as three stages, and this sweep did the second. The
+  multi-session and temporal questions need the third -- combining two retrieved facts
+  -- and no floor will produce that.
+
+A NEAR-MISS FALSE BUG REPORT AT DELIVERY, recorded because this session has spent six
+sweeps finding instruments that failed at their own job, and this time the instrument
+was right and the reader was wrong.
+Building the delivery zip with tools/make_repo_zip.py, the integrity check reported
+VERSION MISSING from the archive. VERSION is tracked by git, git does not ignore it,
+there is no VERSION line in .gitignore, and MANIFEST.in carries a comment saying that
+without VERSION in the sdist "the wheel builds as the 0.0.0 fallback". Every one of
+those facts is true, and the conclusion drawn from them -- that the zip tool had the
+exact class of leak its own docstring was written about -- was WRONG.
+The rule is in ALWAYS = [".git/", "repo.zip", "VERSION"], with the reason directly
+above it: VERSION is the single source of truth for build identification, CI owns it
+and auto-bumps the patch digit, so a copy inside an archive "can only be stale or
+contradictory, never authoritative" -- and the note says what to identify a snapshot
+BY instead (module count and capabilities.json's schema, both of which travel in the
+archive and both of which describe what is actually inside it).
+MANIFEST.in's comment is about the SDIST. ALWAYS is about the DELIVERY ZIP. Two
+different artifacts, two correct and opposite rules, and reading one as evidence
+about the other is the error.
+THE HABIT THAT CAUGHT IT: check where the rule comes from before calling it a bug.
+Three commands -- git check-ignore, a grep of .gitignore, and reading load_rules --
+turned a confident finding into a confirmation. A declared negative with its reason
+written next to it is exactly what stops this, and it worked.

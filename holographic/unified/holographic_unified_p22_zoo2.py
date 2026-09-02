@@ -162,7 +162,8 @@ class _UnifiedPart22:
                 if len(curve) > 1 else False}
 
     def agent_loop(self, objective, executors=None, rounds=3, budget_steps=3,
-                   idle_limit=2, checkpoint_root=None, plan=None, stateless=()):
+                   idle_limit=2, checkpoint_root=None, plan=None, stateless=(),
+                   contracts=None):
         """THE AGENT LOOP (cp28) -- the pattern everyone runs LLMs in, built on memory
         that is actually useful. Ported doctrine, credited: leOS substrate_gather (GATHER
         from the substrate BEFORE any model call), agent_session_tool_loop (a state-
@@ -177,7 +178,21 @@ class _UnifiedPart22:
         ingest; a round summary is taught) -> CHECKPOINT (learning_save when a root is
         given). Long-term memory is the loop's floor: reflexes serve, plans warm, tool
         results cache, archives answer -- across PROCESS RESTARTS, which is the test that
-        matters."""
+        matters.
+
+        `contracts` (default None) closes the EXIT gate (sweep 122, the NOOA property leCore
+        lacked): a dict of STEP NAME -> return contract, e.g.
+        `{"measure": {"expect": "nonempty", "require": ["evidence", "verify"], "retries": 2}}`,
+        with "*" as a default for every executor. A step whose return fails its contract is
+        retried a BOUNDED number of times with the typed violation handed back as `feedback=`,
+        and if it never satisfies the contract the step FAILS loudly instead of being scored
+        done. The audit record lands under result["validation"].
+
+        DEFAULT IS THE OLD BEHAVIOUR, byte for byte: with `contracts=None` no wrapper is
+        constructed, executors are passed through unchanged, and the returned dict has exactly
+        the keys it had before -- `validation` appears only when a contract was declared. The
+        postcondition is the CALLER's to declare and never this loop's to assume, because a
+        step that correctly returns nothing is leCore's abstention property, not a failure."""
         import hashlib
         gid = "loop-" + hashlib.sha1(str(objective).encode()).hexdigest()[:10]
         gather = {"reflex": None, "archive": [], "capabilities": []}
@@ -201,12 +216,20 @@ class _UnifiedPart22:
                 # says why, as the RuntimeError its callers already expect.
                 raise RuntimeError("agent_loop cannot start: %s" % (
                     (made or {}).get("error", "goal was not created")))
+        # WHY the wrapper is not even CONSTRUCTED when no contract is declared: the old path
+        # must stay the old path down to object identity, so an undeclared executor is the
+        # same callable goal_work would have received before this parameter existed.
+        ex_all = executors or {}
+        journal = None
+        if contracts:
+            from holographic.agents_and_reasoning.holographic_postcheck import wrap_executors
+            ex_all, journal = wrap_executors(ex_all, contracts)
         log = []
         idle = 0
         for r_ in range(int(rounds)):
             before = sum(1 for st in self.goal_book.goals[gid]["steps"]
                          if st["status"] == "done")
-            w = self.goal_work(gid, executors=executors or {},
+            w = self.goal_work(gid, executors=ex_all,
                                budget_steps=int(budget_steps), stateless=stateless)
             after = sum(1 for st in self.goal_book.goals[gid]["steps"]
                         if st["status"] == "done")
@@ -234,8 +257,41 @@ class _UnifiedPart22:
             if idle >= int(idle_limit):
                 entry["stopped"] = "idle limit (activity-monitor doctrine)"
                 break
-        return {"goal": gid, "gather": gather, "rounds": log,
-                "status": self.goal_book.goals[gid]["status"]}
+        res = {"goal": gid, "gather": gather, "rounds": log,
+               "status": self.goal_book.goals[gid]["status"]}
+        if journal is not None:
+            # a silent retry is a worse bug than a loud failure: every attempt, verdict and
+            # reason a contract issued travels back to the caller, including false_retries,
+            # which is 0 unless the exit gate has started firing on correct abstentions.
+            from holographic.agents_and_reasoning.holographic_postcheck import validation_report
+            res["validation"] = validation_report(journal)
+        return res
+
+    def result_contract(self, value, contract=None):
+        """Does a return satisfy a CALLER-DECLARED contract (holographic_postcheck.check_contract)?
+        The EXIT gate to pair with the entry gate: result_usable asks "is this usable at all",
+        this asks "is this the typed thing I said the step must return". `contract` is None, an
+        expect-string, or {"expect": "nonempty", "require": ["evidence", "verify"],
+        "types": {"evidence": "list"}, "retries": 2} -- JSON, so it crosses /invoke intact.
+        Returns {ok, reason, violations, empty, expect, contract}; EVERY violation is listed, not
+        just the first, so one round-trip buys the whole fix. `empty` is reported separately from
+        `ok` on purpose: a value can be accepted AND empty, which is a correct abstention and must
+        never read as a failure."""
+        from holographic.agents_and_reasoning.holographic_postcheck import check_contract
+        return check_contract(value, contract)
+
+    def validated_call(self, fn, contract=None, retries=None):
+        """Call `fn`, hold its RETURN to a contract, retry a BOUNDED number of times
+        (holographic_postcheck.validated_call). guarded_call answers "was that usable once";
+        this one hands the executor a typed violation as `feedback=` and asks again, up to
+        `retries` extra attempts (default 1 when a contract is declared, 0 when it is not,
+        hard cap 8 -- refused above it, never clamped). Attempt 1 is always a plain fn() call,
+        so the first attempt is byte-identical to calling it yourself. Returns
+        {ok, value, attempts, retries_used, informed_retries, abstained, reason, raised, trace}.
+        KEPT NEG: this cannot detect a WRONG answer, only an absent or malformed one -- the same
+        limit result_usable has, inherited, not fixed."""
+        from holographic.agents_and_reasoning.holographic_postcheck import validated_call
+        return validated_call(fn, contract=contract, retries=retries)
 
     def codebase_map(self, root, topic=None):
         """WORK WITH LARGE CODEBASES (cp28): walk a source tree, build the semantic layer

@@ -83,9 +83,8 @@ Run all three, in order. Static alone is not enough (it has repeatedly passed co
 
 ```bash
 # static: syntax / compile / broken-import across the whole tree
-python3 -c "from reorganize_repo import analyze_repo, verify, DEFAULT_IGNORE; from pathlib import Path; \
-f=analyze_repo(Path('src'), DEFAULT_IGNORE); r=verify(Path('src'), f); \
-print(len(f), len(r['syntax_errors']), len(r['compile_errors']), len(r['broken_local_imports']))"
+python3 -m compileall -q holographic lecore.py app.py holographic_service.py   # syntax + compile
+python3 tools/audit_imports.py                                                 # broken + flat local imports
 
 # module self-test
 python3 -m holographic.<family>.holographic_<name>      # runs _selftest()

@@ -192,6 +192,50 @@ _DOES_BUDGET = {
 }
 
 
+def audit_card_contract():
+    """Does every catalog card's `method=` name a door the card itself can reach? Returns
+    {"broken": [(method, entry, example)], "checked": n}.
+
+    THE HOLE THIS CLOSES, and it is why four bad cards survived every gate. This file validated the
+    `mind.X(` references INSIDE a card's example and never the card's own `method=` field, so a card
+    could name a door that had never existed and stay green -- `bios_boot`, `doctrine_seedpack`,
+    `panel_realm`, `phase_randomized_null` did exactly that until an audit outside skill_lint went
+    looking. Each was named after a CONCEPT, `method=` defaulted to that name, and the door its own
+    example called had a different one (`bios_boot` -> `boot`).
+
+    WHY THE TEST IS "CAN THE CARD REACH IT" AND NOT "IS IT A MIND VERB", which is the whole design.
+    `swarm_audit --gate` already owns reachability across the layers: it AST-walks the repo to split
+    an unresolved `method=` into an object method (fine -- mind.memory_curate() -> MemoryCurator.plan),
+    a module function (its `unreachable` class, floored at 18), or nothing at all. Repeating that here
+    would be a second gate saying the same thing in different words, which is how one of them gets
+    ignored -- and it would cost 10.5 s of repo walk on the critical path. So this asks the one
+    question that is genuinely a CARD's own business and needs no walk at all: a card that names a
+    door which resolves nowhere AND whose own example never so much as mentions it is promising
+    something it cannot show you how to reach. Measured at 0.07 s over 719 cards, and 0 today --
+    which is the goal state, not an absence of coverage. The synthetic-card test proves it fires.
+
+    KEPT NEG: it does NOT flag the 18 module-function cards. Their example is `from <mod> import
+    <name>`, which DOES show how to reach the thing -- by import, in-process, not over /invoke. That
+    is a real limitation of those cards and it is swarm_audit's `unreachable` floor, not this one's."""
+    import re
+    from holographic.caching_and_storage.holographic_catalog import default_catalog
+    import lecore
+
+    mind = lecore.UnifiedMind(dim=64, seed=0)
+    broken, checked = [], 0
+    for c in default_catalog().all():
+        meth = getattr(c, "method", None)
+        if not meth:
+            continue
+        checked += 1
+        if hasattr(mind, meth):
+            continue
+        ex = c.example or ""
+        if not re.search(r"\b%s\b" % re.escape(str(meth)), ex):
+            broken.append((str(meth), str(c.name), ex[:70]))
+    return {"broken": sorted(broken), "checked": checked}
+
+
 def audit_home_examples():
     """Audit the MODULE-LEVEL functions named in curated catalog homes' `example` strings -- the ones an agent calls
     directly by copying the example -- both "from holographic_X import Y" module refs AND "mind.method(" refs. Returns
@@ -303,6 +347,19 @@ def report(strict=False):
     else:
         print("REDUNDANT (note, --strict to list): %d" % len(al["redundant"]))
 
+    # -- the CARD CONTRACT: does a card's method= name a door the card itself can reach? ------------
+    #    This is the hole that let four cards promise doors that had never existed. It GATES, because
+    #    its goal state is 0 and it is 0 today -- and it deliberately does NOT re-report swarm_audit's
+    #    18 module-function cards, whose examples do show a way in (by import).
+    cc = audit_card_contract()
+    print("\n-- catalog card contract (method= vs the card's own example) --")
+    print("BROKEN -- method= resolves nowhere AND the example never mentions it: %d (of %d cards)"
+          % (len(cc["broken"]), cc["checked"]))
+    for meth, entry, ex in cc["broken"]:
+        print("   %-30s %-40s ex: %s" % (meth, entry[:40], ex))
+    print("   (reachability across layers is swarm_audit --gate's floor, not this one's -- two gates "
+          "saying the same thing in different words is how one gets ignored)")
+
     # -- T3: catalog `does` fields long enough to act as token sponges (a WARNING tier, not a hard gate) --
     dl = audit_does_length()
     print("\n-- catalog does-field length (T3) --")
@@ -323,10 +380,10 @@ def report(strict=False):
     # rewording a sentence to satisfy an arithmetic threshold), and the caught-defect count was zero.
     # The genuine gaps below stay gating, because each names something BROKEN: a method an agent cannot call
     # (no docstring), an example that does not resolve, an alias that reaches nothing.
-    total = gaps + example_gaps + len(al["inert"])
+    total = gaps + example_gaps + len(al["inert"]) + len(cc["broken"])
     print("\nTOTAL: %d invocation gap(s) -- %d method (CRITICAL+TERSE) + %d example (BROKEN+NODOC+TERSE) + "
-          "%d inert alias(es) + %d does-length regression(s).%s"
-          % (total, gaps, example_gaps, len(al["inert"]), len(dl["regressions"]),
+          "%d inert alias(es) + %d broken card contract(s) + %d does-length regression(s).%s"
+          % (total, gaps, example_gaps, len(al["inert"]), len(cc["broken"]), len(dl["regressions"]),
           "" if not strict else "  (%d redundant-alias notes)" % len(al["redundant"])))
     return total
 

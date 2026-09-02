@@ -434,13 +434,13 @@ class _UnifiedPart10:
                      width=width, seed=seed, length_jitter=length_jitter)
 
     def simulate_hair(self, strands, steps=60, dt=1.0 / 60.0, gravity=(0.0, -9.8, 0.0), wind=None,
-                      body_sdf=None, collide_radius=0.0, bend_compliance=1e-3):
+                      body_sdf=None, collide_radius=0.0, bend_compliance=1e-3, ftl=True, damping=0.02):
         """HAIR DYNAMICS (H2): simulate strands as PBD chains (root pinned, inextensible with Follow-The-Leader,
         bend springs for stiffness) under gravity, optional wind force, and body collision. Returns new strands.
         See holographic_groom.simulate_strands."""
         from holographic.mesh_and_geometry.holographic_groom import simulate_strands
         return simulate_strands(strands, steps=steps, dt=dt, gravity=gravity, wind=wind, body_sdf=body_sdf,
-                                collide_radius=collide_radius, bend_compliance=bend_compliance)
+                                collide_radius=collide_radius, bend_compliance=bend_compliance, ftl=ftl, damping=damping)
 
     def interpolate_hair(self, guides, render_roots, k=3, clump=0.4):
         """GUIDE INTERPOLATION (H3): make many render strands from a few simulated guide strands by blending the
@@ -474,13 +474,13 @@ class _UnifiedPart10:
                            hair_color=hair_color, smooth_levels=smooth_levels, lod_stride=lod_stride,
                            specular_tint=specular_tint, specular_strength=specular_strength)
 
-    def solve_pde(self, sdf, boundary_value, points, source=None, n_walks=256, eps=1e-3, seed=0):
+    def solve_pde(self, sdf, boundary_value, points, source=None, n_walks=256, eps=1e-3, seed=0, max_steps=256):
         """WALK ON SPHERES: solve Laplace (Delta u = 0) or Poisson (-Delta u = source) on the interior of an SDF,
         with NO meshing, by random walks that step by the distance-to-boundary (one SDF eval) until they hit the
         boundary and read `boundary_value` there. Returns (solution, standard_error) at each query point. Works on
         any shape you can write an SDF for. SIGGRAPH list #7. See holographic_wos.solve_on_sdf."""
         from holographic.misc.holographic_wos import solve_on_sdf
-        return solve_on_sdf(sdf, boundary_value, points, source=source, n_walks=n_walks, eps=eps, seed=seed)
+        return solve_on_sdf(sdf, boundary_value, points, source=source, n_walks=n_walks, eps=eps, seed=seed, max_steps=max_steps)
 
     def steady_heat(self, sdf, boundary_temperature, points, n_walks=256, eps=1e-3, seed=0):
         """STEADY-STATE heat on any SDF shape: hold the boundary at `boundary_temperature(point)` and find the
@@ -490,12 +490,12 @@ class _UnifiedPart10:
         from holographic.misc.holographic_wos import solve_on_sdf
         return solve_on_sdf(sdf, boundary_temperature, points, n_walks=n_walks, eps=eps, seed=seed)
 
-    def curl_noise(self, res=64, bounds=((0.0, 8.0), (0.0, 8.0)), octaves=4, seed=0, obstacle_sdf=None, ramp=1.0):
+    def curl_noise(self, res=64, bounds=((0.0, 8.0), (0.0, 8.0)), octaves=4, seed=0, obstacle_sdf=None, ramp=1.0, dx=1.0):
         """CURL NOISE: divergence-free procedural turbulence (u, v) on a grid -- the curl of an fBm streamfunction,
         so it never compresses (no sources/sinks). Optional `obstacle_sdf` makes the flow go AROUND a shape. Cheap
         wind/smoke detail with no fluid solve. SIGGRAPH list #1. See holographic_curlnoise.curl_noise."""
         from holographic.mesh_and_geometry.holographic_curlnoise import curl_noise
-        return curl_noise(res, bounds=bounds, octaves=octaves, seed=seed, obstacle_sdf=obstacle_sdf, ramp=ramp)
+        return curl_noise(res, bounds=bounds, octaves=octaves, seed=seed, obstacle_sdf=obstacle_sdf, ramp=ramp, dx=dx)
 
     def tearable_cloth(self, rows=12, cols=12, spacing=1.0, compliance=2e-3, material="paper",
                        tear_strain=None, pin="top"):
@@ -508,14 +508,14 @@ class _UnifiedPart10:
                              tear_strain=tear_strain, pin=pin)
 
     def levitation_chamber(self, height=0.10, wavelength=0.0086, amplitude=4000.0, n_beads=40,
-                           gravity=9.81, bead_radius=1e-3, bead_density=25.0, seed=0):
+                           gravity=9.81, bead_radius=1e-3, bead_density=25.0, seed=0, mass_scale=3e-07):
         """ACOUSTIC LEVITATION: beads in a vertical standing wave feel the Gor'kov radiation force and are trapped
         at the pressure NODES (spaced lambda/2) against gravity. `.settle(field_on=True)` holds them aloft;
         `field_on=False` lets them fall. The 'sound moves objects' showpiece. Acoustics A7 -- reuses the standing
         field idea (A3), the particle system, and gravity. See holographic_levitate.LevitationChamber."""
         from holographic.simulation_and_physics.holographic_levitate import LevitationChamber
         return LevitationChamber(height=height, wavelength=wavelength, amplitude=amplitude, n_beads=n_beads,
-                                 gravity=gravity, bead_radius=bead_radius, bead_density=bead_density, seed=seed)
+                                 gravity=gravity, bead_radius=bead_radius, bead_density=bead_density, seed=seed, mass_scale=mass_scale)
 
     def room_acoustics(self, size=(5.0, 4.0, 3.0), material="plaster", absorption=None, c=343.0):
         """GEOMETRIC ROOM ACOUSTICS: how a room echoes. `.rt60()` is the reverberation time (Sabine), `.reflections
@@ -576,12 +576,43 @@ class _UnifiedPart10:
         from holographic.simulation_and_physics.holographic_probability_current import probability_current
         return probability_current(psi, A=A, mass=mass, hbar=hbar, q=q, dx=dx, bc=bc)
 
-    def quantum_velocity(self, psi, A=None, mass=1.0, hbar=1.0, q=1.0, dx=1.0, bc="periodic"):
+    def quantum_velocity(self, psi, A=None, mass=1.0, hbar=1.0, q=1.0, dx=1.0, bc="periodic", eps=1e-12):
         """The probability VELOCITY field v = j/|psi|^2 -- hand it straight to advect_field to carry glowing tracers
         along the quantum flow (the SIDEWAYS reuse: the quantum current drives the existing advection). Returns
         [vx, vy]. See holographic_probability_current.velocity_field."""
         from holographic.simulation_and_physics.holographic_probability_current import velocity_field
-        return velocity_field(psi, A=A, mass=mass, hbar=hbar, q=q, dx=dx, bc=bc)
+        return velocity_field(psi, A=A, mass=mass, hbar=hbar, q=q, dx=dx, bc=bc, eps=eps)
+
+    def barrier_wall(self, shape, axis, position, thickness, height, gap=None):
+        """A high-V WALL across the grid, perpendicular to `axis` -- the other potential builder for a
+        quantum simulation, and the sibling of the already-wired quantum_dot_well.
+        WHY IT IS HERE AT ALL (sweep 134): the catalog has carried a `barrier_wall` card since it was
+        written, naming a module function no agent could /invoke -- the "present below, unreachable
+        above" class the derived above/below matrix found 18 of. Its sibling well was wired and it was
+        not, so an agent could build the dot and not the barrier it tunnels through.
+        `gap` (the delegate's own default: None) opens a slit in the wall -- a barrier with a hole in
+        it is the double slit, and leaving it unreachable would have shipped the wall without the
+        experiment. delegation_drift --gate caught that omission on the very sweep that wired this
+        verb, which is the audit set doing its job on its own author.
+        See holographic_quantum_dot.barrier_wall."""
+        from holographic.simulation_and_physics.holographic_quantum_dot import barrier_wall
+        return barrier_wall(shape, axis, position, thickness, height, gap=gap)
+
+    def gas_pressure(self, density, temp_K, name="air"):
+        """P = rho R_specific T -- the pressure (Pa) of a gas at a given density and temperature.
+        THE INVERSE DIRECTION, which is why this is not redundant with ideal_gas. A parcel from
+        mind.ideal_gas() is CONSTRUCTED from a pressure and exposes .P and .density(); nothing went
+        the other way, so "what pressure does this density imply" had no door on the mind at all.
+        See holographic_gas.gas_pressure."""
+        from holographic.simulation_and_physics.holographic_gas import gas_pressure
+        return gas_pressure(density, temp_K, name=name)
+
+    def is_flammable(self, material):
+        """Does this material have combustion data -- CAN it burn? A predicate, and deliberately not
+        an action: mind.burn_object() commits you to an ignition, and asking first is the cheap half.
+        See holographic_combustion.is_flammable."""
+        from holographic.simulation_and_physics.holographic_combustion import is_flammable
+        return is_flammable(material)
 
     def quantum_dot_well(self, shape, center, depth, width):
         """A narrow Gaussian potential well (the quantum dot) -- hand it to a QuantumField.set_potential. A negative
@@ -604,12 +635,12 @@ class _UnifiedPart10:
         from holographic.simulation_and_physics.holographic_quantum_scene import solenoid_vector_potential
         return solenoid_vector_potential(shape, center, flux, core=core)
 
-    def aharonov_bohm_phase(self, flux, shape=(128, 128), dx=0.2, q=1.0, ring_radius=24):
+    def aharonov_bohm_phase(self, flux, shape=(128, 128), dx=0.2, q=1.0, ring_radius=24, steps=1):
         """MEASURE the relative phase the two arms of a ring accumulate from enclosed magnetic `flux` -- the
         Aharonov-Bohm interference shift, which equals q*Phi/hbar even though the field is zero on the arms. See
         holographic_quantum_scene.measure_two_arm_phase."""
         from holographic.simulation_and_physics.holographic_quantum_scene import measure_two_arm_phase
-        return measure_two_arm_phase(flux, shape=shape, dx=dx, q=q, ring_radius=ring_radius)
+        return measure_two_arm_phase(flux, shape=shape, dx=dx, q=q, ring_radius=ring_radius, steps=steps)
 
     def quantum_two_slit(self, shape=(256, 256), dx=0.2, slit_axis=0, slit_pos=None, slit_gap=6, slit_sep=40,
                          wall_height=400.0):

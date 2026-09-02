@@ -68,16 +68,16 @@ class _UnifiedPart05:
         from holographic.io_and_interop.holographic_codeverbal import register_composition_form
         return register_composition_form(str(name), str(distance_expr_src))
 
-    def zig_dispatch_policy(self, n, calls_expected, min_calls_to_compile=3, min_n=4096):
+    def zig_dispatch_policy(self, n, calls_expected, min_calls_to_compile=3, min_n=4096, toolchain=None):
         """Z5: which backend (numpy | zig) the native-kernel dispatcher would choose for arrays of length `n`
         called `calls_expected` times, WITH the reason -- the policy is data, sized to the measured 2-5x regime
         and the ~1-2 s first-call compile. Compose with mind.zig_batch_eval to act on the answer.
         See holographic_zigrun.dispatch_policy (AutoKernel enforces the same policy in-process, identity-gated:
         a native result that is not bit-identical to numpy in safe mode refuses the substitution permanently)."""
         from holographic.io_and_interop.holographic_zigrun import dispatch_policy
-        return dispatch_policy(int(n), int(calls_expected), int(min_calls_to_compile), int(min_n))
+        return dispatch_policy(int(n), int(calls_expected), int(min_calls_to_compile), int(min_n), toolchain=toolchain)
 
-    def zig_march_compare(self, kernel=None, width=96, height=72, max_steps=96, out_dir=None):
+    def zig_march_compare(self, kernel=None, width=96, height=72, max_steps=96, out_dir=None, opt='safe'):
         """Z4's executed bar: sphere-trace the SAME rays through the engine's Python marcher and a natively
         compiled Zig loop (same scene SDF text, shared dialect table), shade both with the SAME code, and return
         {t_max_abs_diff, hit_flips, bit_identical, frames_byte_identical}. MEASURED verdict on the demo scene:
@@ -86,7 +86,7 @@ class _UnifiedPart05:
         See holographic_zigmarch.render_compare."""
         from holographic.io_and_interop.holographic_zigmarch import DEMO_SCENE, render_compare
         return render_compare(kernel if kernel is not None else DEMO_SCENE, width=int(width),
-                              height=int(height), max_steps=int(max_steps), out_dir=out_dir)
+                              height=int(height), max_steps=int(max_steps), out_dir=out_dir, opt=opt)
 
     # -- C3: canonical element + delta chain (instancing, generalised) --------------------------------------
     def canonical_form(self, V, family="similarity"):
@@ -1015,21 +1015,21 @@ class _UnifiedPart05:
         As, bs, h = _scb(n_bodies, hertz, zeta, mass=mass, gravity=gravity, dt=dt, substeps=substeps)
         return As, bs, h
 
-    def advance_bank(self, S0, As, bs, k):
+    def advance_bank(self, S0, As, bs, k, transfer=None):
         """Advance M island variants k substeps in ONE batched closed form: (M,2n) -> (M,2n). Measured, M=32 x 1,920
         substeps: 13.20 ms substepped vs 3.10 ms here (4.3x), max|diff| 1.86e-12, horizon free. Raises naming the
         variant if any member is defective. See holographic_modal.advance_bank."""
         from holographic.simulation_and_physics.holographic_modal import advance_bank as _ab
-        return _ab(np.asarray(S0, float), np.asarray(As, float), np.asarray(bs, float), int(k))
+        return _ab(np.asarray(S0, float), np.asarray(As, float), np.asarray(bs, float), int(k), transfer=transfer)
 
-    def blend_forcings(self, s0, A, forcings, weights, k):
+    def blend_forcings(self, s0, A, forcings, weights, k, transfer=None):
         """The one thing that DOES superpose exactly: variants differing only in their FORCING. `s_k = A^k s0 +
         G(A,k) b` is linear in b, so a weighted blend of forcings is the blend of trajectories (measured 1.11e-16).
         One eigendecomposition serves every forcing variant and every blend -- gravity, wind, a load dial. Blending
         OPERATORS instead is nonsense (measured 2.94e-01). See holographic_modal.blend_forcings."""
         from holographic.simulation_and_physics.holographic_modal import blend_forcings as _bf
         return _bf(np.asarray(s0, float), np.asarray(A, float), np.asarray(forcings, float),
-                   np.asarray(weights, float), int(k))
+                   np.asarray(weights, float), int(k), transfer=transfer)
 
     def escalation_plan(self, dim, k, energy=None, sleep_energy=0.0, diagonalizable=True, breakeven=20.0):
         """THE ESCALATION LADDER (X11): pick {sleep | jump | substep} for one island, per frame. Catto's "4
@@ -1079,13 +1079,13 @@ class _UnifiedPart05:
         from holographic.caching_and_storage.holographic_cachehome import replay_margin as _rm
         return _rm(queries, margin, metric=metric)
 
-    def replay_margin_error(self, queries, values, margin, metric=None):
+    def replay_margin_error(self, queries, values, margin, metric=None, error=None):
         """Replay a query stream against a margin and measure what the cache would have SERVED against what was TRUE:
         {hits, rebuilds, hit_rate, margin, max_error, mean_error}. `replay_margin` counts hits; a hit serves a STALE
         value, and hit rate says nothing about how stale. On a rendered frame the max error saturates at the FIRST
         reuse (0.5864) while the mean creeps 0.0001 -> 0.0051. See holographic_cachehome.replay_margin_error."""
         from holographic.caching_and_storage.holographic_cachehome import replay_margin_error as _rme
-        return _rme(queries, values, float(margin), metric=metric)
+        return _rme(queries, values, float(margin), metric=metric, error=error)
 
     def suggest_margin_for_error(self, queries, values, max_mean_error, max_abs_error=None, metric=None):
         """THE GATE for any fat-margin cache: the LARGEST margin whose replayed error stays inside the budget.

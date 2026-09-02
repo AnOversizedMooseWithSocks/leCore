@@ -263,14 +263,14 @@ class _UnifiedPart14:
         import holographic.mesh_and_geometry.holographic_creatureskin as _cs
         return _cs.creature_metaballs(creature, spec, spacing=spacing, limb_taper=limb_taper, head=head)
 
-    def creature_skin_mesh(self, creature, spec=None, spacing=1.0, resolution=40, pad=0.35, blend=1.0):
+    def creature_skin_mesh(self, creature, spec=None, spacing=1.0, resolution=40, pad=0.35, blend=1.0, warn=True):
         """A creature -> a smooth BLENDED metaball skin mesh: limbs FLOW into the torso instead of
         intersecting it, the visual difference between a capsule union and the Spore-style skin.
         Handles per-ball radii, which the shipped metaball_mesh (one radius for all) cannot. See
         holographic_creatureskin.creature_metaball_mesh."""
         import holographic.mesh_and_geometry.holographic_creatureskin as _cs
         return _cs.creature_metaball_mesh(creature, spec, spacing=spacing, resolution=resolution,
-                                          pad=pad, blend=blend)
+                                          pad=pad, blend=blend, warn=warn)
 
     def spine_profile(self, spec, radii):
         """ADJUST THICKNESS ALONG THE SPINE: replace a spec's scalar spine radius with a per-node
@@ -455,7 +455,7 @@ class _UnifiedPart14:
     # ------------------------------------------- organic creature MATERIALS (layered anatomy) --
     def creature_material(self, taxon, axis=(0.0, 0.0, 1.0), origin=(0.0, 0.0, 0.0), seed=0,
                           tint=None, structure_strength=1.0, wetness=1.0, iridescence=1.0,
-                          film_nm=340.0, n_film=1.56):
+                          film_nm=340.0, n_film=1.56, body_length=None, cells_across=None):
         """SKIN for a creature by taxon -- 'reptile'/'fish' (scales), 'amphibian' (glands, wet),
         'insect' (chitin plates), 'worm' (annuli), 'mammal' (pores). Returns channel FIELDS
         (colour/roughness/reflect/structure) evaluated in the creature's own BODY frame, so scale rows
@@ -465,7 +465,7 @@ class _UnifiedPart14:
         import holographic.materials_and_texture.holographic_creaturematerial as _cm
         return _cm.creature_material(taxon, axis=axis, origin=origin, seed=seed, tint=tint,
                                      structure_strength=structure_strength, wetness=wetness,
-                                     iridescence=iridescence, film_nm=film_nm, n_film=n_film)
+                                     iridescence=iridescence, film_nm=film_nm, n_film=n_film, body_length=body_length, cells_across=cells_across)
 
     def anatomy_stack(self, taxon, with_bone=None, with_organ=True, seed=0, **kw):
         """The LAYERED anatomy of an integument, bottom to top: [bone] -> [organ] -> dermis ->
@@ -1201,7 +1201,7 @@ class _UnifiedPart14:
 
     def run_until_settled(self, step, state, steps, residual=None, window=96,
                           check_every=16, cycle_handoff=False, cycle_tol=1e-6,
-                          settle_tol=1e-2):
+                          settle_tol=1e-2, max_lag=48):
         """Settle-gated simulation runner: pay for dynamics, not equilibrium. Runs
         step(state)->state until the residual stream passes convergence_guard
         (i.i.d.), then serves remaining frames from the settled state. Measured on
@@ -1213,7 +1213,7 @@ class _UnifiedPart14:
         return run_until_settled(step, state, steps, residual=residual,
                                  window=window, check_every=check_every,
                                  cycle_handoff=cycle_handoff, cycle_tol=cycle_tol,
-                                 settle_tol=settle_tol)
+                                 settle_tol=settle_tol, max_lag=max_lag)
 
     def behavior_pool(self, window=64, alpha=0.98):
         """Behavior LOD for agent populations: agents whose output stream certifies
@@ -1330,7 +1330,7 @@ class _UnifiedPart14:
 
     def creature_tree(self, source, blend=None, groups=True, group_blend=0.0, taper=0.6,
                       spine_radius=None, limb_radius=None, head=True, radii=None,
-                      op="smooth", blend_rel=0.5):
+                      op="smooth", blend_rel=0.5, tip_inset=0.0, mount_flare=0.0):
         """THE SKIN AS A COMPOSITION TREE, not one global summed field (backlog F-1/F-2/F-4) -- the
         fix for limbs melting into the torso. Parent-child segments blend at their shared joint;
         everything else HARD-unions, so webbing between unrelated limbs is not reduced but made
@@ -1343,8 +1343,12 @@ class _UnifiedPart14:
         `groups=False` gives the softer variant that mounts limbs with a blend instead of a union.
         See holographic_creaturetree.creature_tree / creature_tree_grouped."""
         import holographic.mesh_and_geometry.holographic_creaturetree as _ct
+        # tip_inset / mount_flare go in the kw DICT, not on one call: the grouped branch is the
+        # DEFAULT (groups=True) and forwards **kw, so adding them to the ungrouped call alone would
+        # have made them a silent no-op for most callers -- a worse bug than the drift being fixed.
         kw = dict(taper=taper, spine_radius=spine_radius, limb_radius=limb_radius,
-                  head=head, radii=radii, op=op, blend_rel=blend_rel)
+                  head=head, radii=radii, op=op, blend_rel=blend_rel,
+                  tip_inset=tip_inset, mount_flare=mount_flare)
         if groups:
             return _ct.creature_tree_grouped(source, group_blend=group_blend, blend=blend, **kw)
         return _ct.creature_tree(source, blend=blend, **kw)

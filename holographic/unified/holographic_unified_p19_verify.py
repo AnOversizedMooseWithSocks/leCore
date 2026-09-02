@@ -124,6 +124,35 @@ class _UnifiedPart19:
         from holographic.agents_and_reasoning.holographic_postcheck import guarded_call
         return guarded_call(fn, *args, expect=expect, **kw)
 
+    def external_abstention(self, records, dim=512, seed=0, limit=None, teach_cap=400,
+                            retrieve=None, floor=0.5):
+        """Score the MEMORY abstention gate on SOMEBODY ELSE'S task file -- the first leCore
+        benchmark whose questions leCore did not write.
+
+        `records` is LongMemEval-shaped JSON (a list of instances with `question_id`, `question`,
+        `haystack_sessions`), and their `_abs` question-id suffix marks an abstention question --
+        an event that never happened. Each record gets a FRESH mind taught with its own haystack,
+        so no fact leaks between questions; then `serve` either answers or declines. The primary
+        metric is `false_answer_rate`: abstention questions answered anyway.
+
+        `retrieve=` adds a RETRIEVAL rung after `serve` declines -- 'semantic' (cosine floor) or
+        'bm25' (raw Okapi floor, a DIFFERENT scale that does not transfer between corpora).
+        DEFAULT None reproduces the no-rung numbers exactly. MEASURED on a 4-answerable/
+        4-abstention fixture: no rung gives recall 0.25 / abstention 1.00 / false-answer 0.00 /
+        PAIRED 0.25; semantic at floor 0.50 gives 0.50 / 0.75 / 0.25 / PAIRED 0.50. The rung
+        DOUBLES the paired rate and it BUYS that with abstention -- the 0.00 false-answer rate
+        was purchased at recall 0.25, and this is the exchange rate.
+
+        NOT `route_or_abstain`. leCore has two abstentions and this benchmark measures the other
+        one -- see holographic_extbench's module docstring for the measurement that settled it.
+        See holographic_extbench.run."""
+        import lecore
+        from holographic.agents_and_reasoning.holographic_extbench import (
+            longmemeval_records, run)
+        recs = longmemeval_records(records)
+        return run(recs, lambda: lecore.UnifiedMind(dim=dim, seed=seed),
+                   limit=limit, teach_cap=teach_cap, retrieve=retrieve, floor=floor)
+
     def paired_benchmark(self, n=25, seed=0, z_min=0.8, k=3, stranger=False, closest=False):
         """PAIRED ACCURACY + AbsRec@1 in the FIELD'S metrics, so leCore's numbers are directly citable
         (holographic_agentbench.paired_benchmark). AgentAbstain (arXiv 2607.10059) scores agentic
@@ -168,6 +197,100 @@ class _UnifiedPart19:
         still finds a tool that is still there. REBUILT, never mutated."""
         from holographic.agents_and_reasoning.holographic_agentbench import catalog_without_alias
         return catalog_without_alias(name, alias)
+
+    def above_below(self, root="."):
+        """IS EVERY DECLARED CAPABILITY REACHABLE AT EVERY LAYER (tools/swarm_audit.derived_matrix)?
+        The above/below sweep, with its population DERIVED from the catalog instead of a literal.
+        L0 engine floor / L1 facade class / L2 the /tools manifest / L2d a dedicated MCP tool /
+        L3 a chat verb / L4 named under tests. Returns {rows, genuine, not_meaningful, counts,
+        by_kind}.
+
+        WHAT IT GATES ON, and the judgement is the whole design. REACHABILITY is asked of
+        everything, because it is always meaningful and always checkable: a card whose method is
+        defined nowhere, or exists only as a module function an agent cannot /invoke, is a
+        capability the discovery layer PROMISES AND CANNOT DELIVER. PROMOTION -- having a dedicated
+        MCP tool or chat verb -- is asked of nothing: holographic_mcp hosts lecore_invoke(name,
+        args), which runs any public faculty, so L2 reachability is universal by construction and a
+        dedicated tool is a curation decision. Scoring 636 unpromoted doors as defects would be
+        sweep 123's bar that nobody clears and therefore nobody runs.
+
+        MEASURED, sweep 133: the hand-written matrix had covered 21 capabilities since cp67 and
+        reported 0 gaps, while 718 cards behind 651 doors had never been asked. The derived sweep
+        found 22 GENUINE gaps it was green on -- 4 cards naming a door defined NOWHERE in the repo
+        and 18 naming a module-level function that is importable but not callable over /invoke --
+        plus 13 object methods that are reachable by design and must NOT be flagged.
+        KEPT NEG: it checks that a door EXISTS and dispatches, never that it works. That is the
+        selftest walker's job, and this instrument would be lying if it implied otherwise."""
+        import sys as _sys
+        _sys.path.insert(0, "tools")
+        from swarm_audit import derived_matrix
+        return derived_matrix(self, root=root)
+
+    def delegation_drift(self, min_overlap=0.8):
+        """WHICH FACULTIES HAVE LOST A PARAMETER their module function still accepts (tools/delegation_drift)?
+        The seam audit: a faculty is meant to DELEGATE, and when a parameter is added to the module and not
+        plumbed through the wrapper, the capability becomes REACHABLE BUT CRIPPLED -- /tools lists it,
+        /invoke calls it, and part of it cannot be reached from outside. Every other audit passes: the
+        module has a docstring, the catalog example still runs, nothing is unwired. The failure is in the
+        SEAM, and this is the only instrument that looks at seams.
+        Returns NAMED records, not tuples: {checked, total_missing, missing[{faculty, delegate, missing,
+        overlap}], supplied[{faculty, parameter, bound_to}], extra, unresolved, budgeted}.
+        `supplied` is the half that makes the number honest -- a parameter the wrapper BINDS itself
+        (`mind=self`, `seed=self.seed`, `aspect=width/height`) is not unreachable, it is DECIDED, and it is
+        listed with its binding so a reader can judge rather than take the tool's word.
+        MEASURED, sweep 131: 99 -> 7. Of the original 99, forty-five were never drift (34 bound at the call
+        site, 6 computed, 3 renamed, 2 private) and 47 were real losses now restored; the 7 that remain are
+        named in the report.
+        KEPT NEG, inherited and NOT fixed: this checks NAMES, not semantics -- a faculty forwarding `seed`
+        to a delegate's `rng_seed` still reads as drift, and one forwarding a value to the WRONG delegate
+        parameter still reads as clean. It is a seam-shaped net, not a proof of correctness.
+        SOURCE CHECKOUT ONLY: the logic lives in tools/, which a wheel does not ship; the faculty raises a
+        legible ImportError rather than pretending the audit ran. See tools/delegation_drift.audit_quiet."""
+        try:
+            from tools.delegation_drift import audit_quiet
+        except ImportError as e:      # a missing audit must SAY so; a zero it never computed reads as a pass
+            raise ImportError("delegation_drift needs the tools/ directory of a source checkout "
+                              "(not shipped in the wheel): %s" % e)
+        return audit_quiet(min_overlap=min_overlap)
+
+    def bounded_preview(self, value, head=3, tail=3, max_chars=200, max_bytes=None, depth=2, cost=True):
+        """A BOUNDED, JSON-safe view of a large value -- true size + head/tail sample + what BOTH renderings
+        cost in bytes (holographic_boundedpreview.bounded_preview). The value-shape family's third question,
+        beside shape_of ('what is the contract') and result_usable ('did it produce anything'): 'what is
+        actually IN it, without paying for all of it'.
+        USE IT BEFORE RETURNING A BIG RESULT INTO A PROMPT. MEASURED against today's _jsonable on the same
+        object: a 1e6-float ndarray is 20,269,744 B whole and 340 B bounded (59,617x) while still reporting
+        shape [1000000] and dtype float64 -- the TRUE length, never the truncated one, because an agent that
+        reads an invented length sizes its next call to a number the tool made up.
+        Nested containers bound RECURSIVELY: a list of 1000 lists of 1000 is 20.27 MB whole, 1,432 B bounded,
+        and 41 kB if only the outer level is bounded. An ndarray keeps its nesting -- a (1000,3) array of
+        points previews as rows of 3, never as 3000 flattened numbers.
+        `max_bytes` walks a deterministic ladder of tighter settings until the WHOLE dict fits, and sets
+        `budget_exceeded` when even the tightest one cannot: it will not overrun silently and it will not
+        claim to have fitted. Over HTTP, pass a `ref:` handle as `value` to preview an object the service is
+        already holding.
+        KEPT NEG (both pinned by the module selftest): a preview is LOSSY and the omitted middle is reachable
+        ONLY through the ObjectRefs handle /invoke mints beside it -- without the handle it is a dead end; and
+        bounding a SMALL value costs MORE than sending it whole (measured crossover ~16 floats, ~10 dict keys,
+        ~200 characters), which is why the /invoke seam bounds only what is already over budget instead of
+        bounding by reflex. mind.value_cost(v) gives the byte cost alone."""
+        from holographic.io_and_interop.holographic_boundedpreview import bounded_preview
+        return bounded_preview(value, head=head, tail=tail, max_chars=max_chars,
+                               max_bytes=max_bytes, depth=depth, cost=cost)
+
+    def value_cost(self, value, exact_below=2048):
+        """How many response bytes would this value REALLY cost a context window
+        (holographic_boundedpreview.json_bytes)? Returns {bytes, exact, leaves}.
+        THE BASELINE HALF of every preview claim, and the reason those claims are checkable: `bytes` is the
+        length of the JSON the service would actually send for this value -- the same coercion _jsonable
+        performs -- measured EXACTLY when the value has at most `exact_below` leaves and estimated from a
+        deterministic sample above that, with `exact` saying which happened so nobody has to guess whether a
+        number was measured or modelled. `leaves` is exact when `exact` is true and a lower bound otherwise.
+        WHY IT ESTIMATES AT ALL: rendering a 1e6-element value merely to report its size would pay exactly
+        the cost the bound exists to avoid. Estimator accuracy is pinned within 8% of exact by the selftest.
+        Use it to check mind.bounded_preview's saving yourself rather than believing the field."""
+        from holographic.io_and_interop.holographic_boundedpreview import json_bytes
+        return json_bytes(value, exact_below=exact_below)
 
 
 

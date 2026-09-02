@@ -197,10 +197,15 @@ class Service:
     def _invoke(self, payload):
         """Run ONE faculty on this node's mind. Body: {name, args:{...}}. Returns: {ok, name, result}. Only PUBLIC
         faculties are callable (no leading underscore); the result is coerced to a JSON-safe form. This is the single
-        call a tool client (remote_tools) or a harness makes to use us."""
+        call a tool client (remote_tools) or a harness makes to use us.
+
+        OPTIONAL `budget` (an int of max response bytes, or a dict of bounded_preview options) bounds what comes
+        back: a result too big for it returns as a preview carrying its TRUE size, a head/tail sample and a `ref`
+        handle to the live value, instead of a million JSON numbers. ABSENT = today's response, byte for byte."""
         payload = payload or {}
         name = payload.get("name", "")
         args = payload.get("args", {}) or {}
+        budget = payload.get("budget")            # OPT-IN: absent means the unbounded response, unchanged
         if not name or name.startswith("_"):
             return {"ok": False, "error": "invalid or private tool name: %r" % name}
         # DELEGATE to mind.invoke (C3): the dispatch rules live in ONE place now, so this endpoint and every
@@ -249,12 +254,12 @@ class Service:
             except Exception as e:
                 return {"ok": False, "error": "%s: %s" % (type(e).__name__, str(e)[:200])}
             return {"ok": True, "name": "call:%s" % meth,
-                    "result": _jsonable(result, self.refs)}
+                    "result": _jsonable(result, self.refs, budget)}
         try:
             result = self.mind.invoke(name, args)
-        except ValueError as e:
+        except _caller_error_types() as e:
             return {"ok": False, "error": str(e)}
-        return {"ok": True, "name": name, "result": _jsonable(result, self.refs)}
+        return {"ok": True, "name": name, "result": _jsonable(result, self.refs, budget)}
 
     def _frame_stream_doc(self, _payload):
         """SSE PUSH channel (Server-Sent Events): GET /frame/stream?session=&target_fps=&frames= keeps the
@@ -775,17 +780,91 @@ def _json_default(o):
     raise TypeError("not JSON serializable: %r" % type(o))
 
 
-def _jsonable(o, refs=None):
+_BUDGET_KEYS = ("head", "tail", "max_chars", "max_bytes", "depth")   # what a CALLER may set on a preview
+
+
+def _budgeted(o, refs, budget):
+    """A bounded preview of `o` when its full rendering would blow `budget` bytes -- otherwise None, meaning
+    send it whole (holographic_boundedpreview). This is the other half of pass-by-reference: the handle made
+    an unserialisable object addressable, and this bounds a serialisable one that is simply too big.
+
+    WHY "otherwise None" AND NOT AN UNCONDITIONAL BOUND: bounding by reflex LOSES. The preview envelope costs
+    200-1400 bytes and the measured crossover is ~16 floats / ~10 dict keys / ~200 characters, so a small
+    result is cheaper sent whole and an always-on bound would inflate the common case while claiming to
+    shrink it. Kept negative, pinned in the preview module's selftest.
+
+    WHY exact_below=max_bytes: every JSON leaf costs at least one byte, so a value with MORE leaves than the
+    budget has bytes cannot fit it. The EXACT measurement therefore runs on precisely the values that might
+    fit, and anything routed to the sampled estimator is over budget by construction -- no estimate ever gets
+    to decide "it fits", which is the one way an inexact instrument could let the bound leak.
+
+    Unknown keys in a caller-supplied budget dict are DROPPED rather than raised: this runs on an HTTP
+    boundary, and a typo in a request must not turn a working faculty call into a 500.
+
+    KEPT NEGATIVE -- THE COST THIS SEAM ADDS, measured. Every BOUNDED result mints an ObjectRefs handle, and
+    that registry holds 512 objects with oldest-first eviction: 512 budgeted big results in a session evict
+    the handle a Scene or PostChain was still living behind. (A result that FITS mints nothing, so a client
+    that never overruns its budget adds no churn at all -- verified at 0 handles for 50 small results.) The
+    registry capacity is not configurable from here today; a session that leans on both budgets and 3-D
+    handles is the case to watch."""
+    from holographic.io_and_interop.holographic_boundedpreview import bounded_preview, json_bytes
+    if isinstance(budget, bool):
+        return None
+    if isinstance(budget, (int, float)):
+        opts = {"max_bytes": int(budget)}
+    else:
+        opts = {k: v for k, v in dict(budget or {}).items() if k in _BUDGET_KEYS}
+    max_bytes = int(opts.get("max_bytes") or 4096)
+    opts["max_bytes"] = max_bytes
+    cost = json_bytes(o, exact_below=max_bytes)
+    if cost["exact"] and cost["bytes"] <= max_bytes:
+        return None
+    return bounded_preview(o, refs=refs, **opts)
+
+
+def _caller_error_types():
+    """Exception classes that mean THE CALLER got it wrong, not that this node broke.
+
+    SERVICE.md's own contract says "a bad request returns HTTP 400 ... an unexpected error 500",
+    and only ValueError was honouring it. So `POST /invoke file_read` on the 6.1 MB lab notebook
+    answered HTTP 500 -- EditError's message names the file, the size and the remedy, and the
+    agent that most needs to read it saw a SERVER FAULT instead of its own mistake. An over-cap
+    read, a path outside the file root and a non-unique `old` are all the same class as a
+    mistyped app name or a stale object handle, and those already come back as {ok:false,error}.
+    Resolved LAZILY so a service that only serves SQL never imports the file faculties.
+    KEPT NEGATIVE: this widens by TYPE, deliberately, and not by catching Exception -- a genuine
+    bug inside a faculty must stay a 500, because turning every crash into a tidy 400 is how a
+    broken node starts looking healthy."""
+    try:
+        from holographic.io_and_interop.holographic_codeedit import EditError
+        return (ValueError, EditError)
+    except Exception:
+        return (ValueError,)
+
+
+def _jsonable(o, refs=None, budget=None):
     """Coerce a faculty result into something JSON can carry. Basic types and numpy pass straight through; dicts and
     lists recurse; anything else (a Mesh, a LoadedMesh, ...) becomes a typed summary so /invoke never crashes on an
     un-serializable return value.
 
     `refs` (an ObjectRefs registry, optional) adds a "ref" key to that typed summary and keeps the live object
     addressable, so the caller can pass the handle straight back into the next /invoke. DEFAULT None reproduces
-    the previous output byte for byte -- an existing client sees exactly the keys it saw before, plus nothing."""
+    the previous output byte for byte -- an existing client sees exactly the keys it saw before, plus nothing.
+
+    `budget` (an int of max response bytes, or a dict of bounded_preview options, optional) is the OPT-IN BOUND
+    on how much of a result reaches the caller. A value whose full rendering would exceed it comes back as a
+    bounded preview -- type, TRUE length/shape, a head/tail sample, and the byte cost of both renderings --
+    with the ObjectRefs handle still attached, so the omitted middle stays reachable through `refs`. A 1e6-float
+    ndarray is 20,269,744 bytes here and 340 bounded, measured. A value that already fits is returned WHOLE and
+    unchanged. DEFAULT None reproduces the previous output byte for byte, pinned against a golden corpus in
+    tests/test_boundedpreview.py -- an existing client sees exactly what it saw before."""
     import math
 
     import numpy as np
+    if budget is not None:
+        preview = _budgeted(o, refs, budget)
+        if preview is not None:
+            return preview
     if isinstance(o, float) and not math.isfinite(o):
         # NON-FINITE FLOATS BECOME null. json.dumps emits BARE `NaN` / `Infinity` by default, which are NOT
         # in the JSON grammar: Python's own parser is lenient and accepts them, so this looked fine from

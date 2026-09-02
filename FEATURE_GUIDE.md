@@ -703,10 +703,418 @@ r = lecore.UnifiedMind(dim=256, seed=0).merge_trees(a, b, apply=True)
 assert r["identical"] == 1 and os.path.exists(os.path.join(a, "new.py"))
 ```
 
+**What a big result costs the prompt.** A faculty that returns a million floats returns a million
+JSON numbers, and an agent's context is the scarce resource. `bounded_preview(value)` gives the
+type, the *true* length or shape, a head/tail sample and the byte cost of both renderings;
+`value_cost(value)` gives the cost alone — measured exactly for a small value, sampled and
+flagged `exact: False` for a large one. Over the wire, `POST /invoke` takes an optional `budget`:
+a result over it comes back as this preview *with* a `ref` handle to the live value, and a result
+under it is returned whole, byte for byte as before.
+
+```python
+# guide-check
+import lecore, numpy as np
+mind = lecore.UnifiedMind(dim=256, seed=0)
+big = np.arange(1000000, dtype=float)
+p = mind.bounded_preview(big, max_bytes=512)
+assert p["size"] == 1000000 and p["shape"] == [1000000]      # the TRUE size, never the truncated one
+assert p["truncated"] and p["bytes_preview"] <= 512
+assert mind.value_cost(big)["bytes"] > 1000000               # what the unbounded reply would have cost
+assert mind.value_cost([1, 2, 3]) == {"bytes": 9, "exact": True, "leaves": 3}
+nested = [[float(j) for j in range(1000)] for _ in range(1000)]
+assert mind.bounded_preview(nested)["head"][0]["length"] == 1000   # bounded at EVERY level, not just the outer
+```
+
+*Kept limits.* A preview is lossy: everything between head and tail is reachable only through the
+`ref` handle the service mints beside it, and that handle is process-local and evictable. Below
+roughly sixteen floats — ten dict keys, two hundred characters — the preview envelope costs *more*
+than the value it describes, which is why `/invoke` bounds only what is already over budget instead
+of bounding by reflex.
+
+**Holding a return to a contract.** `result_usable` asks "is this usable at all"; `result_contract`
+asks the sharper question — "is this the typed thing I said this step must return" — and lists
+*every* violation rather than only the first, so one round-trip buys the whole fix. The contract is
+plain JSON, so it crosses `/invoke` intact. `validated_call(fn, contract, retries)` hands the
+executor its own typed violation back as `feedback=` and asks again, a bounded number of times.
+
+```python
+# guide-check
+import lecore
+mind = lecore.UnifiedMind(dim=256, seed=0)
+contract = {"expect": "nonempty", "require": ["evidence", "verdict"], "types": {"evidence": "list"}}
+bad = mind.result_contract({"verdict": "ok"}, contract)
+assert not bad["ok"] and "evidence" in bad["violations"][0]
+seen = []
+def step(feedback=None):
+    seen.append(feedback)
+    return {"verdict": "ok", "evidence": ["cited"]} if feedback else {"verdict": "ok"}
+r = mind.validated_call(step, contract=contract, retries=1)
+assert r["ok"] and r["attempts"] == 2 and r["informed_retries"] == 1
+assert seen[0] is None      # attempt 1 is a plain call -- byte-identical to calling it yourself
+```
+
+*Kept limit.* Neither call can detect a *wrong* answer, only an absent or malformed one — the limit
+`result_usable` has, inherited rather than fixed.
+
+**Did the merge lose anything?** `merge_trees` runs *before* a merge and decides what to apply.
+`merge_census(base, new)` is its after-partner and answers what a clean diff3 cannot: which
+definitions disappeared, which signatures changed, which files shrank — and whether the content
+merely *moved* somewhere else in the tree.
+
+```python
+# guide-check
+import lecore, os, tempfile
+base, new = tempfile.mkdtemp(), tempfile.mkdtemp()
+open(os.path.join(base, "mod.py"), "w").write("def keep():\n    return 1\ndef gone():\n    return 2\n")
+open(os.path.join(new, "mod.py"), "w").write("def keep(extra=None):\n    return 1\n")
+c = lecore.UnifiedMind(dim=256, seed=0).merge_census(base, new)
+assert c["counts"]["lost"] == 1 and c["lost"][0]["name"] == "gone"
+assert c["counts"]["signature_changed"] == 1 and c["signature_changed"][0]["name"] == "keep"
+```
+
+**Auditing your own seams.** A faculty is meant to *delegate*. When a parameter is added to a module
+function and never plumbed through its wrapper, the capability goes on listing itself in `/tools` and
+answering `/invoke` while part of it becomes unreachable -- and every other audit passes, because the
+module has a docstring, the catalog example still runs, and nothing is unwired. `delegation_drift()`
+is the only instrument that looks at that seam. It also reports what a wrapper *binds itself*
+(`mind=self`, `seed=self.seed`) with the binding shown, because a parameter the faculty decides is not
+a parameter the caller lost.
+
+```python
+# guide-check
+import lecore
+mind = lecore.UnifiedMind(dim=256, seed=0)
+d = mind.delegation_drift()
+assert d["checked"] > 1000                                  # every faculty that declares a delegate
+assert d["total_missing"] == 0                              # the backlog is cleared; the budget floor is 0
+assert any(r["bound_to"].startswith("self") for r in d["supplied"])  # decided, not lost
+# Shape is checked on whichever section HAS rows. The first version of this block indexed
+# d["missing"][0] and went red the day the backlog reached zero -- an example that asserts a
+# backlog exists rots the moment somebody clears it.
+rows = d["missing"] or d["supplied"]
+assert rows and isinstance(rows[0], dict)                   # named rows, not tuples
+```
+
+*Kept limits.* It checks **names, not semantics**: a faculty forwarding `seed` to a delegate's
+`rng_seed` still reads as drift, and one forwarding a value to the *wrong* delegate parameter still
+reads as clean. It is a seam-shaped net, not a proof of correctness. The logic lives in `tools/`, so it
+needs a source checkout -- and it raises rather than reporting a zero it never computed.
+
+**Programs you can run, not snippets you can read.** `apps()` lists the applications library -- each
+entry says what it *proves*, because "it ran" is not a demonstration -- and `app_run(name)` runs one end
+to end, returning the numbers it asserts beside its measured runtime. The whole library is 0.29 s, so it
+is an example anyone can afford to run. Every application reaches the engine only through faculties;
+`tests/test_applications.py` parses each file and fails on a `holographic.*` import, so an application
+cannot quietly decay into a script that bypasses the surface every other audit protects.
+
+```python
+# guide-check
+import lecore
+mind = lecore.UnifiedMind(dim=256, seed=0)
+names = [a["name"] for a in mind.apps()]
+# NAME the applications rather than counting them: an exact count is an assertion with an expiry
+# date, and this one expired the day a fifth application landed.
+assert {"spectral_heat", "interleaved_sources", "infinite_zoom"} <= set(names)
+assert all(len(a["proves"]) > 40 for a in mind.apps())       # every entry says what it demonstrates
+
+heat = mind.app_run("spectral_heat")
+assert heat["proved"]["max_error"] < 1e-13                   # a PDE at t=20, exact, in ONE step
+assert heat["proved"]["fd_steps_at_longest"] > 200           # what the marching baseline had to do
+
+demux = mind.app_run("interleaved_sources")
+assert demux["proved"]["strides_recovered"] == 3             # K=2,3,4 recovered from the mixture alone
+assert mind.app_run("request_to_record")["proved"]["fabricated"] == 0   # refuses instead of inventing
+```
+
+*Kept limits.* This is a **first tranche** -- four of the six domains the backlog names; 3-D and
+advanced-algorithms are not here yet. And the comparison worth being careful about: Torchhd, the
+reference open-source VSA/HDC library, ships an `examples/` directory and leCore shipped none, which is
+why this exists -- but their examples are ML tasks scored on public datasets and these are end-to-end
+programs over leCore's own machinery. Different claims, and anyone reading both repos should find that
+sentence true. `applications/` sits beside the engine, so a wheel install raises rather than reporting
+an empty library.
+
+**As above, so below: one operator, two scales.** A feedback buffer is frame N composited with a
+transform of frame N−1. A deep zoom is a coordinate window composited with a transform of itself. They
+are the same operator — and that is not a metaphor, it is an optimisation: zooming in means the new view
+is a magnified *subset* of the old one, so the previous frame already holds every pixel, just blurrier.
+Magnify it (one resample) and recompute one narrow band exactly. `feedback_step()` is the operator,
+`deep_zoom()` is the zoom that rides it, `feedback_fixed_point()` says whether a buffer converges or
+blows up, and `zoom_floor()` says where float64 gives out.
+
+```python
+# guide-check
+import lecore, numpy as np
+mind = lecore.UnifiedMind(dim=256, seed=0)
+
+# decay is THE control parameter, and the critical value is exactly 1.0
+buf = np.random.default_rng(0).random((32, 48))
+assert mind.feedback_fixed_point(buf, steps=200, zoom=1.0, decay=0.9)["verdict"] == "converged"
+assert mind.feedback_fixed_point(buf, steps=400, zoom=1.0, decay=1.6)["verdict"] == "diverged"
+
+# the float64 wall, bracketed from both sides -- and it depends on WHERE you look
+wall = mind.zoom_floor((-0.743643887037151, 0.13182590420533), 320)
+assert 13.0 < wall["decades"] < 14.5 and wall["verified"]
+assert mind.zoom_floor((0.0, 0.0), 320)["decades"] > 100      # no eps wall at the origin
+
+# the zoom refuses to render arithmetic noise
+past = mind.deep_zoom(span0=1e-12, rate=0.1, frames=8, width=64, height=36, max_iter=16, band=4)
+assert past["stopped"].startswith("precision floor")
+```
+
+**One operator, two costumes — and the claim is a number.** Hand `feedback_step()` a 1-D hypervector and
+`rotate` becomes a cyclic **permute**: the VSA sequence operator, and the fixed recurrence
+`mind.reservoir` already uses. With `decay < 1` that *is* a leaky echo-state update. So the demo scene's
+oldest effect and this engine's sequence recurrence are the same operator — and the way to know that
+rather than merely say it is to find something that is **the same number** in both. It is the critical
+decay, and it is exactly **1.0**.
+
+```python
+# guide-check
+import lecore, numpy as np
+mind = lecore.UnifiedMind(dim=256, seed=0)
+vec = np.random.default_rng(3).random(256)
+frame = np.random.default_rng(4).random((48, 64))
+
+# the SAME constant, to 1e-12, in both costumes
+seq = mind.feedback_fixed_point(vec, steps=16, zoom=1.0, rotate=3, decay=0.95, tol=0.0)
+field = mind.feedback_fixed_point(frame, steps=16, zoom=1.0, rotate=0.0, decay=0.95, tol=0.0)
+assert abs(seq["ratio"] - 0.95) < 1e-12 and abs(field["ratio"] - 0.95) < 1e-12
+
+# and it is PERMUTATION-ness that buys it, not rank
+assert mind.is_permutation(vec, zoom=1.0, rotate=3)["permutation"] is True
+rot = mind.is_permutation(frame, zoom=1.0, rotate=0.15)
+assert not rot["permutation"] and rot["sampled_once"] < rot["cells"]   # rounding is many-to-one
+```
+
+*The finding is sharper than "field vs sequence".* The constant holds whenever the transform is a
+**permutation**, and rank has nothing to do with it — a 2-D integer roll lands on 1.0 exactly too. Two
+tidier hypotheses died to get there: that rank was the cause (no), and that the clamped edges were
+(wrapped 1.0001997 vs clamped 1.0001981 — indistinguishable). It is nearest-neighbour **rounding**,
+which is many-to-one: at 0.15 rad a 48×64 rotation samples only 2,658 of 3,072 cells exactly once, and
+its critical decay sits 2.0e-04 above 1. `is_permutation()` reports that, so a ratio that looks wrong
+comes with the reason.
+
+*Kept limits, all measured.* The acceleration is real but not free: reuse costs ~1.1 % mean error
+against a full recompute, bounded by the refresh band. It is only real-time at `band=8` — `band=4` is
+18.7 ms/frame, already over a 16.7 ms budget before you add trails. And `zoom_floor` **detects** the
+float64 wall; it cannot take you past it. Going deeper needs arbitrary precision or a perturbation
+reference orbit, which is a different and much larger build. Run the whole effect with
+`mind.app_run('infinite_zoom')`.
+
 **Over the wire.** The same doors ride the MCP server: `lecore-mcp` is on PATH after
 `pip install leos-core`; `study` / `study_ask` / `wisdom_record` / `wisdom_ask` are curated
 tools, and `lecore_invoke` reaches every faculty. The `initialize` banner carries the
 workflow contract to every connected model.
+
+## 11. Meshes, end to end
+
+The largest verb family in the engine, and the one that had the thinnest human coverage: ninety-odd
+`mesh_*` doors spanning build, measure, repair, edit, subdivide, decimate, unwrap, the field bridge
+and export. Every block below opens with `# guide-check` and runs verbatim in CI.
+
+One habit before you start, because it costs a crash otherwise: **probe the return, do not read it
+off the prose.** Several of these hand back a tuple whose arity is easy to guess wrong — a
+`mesh_lod_chain()` rung is `(mesh, faces, error, ratio)`, not the `(mesh, log)` pair that
+`mesh_decimate_to()` and `mesh_repair()` return. `mind.shape_of(mind.mesh_lod_chain, mesh)` settles it
+in one call, and `mind.signature_of(fn)` answers the arity without executing anything.
+
+### 11a. Build one, then measure it
+
+`mesh_box()`, `mesh_grid()` and `mesh_tetrahedron()` are the primitives; `mesh_from_gltf()` parses binary
+glTF back into a mesh, `mesh_from_sdf()` marches an implicit field into a surface, and
+`points_to_mesh()` takes oriented points the whole way to a watertight quad mesh. Measurement is a
+family of its own: `mesh_report()` is the one-call summary (counts, face-type fractions, boundary and
+non-manifold edges, bbox, centroid), `mesh_euler()` gives V−E+F with genus and the closed/manifold
+flags, `mesh_face_counts()` gives the tri/quad/n-gon split, and `mesh_volume()` and
+`mesh_connected_components()` answer the two questions a broken import usually fails.
+
+```python
+# guide-check
+import lecore
+mind = lecore.UnifiedMind(dim=256, seed=0)
+box = mind.mesh_box(1.0, 1.0, 1.0)
+r = mind.mesh_report(box)
+assert r["verts"] == 8 and r["faces"] == 6 and r["quad_fraction"] == 1.0
+assert r["is_closed"] and r["is_manifold"] and r["euler_characteristic"] == 2
+assert mind.mesh_volume(box) == 1.0 and mind.mesh_connected_components(box) == 1
+assert mind.mesh_euler(box)["genus"] == 0
+tri = mind.mesh_triangulate(box)
+assert mind.mesh_face_counts(tri) == {3: 12, 4: 0, 5: 0}
+assert len(mind.mesh_creases(tri)) == 12          # a cube has exactly twelve sharp edges
+```
+
+Deeper measurements, all read-only: `mesh_curvature()` (mean or Gaussian) with
+`mesh_curvature_confidence()` beside it so a noisy estimate says so; `mesh_creases()` for the sharp
+edges; `mesh_geodesic()` for single-source distance *across the surface*; `mesh_section()` for an exact
+planar cross-section (polylines, area, perimeter); `mesh_winding_number()` for inside/outside at any
+query point; `mesh_closest_point()` and `mesh_point_distance()` for the correspondence and distance
+queries every fitting loop needs; `mesh_orientation_report()` and `mesh_is_oriented()` for the property
+a half-edge structure assumes — is every directed edge traversed exactly once.
+
+### 11b. Repair what an importer handed you
+
+`mesh_repair()` composes the standard cleanup and returns a log of what it actually did, which is the
+part you want in a pipeline. Its pieces are callable on their own: `mesh_weld()` merges vertices
+closer than a tolerance, `mesh_fill_holes()` closes boundary loops, `mesh_make_manifold()` splits
+non-manifold vertices into their connected fans, `mesh_orient()` makes winding consistent by
+flood-fill, `mesh_drop_small_components()` removes disconnected specks, and `mesh_triangulate()`
+ear-clips every face. `mesh_split_vertices()` and `mesh_rip_vertex()` go the other way — they *un*-weld
+— and `mesh_topology_delta()` reports whether an op changed topology it had no business changing.
+
+```python
+# guide-check
+import lecore
+mind = lecore.UnifiedMind(dim=256, seed=0)
+tri = mind.mesh_triangulate(mind.mesh_box(1.0, 1.0, 1.0))
+torn = mind.mesh_split_vertices(tri)                    # every face gets its own corners: 36 loose verts
+assert mind.mesh_report(torn)["verts"] == 36 and not mind.mesh_report(torn)["is_closed"]
+fixed, log = mind.mesh_repair(torn)
+assert mind.mesh_report(fixed)["verts"] == 8 and mind.mesh_report(fixed)["is_closed"]
+assert log["vertices_delta"] == -28 and log["became_manifold"] is not None
+holed = mind.mesh_grid(nx=3, ny=3)
+assert mind.mesh_report(holed)["boundary_edges"] == 12
+closed = mind.mesh_fill_holes(holed)
+closed = closed[0] if isinstance(closed, tuple) else closed
+assert mind.mesh_report(closed)["boundary_edges"] == 0
+```
+
+`mesh_face_type()` converts a triangle mesh's face standard to quads or n-gons *without* moving a
+vertex — the operation an artist expects when a tool says "quadrangulate".
+
+### 11c. Edit it: the Euler operators
+
+These are the modelling verbs, and they are Euler operators rather than mesh rewrites, so the
+combinatorial invariants stay checkable after every step (`mesh_euler()` is the check).
+`mesh_extrude()` lifts a face along its normal, `mesh_inset()` shrinks one toward its centre,
+`mesh_bevel_vertex()` rounds a corner, `mesh_poke()` fans a face from a new centre vertex, and
+`mesh_loop_cut()` inserts an edge loop. Lower down: `mesh_split_edge()`, `mesh_split_face()`,
+`mesh_flip_edge()`, `mesh_collapse_edge()`, `mesh_dissolve_vertex()` and `mesh_bridge()` (join two edge
+loops). `mesh_symmetrize()` mirrors across an axis plane. Selections are first-class and persistent:
+`mesh_selection()` holds a vertex/edge/face set, and `mesh_soft_selection()` gives a geodesic falloff
+in [0,1] so a deformation fades out instead of stopping at a hard boundary.
+
+### 11d. Subdivide and smooth
+
+```python
+# guide-check
+import lecore, numpy as np
+mind = lecore.UnifiedMind(dim=256, seed=0)
+box = mind.mesh_box(1.0, 1.0, 1.0)
+quads = mind.mesh_catmull_clark(box, levels=2)
+assert mind.mesh_face_counts(quads) == {3: 0, 4: 96, 5: 0}      # Catmull-Clark stays all-quad
+loop = mind.mesh_subdivide(mind.mesh_triangulate(box), levels=2)
+assert len(loop.faces) == 12 * 4 ** 2
+smoothed = mind.mesh_smooth(loop, iters=8)
+span = lambda mesh: float(np.ptp(np.asarray(mesh.vertices), axis=0).max())
+assert span(smoothed) > 0.9 * span(loop)     # Taubin lambda|mu denoises WITHOUT the shrink a plain Laplacian causes
+limit_pts, limit_normals = mind.mesh_limit_surface(loop)
+assert limit_pts.shape == np.asarray(loop.vertices).shape
+```
+
+`mesh_catmull_clark()` is the quad subdivision and takes a crease map; build one with
+`mesh_crease_edges()` from an explicit edge list, or let `mesh_auto_crease()` tag the sharp edges for
+you by dihedral angle. `mesh_subdivide()` is Loop subdivision for triangles, and `mesh_limit_surface()`
+jumps straight to where infinite subdivision would put every vertex — closed form, no iteration.
+
+### 11e. Decimate, and prove the loss
+
+A decimator that does not report its error is a decimator you cannot trust. `mesh_decimate_to()`
+takes an explicit budget (`target_faces` or `target_fraction`) and returns a log beside the mesh;
+`mesh_surface_deviation()` gives the mean and max point-to-surface error against the original, and
+`mesh_egi_compare()` checks that the *orientation field* survived (Horn's Extended Gaussian Image),
+which is the failure a face-count target alone will not catch.
+
+```python
+# guide-check
+import lecore
+mind = lecore.UnifiedMind(dim=256, seed=0)
+dense = mind.mesh_subdivide(mind.mesh_triangulate(mind.mesh_box(1.0, 1.0, 1.0)), levels=3)
+assert len(dense.faces) == 768
+lean, log = mind.mesh_decimate_to(dense, target_fraction=0.25)
+assert log["source_faces"] == 768 and len(lean.faces) <= 200
+mean_dev, max_dev = mind.mesh_surface_deviation(dense, lean)
+assert max_dev < 0.05                                   # the quality metric, on a unit box
+chain = mind.mesh_lod_chain(lean, targets=(0.5,))
+assert [len(level[0].faces) for level in chain][0] == len(lean.faces)   # rung 0 is the source itself
+assert len(chain) == 2 and len(chain[1][0].faces) < len(lean.faces)     # each rung is (mesh, faces, error, ratio)
+assert mind.mesh_select_lod(chain, 2.0, 1.0) == 0 and mind.mesh_select_lod(chain, 500.0, 1.0) == 1
+```
+
+`mesh_qem_decimate()` is the Garland–Heckbert quadric decimator underneath; `mesh_cluster_decimate()`
+is the parallel vertex-clustering alternative when you care more about throughput than about the
+silhouette, with `mesh_cluster_lod_chain()` as its chain form. `mesh_field_lod()` builds the chain in
+the field domain instead, `mesh_select_lod()` picks a rung by screen-space error, and
+`mesh_textured_lod()` is the one call for a decimated mesh that still wears its texture.
+
+### 11f. Unwrap it
+
+```python
+# guide-check
+import lecore
+mind = lecore.UnifiedMind(dim=256, seed=0)
+flat = mind.mesh_triangulate(mind.mesh_grid(nx=4, ny=4))
+uv = mind.mesh_uv_unwrap(flat, method="lscm")
+assert uv.shape == (25, 2)
+angle = mind.mesh_uv_angle_distortion(flat, uv)
+assert angle["flipped"] == 0 and abs(angle["max"] - 1.0) < 1e-6   # a developable surface unwraps EXACTLY
+assert mind.mesh_uv_distortion(flat, uv) < 1e-6
+assert set(mind.mesh_uv_report(flat, methods=("lscm", "planar"))) == {"lscm", "planar"}
+assert mind.mesh_pack_uv(flat).shape == (25, 2)
+```
+
+`mesh_lscm()` is the least-squares conformal map (Lévy et al., 2002) that `mesh_uv_unwrap()` reaches
+for by default; `mesh_pack_uv()` unwraps each connected component and packs the islands. Seams first,
+if the surface is not a disk: `mesh_auto_seam()` marks them by dihedral angle, `mesh_shortest_seam()`
+finds a path between two vertices, and `mesh_cut_seam()` opens the mesh along one. Never ship a chart
+without measuring it — `mesh_uv_angle_distortion()` is the quantity LSCM actually minimises,
+`mesh_uv_area_distortion()` catches the opposite failure, `mesh_uv_distortion()` is the per-edge
+stretch, and `mesh_uv_report()` runs every chart against every metric so nobody picks by vibe.
+`mesh_stable_uv()` gives UVs that are a deterministic function of world position (they do not swim
+when the topology changes); after a decimation, `mesh_reproject_uv()` carries the old chart onto the
+new topology and `mesh_rebake_texture()` bakes the pixels across.
+
+### 11g. Meshes are fields wearing a different costume
+
+The bridge runs both ways, and it is the reason CSG, collision and skeletons all work on an
+imported mesh with no extra machinery. `mesh_to_sdf()` gives signed distance at query points,
+`mesh_to_sdf_grid()` produces a full re-marchable field, and `mesh_from_sdf()` marches one back.
+
+```python
+# guide-check
+import lecore, numpy as np
+mind = lecore.UnifiedMind(dim=256, seed=0)
+tri = mind.mesh_triangulate(mind.mesh_box(1.0, 1.0, 1.0))
+pts = np.array([[0.0, 0.0, 0.0], [0.9, 0.0, 0.0], [2.0, 0.0, 0.0]])
+assert np.allclose(mind.mesh_to_sdf(tri, pts), [-0.5, 0.4, 1.5])            # signed: inside is negative
+assert np.allclose(mind.mesh_winding_number(pts, tri.vertices, tri.faces), [1, 0, 0])
+cut = mind.mesh_section(tri, (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+assert cut["area"] == 1.0 and cut["perimeter"] == 4.0 and cut["contours"] == 1
+glb = mind.mesh_to_gltf(tri)
+assert glb[:4] == b"glTF" and len(mind.mesh_from_gltf(glb).faces) == 12     # a real round trip
+assert mind.mesh_to_stl(tri.vertices, tri.faces).startswith("solid ")
+```
+
+`mesh_csg()` routes a boolean of two solids through the field rather than through fragile polygon
+clipping; `mesh_to_field()` and `mesh_sample_field()` are the banded-grid form; `mesh_to_field_vector()`
+carries a whole surface as a *single* hypervector, so an edit becomes a bind. Structure comes out
+of the same bridge: `mesh_skeleton()` for the curve skeleton / medial axis, `mesh_parts()` for limbs
+and body via the Reeb graph of geodesic distance, `mesh_laplacian_eigenmaps()` for the low spectrum
+of the cotan Laplacian, and `mesh_fiedler_order()` for a stable linear vertex order. `mesh_to_softbody()`
+turns any mesh into a simulatable body, and `mesh_program_obj()` runs a compiled mesh-transform
+program on the installed machine.
+
+### 11h. Get it out again
+
+`mesh_to_stl()` is the CAD export, `mesh_to_gltf()` writes single-file binary glTF (and
+`mesh_from_gltf()` reads it back). For storage rather than interchange, `mesh_encode()` compresses at a
+stated error budget and `mesh_decode()` inverts it; `mesh_to_tokens()` serialises to a stable token
+stream in Morton order, which is what a sequence model wants.
+
+*Kept limits.* `mesh_csg()`, `mesh_skeleton()` and `mesh_to_sdf_grid()` all go through a voxel grid, so
+their fidelity is the resolution you pass — a thin feature below the cell size will not survive,
+and raising `res` costs cubically. `mesh_uv_unwrap()` expects disk topology: cut seams first for
+anything else, or use `mesh_pack_uv()`, which does the per-component unwrap for you.
 
 ## Where to look next
 

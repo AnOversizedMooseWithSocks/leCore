@@ -830,13 +830,13 @@ class _UnifiedPart12:
         from holographic.rendering.holographic_lens import deflect
         return deflect(query, attractors, masses=masses, sigma=sigma, strength=strength)
 
-    def detect_caustic(self, query, attractors, masses=None, sigma=0.5):
+    def detect_caustic(self, query, attractors, masses=None, sigma=0.5, significant=0.5):
         """Routing-ambiguity (caustic) score at a query: high when the two strongest attractors pull in opposite
         directions with similar strength -- a fold/decision-boundary where a tiny move flips the winner.
         Complementary to RecallNull ('is this a match?') -- this asks 'is this AMBIGUOUS between matches?'. Returns
         (caustic_score in [0,1], n_significant_attractors). See holographic_lens.detect_caustic."""
         from holographic.rendering.holographic_lens import detect_caustic
-        return detect_caustic(query, attractors, masses=masses, sigma=sigma)
+        return detect_caustic(query, attractors, masses=masses, sigma=sigma, significant=significant)
 
     def navigate_field(self, query, attractors, masses=None, sigma=0.5, strength=0.6):
         """Climb the attractor field from a query toward an attractor (iterated, decaying-step deflection),

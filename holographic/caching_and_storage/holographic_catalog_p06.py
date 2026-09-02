@@ -3477,6 +3477,91 @@ def register_p06(c):
                              "three way merge decision sheet", "safe branch merge"))
 
     c.register_capability(
+        "The above/below sweep (is every declared capability reachable at every layer?)",
+        "mind.above_below() -- is every DECLARED capability reachable at every layer? Population "
+        "DERIVED from the catalog (718 cards, 651 doors) instead of a 21-row literal frozen at "
+        "cp67; L0 engine / L1 facade / L2 /tools manifest / MCP tool / chat verb / pinned, all "
+        "measured. Reachability is asked of everything, PROMOTION of nothing -- lecore_invoke runs "
+        "any faculty, so a dedicated tool is a curation act and a bar nobody clears is a bar "
+        "nobody runs. MEASURED sweep 133: 22 GENUINE gaps the old matrix scored 0 on -- 4 cards "
+        "naming a door defined NOWHERE, 18 a module function no agent can /invoke.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256, seed=0); "
+                "print(m.above_below()['counts']['genuine'])",
+        native=True, aliases=("is every capability reachable at every layer",
+                              "above and below sweep",
+                              "which capabilities are missing from the hosted tool list",
+                              "check a feature exists in the engine the api and the chat",
+                              "find capabilities that exist in the engine but nowhere else",
+                              "audit the layers of the stack for gaps",
+                              "does the catalog promise anything it cannot deliver",
+                              "is this verb exposed over mcp"))
+
+    c.register_capability(
+        "Working with files past the 1 MB read cap (append, stat, tail)",
+        "mind.file_append(path, text) grows a file WITHOUT reading it; mind.file_stat(path) gives "
+        "bytes+lines in O(1) memory. The wall they remove: appending one line to the 6.1 MB "
+        "docs/NOTES_concepts.md over /invoke cost file_read_lines over the WHOLE file -- 85,602 lines, "
+        "6,451,243 B -- purely to learn where the end was, defeating the 1 MB read cap through the back "
+        "door. MEASURED 6,451,243 -> 133 B (48,506x), 2 calls -> 1. file_read_lines/file_view take a "
+        "NEGATIVE start for the tail (187x faster on 6 MB). The read cap is UNCHANGED and still refuses "
+        "-- a loud refusal beats a silent context bomb.",
+        example="import lecore, tempfile, os; m=lecore.UnifiedMind(dim=256, seed=0); "
+                "d=tempfile.mkdtemp(); m.set_file_root(d); m.file_write('n.md', 'one\\n'); "
+                "m.file_append('n.md', 'two\\n'); print(m.file_stat('n.md')['lines'])",
+        native=True, aliases=("append a line to a file without reading it",
+                              "add text to the end of a big file",
+                              "the file is too big to read, what now",
+                              "tail the last lines of a log",
+                              "how many lines are in this file",
+                              "read a document larger than the size cap",
+                              "page through a huge file a chunk at a time",
+                              "grow a log file without loading it"))
+
+    c.register_capability(
+        "Memory curation, decay and reflection (what to keep hot, what to archive, never delete)",
+        "mind.memory_curate() -> a curator over the TAUGHT partition: ACT-R activation per fact "
+        "(reuses holographic_actr), a bounded hot set, and re-taught questions consolidated so the "
+        "newest answer is current. NO DELETE PATH -- unicron_turn_memory found that 'eviction is a "
+        "loss', so it DEMOTES to a restorable archive, journals every reason, and plan() mutates "
+        "nothing. Time is logical, never wall-clock. SELF-MEASURED (no public benchmark scores "
+        "forgetting): vs a recency window +0.040 [0.032,0.048] at drift 0.5, and LOSES -0.031 "
+        "[-0.041,-0.02] under a full topic switch. Robust middle, not dominant.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256, seed=0); "
+                "m.teach('who wrote dune','frank herbert'); m.teach('who wrote dune','f. herbert'); "
+                "print(m.memory_curate().plan(keep=1)['counts']['superseded'])",
+        native=True, aliases=("forget memories that stop being useful",
+                              "curate a memory store, drop what is stale",
+                              "which facts should I keep and which should I archive",
+                              "reflect over past memories and write a summary",
+                              "rank memories by how often and how recently they were used",
+                              "clean up old facts without losing them",
+                              "the same thing was taught twice, keep the newest",
+                              "archive stale memories but be able to get them back"))
+
+    c.register_capability(
+        "Post-merge census: did the merge lose a definition, a parameter, or a file's content?",
+        "mind.merge_census(base, new) -- the AFTER partner to merge_trees, which runs BEFORE and only "
+        "at FILE level. Censuses DEFINITIONS, SIGNATURES and LINE COUNTS between two trees (or a git "
+        "ref vs the worktree), then asks whether anything lost or shrunk merely MOVED. NOTES states "
+        "that rule in capitals across sweeps 120/121/125 and nothing enforced it: a clean three-way "
+        "merge once dropped 10 definitions. MEASURED on the sweep-122 merge -- merge_trees hands 28 "
+        "files to a human as both_changed, this names 6 and resolves the catalog's 973 missing lines "
+        "as MOVED. KEPT NEG: an import alias IS a def.",
+        example="import lecore, tempfile, os; m=lecore.UnifiedMind(dim=256, seed=0); "
+                "a=tempfile.mkdtemp(); b=tempfile.mkdtemp(); "
+                "open(os.path.join(a,'f.py'),'w').write('def kept():\\n    pass\\ndef gone():\\n    pass\\n'); "
+                "open(os.path.join(b,'f.py'),'w').write('def kept():\\n    pass\\n'); "
+                "print(m.merge_census(a,b,base_is_ref=False)['counts']['lost_unexplained'])",
+        native=True, aliases=("did the merge lose any functions",
+                              "check nothing disappeared after a merge",
+                              "a file shrank after merging, what went missing",
+                              "did that code move somewhere else",
+                              "compare two versions of a codebase for missing definitions",
+                              "check a signature did not change after a merge",
+                              "a function quietly lost a parameter",
+                              "post merge census"))
+
+    c.register_capability(
         "Regenerable audit (store the text, regenerate the vectors)",
         "learning_save(root, audit='regen') -- lever 3 (sweeps 96+101): when every audit "
         "K/V row is taught-attributable, the experience section is dropped and the "
@@ -3766,6 +3851,18 @@ def register_p06(c):
                              "pipeline stage contracts", "verify the renderer end to end"))
 
     c.register_capability(
+        "External-corpus abstention (score the memory gate on a task file leCore did not write)",
+        "mind.external_abstention(records, retrieve=, floor=): score the MEMORY abstention gate on SOMEBODY ELSE'S task file -- LongMemEval schema, their `_abs` id convention, a FRESH mind per record. leCore has TWO abstentions and this measures the OTHER one: route_or_abstain abstains on 100% of that benchmark (z=-1.69). THE EXCHANGE RATE, 4-answerable/4-abstention: no rung recall 0.25 / abstention 1.00 / PAIRED 0.25; semantic rung at floor 0.50 gives 0.50 / 0.75 / PAIRED 0.50. The rung DOUBLES paired and BUYS it with abstention. QUOTE THE PAIRED RATE.",
+        example="import lecore; m=lecore.UnifiedMind(dim=64, seed=0); "
+                "from holographic.agents_and_reasoning.holographic_extbench import _fixture; "
+                "print(m.external_abstention(_fixture())['false_answer_rate'])",
+        native=True, aliases=("run a benchmark someone else wrote",
+                             "score abstention on an external dataset",
+                             "longmemeval", "load a third party evaluation set",
+                             "measure how often we correctly refuse to answer",
+                             "is our abstention number self referential",
+                             "did we answer a question about something that never happened"))
+    c.register_capability(
         "Did that call produce anything USABLE? (the quiet failure)",
         "mind.result_usable(v, expect=) / mind.guarded_call(fn). A tool that RAISES is caught by ordinary "
         "flow; one that returns nothing usable is treated as SUCCESS -- BENCH-3 measures that at "
@@ -3779,6 +3876,30 @@ def register_p06(c):
                              "silent failure", "the call succeeded but did nothing",
                              "validate what a function gave back"))
 
+    c.register_capability(
+        "Bounded previews at the /invoke boundary (what a big result costs a prompt)",
+        "mind.bounded_preview(v) / mind.value_cost(v). A big result costs an agent its CONTEXT: /invoke serialised it whole, so a 1e6-float array left as 20 MB of JSON. The preview keeps the TYPE, the TRUE shape and dtype, a HEAD and TAIL sample, and the byte cost of both -- measured 20,269,744 B -> 364 B (55,686x); nested containers bounded RECURSIVELY. /invoke takes an optional budget: over it, this preview PLUS a ref handle to the live value; under it, today's bytes exactly. KEPT NEG: under ~16 floats the envelope costs MORE than the value.",
+        example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=256, seed=0); "
+                "print(m.bounded_preview(np.arange(1000000, dtype=float), max_bytes=512)['size'])",
+        native=True, aliases=("preview a large result", "truncate a big array for the prompt",
+                             "how many bytes will this result cost", "shorten a tool output",
+                             "show me the first and last few items",
+                             "summarize a huge list without printing all of it",
+                             "avoid dumping a million numbers into my context",
+                             "bound the response size", "head and tail of a value"))
+
+    c.register_capability(
+        "Validated termination: hold a step's RETURN to a contract, retry bounded (the exit gate)",
+        "mind.result_contract(v, c) / mind.validated_call(fn, c) / agent_loop(contracts=). leCore gates the ENTRY (abstain before acting, false-action 0.0%); this is the EXIT gate it lacked -- hold a step's RETURN to a CALLER-declared contract, retry bounded, feed the verdict back as a typed error. MEASURED on 5 executors: false passes 2 -> 0, at 5 -> 8 executor calls (+60%). A deliberate abstention ([]) is not a failure: false-retry rate 0.000. KEPT NEG: catches an ABSENT or MALFORMED return, never a WRONG one; a cached step is not re-validated.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256, seed=0); "
+                "print(m.validated_call(lambda: None, {'retries': 2})['attempts'])",
+        native=True, aliases=("retry a tool call when it returns nothing useful",
+                             "enforce a return contract on a step",
+                             "stop the loop accepting a bad result",
+                             "typed return validation with retry",
+                             "make the agent prove the step finished",
+                             "bounded retry with the error fed back",
+                             "validate what a step returned before moving on"))
     c.register_capability(
         "Runtime-discovery abstention (does it abandon AFTER starting?)",
         "BENCH-3. BENCH-1/2 test one of AgentAbstain's eight scenarios -- capability absent, knowable "

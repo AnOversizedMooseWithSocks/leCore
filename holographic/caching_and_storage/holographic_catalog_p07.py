@@ -123,9 +123,10 @@ def register_p07(c):
         "aces_tonemap",
         "ACES filmic TONEMAP for an HDR buffer -- exposure + auto-key, the display transform "
         "a physically-lit render needs before pixels are viewable.",
-        example="from holographic.rendering.holographic_gbuffer import aces_tonemap",
+        example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=64, seed=0); "
+                "print(m.aces_tonemap(np.array([[[0.1, 0.5, 4.0]]]))[0][0][2] < 1.0)",
         aliases=("tonemap an hdr image", "filmic display transform", "make hdr viewable"),
-        module="holographic_gbuffer")
+        module="holographic_gbuffer", method="aces_tonemap")
     c.register_capability(
         "add_caustics",
         "Add light CAUSTICS to a rendered image from the scene + camera (light direction and "
@@ -179,9 +180,10 @@ def register_p07(c):
         "element_flame_color",
         "The FLAME COLOR an element burns with (emission spectrum -> RGB) -- the flame-test "
         "palette the combustion renderer colors its fire from.",
-        example="from holographic.simulation_and_physics.holographic_elements import element_flame_color",
+        example="import lecore; m=lecore.UnifiedMind(dim=64, seed=0); "
+                "print(m.element('Na')['flame_color'])",
         aliases=("what color does this element burn", "flame test color"),
-        module="holographic_elements")
+        module="holographic_elements", method="element")
     c.register_capability(
         "add_velocity",
         "Inject a VELOCITY impulse into a spectral field simulation -- the stir operator for "
@@ -234,7 +236,7 @@ def register_p07(c):
         "LLM its generated operating screen (syscalls, rules, contract).",
         example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rep = mind.boot(partition='/data/p1'); print(mind.os_prompt(rep))",
         aliases=("boot the mind", "bios", "power on self test", "operating prompt",
-                 "os for the llm"), module="holographic_bios")
+                 "os for the llm"), module="holographic_bios", method="boot")
     c.register_capability(
         "doctrine_seedpack",
         "Boot a fresh mind with the DISTILLED OPERATING DOCTRINE: 14 measured, "
@@ -243,7 +245,8 @@ def register_p07(c):
         "stays honest.",
         example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.doctrine_load()",
         aliases=("seed doctrine", "load the doctrine pack", "boot with lessons",
-                 "teach the operating doctrine"), module="holographic_seedpack")
+                 "teach the operating doctrine"), module="holographic_seedpack",
+        method="doctrine_load")
     c.register_capability(
         "panel_realm",
         "Seat the expert panel in the swarm realm: each member a named resident with its "
@@ -251,7 +254,7 @@ def register_p07(c):
         "consensus is silent, only disagreement is recorded, authored per-expert.",
         example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.panel_seat(); mind.panel_deliberate(q, {\'widrow\': \'a\', \'bau\': \'b\'})",
         aliases=("seat the panel", "panel swarm", "expert realm", "council realm"),
-        module="holographic_unified_p20_zoo")
+        module="holographic_unified_p20_zoo", method="panel_seat")
     c.register_capability(
         "app_substrate",
         "Give an app built on leCore its own memory PER USER: remember/recall with "
@@ -273,7 +276,65 @@ def register_p07(c):
         aliases=("drift detection", "echo detection", "conflict candidate",
                  "stale memory", "loop detection"),
         module="holographic_drift")
-    return 29
+    c.register_capability(
+        "delegation_drift",
+        "Which faculties have LOST a parameter their module function still accepts? "
+        "mind.delegation_drift() audits the seam every other audit misses: a parameter added to a "
+        "module and never plumbed through its wrapper leaves the capability reachable but crippled -- "
+        "/tools lists it, /invoke calls it, part of it cannot be reached. Reports each faculty, its "
+        "delegate, the lost parameters and the overlap, plus SUPPLIED: what a wrapper binds itself "
+        "(mind=self, seed=self.seed), with its binding, because that is decided, not lost. "
+        "KEPT NEG: names, not semantics. Needs a source checkout (logic is in tools/).",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.delegation_drift()",
+        aliases=("faculty signature drifted from the function it delegates to",
+                 "a mind verb is missing a parameter the module function has",
+                 "fix a wrapper that lost an argument",
+                 "which faculties cannot forward everything",
+                 "wrapper signature audit", "find crippled capabilities",
+                 "parameter I cannot pass through the mind",
+                 "check my faculty matches its module function"),
+        module="delegation_drift", method="delegation_drift")
+    c.register_capability(
+        "applications",
+        "The APPLICATIONS LIBRARY: named end-to-end programs you can run, not snippets to read. "
+        "mind.apps() lists them with what each PROVES; mind.app_run(name) runs one and returns the "
+        "numbers it asserts plus its runtime. 4 domains, 0.29s total: spectral_heat (a PDE advanced to "
+        "any horizon in ONE exact step, 4.4e-16), interleaved_sources (the stride of an "
+        "unlabelled round-robin stream recovered for 2, 3 and 4 hidden senders), request_to_record "
+        "(requests parsed to {action, object, quality}, unparseable ones refused), texture_composite "
+        "(fields blended to a deterministic PNG). All through faculties.",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.apps(); mind.app_run('spectral_heat')",
+        aliases=("run a named end to end example program",
+                 "a library of runnable applications I can try",
+                 "show me a worked example of what this engine does",
+                 "cookbook of end to end programs",
+                 "list the demo programs", "try a sample application",
+                 "what can this engine actually do, show me",
+                 "example programs", "run the demo"),
+        module="applications", method="app_run")
+    c.register_capability(
+        "feedback_and_deep_zoom",
+        "The demo-scene operator: ITERATE A PROJECTION. mind.feedback_step() is the video-feedback "
+        "tunnel -- frame N holding a transform of frame N-1 -- and mind.deep_zoom() is a Mandelbrot "
+        "deep zoom RENDERED BY it: 9.7 ms/frame at 320x180 vs 98.3 full, error ~1.1%. ONE "
+        "OPERATOR, TWO COSTUMES: on a 1-D hypervector rotate becomes permute, a leaky "
+        "echo-state update, and the critical decay is EXACTLY 1.0 in both whenever the transform is "
+        "a permutation (mind.is_permutation). mind.zoom_floor() says where float64 ends -- 13.8 "
+        "decades -- and deep_zoom STOPS there. KEPT NEG: detects that wall, cannot pass.",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.deep_zoom(frames=8, band=8)",
+        aliases=("feedback buffer, feed the last frame back in",
+                 "zoom into a mandelbrot forever",
+                 "video feedback tunnel effect", "infinite zoom demo",
+                 "how deep can I zoom before float64 breaks",
+                 "does my feedback buffer converge or blow up",
+                 "demoscene effect", "fractal zoom in real time",
+                 "as above so below, same structure at every scale",
+                 "the same operator on a field and on a sequence",
+                 "feedback on a vector instead of an image",
+                 "leaky integrator over hypervectors",
+                 "decay a sequence and bundle new content into it"),
+        module="holographic_feedback", method="deep_zoom")
+    return 32
 
 
 _PART = "holographic_catalog_p07"

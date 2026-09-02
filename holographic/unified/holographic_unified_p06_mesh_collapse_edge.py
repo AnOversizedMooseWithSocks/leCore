@@ -102,7 +102,7 @@ class _UnifiedPart06:
         return fit_camera(self._as_mesh(mesh), direction=direction, up=up, fov_deg=fov_deg,
                           aspect=float(width) / float(height), margin=margin)
 
-    def silhouette_sweep(self, ref_mesh, mesh, n_azimuth=6, size=128, include_top=True):
+    def silhouette_sweep(self, ref_mesh, mesh, n_azimuth=6, size=128, include_top=True, ref_cache=None):
         """Orthographic TURNTABLE silhouette comparison: rotate the pair through `n_azimuth` directions across
         [0, pi) (theta and theta+pi are the same outline under orthographic projection) plus the top, and score
         IoU per direction under the REFERENCE's frame. The fast instrument behind the default-on modification
@@ -110,7 +110,7 @@ class _UnifiedPart06:
         holographic_render.silhouette_sweep."""
         from holographic.rendering.holographic_render import silhouette_sweep
         return silhouette_sweep(self._as_mesh(ref_mesh), self._as_mesh(mesh), n_azimuth=n_azimuth, size=size,
-                                include_top=include_top)
+                                include_top=include_top, ref_cache=ref_cache)
 
     def mesh_decimate_to(self, mesh, target_faces=None, target_fraction=None, keep_uv="auto",
                          min_silhouette_iou=0.95, views_size=128, topology=True):
@@ -208,7 +208,7 @@ class _UnifiedPart06:
         from holographic.mesh_and_geometry.holographic_meshbridge import sample_distance_grid
         return sample_distance_grid(grid, axes, points)
 
-    def mesh_reproject_uv(self, source_mesh, source_uv, target_mesh, uv_tol=1e-6, tie=0.5):
+    def mesh_reproject_uv(self, source_mesh, source_uv, target_mesh, uv_tol=1e-6, tie=0.5, disc_factor=5.0):
         """REPROJECT a uv map onto a mesh whose face count changed -- after decimation, remeshing, retopo, any
         topology edit. Per-CORNER and seam-aware: a retopo welds the two sides of a seam into one vertex, and one
         vertex cannot carry the two uvs a seam needs, so plain per-vertex transfer makes the faces around it span
@@ -217,7 +217,7 @@ class _UnifiedPart06:
         See holographic_meshtools.reproject_uv."""
         from holographic.mesh_and_geometry.holographic_meshtools import reproject_uv
         return reproject_uv(self._as_mesh(source_mesh), source_uv, self._as_mesh(target_mesh),
-                            uv_tol=uv_tol, tie=tie)
+                            uv_tol=uv_tol, tie=tie, disc_factor=disc_factor)
 
     def uv_atlas_report(self, mesh, uvs=None):
         """DIAGNOSE whether a mesh's UVs can survive retopo/LOD/remesh BEFORE you spend the time: island count,
@@ -227,7 +227,7 @@ class _UnifiedPart06:
         from holographic.mesh_and_geometry.holographic_meshtools import uv_atlas_report
         return uv_atlas_report(self._as_mesh(mesh), uvs=uvs)
 
-    def mesh_textured_lod(self, mesh, texture, uvs=None, grid=48, size=1024, margin=2, silhouette=0.95):
+    def mesh_textured_lod(self, mesh, texture, uvs=None, grid=48, size=1024, margin=2, silhouette=0.95, method='auto'):
         """ONE CALL for a decimated mesh that STILL WEARS ITS TEXTURE, routed BY MEASUREMENT: a coherent atlas
         gets a cheap uv transfer (image reused); a fragmented scan atlas gets a full RE-BAKE into a new per-face
         atlas (the only correct route -- transfer would render as speckle). Returns (lod_mesh, uv, image,
@@ -243,7 +243,7 @@ class _UnifiedPart06:
             _probe, rep = silhouette_guarded(src, lambda g: cluster_decimate(src, g, keep_uv=False),
                                              int(grid), min_iou=floor)
             grid = rep["knob"]
-        out = textured_lod(src, texture, uvs=uvs, grid=grid, size=size, margin=margin)
+        out = textured_lod(src, texture, uvs=uvs, grid=grid, size=size, margin=margin, method=method)
         if floor is not None:
             out[3]["silhouette"] = rep
         return out
@@ -279,13 +279,13 @@ class _UnifiedPart06:
         from holographic.io_and_interop.holographic_assetimport import asset_base_texture as _abt
         return _abt(loaded_mesh)
 
-    def preview_asset(self, path, camera=None, width=512, height=384, ambient=0.5, smooth=True, fit=False):
+    def preview_asset(self, path, camera=None, width=512, height=384, ambient=0.5, smooth=True, fit=False, eye_dir=(0.55, 0.35, 0.7)):
         """ONE-CALL TEXTURED PREVIEW of an asset file (.obj/.glb/.gltf): import with materials + embedded
         textures, auto-frame, rasterize with the base-colour map applied. Returns (image (H,W,3), LoadedMesh).
         The pointer from import to textured render that was missing -- previously five manual composition steps.
         See holographic_assetimport.preview_asset."""
         from holographic.io_and_interop.holographic_assetimport import preview_asset
-        return preview_asset(path, camera=camera, width=width, height=height, ambient=ambient, smooth=smooth, fit=fit)
+        return preview_asset(path, camera=camera, width=width, height=height, ambient=ambient, smooth=smooth, fit=fit, eye_dir=eye_dir)
 
     def mesh_to_sdf_grid(self, mesh, bounds, res=48, band=None, sign="auto"):
         """Convert an imported mesh into a FULL, re-marchable signed distance field
