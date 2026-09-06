@@ -34,7 +34,7 @@ The generators it runs, read from that list at generation time so this page cann
 - `holographic/caching_and_storage/holographic_pipelinemap.py` -> `docs/PIPELINE_MAP.md`, `pipelines.json`
 - `tools/unifiers.py --write` -> `docs/UNIFIERS.md`
 
-## Family layout (792 modules)
+## Family layout (800 modules)
 
 ```mermaid
 graph LR
@@ -43,7 +43,7 @@ graph LR
     H --> mesh["mesh_and_geometry (111)"]
     H --> agen["agents_and_reasoning (108)"]
     H --> io_a["io_and_interop (94)"]
-    H --> rend["rendering (70)"]
+    H --> rend["rendering (78)"]
     H --> cach["caching_and_storage (59)"]
     H --> samp["sampling_and_signal (58)"]
     H --> simu["simulation_and_physics (53)"]
