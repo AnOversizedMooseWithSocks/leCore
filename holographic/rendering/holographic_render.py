@@ -864,6 +864,32 @@ def save_image(path, rgb01, level=6, filters=True):
     return str(path)
 
 
+def load_exr(path, exposure=1.0, channels="RGB"):
+    """Read an OpenEXR image -> (H,W,3) float32 LINEAR radiance, UNBOUNDED -- the same contract as load_hdr, so it
+    feeds sky_dome / DomeLight / the glass bake's HdriEnv unchanged.
+
+    OPT-IN ACCELERATOR, like numba and wgpu: this uses the `OpenEXR` package (pip install OpenEXR) because EXR is a
+    whole container format -- PIZ/ZIP/DWA codecs, half floats, tiles, multi-part -- and PIZ in particular (wavelet +
+    Huffman, which is what Poly Haven ships) is not a weekend's stdlib. The core does not import it at module load;
+    without the package this raises ImportError naming the fix. `load_hdr` (Radiance RGBE, pure stdlib) remains the
+    dependency-free door. Returns radiance in the same orientation as load_hdr (row 0 = top = +y)."""
+    try:
+        import OpenEXR, Imath
+    except ImportError as exc:
+        raise ImportError("load_exr needs the optional OpenEXR package: pip install OpenEXR  (or convert the map "
+                          "to Radiance .hdr and use load_hdr, which is pure stdlib)") from exc
+    f = OpenEXR.InputFile(str(path))
+    hdr = f.header(); dw = hdr["dataWindow"]
+    W, H = dw.max.x - dw.min.x + 1, dw.max.y - dw.min.y + 1
+    pt = Imath.PixelType(Imath.PixelType.FLOAT)
+    have = set(hdr["channels"].keys())
+    chans = [c for c in channels if c in have] or list(have)[:3]
+    img = np.stack([np.frombuffer(f.channel(c, pt), dtype=np.float32).reshape(H, W) for c in chans], axis=-1)
+    if img.shape[-1] == 1:
+        img = np.repeat(img, 3, axis=-1)
+    return (img[..., :3] * float(exposure)).astype(np.float32)
+
+
 def load_hdr(path, exposure=1.0):
     """Read a Radiance .hdr / .pic (RGBE) file -> (H,W,3) float32 of LINEAR radiance, UNBOUNDED.
 

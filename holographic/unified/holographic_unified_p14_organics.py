@@ -1598,16 +1598,27 @@ class _UnifiedPart14:
         return tuple(_ml.material(name).absorption)
 
     def crystal_grow_on(self, sdf, bounds, count=24, habit="quartz", size=0.18, size_jitter=0.45,
-                        inward=False, tilt=0.18, where=None, seed=0, substrate=True, batched=False):
+                        inward=False, tilt=0.18, where=None, seed=0, substrate=True, batched=False, cull=False,
+                        real_cell=False, pack=None, clip_to_substrate=False, seeds=None):
         """GROW CRYSTALS ON ANY SURFACE. Seeds land on the SDF and each crystal's c-axis aligns to the
         surface NORMAL, because a crystal grows perpendicular to what it nucleated on -- which is why
         a druse radiates and (with inward=True) why a geode points at its own middle. `where` is a
         weight FIELD, so crystals grow only where a material says: measured, gating raised the mean
-        field value under the crystals from 0.313 to 0.577. See holographic_crystalgrow.grow_on."""
+        field value under the crystals from 0.313 to 0.577. `habit` may be a list or a callable
+        seed_point->name (mixed minerals, each with its own lattice) and `size` a {habit: size} dict;
+        habits include the short fat "druse" for paving a wall. cull=True prunes by bounding spheres
+        (same surface). real_cell=True builds each habit on its mineral's REAL axial ratio (quartz
+        c/a 1.1001 -> the 141 deg 47' prism-rhombohedron angle; the c = a default gives 139.1).
+        pack=k: COMPETITIVE GROWTH -- each crystal's size is k x its nearest-neighbour seed spacing, so
+        neighbours meet along their faces instead of interpenetrating into shards (k ~ 0.55 for
+        quartz_point). clip_to_substrate=True: crystals exist only outside the host rock -- no growth
+        below the surface they grew from. seeds=(P, N): explicit seed points/normals (art-directed
+        specimen), with `size` optionally per seed. See holographic_crystalgrow.grow_on."""
         import holographic.mesh_and_geometry.holographic_crystalgrow as _cg
         return _cg.grow_on(sdf, bounds, count=count, habit=habit, size=size,
                            size_jitter=size_jitter, inward=inward, tilt=tilt, where=where,
-                           seed=seed, substrate=substrate, batched=batched)
+                           seed=seed, substrate=substrate, batched=batched, cull=cull, real_cell=real_cell, pack=pack,
+                           clip_to_substrate=clip_to_substrate, seeds=seeds)
 
     def crystal_cluster(self, count=9, habit="quartz", size=0.30, radius=0.22, seed=0, **kw):
         """A free-standing DRUSE -- crystals radiating from a small rocky base. This is grow_on with
@@ -1621,7 +1632,9 @@ class _UnifiedPart14:
         """A GEODE: a hollow nodule whose cavity wall is lined with INWARD-pointing crystals, built
         from the physics rather than as a special shape. MEASURED hollow: 0.00 filled at the centre,
         1.00 in the rind, with a distinct crystal band between. `where` can leave part of the wall
-        bare. Slice it with crystal_cut to look inside. See holographic_crystalgrow.geode."""
+        bare. Slice it with crystal_cut to look inside. parts=True returns (rind, lining) so the rock and
+        the crystals can be rendered as what they are: bake_glass(crystal_cut(lining), opaque=crystal_cut(rind)).
+        cull=True prunes the union by bounding spheres (same surface). See holographic_crystalgrow.geode."""
         import holographic.mesh_and_geometry.holographic_crystalgrow as _cg
         return _cg.geode(radius=radius, shell=shell, count=count, habit=habit, size=size,
                          seed=seed, where=where, **kw)
@@ -1633,6 +1646,16 @@ class _UnifiedPart14:
         anything was cut. See holographic_crystalgrow.cut."""
         import holographic.mesh_and_geometry.holographic_crystalgrow as _cg
         return _cg.cut(field, normal=normal, point=point)
+
+    def crystal_single(self, habit="quartz", size=1.0, real_cell=False):
+        """ONE named crystal as a closed SDF (holographic_crystalgrow.habit_sdf): the same builder crystal_cluster
+        and crystal_geode place many of, exposed for a single specimen -- c-axis along +z, `size` scales it without
+        changing its proportions. WHY a verb: `crystal_habit` with a bare Miller list is an OPEN prism (measured:
+        the hexagonal (100)+(101) pair filled 16% of a +/-1.8 probe and ran off the grid) because it needs
+        `form=True` to expand each index into its whole form; this path always does. Habits: crystal_habits().
+        real_cell=True uses the mineral's real unit cell (holographic_crystalgrow.CELLS)."""
+        import holographic.mesh_and_geometry.holographic_crystalgrow as _cg
+        return _cg.habit_sdf(habit, size, real_cell=real_cell)
 
     def crystal_habits(self):
         """The named crystal habits (quartz, beryl, cube, octahedron, dodecahedron, needle) with

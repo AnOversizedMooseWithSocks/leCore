@@ -363,7 +363,26 @@ def _cache_chunk(n_tri, bytes_per_level=6 * 1024 * 1024):
     return int(min(4096, max(8, bytes_per_level // max(per_point, 1))))
 
 
-def point_set_to_mesh_grid(P, V, faces, radius=2, cells_per_axis=None, signed=False):
+def _grid_query_chunk(nbrs, tri_per_cell, max_bytes=512 * 1024 * 1024):
+    """How many queries point_set_to_mesh_grid may process at once inside `max_bytes`.
+
+    WHY a model and not a constant: the per-query cost is set by the RADIUS, not by the mesh. Each query
+    materialises `nbrs` = (2r+1)^3 neighbour-cell rows (int64 coords, clipped copies, linear ids and the three
+    pair_* arrays -- about 81 bytes per neighbour) and then `nbrs * tri_per_cell` candidate rows (positions,
+    triangle ids, paired query points, closest points and distances -- about 152 bytes each). Radius 3 is 3.4x
+    the memory of radius 2 at the same N, so a fixed chunk would be wrong for one of them.
+
+    The 3.0x factor is MEASURED, not padding: numpy builds unnamed temporaries for each expression and the
+    allocator does not return freed arenas promptly, so observed peak RSS ran ~2.9x the sum of the named arrays
+    (36.8 KB/query observed vs 12.5 KB/query modelled at radius=2). Peak RSS is what the OOM killer reads, so
+    the model targets peak RSS. Floored at 256 -- below that the Python loop overhead starts to show, and a
+    budget that small cannot be met by chunking anyway."""
+    per_query = 3.0 * (81.0 * nbrs + 152.0 * nbrs * max(float(tri_per_cell), 0.0))
+    return int(max(256, min(4_000_000, max_bytes / max(per_query, 1.0))))
+
+
+def point_set_to_mesh_grid(P, V, faces, radius=2, cells_per_axis=None, signed=False,
+                           chunk=None, max_bytes=512 * 1024 * 1024):
     """Min distance from each query point P (N,3) to a triangle set, ACCELERATED by a vectorized uniform-grid index
     that CULLS the work -- the genuine speedup the batched all-pairs kernel could not give (that one is memory-bound;
     this one does far less arithmetic). The whole thing is array ops, NO Python per-cell dicts (those were measured
@@ -385,16 +404,26 @@ def point_set_to_mesh_grid(P, V, faces, radius=2, cells_per_axis=None, signed=Fa
     query's cell -- correct for near-surface queries on a roughly uniform mesh (the LOD/deviation use), but a large
     triangle whose centroid is far, or a query far from the surface, can be missed. A query whose neighbourhood holds
     no triangle returns +inf (caller can widen `radius` or fall back to the exact point_set_to_mesh). Raise `radius`
-    or `cells_per_axis` to trade speed for guaranteed coverage."""
+    or `cells_per_axis` to trade speed for guaranteed coverage.
+
+    STREAMED, so a big query set no longer has to fit in RAM. The neighbour gather materialises a
+    (N, (2r+1)^3, 3) block -- 125 cells per query at the default radius -- and the candidate list is another
+    few arrays on top. MEASURED at radius=2 on a 33k-triangle marched sphere: **36.8 KB of peak RSS per
+    query, growing linearly**, which killed a 200k-point call on a 7 GB box and is exactly why every
+    mesh_distance_grid bake above 112^3 was OOM-killed -- the shell of a 176^3 grid is ~1M voxels, i.e. a
+    37 GB demand for a 43 MB answer. The queries are now processed in blocks of `chunk` (auto-sized by
+    _grid_query_chunk to fit `max_bytes`, default 512 MB), which is EXACT rather than approximate: every
+    stage is per-query independent, so the result is bit-identical to the unchunked path at any chunk size
+    (pinned by a self-test). Pass chunk= to override; pass max_bytes= to change the budget."""
     V = np.asarray(V, float)
     F = np.asarray([f[:3] for f in faces], dtype=int)
     A = V[F[:, 0]]; B = V[F[:, 1]]; C = V[F[:, 2]]
     P = np.asarray(P, float)
     cent = (A + B + C) / 3.0
-    lo = np.minimum(V.min(axis=0), P.min(axis=0))
-    hi = np.maximum(V.max(axis=0), P.max(axis=0))
-    span = np.maximum(hi - lo, 1e-9)
-    if cells_per_axis is None:
+    lo = np.minimum(V.min(axis=0), P.min(axis=0))                   # index bounds come from the FULL query set and
+    hi = np.maximum(V.max(axis=0), P.max(axis=0))                   # are hoisted ABOVE the chunk loop on purpose:
+    span = np.maximum(hi - lo, 1e-9)                                # per-chunk bounds would move the cell grid and
+    if cells_per_axis is None:                                      # make the answer depend on the chunk size.
         cells_per_axis = int(np.clip(round(2.0 * len(F) ** (1.0 / 3.0)), 4, 128))   # ~triangle-sized cells
     dims = np.array([cells_per_axis] * 3, dtype=int)
     cell = (hi - lo) / dims
@@ -413,20 +442,50 @@ def point_set_to_mesh_grid(P, V, faces, radius=2, cells_per_axis=None, signed=Fa
     starts[1:] = np.cumsum(counts)[:-1]                             # CSR offsets into `order`
 
     off = np.stack(np.meshgrid(*([np.arange(-radius, radius + 1)] * 3), indexing="ij"), axis=-1).reshape(-1, 3)
-    qc = cell_of(P)                                                 # (N,3)
-    ncoord = qc[:, None, :] + off[None, :, :]                       # (N,B,3) neighbour cells
-    inb = np.all((ncoord >= 0) & (ncoord < dims), axis=2)           # (N,B) in-bounds
-    ncl = np.clip(ncoord, 0, dims - 1)
-    ncl_lin = ncl[..., 0] * ny * nz + ncl[..., 1] * nz + ncl[..., 2]                 # (N,B)
-    pair_start = starts[ncl_lin].ravel()                           # (N*B,)
-    pair_count = np.where(inb, counts[ncl_lin], 0).ravel()         # (N*B,) 0 for out-of-bounds
-    pair_query = np.repeat(np.arange(len(P)), off.shape[0])        # (N*B,) which query each pair belongs to
+    nbrs = int(off.shape[0])                                        # (2r+1)^3 neighbour cells visited per query
+    fn = None
+    if signed:
+        fn = np.cross(B - A, C - A)                                 # face normals are PER-TRIANGLE, so they are
+        ln = np.linalg.norm(fn, axis=1)                             # built once here rather than once per chunk --
+        fn = fn / np.where(ln[:, None] > 1e-12, ln[:, None], 1.0)   # they do not vary with the query set
 
-    keep = pair_count > 0
-    s = pair_start[keep]; c = pair_count[keep]; q = pair_query[keep]
     best = np.full(len(P), np.inf)
     sgn = np.ones(len(P))
-    if c.size:
+    if chunk is None:
+        chunk = _grid_query_chunk(nbrs, len(F) / float(max(ncells, 1)), max_bytes)
+    chunk = max(1, int(chunk))
+
+    # NAMED NEXT RUNG (do not lose this): holographic_fields.close_pairs solves the same problem -- gather
+    # the candidates in a neighbour block around each query -- and NEVER MATERIALISES THE PRODUCT. It loops
+    # the 3^D offsets (a tiny fixed loop) and touches only (N,) arrays per iteration, so its peak is
+    # O(N + pairs) with no budget to tune. That is strictly better than chunking. It is not done here
+    # because the signed path picks its nearest triangle with a lexsort over (distance, query), and turning
+    # that into a running argmin across offsets touches a TIE-BREAK on a determinism-critical path -- worth
+    # doing deliberately, not as a second rewrite of the same reduction in one sweep.
+    #
+    # STREAM THE QUERIES. Everything below is per-query independent -- the neighbour gather, the
+    # candidate reduction (np.minimum.at over disjoint query ids) and the signed lexsort all act
+    # within one query -- so slicing P into blocks is EXACTLY equivalent, not an approximation.
+    # It is the whole point of this loop: peak memory becomes O(chunk), while the work stays O(N).
+    for i0 in range(0, len(P), chunk):
+        Pc = P[i0:i0 + chunk]
+        nc = len(Pc)
+        qc = cell_of(Pc)                                            # (c,3)
+        ncoord = qc[:, None, :] + off[None, :, :]                   # (c,B,3) neighbour cells
+        inb = np.all((ncoord >= 0) & (ncoord < dims), axis=2)       # (c,B) in-bounds
+        ncl = np.clip(ncoord, 0, dims - 1)
+        ncl_lin = ncl[..., 0] * ny * nz + ncl[..., 1] * nz + ncl[..., 2]            # (c,B)
+        pair_start = starts[ncl_lin].ravel()                        # (c*B,)
+        pair_count = np.where(inb, counts[ncl_lin], 0).ravel()      # (c*B,) 0 for out-of-bounds
+        pair_query = np.repeat(np.arange(nc), nbrs)                 # (c*B,) which query each pair belongs to
+        del ncoord, inb, ncl, ncl_lin, qc                           # the (c,B,3) block is the memory peak: drop it
+                                                                    # BEFORE the candidate list is built, so the two
+                                                                    # stages do not have to be resident at once
+        keep = pair_count > 0
+        s = pair_start[keep]; c = pair_count[keep]; q = pair_query[keep]
+        if not c.size:
+            continue                                                # no triangle anywhere near this block -> +inf
+        bc = np.full(nc, np.inf)                                    # this block's own accumulators
         total = int(c.sum())
         incr = np.ones(total, dtype=int)                          # vectorized concatenated ranges [s_i, s_i+c_i)
         seg = np.cumsum(c) - c                                    # where each range begins in the flat output
@@ -435,22 +494,20 @@ def point_set_to_mesh_grid(P, V, faces, radius=2, cells_per_axis=None, signed=Fa
         pos = np.cumsum(incr)                                     # positions into `order`
         tri = order[pos]                                          # candidate triangle indices (flat)
         eq = np.repeat(q, c)                                      # the query for each candidate edge
-        Pe = P[eq]
+        Pe = Pc[eq]
         cp = _closest_points_on_triangles(Pe, A[tri], B[tri], C[tri])               # paired: one query vs one triangle
         de = np.linalg.norm(Pe - cp, axis=1)
-        np.minimum.at(best, eq, de)                              # nearest distance per query
+        np.minimum.at(bc, eq, de)                                 # nearest distance per query
+        best[i0:i0 + nc] = bc
         if signed:
-            fn = np.cross(B - A, C - A)
-            ln = np.linalg.norm(fn, axis=1)
-            fn = fn / np.where(ln[:, None] > 1e-12, ln[:, None], 1.0)
             srt = np.lexsort((de, eq))                            # sort edges by query then distance
             qs = eq[srt]
             first = np.ones(len(qs), dtype=bool)
             first[1:] = qs[1:] != qs[:-1]                         # first per query = the minimum-distance edge
             win = srt[first]
             wq = qs[first]
-            sv = np.sign(np.sum((P[wq] - cp[win]) * fn[tri[win]], axis=1))
-            sgn[wq] = np.where(sv == 0, 1.0, sv)
+            sv = np.sign(np.sum((Pc[wq] - cp[win]) * fn[tri[win]], axis=1))
+            sgn[i0 + wq] = np.where(sv == 0, 1.0, sv)
     return sgn * best if signed else best
 
 
@@ -691,7 +748,8 @@ def open_fraction(mesh):
     return sum(1 for v in cnt.values() if v == 1) / float(len(cnt))
 
 
-def mesh_to_sdf_grid(mesh, bounds, res=48, band=None, sign="auto", open_threshold=0.05):
+def mesh_to_sdf_grid(mesh, bounds, res=48, band=None, sign="auto", open_threshold=0.05,
+                     verify=4096, verify_tol=0.01):
     """Build a FULL, re-marchable signed distance grid from a mesh -- the complete mesh -> field conversion.
     Returns (grid res^3, (xs,ys,zs)).
 
@@ -704,6 +762,12 @@ def mesh_to_sdf_grid(mesh, bounds, res=48, band=None, sign="auto", open_threshol
         (Jacobson et al. 2013) via the fast cluster-dipole sum (Barill et al. 2018; measured 113x over the
         exact sum on the regression scan). No closure or orientation assumption -- the published robust answer
         for soups. Costs O(voxels x cells) + exact near-cells.
+      * "winding_flood" -- the CHEAP equivalent, opt-in: winding signs only the BAND (which is all the flood
+        needs -- a watertight blocking shell), then flood_fill_sign does the interior. The full-volume winding
+        path prices the whole grid, and its cost is in the wrong place: the winding number far from a surface
+        was never in doubt. The band is O(surface area) and its share of the volume SHRINKS with resolution
+        (17.5% of voxels at 128^3, 11.6% at 192^3, 8.4% at 288^3), so this saves more exactly where "winding"
+        hurts most.
       * "auto" (default) -- probe open_fraction(mesh): > `open_threshold` routes to "winding", else "flood".
         BACKWARD COMPATIBLE BY MEASUREMENT, not by promise: an edge-closed mesh takes the flood path
         BIT-IDENTICALLY (pinned by selftest); only the class whose flood output was documented garbage moves.
@@ -716,8 +780,63 @@ def mesh_to_sdf_grid(mesh, bounds, res=48, band=None, sign="auto", open_threshol
         sign = "winding" if open_fraction(mesh) > open_threshold else "flood"
     if sign == "flood":
         return flood_fill_sign(grid, band_val), axes
+    if sign == "winding_flood":
+        # THE COMPOSITION. The two sign methods fail in disjoint places, so use each only where it is right.
+        # flood_fill_sign is cheap and topologically exact, and leaks on a soup for ONE reason: the negative
+        # band shell that is supposed to block it has holes, because the shell's sign is nearest-normal.
+        # fast_winding_number has no holes, but pricing it over the whole volume is what makes "winding"
+        # expensive -- MEASURED 38.8 min for a 192^3 ladybird bake, and the cost is in the wrong place: the
+        # winding number far from the surface is never in doubt. So: WINDING SIGNS THE SHELL (making it
+        # watertight, which is the only thing the flood needs), THE FLOOD FILLS THE INTERIOR.
+        # PAIRED MEASUREMENT, same process, 151,582-face .glb at 128^3: 519.5s -> 237.9s (2.18x), and the
+        # output is not merely close -- 0 of 2,097,152 voxels differ in sign and the marched meshes are
+        # vertex-identical at 343,628 faces. The speedup is bounded by the two costs winding_flood still
+        # pays in full (the distance build and the flood itself), which is why it is 2.18x and not the
+        # 5.7x the band fraction alone would suggest -- an honest ceiling, not a disappointment.
+        # The shell is O(SURFACE AREA), and its share of the volume SHRINKS as resolution rises -- measured
+        # 17.5% of voxels at 128^3, 11.6% at 192^3, 8.4% at 288^3 -- so the saving grows exactly where the
+        # full-volume path hurts most. Opt-in, not the default: "auto" still routes to "winding" so no
+        # existing bake changes (hard constraint 3).
+        from holographic.mesh_and_geometry.holographic_voxelize import fast_winding_number
+        xs, ys, zs = axes
+        g = np.abs(np.asarray(grid, float))          # magnitudes from the band build are already correct
+        shell = g < band_val * (1.0 - 1e-9)          # exactly the voxels the banded build actually solved
+        idx = np.argwhere(shell)
+        if len(idx):
+            pts = np.stack([xs[idx[:, 0]], ys[idx[:, 1]], zs[idx[:, 2]]], axis=1)
+            w = fast_winding_number(pts, mesh.vertices, [f[:3] for f in mesh.faces])
+            # |w|: robust to either global orientation, same convention as the full-volume path
+            g[idx[:, 0], idx[:, 1], idx[:, 2]] *= np.where(np.abs(w) > 0.5, -1.0, 1.0)
+        out = flood_fill_sign(g, band_val)
+        # SELF-CHECK, ON BY DEFAULT, because this path has a real and non-obvious scope limit.
+        # The two methods answer DIFFERENT QUESTIONS: "winding" asks "is this point enclosed by the
+        # surface's solid angle?", winding_flood asks "can this point escape to the grid boundary?".
+        # They coincide for the class that motivated winding in the first place -- .glb soups whose
+        # boundary edges are SEAMS between coincident shells, with no opening a voxel wide (measured on a
+        # 151,582-face scan: 0 of 373,248 voxels differ). They diverge the moment there is a REAL hole,
+        # and NOT gracefully: a hole of 0.8 band widths in a sphere already flips 5.05% of voxels, and the
+        # figure does not shrink with the hole (4-5% from 0.8 to 2.2 bands) because the flood only needs
+        # one voxel-wide passage. winding_flood UNDER-fills there (inside 0.066 vs 0.117) -- it would ship
+        # a hollow object silently. So verify against the solid-angle answer on a cheap random subsample
+        # and REFUSE rather than return a plausible wrong field; `verify=0` opts out.
+        if verify:
+            rs = np.random.default_rng(0)                       # fixed seed: the check must be deterministic
+            n = min(int(verify), out.size)
+            flat = rs.choice(out.size, n, replace=False)
+            ii = np.stack(np.unravel_index(flat, out.shape), axis=1)
+            qp = np.stack([xs[ii[:, 0]], ys[ii[:, 1]], zs[ii[:, 2]]], axis=1)
+            wv = fast_winding_number(qp, mesh.vertices, [f[:3] for f in mesh.faces])
+            bad = float(((np.abs(wv) > 0.5) != (out[ii[:, 0], ii[:, 1], ii[:, 2]] < 0)).mean())
+            if bad > float(verify_tol):
+                raise ValueError(
+                    "sign='winding_flood' disagrees with the solid-angle answer on %.1f%% of a %d-point "
+                    "sample (tolerance %.1f%%). This mesh has an opening the grid flood can walk through, "
+                    "so the flood under-fills the interior and the field would be hollow. Use sign='winding' "
+                    "(exact, O(voxels)) -- or pass verify=0 if you deliberately want the connectivity answer."
+                    % (100 * bad, n, 100 * float(verify_tol)))
+        return out, axes
     if sign != "winding":
-        raise ValueError("sign must be 'auto', 'flood', or 'winding', got %r" % (sign,))
+        raise ValueError("sign must be 'auto', 'flood', 'winding', or 'winding_flood', got %r" % (sign,))
     from holographic.mesh_and_geometry.holographic_voxelize import fast_winding_number
     xs, ys, zs = axes
     gx, gy, gz = np.meshgrid(xs, ys, zs, indexing="ij")
@@ -798,6 +917,17 @@ def voxel_remesh(mesh, resolution=64, pad=0.2, sign="auto", keep_uv="auto"):
     span = float((V.max(0) - V.min(0)).max()) or 1.0
     p = float(pad) * span                                # pad relative to the mesh size, so the SDF band clears the
     lo = V.min(0) - p; hi = V.max(0) + p                 # grid boundary and the marched surface always closes
+    # TRIANGULATE FIRST. This faculty's whole job is MESSY-INPUT CLEANUP, and quads are the most ordinary
+    # mess there is -- box() and every other primitive here emits them. The sampler underneath indexes faces
+    # as triangles and (rightly) refuses n-gons with an arity error, so voxel_remesh(box()) raised
+    # "needs TRIANGLES, got 4-gon faces" -- a cleanup verb rejecting input for needing cleanup. Reusing the
+    # ear-clip (meshverbs2.triangulate_ngons, CONCAVE-CORRECT unlike a naive fan) rather than fanning here,
+    # per the rule that a second implementation of a solved problem is a discoverability tax. Imported lazily:
+    # meshverbs2 is a higher layer than this kernel and a module-level import would invert the dependency.
+    # No-op on an all-triangle mesh, so the old path stays byte-identical.
+    if len(mesh.faces) and len(mesh.faces[0]) != 3:
+        from holographic.mesh_and_geometry.holographic_meshverbs2 import triangulate_ngons
+        mesh = triangulate_ngons(mesh)
     grid, axes = mesh_to_sdf_grid(mesh, (lo.tolist(), hi.tolist()), res=int(resolution), sign=sign)
     out = marching_tetrahedra_vec(grid, axes, level=0.0)
     # keep_uv="auto": a remesh REPLACES the topology, so uvs can only be PROJECTED from the source surface
@@ -1166,5 +1296,90 @@ def _selftest_sculpt_prepare():
           "sub-cell sliver refused with the report; grid==mesh field; opt-out is single-pass)")
 
 
+def _selftest_grid_chunking():
+    """PIN THE EXACTNESS CONTRACT of the streamed point_set_to_mesh_grid.
+
+    This is a regression trap, not a smoke test. Chunking a reduction is only safe because every stage of
+    this kernel is per-query independent; the day someone makes the index bounds, the cell size or the
+    accumulator depend on the block, the answer silently becomes a function of the chunk size and every
+    baked SDF in the engine quietly changes. So the assertion is BIT-IDENTICAL output across chunk sizes
+    that do not divide the query count, signed and unsigned -- not 'close enough'."""
+    ax = np.linspace(-1.5, 1.5, 28)
+    g = np.stack(np.meshgrid(ax, ax, ax, indexing="ij"), axis=-1)
+    msh = marching_tetrahedra_vec(np.linalg.norm(g, axis=-1) - 1.0, (ax, ax, ax))
+    rng = np.random.default_rng(0)
+    P = rng.normal(size=(500, 3))
+    P = P / np.linalg.norm(P, axis=1)[:, None] * rng.uniform(0.8, 1.2, 500)[:, None]
+    for signed in (False, True):
+        ref = point_set_to_mesh_grid(P, msh.vertices, msh.faces, radius=2, signed=signed, chunk=10 ** 9)
+        for chunk in (1, 7, 103, 499):                      # deliberately NOT divisors of 500
+            got = point_set_to_mesh_grid(P, msh.vertices, msh.faces, radius=2, signed=signed, chunk=chunk)
+            assert np.array_equal(np.isinf(ref), np.isinf(got)), \
+                "chunk=%d changed WHICH queries found no triangle (signed=%s)" % (chunk, signed)
+            f = np.isfinite(ref)
+            assert np.array_equal(ref[f], got[f]), \
+                "chunk=%d is not bit-identical: max delta %.3g (signed=%s)" % (
+                    chunk, float(np.abs(ref[f] - got[f]).max()), signed)
+        assert np.isfinite(ref).any(), "the fixture must actually reach the surface"
+
+    # the auto chunk must SHRINK as the radius grows -- the whole reason it is a model and not a constant
+    c2 = _grid_query_chunk(5 ** 3, 0.13)
+    c3 = _grid_query_chunk(7 ** 3, 0.13)
+    assert c3 < c2, "radius 3 costs 2.7x the neighbour rows of radius 2; its chunk must be smaller (%d vs %d)" % (c3, c2)
+    assert _grid_query_chunk(125, 0.13, max_bytes=8 * 1024 ** 3) > _grid_query_chunk(125, 0.13, max_bytes=64 * 1024 ** 2), \
+        "a bigger byte budget must buy a bigger chunk"
+    print("OK: point_set_to_mesh_grid streams -- bit-identical across chunk sizes 1..1e9, signed and unsigned; "
+          "auto-chunk shrinks with radius and grows with the budget")
+
+
+def _selftest_winding_flood():
+    """PIN BOTH SIDES of sign="winding_flood": where it is identical to full-volume "winding", and where
+    it is NOT -- because a fast path whose scope is only in a docstring is a footgun.
+
+    The two methods answer different questions. "winding" asks *is this point enclosed by the surface's
+    solid angle*; winding_flood asks *can this point escape to the grid boundary past a winding-signed
+    shell*. That coincides for the class winding was built for -- .glb soups whose boundary edges are
+    seams between coincident shells, no opening a voxel wide -- and breaks as soon as there is a real
+    hole, because the flood only needs one voxel-wide passage. So: assert identity on a closed mesh,
+    assert the REFUSAL fires on a punctured one, and assert the escape hatch still returns the
+    connectivity answer. The refusal is the load-bearing assertion; without it this path would ship a
+    silently hollow object."""
+    ax = np.linspace(-1.5, 1.5, 26)
+    gg = np.stack(np.meshgrid(ax, ax, ax, indexing="ij"), axis=-1)
+    sph = marching_tetrahedra_vec(np.linalg.norm(gg, axis=-1) - 1.0, (ax, ax, ax))
+    SV = np.asarray(sph.vertices, float)
+    SF = [tuple(f) for f in sph.faces]
+    bs = ((-1.6, -1.6, -1.6), (1.6, 1.6, 1.6))
+
+    # (1) IDENTICAL where it is meant to be used: no opening for the flood to walk through
+    a, _ = mesh_to_sdf_grid(sph, bs, res=30, sign="winding")
+    b, _ = mesh_to_sdf_grid(sph, bs, res=30, sign="winding_flood")
+    same = (np.asarray(a) < 0) == (np.asarray(b) < 0)
+    assert same.all(), "winding_flood must match winding EXACTLY here: %d of %d voxels differ" % (
+        int((~same).sum()), same.size)
+    assert (np.asarray(b) < 0).mean() > 0.05, "the interior must actually be found"
+
+    # (2) THE REFUSAL. Punch a polar hole ~0.8 band widths across -- measured to flip ~5% of voxels.
+    zc = np.array([SV[list(f)].mean(0)[2] for f in SF])
+    holed = Mesh(SV, [f for f, z in zip(SF, zc) if z < 0.95])
+    assert open_fraction(holed) > 0.0, "the fixture must actually be punctured"
+    try:
+        mesh_to_sdf_grid(holed, bs, res=30, sign="winding_flood")
+        raise AssertionError("a mesh with a real hole must REFUSE the winding_flood path, not return a "
+                             "hollow field -- the self-check is the whole reason this path is shippable")
+    except ValueError as exc:
+        assert "winding_flood" in str(exc) and "sign='winding'" in str(exc), str(exc)
+
+    # (3) the opt-out still works, and it really does under-fill -- which is why (2) exists
+    h_wf, _ = mesh_to_sdf_grid(holed, bs, res=30, sign="winding_flood", verify=0)
+    h_w, _ = mesh_to_sdf_grid(holed, bs, res=30, sign="winding")
+    assert (np.asarray(h_wf) < 0).mean() < (np.asarray(h_w) < 0).mean(), \
+        "the documented failure is UNDER-filling; if it stopped under-filling, re-measure the scope"
+    print("OK: sign='winding_flood' is sign-identical to 'winding' with no flood passage (%d voxels, 0 "
+          "differ), REFUSES on a punctured mesh, and verify=0 returns the connectivity answer" % same.size)
+
+
 if __name__ == "__main__":
     _selftest_sculpt_prepare()
+    _selftest_grid_chunking()
+    _selftest_winding_flood()

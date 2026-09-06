@@ -902,6 +902,53 @@ float64 wall; it cannot take you past it. Going deeper needs arbitrary precision
 reference orbit, which is a different and much larger build. Run the whole effect with
 `mind.app_run('infinite_zoom')`.
 
+**Sync: drive the visuals from the music.** A demo that doesn't hit on the beat is a screensaver.
+`onset_detect()` finds the hits in audio, `tempo()` gives one global BPM, and `beat_grid()` predicts
+where the beats land so an effect can fire *on* the beat rather than just after it. The analysis half
+already existed — `audio_param_bus` was computing spectral flux and exposing it as `bus.onset` — so this
+is the **receiver**, not a new instrument.
+
+```python
+# guide-check
+import lecore, numpy as np
+mind = lecore.UnifiedMind(dim=256, seed=0)
+rate, bpm, secs = 22050, 120.0, 8.0
+
+# a click track IS its own ground truth -- that is the only reason the numbers below mean anything
+beats = np.arange(0.5, secs, 60.0 / bpm)
+x = np.zeros(int(secs * rate))
+for t0 in beats:
+    i = int(t0 * rate); et = np.arange(int(0.25 * rate)) / rate
+    seg = np.sin(2 * np.pi * 180.0 * et) * np.minimum(et / 1e-3, 1.0) * np.exp(-et / 0.03)
+    x[i:i + len(seg)] += seg[:len(x) - i]
+
+det = mind.onset_detect(x, rate)
+assert det["n"] == len(beats) and not det["abstained"]
+assert abs(mind.tempo(det["times"])["bpm"] - bpm) / bpm < 0.005      # within 0.5%
+assert mind.beat_grid(det["times"], secs)["mean_abs_error"] < 0.04   # random phase averages 0.125 s
+
+# THE ABSTENTION: no structure, no beats -- loud noise as well as silence
+assert mind.onset_detect(np.zeros(int(2 * rate)), rate)["n"] == 0
+assert mind.onset_detect(np.random.default_rng(0).normal(0, 0.3, int(2 * rate)), rate)["n"] == 0
+```
+
+*Kept limits, measured rather than guessed.* **Slow attacks are the failure envelope**: precision falls
+to **0.54** at a 30 ms attack (recall stays 1.00 — it finds every beat and adds as many again), so use it
+on percussive material. An onset at exactly `t=0` is **undetectable** — the flux needs a previous frame
+to difference against. The analysis is **offline**: `param_bus` normalises over the whole track, which is
+right for a fixed soundtrack and wrong for a live visualiser. And it is **one global tempo** — no tempo
+curve, no rubato, no downbeat; on a syncopated pattern the BPM reads a subdivision and `confidence` drops
+to 0.52 to say so. Run the whole loop with `mind.app_run('beat_sync')`.
+
+*The neighbours worth knowing, since sync is a chain and these are the links either side of it.*
+`audio_param_bus()` is the analysis this rides on — per-frame band envelopes (bass/low-mid/high-mid/
+treble) plus the flux curve, with `subscribe()` mapping any band onto a parameter range, which is how a
+knob gets driven when you want a continuous envelope rather than discrete hits. `analytic_signal()` gives
+the Hilbert envelope when you want amplitude without the carrier. And on the output side,
+`milk_parse()` and `milk_eval()` read Milkdrop `.milk` presets and evaluate their per-frame equations
+deterministically — a preset's motion variables are driven from exactly these audio envelopes, so the
+bus feeds them directly.
+
 **Over the wire.** The same doors ride the MCP server: `lecore-mcp` is on PATH after
 `pip install leos-core`; `study` / `study_ask` / `wisdom_record` / `wisdom_ask` are curated
 tools, and `lecore_invoke` reaches every faculty. The `initialize` banner carries the

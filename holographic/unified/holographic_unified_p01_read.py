@@ -1450,6 +1450,15 @@ class _UnifiedPart01:
         from holographic.io_and_interop.holographic_assetfetch import fetch_asset
         return fetch_asset(url, cache_dir=cache_dir, sha256=sha256, timeout=timeout)
 
+    def load_exr(self, path, exposure=1.0):
+        """Read an OpenEXR environment map -> (H,W,3) float32 linear radiance, same contract as load_hdr, so
+        `lambda d: m.sky_dome(d, env=m.load_exr(path))` is a light for the path tracer or the glass bake. OPT-IN:
+        needs `pip install OpenEXR` (PIZ/ZIP/DWA codecs are a container format, not a stdlib afternoon); raises
+        ImportError naming the fix without it. This closes the '.exr is not supported' kept negative on load_hdr --
+        by an optional import, not by widening the core. See holographic_render.load_exr."""
+        from holographic.rendering.holographic_render import load_exr
+        return load_exr(path, exposure=exposure)
+
     def load_hdr(self, path, exposure=1.0):
         """Read a Radiance .hdr / .pic (RGBE) environment map -> (H,W,3) float32 LINEAR radiance, UNBOUNDED.
 

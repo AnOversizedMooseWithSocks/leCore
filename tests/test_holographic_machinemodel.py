@@ -131,8 +131,17 @@ def test_the_gather_unit_has_constant_marginal_cost_in_n():
             gather(b, rule)
         return (time.perf_counter() - t0) / 200
 
-    small, large = marginal(8), marginal(256)
-    assert large < 3.0 * small, (small, large)          # 32x the lookups must not cost 32x the time
+    # PAIRED, AND THE MEDIAN OF THREE. The ratio gate was already right -- a wall-clock ceiling is a
+    # claim about a machine -- but a single unpaired pair still lets one contention spike inside
+    # marginal(256) decide the verdict, and this test duly went red under `pytest -n 4` while passing
+    # three times out of three in isolation. Pairing the two measurements puts them under the SAME
+    # load, and taking the median of three pairs means no single spike can carry the result. This is
+    # the remedy infinite_zoom paid two flaky tests to learn, applied here rather than rediscovered.
+    ratios = []
+    for _ in range(3):
+        small, large = marginal(8), marginal(256)
+        ratios.append(large / max(small, 1e-12))
+    assert sorted(ratios)[1] < 3.0, ratios                # 32x the lookups must not cost 32x the time
 
 
 def test_the_spec_sheet_measures_itself_rather_than_quoting_a_comment():
@@ -180,20 +189,32 @@ def test_the_two_measurements_that_were_fictions_now_measure_real_work():
 
 
 def test_place_unit_runs_on_measured_numbers():
-    sheet = spec_sheet(quick=True)
-    base = sheet["baseline_dense_index"]["marginal_ns"]
+    """MAJORITY OF THREE SHEETS, because spec_sheet MEASURES itself.
 
-    # against a raw array read almost nothing can pay, and the model must SAY so rather than flatter a unit
-    assert place_unit("texture_unit", base, 10 ** 6, sheet=sheet)["break_even_n"] == float("inf")
-    assert place_unit("t4_compressed_ram", base, 10 ** 6, sheet=sheet)["use_unit"] is False
+    That self-measurement is the point of the sheet (it refuses to quote a comment), but it means every
+    verdict below rests on wall-clock timings taken on a shared box: under `pytest -n 2` the numbers
+    shift enough to flip a threshold, and this test duly went red in a parallel run while passing every
+    time in isolation. Three sheets and a majority vote is the same remedy already applied to
+    infinite_zoom (twice), the gather unit, and the memoize cost model -- the FIFTH time this repo has
+    paid for an unpaired wall-clock comparison. The claims are real; a single sample of them is not."""
+    def verdicts():
+        sheet = spec_sheet(quick=True)
+        base = sheet["baseline_dense_index"]["marginal_ns"]
+        hot = place_unit("t2_baked_grid", 50_000.0, 10 ** 6, sheet=sheet)
+        return (place_unit("texture_unit", base, 10 ** 6, sheet=sheet)["break_even_n"] == float("inf"),
+                place_unit("t4_compressed_ram", base, 10 ** 6, sheet=sheet)["use_unit"] is False,
+                bool(hot["use_unit"]) and hot["speedup"] > 5.0,
+                hot["unit"] == "t2_baked_grid" and bool(hot["note"]))
 
-    # against a genuinely expensive evaluator (50 us) the baked grid pays almost immediately
-    hot = place_unit("t2_baked_grid", 50_000.0, 10 ** 6, sheet=sheet)
-    assert hot["use_unit"] is True and hot["speedup"] > 5.0
-    assert hot["unit"] == "t2_baked_grid" and hot["note"]
+    trials = [verdicts() for _ in range(3)]
+    for k, name in enumerate(("texture_unit never breaks even against a raw array read",
+                              "t4_compressed_ram does not pay against a raw array read",
+                              "the baked grid pays against a 50us evaluator",
+                              "the verdict names its unit and explains itself")):
+        assert sum(t[k] for t in trials) >= 2, "%s failed the majority of 3 sheets" % name
 
     with pytest.raises(KeyError):
-        place_unit("no_such_unit", 100.0, 10, sheet=sheet)
+        place_unit("no_such_unit", 100.0, 10, sheet=spec_sheet(quick=True))
 
 
 def test_kept_negative_the_denominator_decides_the_verdict():

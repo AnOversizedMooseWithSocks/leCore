@@ -86384,3 +86384,128 @@ THE HABIT THAT CAUGHT IT: check where the rule comes from before calling it a bu
 Three commands -- git check-ignore, a grep of .gitignore, and reading load_rules --
 turned a confident finding into a confirmation. A declared negative with its reason
 written next to it is exactly what stops this, and it worked.
+
+--------------------------------------------------------------------------------
+SWEEP 137 -- THE LOOP CAME HOME, THE AGENTS WERE KILLED MID-FLIGHT, AND THE
+CLOSE-OUT FOUND TWO WRONG JUDGEMENTS -- ONE OF THEM ITS OWN
+
+THE BRIEF (Moose, standing): the swarm brief, demo scene leading, the above/below
+sweep, fractals/inception/layers.
+
+THE LOOP CAME HOME. Sweeps 129-136 were delivered as a zip; Moose committed it
+upstream (1d4de08 "new"); CI refreshed the generated docs, routing index and
+durations; and it merged back. Censused THROUGH OUR OWN FACULTY:
+    merge_census(base=5cd22f7, new=.)  ->  1999 files, 0 lost, 0 added,
+                                           0 signature changes, 0 shrunk.  CLEAN
+Three files checked byte-for-byte against upstream (test_external_abstention.py,
+swarm_audit.py, holographic_extbench.py): SAME. And unparseable_base is 0 for the
+first time -- tools/tour.py compiles upstream, which is sweep 133's f-string fix
+having gone out and come home. One conflict: REFERENCE.md, generated, regenerated
+rather than hand-resolved.
+
+THE CONTAINER RESTARTED MID-ROUND AND KILLED BOTH AGENTS. Their work was on disk;
+their REPORTS were not. So nothing below is self-reported -- every number here was
+re-measured at close-out, and where an agent's item did not land it is recorded as
+not landed rather than as a plan.
+
+ITEM Q (agent-b, demo scene) -- LANDED, AND VERIFIED FROM SCRATCH.
+The audio wire had been open since sweep 133: audio_param_bus produced per-frame
+band energies and NOTHING computed onsets to drive it. RULE 0 confirmed it again --
+five phrasings, and beat_detect / onset_detect / tempo / spectral_flux / stft /
+envelope all MISSING.
+SHIPPED: detect_onsets / estimate_tempo / beat_grid in holographic_parambus, wired
+as mind.onset_detect / mind.tempo / mind.beat_grid on p10, catalogued, plus a
+beat_sync application with a GALLERY entry, a rendered artefact and a guide block.
+RE-MEASURED AT CLOSE-OUT (not taken on trust): applications registry 6 across 5
+domains; beat_sync 15/15 onsets P=1.00 R=1.00, 119.95 BPM, grid 6.2 ms, visual lands
+33.3 ms; infinite_zoom still 9.4 ms/frame at the 60 fps budget, 8.8x vs full
+recompute. compileall clean, audit_imports 0/0, every touched selftest green.
+
+ITEM R (agent-c, the seven rendering cards) -- DID NOT LAND. The floor was still 13
+when the round resumed. Recorded as not done, and the close-out took the first of
+the seven rather than banking the rest as if they had been.
+
+CLOSE-OUT, AND IT FOUND TWO WRONG JUDGEMENTS.
+
+1. MY OWN, CAUGHT BY RUNNING IT. splat_denoise wired (mind.splat_denoise on p07),
+   and the catalog example I first wrote asserted a denoising win at K=8. It is not
+   there. MEASURED on a 32x32 separable Hann bump, noisy baseline err 0.0773:
+       K=2  0.4184   K=4  0.2206   K=8  0.1228   -- ALL WORSE THAN DOING NOTHING
+       K=16 0.0653   K=32 0.0469   K=64 0.0456   -- better
+   And on a field the gaussian basis CAN represent (a single blob, baseline 0.0830):
+       K=1  0.0421   K=2  0.0290   K=4  0.0178   -- better from one splat
+   SO THE KEPT NEGATIVE IS THE CARD'S HEADLINE: AN UNDER-PROVISIONED K IS WORSE THAN
+   DOING NOTHING. The basis IS the prior, and K must match the field's structure or
+   the cleanup pass is damage. Example rewritten to the blob case, which is true and
+   runs. Floor 13 -> 12.
+
+2. THE PLAN'S, CARRIED FOR TWO SWEEPS. write_multichannel was listed among "the
+   seven rendering cards" and the sweep-134 demo-scene review named it "the only one
+   of the seven that gets data OUT" -- so it was prioritised second. IT IS NOT A
+   RENDERING FUNCTION. It lives in caching_and_storage/holographic_substrate and
+   splits fountain-code droplets across two channels of MODEL WEIGHTS so that
+   destroying either channel still decodes. Checked by importing all seven and
+   printing the family each actually lives in: six are genuinely under
+   holographic/rendering/, that one is not.
+   THE MECHANISM OF THE ERROR, worth more than the correction: the judgement was made
+   FROM THE NAME, inside a list already labelled RENDERING. The same review's guess
+   about add_caustics ("it likely wants a scene/light argument") was RIGHT --
+   add_caustics(img, scene, camera, width, height, light_dir=...) -- because there
+   the name and the family agreed. A name is evidence only when nothing has already
+   grouped it for you.
+   chain_transport(chains, d_eye, d_ang, pad) reads as exactly what the review
+   suspected: warm-start plumbing for a PREVIOUS march, a correct non-door.
+
+THE UP/DOWN/SIDEWAYS CHECK ON THE BEAT WORK, and it closed a direction.
+    DOWN     the first half of a track            WORKS (a segment is a track)
+    UP       a 2-channel stereo buffer            CRASHED -- "boolean index did not
+             match indexed array along axis 0", out of the framing step. An error
+             naming the symptom and not the cause, from THE SINGLE MOST LIKELY INPUT
+             A DEMO SCENER HAS ON DISK.
+    SIDEWAYS a decimated envelope instead of audio  RUNS, RETURNS ZERO ONSETS
+FIXED the UP direction: a >1-D input is averaged to mono before framing. That is what
+every onset detector does -- a beat is in both channels, so the downmix IS the mono
+signal, not an approximation of one. Asserted EQUAL to the mono result (8 == 8), and
+the mono path is untouched. Proven over HTTP: mono 7, stereo 7, tempo 120.14 BPM from
+the stereo path.
+THE SIDEWAYS DIRECTION IS LEFT OPEN AND ASSERTED SO, because running-but-not-working
+is worse than raising: a caller gets a number instead of an error. The cause is
+structural -- this is an STFT flux detector and an envelope has already discarded the
+spectrum it measures. A general 1-D change-point verb is a DIFFERENT faculty, and
+detect_regimes already exists for that.
+
+AND A THIRD NUMBER THAT NEEDED CORRECTING -- MINE AGAIN. The first tempo test asserted
+|bpm - 120| < 2 and failed at 117.19. The failure was RIGHT: 0.5 s spacing is 120 BPM
+by construction, so the gap is RESOLUTION, not error. Onset times land on frame
+boundaries and a frame is hop/rate seconds:
+        frame 64.0 ms -> 117.19 BPM  err 2.34%
+        frame 32.0 ms -> 119.86 BPM  err 0.11%
+        frame 16.0 ms -> 120.14 BPM  err 0.11%
+        frame  8.0 ms -> 120.00 BPM  err 0.00%
+The estimator is fine; THE ANALYSIS RATE IS THE KNOB. The test now asserts the
+RELATIONSHIP -- coarse frames bounded, fine frames accurate, finer never worse --
+rather than one magic constant, which would have hidden which of the two was being
+measured. NOTE FOR ANYONE QUOTING beat_sync's HEADLINE 0.045%: that belongs to ONE
+CONFIGURATION, not to the faculty.
+
+MEASUREMENTS AND STATE
+Catalog 721 cards / 653 doors; L0/L1/L2-reachable 626 -> 628. Eight audits:
+reachability 0 no-docstring / 0 import-only / 0 duplicate (canary 6, 4 over cap, 0
+source); catalog_gaps 0; skill_lint 0 including 0 broken card contracts and 0
+does-length regressions; doc_coverage within budget; wiring 0 dark / 0 catalog-only;
+delegation_drift --gate 0; swarm_audit --gate 12 (from 13, rebased with the reason);
+audit_imports 0/0; regen --check green. HTTP /invoke proven for onset_detect (mono
+AND stereo), tempo and splat_denoise.
+
+FOUND, NOT FIXED
+- SIX rendering cards remain of the seven, now correctly counted: add_caustics
+  (wants scene/camera/light -- the review's guess was right), aniso_render(splats,
+  shape), from_components(I,Q,U,V) all read caller-facing; chain_transport reads as
+  plumbing and deserves a budgeted negative rather than a forced faculty;
+  write_multichannel is not a rendering card at all and should be re-grouped before
+  anyone prioritises it again.
+- The SIDEWAYS direction on onset detection: open, asserted, and correctly a
+  different faculty.
+- ITEM R's other six above/below cards: untouched, because the agent that owned them
+  never reported and guessing signatures for someone else's stack is how a sweep
+  breaks someone else's work.

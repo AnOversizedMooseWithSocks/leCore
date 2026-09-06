@@ -41,14 +41,25 @@ def test_normal_queries_are_decision_safe_on_the_shipped_index(index):
 
 
 def test_ambiguous_queries_collapse_the_margin(index):
-    # THE MECHANISM. Midpoints between two documents are ambiguous by construction; their margins must
-    # collapse relative to ordinary queries. This is why flip rate is not predictable from N and bits.
+    """THE MECHANISM. Midpoints between two documents are ambiguous by construction; their margins must
+    collapse relative to ordinary queries. This is why flip rate is not predictable from N and bits.
+
+    ASSERTS THE MECHANISM, NOT A SNAPSHOT OF ONE INDEX -- the same fix its neighbour above already
+    carries, applied here one sweep late. The original second assertion demanded
+    `r_amb["flip_rate"] > r_norm["flip_rate"]`, a STRICT inequality on a quantity that is 0.0 for both
+    samples whenever 8 bits is comfortably enough for the shipped index. It went red at 794 rows with
+    the margin contract passing handsomely (0.064 vs 0.567 -- an 8.9x collapse against a 5x gate),
+    because nothing flipped on either side: 0.0 > 0.0 is false. That is a test failing BECAUSE THE
+    QUANTIZER IS DOING WELL, which is the same shape as the five tests this repo has already lost to
+    fixtures that pinned the size of a mess instead of a contract. The margin collapse IS the
+    mechanism; flip rate is a downstream consequence that only becomes observable once the index is
+    dense enough to have any flips at all, so it is asserted as non-decreasing and REPORTED."""
     amb = 0.5 * (_rows(index, 200, seed=2) + _rows(index, 200, seed=3))
     normal = _rows(index, 200, seed=4)
     r_amb = decision_flip_rate(index, amb, bits=8, mode="uniform")
     r_norm = decision_flip_rate(index, normal, bits=8, mode="uniform")
     assert r_amb["margin_median"] < 0.2 * r_norm["margin_median"]
-    assert r_amb["flip_rate"] > r_norm["flip_rate"]
+    assert r_amb["flip_rate"] >= r_norm["flip_rate"]
 
 
 def test_well_separated_queries_survive_aggressive_quantization(index):

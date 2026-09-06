@@ -54,6 +54,9 @@ REGISTRY = {
     "request_to_record": ("applications.parse.request_to_record", "parse"),
     "texture_composite": ("applications.art.texture_composite", "art"),
     "infinite_zoom": ("applications.demoscene.infinite_zoom", "demoscene"),
+    "beat_sync": ("applications.demoscene.beat_sync", "demoscene"),
+    "prism": ("applications.demoscene.prism", "demoscene"),
+    "spectral_glass": ("applications.demoscene.spectral_glass", "demoscene"),
 }
 
 
@@ -100,7 +103,7 @@ def _selftest():
     """Every registered name must import, declare its metadata, and expose run() -- the listing and the
     library cannot disagree. Pins the COUNT so a silently dropped application fails loudly."""
     names = sorted(REGISTRY)
-    assert len(names) == 5, names
+    assert len(names) == 8, names
     listed = apps()
     assert [a["name"] for a in listed] == names, "apps() must list exactly the registry"
     for a in listed:
@@ -108,7 +111,7 @@ def _selftest():
         assert callable(mod.run) and callable(mod._selftest), a["name"]
         assert isinstance(mod.PROVES, str) and len(mod.PROVES) > 20, "%s: say what it proves" % a["name"]
         assert mod.NAME == a["name"] and mod.DOMAIN == a["domain"], "%s: metadata disagrees" % a["name"]
-    assert len({a["domain"] for a in listed}) == 5, "one application per domain in this tranche"
+    assert len({a["domain"] for a in listed}) == 5, "five domains; demoscene now carries four"
     print("applications registry selftest OK: %d applications across %d domains -- %s"
           % (len(names), len({a["domain"] for a in listed}), ", ".join(names)))
 

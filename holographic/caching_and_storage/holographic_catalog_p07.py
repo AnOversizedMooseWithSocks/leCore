@@ -171,11 +171,11 @@ def register_p07(c):
         module="holographic_splat")
     c.register_capability(
         "splat_denoise",
-        "Edge-aware DENOISE for a splat render -- smooths the gaussian shimmer while "
-        "preserving silhouettes; the cleanup pass between splatting and display.",
-        example="from holographic.rendering.holographic_splat import splat_denoise",
-        aliases=("denoise a splat render", "smooth gaussian shimmer"),
-        module="holographic_splat")
+        "Denoise a 2-D field by fitting K Gaussian splats and rendering them back: the smooth basis IS the prior, so K alone decides how much detail survives. MEASURED on a 32x32 field, noise err 0.0830 -> 0.0178 at K=4 when the field IS gaussian. KEPT NEG, and it is the whole warning: an UNDER-PROVISIONED K IS WORSE THAN DOING NOTHING. On a separable Hann bump the basis fits badly and K=2/4/8 score 0.418/0.221/0.123 against a 0.077 noisy baseline -- only K>=16 beats it. Match K to the field's structure or the cleanup pass is damage.",
+        example="import lecore, numpy as np; m=lecore.UnifiedMind(dim=64, seed=0); rng=np.random.default_rng(0); g=np.exp(-(np.add.outer((np.arange(32)-16)**2,(np.arange(32)-16)**2))/40.0); n=g+0.1*rng.normal(size=g.shape); print(float(np.abs(m.splat_denoise(n,4)-g).mean()) < float(np.abs(n-g).mean()))",
+        aliases=("denoise a splat render", "smooth gaussian shimmer",
+                 "clean up a noisy render", "how many splats do I need"),
+        module="holographic_splat", method="splat_denoise")
     c.register_capability(
         "element_flame_color",
         "The FLAME COLOR an element burns with (emission spectrum -> RGB) -- the flame-test "
@@ -334,7 +334,23 @@ def register_p07(c):
                  "leaky integrator over hypervectors",
                  "decay a sequence and bundle new content into it"),
         module="holographic_feedback", method="deep_zoom")
-    return 32
+    c.register_capability(
+        "beat_sync",
+        "SYNC: drive the visuals from the music. mind.onset_detect(samples, rate) finds the hits, "
+        "mind.tempo(times) gives one global BPM, mind.beat_grid(times, secs) predicts where the beats "
+        "land -- the receiver for the wire audio_param_bus already had a signal on. MEASURED against "
+        "click tracks with EXACT known beats (+/-50ms): clean 60-175 BPM P=1.00 R=1.00, tempo within "
+        "0.05%, grid error 6ms, noise survived to sigma 0.2. IT ABSTAINS: silence and noise (loud or "
+        "quiet) return ZERO onsets. KEPT NEG: slow attacks are the failure envelope -- precision 0.54 at "
+        "a 30ms attack. Run: mind.app_run('beat_sync').",
+        example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.app_run('beat_sync')",
+        aliases=("detect the beat in an audio track", "find onsets in a waveform",
+                 "drive the visuals from the music", "tempo of a track in bpm",
+                 "trigger an effect on the kick drum", "beat detection",
+                 "sync an effect to music", "spectral flux onset novelty",
+                 "what bpm is this", "make the demo hit on the beat"),
+        module="holographic_parambus", method="onset_detect")
+    return 33
 
 
 _PART = "holographic_catalog_p07"

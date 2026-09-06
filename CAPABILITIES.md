@@ -26,6 +26,14 @@ import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rng
 ```
 *Find it by:* store a mesh as canonical plus deltas, canonical element, recognize that two triangles are the same up to a transform, instancing generalized, delta chain for geometry, shape recognition, congruent, similar shapes
 
+### Caustic as one hypervector, wavelength as an axis (holographic_caustic)
+The caustic as ONE HYPERVECTOR, wavelength as an axis -- RENDER = QUERY. Trace the light ONCE with a per-ray spectrum, BUNDLE the landings into an FPE field, READ the image at any resolution: RGB is three UNBINDS (the colour-matching integral folded into the query). .translate is a bind, .add superposes another object. Measured 0.80-0.95 agreement with the histogram (dim 1024-16384), 5x smoother at equal rays. KEPT NEGATIVE: colour separation is CAPACITY-BOUNDED (same-geometry reads at two wavelengths correlate ~0.75 at dim 2048, above a ~3% physical dispersion). Raise dim or tile..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.mesh_and_geometry.holographic_sdf import sphere; h=m.holographic_caustic(sphere(0.6), light_dir=(0.35,-1,0), receiver_y=-1.2, extent=0.9, n_side=100, window=1.2, dim=1024, aim=(0,0,0)); xs=np.linspace(-1.2,1.2,32); print(h.read_rgb(xs, xs, m.wavelength_cmf).shape)
+```
+*Find it by:* caustic as a hypervector, render the caustic from a superposition, caustics without a histogram, read the caustic at any resolution, wavelength as a dimension, spectral caustic in one pass, bundle the light instead of binning it, holographic dispersion
+
 ### Circular encoder (angles and clocks with an EXACT wrap)
 mind.circular_encoder(dim, period): encode a CIRCULAR variable (angle, hour, weekday, phase) so encode(x) == encode(x+period) to 1e-12 and similarity depends ONLY on the circular gap: 23:59 and 00:01 read as 2-minute neighbours where the LINE ScalarEncoder reads cos 0.21 (periodicity needs INTEGER harmonics -- a construction, not a parameter). Poisson-minus-DC kernel: small antipodal dip (<0.25, measured); concentration trades lobe width for dip. decode() = circular cleanup. Audit carried: SignedEncoder REFUTED -- signed is native to ScalarEncoder..
 
@@ -83,6 +91,14 @@ mind.damage_mask(destroy_fraction, seed, dim): a keep-mask zeroing a random frac
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); v=m.perceive('a red cube','text'); print(m.damage_mask(0.4).sum(), (v*m.damage_mask(0.4)).shape)
 ```
 *Find it by:* corrupt a vector for testing, damage a hypervector, zero out random slots, simulate data loss, knock out part of a vector, robustness test mask, graceful degradation test, how much damage can it take
+
+### Density field as one hypervector: closed-form ray integral, no marching (holographic_fog_volume)
+A traditional renderer has NO model of empty space -- it marches to find out. holographic_fog_volume carries the WHOLE density field, occupied and empty, as ONE FPE hypervector, and the line integral of density along any ray has a CLOSED FORM: one inner product per ray, no steps (the FPE basis is a phase code; the integral of a complex exponential is a complex exponential). Measured EXACT against a 160-step march (corr 1.0000), ~90x faster at image scale; empty space reads tau~0 with no marching. Optical depth / extinction only -- emissive self-shadowing media still march (documented)..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); vol=m.holographic_fog_volume([[0,0,0],[1,0.5,0]], [1.0,0.6], bounds=[(-3,3)]*3, dim=1024); print(round(float(vol.optical_depth(np.array([[-3,0,0.]]), np.array([[1,0,0.]]), 6.0)[0]),3))
+```
+*Find it by:* fog without ray marching, the field knows where empty space is, closed form ray integral, volume as one hypervector, optical depth in one inner product, atmosphere in closed form, no model of empty space, density field as a vector
 
 ### Dialect emitters (WGSL / C / JS / Zig from the Python kernel)
 leCore's kernels are written once, in Python, and the browser needs them in WGSL. mind.emit_kernel(fn, dialect) walks the same AST that code_structure decomposes and a dialect table supplies the type names, the intrinsic names and the declaration syntax -- so the hand-written compute shader becomes a PROJECTION of the authoritative Python kernel: one source of truth, two runtimes, no drift. Dialects: wgsl, glsl (ES 3.0/WebGL2), c_f64, c_f32, js, zig_f64, zig_f32. BOUNDED LOOPS EMIT: `for i in range(<int literal>)` -- the shader fBm/octave shape -- with explicit counter promotion ((double)i / f32(i) / @floatFromInt) and mutable accumulators; a variable trip count still refuses. THE BAR IS EXECUTED, not asserted: mind.validate_kernel COMPILES the emitted C with cc and RUNS it on the same inputs. MEASURED on the sphere SDF, smoothstep and cosine over 200 random inputs: c_f64 is BIT-IDENTICAL to the Python original (same order of operations, same doubles); c_f32 differs by 8.0e-08 to 3.4e-07. KEPT NEGATIVE 1: A WGSL KERNEL CANNOT BE BIT-IDENTICAL TO ITS PYTHON ORIGINAL -- WGSL's f32 is single precision and NumPy is double, so the bar is 'to float tolerance' and THE TOLERANCE IS f32 EPSILON, not a number anybody chooses. c_f32 exists so that tolerance is measured by running it. KEPT NEGATIVE 2: the emitted WGSL is NOT executed by any test here -- there is no GPU and no browser. Its arithmetic semantics are validated through c_f32, which shares the IR and differs only in a table; what is NOT validated is WGSL's own precision guarantees, its fast-math latitude, or whether the shader compiles. That is a real gap, stated. KEPT NEGATIVE 3: `bind` is NOT emittable and that is not a missing feature -- it is a circular convolution by FFT, a whole-array cooperative algorithm, and its WGSL is a workgroup FFT, a different artifact. A scalar emitter that pretended otherwise would emit an O(D^2) loop nest and call it a bind. K10's rule is obeyed throughout: the emitter REFUSES rather than guesses, because a wrong int/double is a wrong answer at no tolerance. ZIG (opt-in, `pip install ziglang`, numba's exact contract -- every test passes without it): validate_kernel with a zig_* dialect compiles `-O ReleaseSafe` and RUNS. MEASURED: zig_f64 BIT-IDENTICAL on the round-box SDF over 200 inputs; zig_f32 max 7.0e-07. KEPT NEGATIVE 4: Zig REFUSES unused locals/params at compile time -- a dead assignment emits but will not build, and we do not suppress that. KEPT NEGATIVE 5: ReleaseFast licenses float reassociation and is NOT the deterministic mode. KEPT NEGATIVE 6: std.math.pow is not libm pow (measured 1-ulp gap), so f64 bit-identity is a property of the builtin intrinsics only. The zig wheel also backstops the C path: run_c falls back to `zig cc` when no system compiler exists..
@@ -148,6 +164,14 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); img=np.
 ```
 *Find it by:* find edges in an image, detect corners in an image, find lines in an image, dominant colors of an image, image palette, cluster images by appearance, image feature vector, perceptual image descriptor
 
+### Imperfections inside a gem as one hypervector: milky quartz, inclusions, colour zoning (gem_flaw_volume)
+m.gem_flaw_volume(field=any P->[0,1] such as crystal_cloudiness, bounds) bundles the flaw density into ONE FPE vector; relight_glass(flaw_volume=fv, flaw_sigma, flaw_albedo) reads its integral along each pixel's recorded interior path in CLOSED FORM (holographic_volint, no marching): extinction + single-scatter glow. absorb_volume + absorb_volume_sigma(rgb) is COLOUR ZONING the same way (amethyst purple at the tips). MEASURED: vs a 400-step march 12%; crosstalk floor ~10% at dim 4096. Before, only the MC tracer had flaws..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.mesh_and_geometry.holographic_sdf import sphere; cam=m.camera(eye=(0,0,3),target=(0,0,0),fov_deg=30,aspect=1.0); b=m.bake_glass(sphere(0.6),cam,16,16,n_lams=3); fv=m.gem_flaw_volume(field=lambda P: np.ones(len(P)),bounds=[(-0.7,0.7)]*3,res=6,dim=512); env=lambda D: np.ones((len(D),3)); pure=m.relight_glass(b,env); milky=m.relight_glass(b,env,flaw_volume=fv,flaw_sigma=5.0,flaw_albedo=(0.5,0.5,0.5)); print(len(b.segs)>0, not np.allclose(pure,milky))
+```
+*Find it by:* crystals are too pure, add inclusions to the gem, milky quartz render, cloudy crystal base, amethyst purple only at the tips, colour zoning in a crystal, rutile needles inside quartz, imperfections in the glass bake
+
 ### Mesh as a sequence (SATO-SEQ: stable serialization + hypervector encode)
 SATO-SEQ -- serialise a mesh to a STABLE token sequence (m.mesh_to_tokens) and bind a sequence into one FHRR hypervector (m.seq_encode / m.seq_decode). Three deterministic vertex orders: morton (Z-order curve, byte-stable under input permutation), zyx (PolyGen lexicographic), fiedler (spectral seriation). Coords quantised to `bits` bits (3 tokens/vertex). Sequence -> hypervector by permutation-power binding; past the ~dim/8 capacity cliff it stores block vectors (round-trips exactly). Clean-room from Morton/PolyGen, NOT the GPL-3.0 SATO code. Returns (tokens, order, grid)..
 
@@ -205,6 +229,14 @@ patterns, transformations, rotations and scaling form a hierarchy the way letter
 import numpy as np, lecore; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(lecore.classify_transform(lambda x: x + np.array([0.1, 0, 0]))['name']); print(lecore.classify_transform(lambda x: 1.7 * x)['name']); print(lecore.classify_transform(lambda x: x / (1 + 0.3 * x[2]))['name']); print(mind.hypervector_layer()['name'])
 ```
 *Find it by:* which floor is this transform on, classify a transform, can I push a delta through this, transform tower, transform hierarchy, levi decomposition, affine group, abelian ideal
+
+### Tiled holographic caustic (break the capacity wall)
+holographic_caustic with the receiver split into grid x grid tile vectors, each read routing its own pixels -- the capacity wall broken the way TiledRadianceField breaks it. Build 50.7s (one dim-16384 vector) -> 4.6-11s (tiles); 0.87 agreement with the true caustic at equal ray budget. KEPT NEGATIVE: with landings per tile still above the tile's dim, each tile shows its own crosstalk texture -- a PATCHWORK at borders; use more tiles. The histogram on an analytic SDF is 2.3s: the substrate wins on resolution independence, composability and one-pass spectrum here, not raw speed..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.mesh_and_geometry.holographic_sdf import sphere; t=m.holographic_caustic_tiled(sphere(0.6), light_dir=(0.35,-1,0), receiver_y=-1.2, extent=0.9, n_side=100, window=1.2, grid=2, dim=1024, aim=(0,0,0)); xs=np.linspace(-1.2,1.2,32); print(t.read_rgb(xs, xs, m.wavelength_cmf).shape)
+```
+*Find it by:* caustic too blotchy raise resolution, holographic caustic patchwork, tile the caustic field, caustic field capacity wall, more landings than dimensions, tiled hypervector caustic
 
 ### Transform (warp)
 move / rotate / warp across representations: VSA bind (rigid) + permute (order), 4x4 matrices (translate/scale/rotate/compose/decompose/look_at + quaternions), clifford rotors, anisotropic steering -- one facade.
@@ -876,6 +908,14 @@ import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); lib=mind.nested_memory(
 ```
 *Find it by:* many databases in one vector, library of memories, nested knowledge bases, memory of memories, query across model shelf, holographic library, two level lookup one operation, shelve a trained memory
 
+### Optics of a named material: index, dispersion, absorption in one door (glass_optics)
+glass_optics('ruby') -> {n_d 1.77, abbe 72.2, absorb per-RGB, tint}: everything a physically based glass render needs to refract, DISPERSE and colour a named material. The library had an index and an absorption per gem but NO dispersion, so a ruby could never split light. Catalogue values: diamond 44.3 on n 2.42 (its 'fire' is a modest Abbe number on a high index), corundum 72.2, beryl 56, quartz 70, water 55.7. bake_glass(material=) / relight_glass(material=) read it; a thick ruby comes out redder than a thin edge..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.materials_and_texture.holographic_matlib import glass_optics; print(glass_optics('diamond')['abbe'], glass_optics('ruby')['absorb'])
+```
+*Find it by:* render a ruby, diamond dispersion, abbe number of sapphire, physical gem material, material index of refraction and dispersion, make the glass a real material, how much does water disperse, beer lambert absorption of a gem
+
 ### Ouroboros (the closed memory loop: leCore eats the installed model's memory)
 THE NAMED PROCESS: a model with leCore installed in its weights OUTPUTS memory -- GDN head state (an outer-product accumulator, leCore's own HRR trace) and durable notes -- and server-side leCore CONSUMES it as an ordinary data structure, then feeds it back. MEASURED on exact GDN algebra: read 0.935; external write reads 0.951 by the model's own readout (zero forward passes); delete -> -0.24; capacity 0.932 pred / 0.905 meas; transcript consolidation 0.767 -> 0.918 (self-rehearsal = pollution, kept negative). Durable side: memory_write/memory_search per-tenant partition. docs/ZOO.md 7-8..
 
@@ -1217,6 +1257,14 @@ import lecore; m=lecore.UnifiedMind(); ix=m.perfect_recall_index(tile=8); ix.add
 ```
 *Find it by:* guarantee nothing relevant is missed, make search results provably complete, certificate of retrieval completeness, recover documents the ranker dropped, safety net under ranked search, exhaustive candidate generation with proof
 
+### mesh_query_chunk
+Why a big SDF bake gets OOM-KILLED, and the knob that stops it. The mesh-distance kernel held a (N,(2r+1)^3,3) neighbour block -- MEASURED 36.8 KB peak RSS per query -- so a 176^3 bake needed 37 GB for a 43 MB grid. Now STREAMED: mesh_point_distance takes max_bytes (default 512 MB) and peak memory is FLAT in the query count (0.58 GB at 200k points, 0.62 GB at 800k), staying bit-identical at any chunk size. This verb reports the block a budget buys, so you can size a bake before it dies. Cost scales with RADIUS, not mesh size..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); print(m.mesh_query_chunk(radius=2), m.mesh_query_chunk(radius=3))
+```
+*Find it by:* out of memory baking an sdf, killed while baking a distance field, my bake gets oom killed, how much memory does a mesh distance query need, sdf bake resolution limit, process killed at 128 cubed, distance field too big for ram, chunk a point to mesh query
+
 ### perfect_recall_index
 GUARANTEED perfect recall (holographic_perfectrecall): exact AND-containment queries over any corpus size, zero false negatives (sparse binary superposition filters -- Bloom-as-VSA, Kleyko 2020) and zero false positives (sha256 verify, the depth test), under OR-baked tile probes with independent resolution (irradiance-map cull; probe saturation is a measured negative). Multi-channel (token/trigram/fields), instanced term codes, no BM25. Returns the EXACT ground-truth doc set. KEPT NEG: containment not relevance; ubiquitous terms degenerate to the timed scan..
 
@@ -1249,6 +1297,14 @@ import lecore; m=lecore.UnifiedMind(dim=256, seed=0); print(m.repo_map('holograp
 ```
 *Find it by:* map out a large codebase, repo map, what files matter most, summarize this codebase, codebase overview, scan a javascript project, index a c codebase, which files depend on which
 
+### sellmeier_ior
+The refractive index of a REAL GLASS at a wavelength (Sellmeier equation), plus abbe_number for how hard it disperses. mind.sellmeier_ior(nm, glass) with glass 'BK7' | 'SF11' | 'fused_silica'. This is what lets a colour choose its own IOR: dispersion_spread could already split a bundle across IORs, but nothing could say which IOR a wavelength HAS, so its test hand-picked two numbers. Low Abbe = strong rainbow (SF11 25.7 flint); high = weak (BK7 64.2 crown)..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); print(round(float(m.sellmeier_ior(587.5618, 'BK7')), 4), round(m.abbe_number('SF11'), 2))
+```
+*Find it by:* index of refraction for a wavelength, how much does glass bend blue light, refractive index of BK7, sellmeier equation, abbe number of a glass, pick a glass for a rainbow, wavelength to ior
+
 ## Geometry, modeling & rendering
 
 *build shapes (mesh or SDF), texture and light them, and render to an image.*
@@ -1269,6 +1325,14 @@ import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.recolor_image(img,
 ```
 *Find it by:* 2d, image, edit an image, generate an image, draw, draw a picture, make a drawing, paint
 
+### A single named crystal as a closed SDF (crystal_single)
+m.crystal_single('quartz', size) -- one specimen from the same builder crystal_cluster and crystal_geode place many of (habit_sdf). WHY: crystal_habit with a bare Miller list is an OPEN prism (the hexagonal (100)+(101) pair filled 16% of a probe and ran off its edge) until form=True expands each index into its whole form; this path always does. Habits: quartz, beryl, cube, octahedron, dodecahedron, needle. Hand it to bake_glass(..., material='quartz') for the gem render..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); s=m.crystal_single('quartz',0.9); g=np.linspace(-1.8,1.8,21); G=np.stack(np.meshgrid(g,g,g,indexing='ij'),-1).reshape(-1,3); d=np.asarray(s.eval(G)); print(round(float((d<0).mean()),3), float(np.abs(G[d<0]).max())<1.6)
+```
+*Find it by:* one quartz crystal, single crystal shape, a crystal point, make one crystal not a cluster, closed crystal sdf, crystal specimen
+
 ### Adaptive path tracing (CI-driven sampling: stop when the pixel is proven)
 mind.path_trace_adaptive(sdf, camera, tol=0.02) samples in blocks and stops each pixel when its CLT 95% half-width falls under tol*scale -- the statedemand stopping rule per pixel, valid because Monte-Carlo samples are iid by construction (scope stated, not assumed). Sky and flat regions stop at min_spp; edges and high-variance paths run to max_spp. MEASURED (lit sphere, 48x48): 84% of a flat 128-spp render's samples avoided, error 7x under the contracted tolerance, spp 16-112 spatially adaptive. Uses path_trace's own active mask -- the shipped tracer, not a fork..
 
@@ -1276,6 +1340,14 @@ mind.path_trace_adaptive(sdf, camera, tol=0.02) samples in blocks and stops each
 import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.rendering.holographic_render import Camera; img,rep=mind.path_trace_adaptive(lambda P: np.linalg.norm(P,axis=-1)-1.0, Camera(), width=24, height=24, max_spp=32); print(rep['why'])
 ```
 *Find it by:* adaptive sampling render, stop sampling converged pixels, render faster same quality, variance based sampling, spend samples where noisy, progressive render with a stopping rule
+
+### Adaptive render: one call that picks collapse vs trace vs bake (render_adaptive / plan_render)
+ONE render call that ADAPTS, grounded in MEASURED break-evens: bake the SDF only when primitives or frames make it pay (bake loses under ~16 primitives single-frame, wins 6.4x at 64); collapse diffuse surfaces (PRT, free relight) and trace reflective ones, deriving each surface's method from its material; keep the exact marcher. plan_render returns the plan WITH A REASON for every choice, without rendering. This is the top of the holographic render stack -- the door to use before reaching for path_trace. Returns (frame, relight, plan)..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.simulation_and_physics.holographic_semantic import parse_description; objs=parse_description('a red ball beside a mirror box')['objects']; print(m.plan_render(objs, frames=8, relight=True)['reasons'][:2])
+```
+*Find it by:* which render method should I use, let the renderer choose, adaptive rendering pipeline, auto select bake or trace, render plan with reasons, fast render for many frames, one render call that adapts, relight or trace decision
 
 ### Adaptive rendering
 the render call that picks its own methods/quality: the converging sampler that stops per-pixel when the confidence interval is tight, and the render-method auto-picker.
@@ -1349,6 +1421,18 @@ import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); b = mind.bake_field_nd(
 ```
 *Find it by:* bake a 2d function, n-d texture unit, bake a volume, multivariate lookup table, encode a 2d point, bake a grid, n dimensional function encoding, bake a field over a grid
 
+### Bake once, relight by dot product (bake_scene / render_baked)
+COLLAPSE, DON'T TRACE -- the render lineage this engine started from. bake_scene(sdf, camera, w, h, methods, colors) traces primary visibility ONCE, dispatches each hit to 'collapse' (PRT) or 'trace' (a mirror bounce), and precomputes the radiance-transfer vector at every diffuse hit. render_baked(scene, light) then shades every pixel as a DOT PRODUCT -- no rays; every frame, the first included, is a relight. Measured 57x per relight over re-traced shadows; 0.0036s vs 0.0545s all-trace (15x). Break-even ~160 relights: for INTERACTIVE relighting over fixed geometry, not one still..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); class S:
+    cs=np.array([[0,0,0.],[-1.6,0,0]]); cols=np.array([[.7,.7,.7],[.8,.3,.3]])
+    def eval(s,P): return np.min(np.stack([np.linalg.norm(P-c,axis=1)-0.8 for c in s.cs]),axis=0)
+    def ids(s,P): return np.argmin(np.stack([np.linalg.norm(P-c,axis=1) for c in s.cs]),axis=0)
+cam=m.camera(eye=(0,1.2,5.5), target=(-0.8,0,0), fov_deg=40, aspect=1.0); sc=m.bake_scene(S(), cam, 24, 24, {0:'trace',1:'collapse'}, S.cols, n=120); warm=lambda w: np.clip(w@np.array([0.4,0.7,0.3]),0,1)[:,None]*np.ones(3)+0.05; print(m.render_baked(sc, warm).shape)
+```
+*Find it by:* relight without re-rendering, render as a dot product, bake once render many, collapse dont trace, precomputed radiance transfer render, interactive relighting, why is my render slow every frame, move the light for free
+
 ### Beer-Lambert absorption (why a thick gem is darker than a thin one)
 light is attenuated by the DISTANCE it travels INSIDE a transmissive solid, so depth reads: a gem's thick parts come out darker and more saturated than its edges. Albedo alone tints once per interaction and cannot tell a thick crystal from a sliver, which is why gems looked like coloured glass. The path tracer takes sigma per RGB as an 8th material channel and uses the interior path length it already computes for refraction. MEASURED on glass pixels: sigma=0 gives (0.93,0.93,0.96), absorbing gives (0.11,0.10,0.16) -- darker AND hue-shifted, since each channel is absorbed at its own rate..
 
@@ -1404,6 +1488,14 @@ quantise the light into flat BANDS and darken the silhouette, per vertex, so it 
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); cols = mind.toon_shade(mesh, cols, cam['eye'], bands=3, rim=0.42); img = mind.render_mesh(mesh, cam, vertex_colors=cols, lights=[], ambient=1.0)
 ```
 *Find it by:* cel shading, toon shading, flat cartoon look, outline the creature, posterize shading, non photorealistic render, comic book look, quantize shading bands
+
+### Checkerboard floor, mottled rock, grey backdrop: albedo fields and background in relight_glass
+relight_glass(bake, env, floor_albedo=fn, opaque_albedo=fn, background=(r,g,b)): the albedos accept a CALLABLE P(m,3)->(m,3) -- a checkerboard is light/dark by floor(x/s)+floor(z/s) parity; weathered stone is a rock colour mixed by a baked holographic fBm (procedural_noise().sample_grid_fast(48) read via GridSDF; the same field displaces the rind SDF, x0.7 to stay Lipschitz). `background` paints only pixels that see nothing; the HDRI still lights and reflects. composite_caustic(receiver_mask=bake.floor) keeps the caustic off the body..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.mesh_and_geometry.holographic_sdf import sphere; cam=m.camera(eye=(0,0.8,3),target=(0,0.3,0),fov_deg=60,aspect=1.0); b=m.bake_glass(sphere(0.5),cam,24,24,n_lams=3,floor_y=-0.5); ck=lambda P: np.where(((np.floor(P[:,0]/0.5)+np.floor(P[:,2]/0.5)).astype(int)%2==0)[:,None],[[0.9]*3],[[0.1]*3]); img=m.relight_glass(b,lambda D: np.ones((len(D),3)),floor_albedo=ck,background=(0.3,0.3,0.3)).reshape(-1,3); print(bool((img[b.floor,0]>0.5).any() and (img[b.floor,0]<0.12).any()), bool(np.allclose(img[~(b.glass|b.floor)],0.3)))
+```
+*Find it by:* checkerboard floor, solid gray background, use the hdri for lighting but not as background, rough rock texture, outside of the geode should be rough, caustic drawn on top of the object, textured floor under the gem, mottled stone albedo
 
 ### Closest point on a mesh (shared correspondence machine for transfer + bakes)
 Closest point on a mesh to each query point -- the shared correspondence machine behind uv/attribute transfer AND the high-to-low bakes (M14: one projection, many channels). Builds a uniform spatial hash over triangles ONCE and ring-searches it per point; returns (face_index, barycentric, distance) so the caller reads whatever it needs (position, normal, uv, weight) off the single projection instead of re-casting. m.mesh_closest_point(mesh, points). The dedup of four inline copies of the same grid+ring-search; bit-identical to each (same cell rule, ring order, first-seen tie-break)..
@@ -1500,6 +1592,14 @@ field-aligned retopology begins with a cross field: a direction at every face, d
 from holographic.mesh_and_geometry.holographic_mesh import tetrahedron; print(mind.field_singularities(tetrahedron()))
 ```
 *Find it by:* field singularities, cross field, cross field on a surface, 4-rosy, smoothest direction field, field aligned remesh, singularities of a direction field, instant meshes
+
+### Culled union: evaluate only the crystals that can be nearest (cull=True)
+crystal_cluster / crystal_geode / crystal_grow_on accept cull=True (default off): each placed crystal gets a bounding sphere; per point the most promising member is evaluated exactly, then only members whose bound beats that value. Lever 5, exact where it matters: same zero set, identical values near the surface, never a smaller distance (a tighter, valid sphere-tracing field). MEASURED: 60-crystal geode 2.40s -> 0.30s (8.1x) on 200k points, 11-crystal cluster 2.5x. Per-CALL overhead remains -- for a render, bake_sdf the body once instead..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); Q=np.random.default_rng(0).uniform(-1,1,(2000,3)); a=np.asarray(m.crystal_cluster(count=5,seed=1).eval(Q)); b=np.asarray(m.crystal_cluster(count=5,seed=1,cull=True).eval(Q)); print(bool(np.array_equal(a<0,b<0)), bool(np.all(b>=a-1e-12)))
+```
+*Find it by:* cluster render is slow, geode sdf too slow, speed up the crystal union, bounding sphere culling, many crystals evaluate faster, spatial culling for sdf union
 
 ### Curve skeleton / medial axis of a mesh (interior distance ridge)
 Curve SKELETON / medial axis of a mesh: the ridge (local maxima) of the interior distance field -- the deepest, surface-equidistant points tracing the shape's backbone, for rigging, thickness, and part detection. m.mesh_skeleton(mesh) returns {points, depth=medial radius (local half-thickness), bounds}. GENERALISES existing machines: distance from the shared correspondence (closest_face_point), inside/out from the winding number -- not a new algorithm. Validated: a cylinder's ridge lands on its axis (radial 0.02). KEPT NEGATIVE: a voxel ridge, res-limited, not yet a connected 1-D curve..
@@ -1828,6 +1928,14 @@ an ORDERED stack of material layers -- base -> diffuse -> specular/reflection ->
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.layered_material([mind.material_layer('base', paint), mind.material_layer('clearcoat', gloss, alpha=0.3)]).sample('albedo', [0.3, 0.7])
 ```
 *Find it by:* layered material, material layers, clearcoat, coat, layer stack, material stack, over compositing, base diffuse specular coat
+
+### Light a render with a real HDRI (.exr in, exact floor irradiance, the map picks the shadow)
+m.load_exr(path) reads OpenEXR (opt-in `pip install OpenEXR`; load_hdr stays the stdlib RGBE door) -> linear (H,W,3). m.hdri_env(img) makes it the light: .radiance(dirs) via sky_dome, plus the map's own pixels integrated once for the floor -- exact cosine-weighted irradiance, the dominant lobe, and that lobe's SHARE (0.41 for a lounge sun, 0.11 for cafeteria ceiling lights): the map decides how hard the shadow is. relight_glass(bake, m.hdri_env(img)): the background is the photograph, the gem refracts the room..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); img=np.zeros((32,64,3),np.float32); img[:16]=2.0; e=m.hdri_env(img); print(round(float(e.floor_irradiance.mean()),2), round(e.sun_share,2))
+```
+*Find it by:* load an exr, use an hdri to light the scene, environment map lighting, image based lighting, light the glass with a photo, openexr environment map, where is the sun in my hdri, how hard should the shadow be
 
 ### Lighting (domain)
 one home for lighting: the light types (point/directional/spot/area/dome/IES) and the shade INTEGRAL in each mode -- direct NEE, PRT relight, environment SH; render methods call it.
@@ -2190,6 +2298,14 @@ import numpy as np; from holographic.rendering.holographic_postfx import PostCha
 ```
 *Find it by:* kernel fusion, fuse post effects, compose filter passes, one fft instead of many, post processing chain, postfx, fuse blur and sharpen, compose transfers
 
+### Precomputed radiance transfer (PRT): shading as a dot product
+The per-point VISIBILITY INTEGRAL is what makes global illumination expensive, and for static geometry it depends only on geometry -- so precompute it ONCE as a spherical-harmonic transfer vector per surface point (radiance_transfer), project the light onto SH, and shading COLLAPSES to transfer @ light (Sloan/Kautz/Snyder 2002). VSA framing: the transfer vector is a per-point codebook entry, relight a readout. Measured 3.82s precompute once, 0.0004s per relight (57x). Low-frequency, diffuse, static geometry -- the documented limits. The 'collapse the wave function' answer to path tracing..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.mesh_and_geometry.holographic_sdf import sphere; pts=np.array([[0,1.0,0],[1.0,0,0]]); T=m.radiance_transfer(sphere(1.0), pts, pts, order=3, n=200); print(T.shape)
+```
+*Find it by:* precomputed radiance transfer, PRT, spherical harmonics lighting, shade with a dot product, collapse the wave function instead of path tracing, visibility integral once, global illumination without tracing every frame, transfer vector per point
+
 ### Preview (swatch & material ball)
 SEE what you composed: mind.preview_texture(graph) renders a CMP1 texture graph as a flat RGB swatch, and mind.preview_material(material) renders a material on the classic MATERIAL BALL sphere (Cook-Torrance shaded, using the material's roughness/metallic channels) -- works on a plain Material or a CMP2/CMP3 layered/multi material. Returns a float image in [0,1] to save/view. The missing step between composing a texture/material and looking at it..
 
@@ -2286,6 +2402,14 @@ import lecore; m=lecore.UnifiedMind(); m.save_render('/tmp/x.png', __import__('n
 ```
 *Find it by:* read a png file into an array, load an image from disk, open a render I saved earlier, decode a png, get pixels out of an image file, look at my own render, did my render change, check the image I just saved
 
+### Real unit cells for crystal habits (real_cell=True): quartz's 141 deg 47' angle, not 139
+Every crystal in leCore is the intersection of lattice half-spaces (crystal_habit) -- no billboards, no sprites: a true convex distance field with unit gradient (pinned). But the lattice basis defaults to c = a, which is not quartz (a 4.913, c 5.405 A): the prism-rhombohedron interfacial angle came out 139.1 deg instead of the textbook 141 deg 47'. crystal_single / crystal_grow_on / crystal_cluster / crystal_geode take real_cell=True to build each habit on its mineral's axial ratio (CELLS: quartz 1.1001, beryl 0.9976). Default off keeps old fields byte-identical; new work should pass True..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.mesh_and_geometry.holographic_bravais import lattice_basis, reciprocal_basis; B=reciprocal_basis(lattice_basis('hexagonal',a=1.0,c=1.1001)[0]); r=np.array([1.,0,1])@B; p=np.array([1.,0,0])@B; print(round(180-np.degrees(np.arccos(r@p/np.linalg.norm(r)/np.linalg.norm(p))),1))
+```
+*Find it by:* physically accurate crystal lattice, real quartz unit cell, interfacial angle of quartz, are the crystals billboards, crystals should be real geometry, correct c/a ratio
+
 ### Recover a body from a mesh (spine, thickness, inferred tissue)
 the observe half of the pipeline. rig_from_mesh takes the medial-axis centerline as a real SPINE chain carrying the medial radius -- the shape's own thickness measurement -- so a scanned body gets parented segments, joint blending, anatomy space AND organs, none of which rig_from_primitives could give it. infer_tissue_fractions derives muscle/fat from the gap between fitted bone and observed skin, body_params-shaped so an inferred body drives tissue_fields like an authored one. KEPT NEGATIVES: single-branch (torso, not limbs); the muscle/fat split is not observable from a silhouette..
 
@@ -2367,12 +2491,20 @@ import numpy as np, lecore; m=lecore.UnifiedMind(); from holographic.mesh_and_ge
 *Find it by:* build a rig from segmented parts, auto rig a creature from its limbs, turn mesh parts into a skeleton, make a bone hierarchy and bind weights, rig template from part labels, assemble joints and skinning from parts
 
 ### Robust mesh-to-SDF sign for scan soups (winding number)
-FIX for open/scan meshes shredding in mesh->SDF conversion: m.mesh_to_sdf_grid(mesh, bounds, sign='auto') and m.voxel_remesh(mesh, sign='auto') route edge-closed meshes to the original flood path BIT-IDENTICALLY, and meshes with boundary edges (a Sketchfab .glb scan measured 71% boundary -- flood leaked, marched garbage blobs) to the GENERALISED WINDING NUMBER sign (Jacobson 2013) via fast cluster-dipoles (Barill 2018; 113x measured over the exact sum). Pinned: slit-sphere soup interior signed 4% by flood vs 100% by winding at equal res..
+FIX for open/scan meshes shredding in mesh->SDF conversion: m.mesh_to_sdf_grid / m.voxel_remesh with sign='auto' send edge-closed meshes down the original flood path BIT-IDENTICALLY, and meshes with boundary edges (a .glb scan at 71% boundary -- flood leaked, marched garbage) to the GENERALISED WINDING NUMBER (Jacobson 2013; Barill 2018 dipoles, 113x). Pinned: soup interior 4% by flood vs 100% by winding. sign='winding_flood' is the FAST path -- winding signs only the BAND, the flood fills inside: 2.18x at 128^3, 0 of 2,097,152 voxels differing; self-checks, refuses on a holed mesh..
 
 ```python
 import lecore, numpy as np; m=lecore.UnifiedMind(); from holographic.mesh_and_geometry.holographic_mesh import box; g,axes=m.mesh_to_sdf_grid(box(), ((-1.2,-1.2,-1.2),(1.2,1.2,1.2)), res=16, sign='auto'); (g.shape, float(g.min())<0)
 ```
-*Find it by:* glb import renders as garbage blobs, voxel remesh shreds my scanned mesh, open mesh to sdf conversion broken, fix inside outside for triangle soup, winding number sign for mesh to field, imported scan becomes disconnected chunks
+*Find it by:* glb import renders as garbage blobs, voxel remesh shreds my scanned mesh, open mesh to sdf conversion broken, fix inside outside for triangle soup, winding number sign for mesh to field, imported scan becomes disconnected chunks, winding number sign is slow, sdf bake takes forever
+
+### Rock and glass in one bake: an opaque body beside the gem (bake_glass opaque=)
+bake_glass(lining, ..., opaque=rind) adds a second SDF shaded as Lambert rock: it wins the pixel where nearer than the glass, and exit/reflection rays that strike it are recorded at bake time, so relight shows the cavity wall THROUGH the crystals. relight_glass(..., opaque_albedo=) shades it: map over a cosine hemisphere + each lobe with a shadow ray + the map's sun from its floor share. Geode: crystal_geode(parts=True, clip_to_skin=True) -> (rind, lining), crystal_cut each with one plane. Before: the rind rendered as violet glass, 39% of the crystals stuck out of the nodule..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.mesh_and_geometry.holographic_sdf import sphere, plane; cam=m.camera(eye=(0,3,0.01),target=(0,0,0),fov_deg=40,aspect=1.0); b=m.bake_glass(sphere(0.6),cam,24,24,n_lams=3,opaque=plane(-1.5)); print(int(b.opaque.sum())>50, bool(b.exit_opq[:,b.glass].mean()>0.5))
+```
+*Find it by:* geode with a rock rind, opaque rock next to the glass, crystals growing out of stone, render the geode properly, matrix under the crystal cluster, see the cavity wall through the crystals, rind should not be transparent, cut geode render
 
 ### Rotation-measure synthesis (Faraday depth)
 recover the FARADAY DEPTH of polarized light -- the line-of-sight magnetic field a radio telescope reads from a galaxy's polarized glow (holographic_rmsynth; Brentjens & de Bruyn 2005). Transforms complex polarization P=Q+iU over wavelength^2 into a spectrum over Faraday depth phi, peaked to {rm, polarized_intensity, angle0}. Field-native over an image cube; handles unevenly-sampled bands with gaps. The SEQUENCE costume of the Stokes state (U1). rm_synthesis / rmtf / rm_peak / rm_phi_grid / rm_resolution / stokes_faraday_depth.
@@ -2830,6 +2962,14 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.capture_edit_comman
 ```
 *Find it by:* make any edit undoable, record an arbitrary edit, snapshot inverse command, wrap an edit for undo, undoable geometry edit
 
+### caustic_pass
+Project a forward-traced caustic onto a rendered frame as a SEPARATE PASS, then composite -- how you get a visible caustic into a path-traced image. Brute force is the wrong algorithm: this tracer has no next-event estimation, so a small bright source arrives as fireflies (measured -- raising the key 95->220 made raw grain WORSE, 0.76->1.19). mind.caustics forward-traces instead, deterministic and clean. Project with the SAME window=/center=, pass occluder_sdf or the pattern paints over the glass casting it. Plane receivers only..
+
+```python
+import lecore, numpy as np; m=lecore.UnifiedMind(dim=64, seed=0); print(m.composite_caustic(np.full((4,4,3),0.1), np.zeros((4,4,3))).shape)
+```
+*Find it by:* caustic pass, composite a caustic onto a render, add caustics to a path trace, why are my caustics all fireflies, photon map pass, project a caustic, caustics on the floor of a render
+
 ### creature
 Build a Spore-style non-humanoid CREATURE from a body-plan spec (holographic_creature) -- a spine with limbs attached at fractional positions, bilateral symmetry, and generic organic joint constraints (a cone at each mount, no-hyperextension hinges). spec: {spine:{length,segments,axis,curve}, limbs:[{at,dir,segments,length,radius,mirror,cone_deg,hinge_deg}], head, body:<morph block>}. Returns the Creature + its morph-aware skin SDF (meshes, emits Shadertoy). Generalises the humanoid to arbitrary body plans.
 
@@ -2853,6 +2993,14 @@ should you raise the DIMENSION or the BANDWIDTH for an n-D texture bake of THIS 
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); ax=np.linspace(0,1,40); P=np.stack(np.meshgrid(ax,ax,indexing='ij'),-1); m.diagnose_bake([ax,ax], np.sin(2*np.pi*P[...,0])*np.cos(2*np.pi*P[...,1]))['verdict']
 ```
 *Find it by:* tune the bake dimension, raise dimension or bandwidth for a bake, is my bake variance limited, diagnose a texture bake, should i raise dim or margin, pick bake dimension, auto-tune bake parameters, bias or variance limited bake
+
+### dispersive_render
+DISPERSIVE GLASS IN THE VIEW PATH -- what you SEE through glass: every internally refracted edge splits into rainbow fringes. The camera-path twin of spectral_caustics (the light path). Path-traces once per hero wavelength at that wavelength's index. Name a glass, or give n_d + abbe -- the same slider Blender/LuxCore/Octane expose (cauchy_ior). YOU SEE IT ONLY WHERE THE REFRACTED IMAGE HAS EDGES: smooth sky measures saturation 0.25, studio sky with HDR panels 0.46. Costs one full path trace per wavelength..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); print(round(float(m.cauchy_ior(450.0, 1.5168, 25.0)), 4))
+```
+*Find it by:* dispersion glass material, rainbow edges through glass, see through glass with dispersion, glass bsdf dispersion, abbe number glass shader, chromatic dispersion render, blender dispersion glass, prism glass shader
 
 ### edit_history
 the UNDO/REDO log AND EDITABLE CONSTRUCTION HISTORY for an interactive edit session (holographic_edithistory) -- an EditHistory you thread scene state through: do(state, cmd) applies and records, undo/redo walk it bit-identically (tie-safe replay). Also .rebuild(base) replays the whole recipe, and .replace_command(i, new_cmd, base) edits a PAST operation's parameters and re-evaluates downstream (the Maya/C4D reach-back). Build commands with vertex_move_command / capture_edit_command.
@@ -3046,6 +3194,30 @@ import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,see
 ```
 *Find it by:* ray march an sdf, cast a ray into an sdf, sphere trace a ray, sdf ray hit, raymarch pick
 
+### reject_outliers
+FIREFLY REJECTION, free from the progressive split: combine_buckets(reject=k) drops bucket values more than k MADs from the per-pixel median and averages the rest. A firefly is one rare bright path, so it lands in ONE bucket and the others disagree. Beats clamp_fireflies for spectral renders -- clamping compares a pixel to a GLOBAL percentile and cannot tell a firefly from a real highlight; this compares a pixel to ITSELF, so consensus is untouched. MAD not sigma: a 500x sample inflates sigma enough to protect itself..
+
+```python
+import numpy as np; from holographic.rendering.holographic_progressive import combine_buckets; b=[np.ones((2,2,3)) for _ in range(5)]; b[2]=b[2].copy(); b[2][0,0]=500.0; print(round(float(combine_buckets(b)[0,0,0]),1), round(float(combine_buckets(b, reject=3.0)[0,0,0]),1))
+```
+*Find it by:* firefly removal, reject outlier samples, speckles in my render, bright dots in a path trace, robust mean across buckets, salt and pepper noise in a render, median of several renders
+
+### render_progressive
+A render you can PAUSE, RESUME, WATCH WHILE IT RUNS, and finish ACROSS PROCESS RESTARTS -- so a short-lived environment stops capping the quality you can reach. Splits the SAMPLES into seeded buckets reduced by sum: Monte Carlo samples are iid, so an image is a mean of batches and order does not matter. Fixes job_submit's declared 'ATOMIC, do not expect a partial render' limit. Verified: interrupted == uninterrupted BYTE-IDENTICALLY, including across a process restart. workers=N runs buckets on separate processes (1.76x on 2 cores)..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.rendering.holographic_progressive import sample_buckets; print(len(sample_buckets(4, spp=8)), sorted({b['seed'] for b in sample_buckets(4, spp=8)}))
+```
+*Find it by:* pause and resume a render, resume an interrupted render, render in chunks over time, progressive render, checkpoint a render, render bigger than my time budget, watch a render as it converges, distributed render across processes
+
+### rgb_to_spectrum
+RGB -> a smooth physical reflectance SPECTRUM (the inverse of spectrum_to_rgb), so ordinary RGB-authored materials can be rendered spectrally. Jakob & Hanika's sigmoid-of-a-quadratic space (Eurographics 2019): 3 coefficients, bounded in [0,1] so it cannot invent energy. The paper ships a 9 MiB table because its fit needs CERES+autodiff; this solves on demand from a closed-form seed plus Levenberg-Marquardt -- max round-trip error 9.4e-13 over 400 sRGB colours, 0 bytes of table. BAKE-ONCE at ~0.6 ms; keep the coeffs, never fit per pixel..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); s=m.rgb_to_spectrum((0.8,0.2,0.2)); print(len(s), [round(float(v),3) for v in m.reflectance_to_rgb(s)])
+```
+*Find it by:* rgb to spectrum, spectral upsampling, turn a colour into a spectrum, make a material spectral, what spectrum is this colour, render an rgb texture spectrally, inverse of spectrum to rgb, why is my spectrum black
+
 ### scene_cost
 estimate the per-ray evaluation COST of an SDF scene (W2) -- an ALU/machine-model annotation for deciding if a scene raymarches in real time. Returns alu (approx ops per map() call), nodes, depth, iterative (has a fractal/tiling loop), and a plain-language verdict (cheap / moderate / heavy). Know the price before you ship the scene.
 
@@ -3094,13 +3266,29 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); from holographic.mesh_and_g
 ```
 *Find it by:* solidify a mesh, thicken a surface, give a surface thickness, add thickness to a mesh, shell a surface, make a hollow shell, shell modifier, turn a sheet into a solid slab
 
-### splat_denoise
-Edge-aware DENOISE for a splat render -- smooths the gaussian shimmer while preserving silhouettes; the cleanup pass between splatting and display..
+### spectral_caustics
+A caustic WITH ITS COLOUR -- rainbow fringing on focused light. Traces mind.caustics once per hero wavelength at that wavelength's Sellmeier IOR (Hero Wavelength Sampling, Wilkie et al. EGSR 2014 -- count, u) and combines through the engine's own observer. anchors=k beats it: the layer family is rank-3, so 3 traces reconstruct all 16 at 4.9x, rel RGB error 0.0072, 100.1% of chromatic saturation. anchors=None is byte-identical to full tracing. Monochrome baseline saturation is exactly 0.0..
 
 ```python
-from holographic.rendering.holographic_splat import splat_denoise
+import lecore, numpy as np; m=lecore.UnifiedMind(dim=64, seed=0); sph=lambda p: np.linalg.norm(p, axis=-1)-1.0; r=m.spectral_caustics(sph, glass='BK7', count=4, anchors=3, res=32, receiver_y=-1.6, extent=2.5, n_side=60); print(r['traced'], r['rgb'].shape)
 ```
-*Find it by:* denoise a splat render, smooth gaussian shimmer
+*Find it by:* rainbow caustics, chromatic aberration in caustics, coloured light through glass, prism colours, dispersion render, spectral rendering, hero wavelength sampling, why is my caustic grey
+
+### spectral_material_ball
+THE MATERIAL BALL, RENDERED SPECTRALLY -- the default preview environment (orthographic unit sphere, one directional light, Cook-Torrance) shaded once per hero wavelength instead of once in RGB, combined in linear radiance and tone-mapped once. Measured max 0.151 difference against the RGB ball on the same material: a different image, not a re-tint. KEPT NEGATIVE: there is no glass= argument -- an opaque BRDF has no transmitted path, so dispersion on a ball measured 0.001 (invisible). Use spectral_caustics for the rainbow..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64, seed=0); print(m.spectral_material_ball((0.9,0.3,0.25), count=8, res=48).shape)
+```
+*Find it by:* spectral material preview, material ball with a spectrum, preview a material spectrally, render the preview sphere per wavelength, spectral preview sphere
+
+### splat_denoise
+Denoise a 2-D field by fitting K Gaussian splats and rendering them back: the smooth basis IS the prior, so K alone decides how much detail survives. MEASURED on a 32x32 field, noise err 0.0830 -> 0.0178 at K=4 when the field IS gaussian. KEPT NEG, and it is the whole warning: an UNDER-PROVISIONED K IS WORSE THAN DOING NOTHING. On a separable Hann bump the basis fits badly and K=2/4/8 score 0.418/0.221/0.123 against a 0.077 noisy baseline -- only K>=16 beats it. Match K to the field's structure or the cleanup pass is damage..
+
+```python
+import lecore, numpy as np; m=lecore.UnifiedMind(dim=64, seed=0); rng=np.random.default_rng(0); g=np.exp(-(np.add.outer((np.arange(32)-16)**2,(np.arange(32)-16)**2))/40.0); n=g+0.1*rng.normal(size=g.shape); print(float(np.abs(m.splat_denoise(n,4)-g).mean()) < float(np.abs(n-g).mean()))
+```
+*Find it by:* denoise a splat render, smooth gaussian shimmer, clean up a noisy render, how many splats do I need
 
 ### to_shadertoy
 Emit a complete runnable SHADERTOY fragment shader for an SDF (holographic_sdf) -- map + raymarch + normals + lighting + mainImage, ready for shadertoy.com. Works for the fractal SDFs (fold_fractal/mandelbulb/menger) too, with a header note that a distance estimate needs conservative steps. The 'get the shadertoy code' primitive.
@@ -3185,6 +3373,14 @@ GROUND-PLANE DEPTH from linear perspective (m.ground_plane_depth): for a forward
 import numpy as np, lecore; m=lecore.UnifiedMind(); img=np.zeros((60,80,3)); yy,xx=np.mgrid[0:60,0:80]; img[:]=(0.2+0.6*yy/59.0)[...,None]; d=m.ground_plane_depth(img, vp=(40,5)); (d.shape==(60,80), float(d[50:].mean())>float(d[:10].mean()))
 ```
 *Find it by:* ground plane depth, perspective depth ramp, road recession depth, depth from linear perspective, forward-looking depth, horizon depth ramp, depth for a road or track scene
+
+### HDRI base light plus extra key/rim lobes for dispersion and caustics (env_add_light)
+The studio rig on top of a photograph: m.env_add_light(env, direction, irradiance=..., sigma=0.045) layers an analytic Gaussian lobe on an hdri_env. Size it by the FLOOR irradiance it adds (a fraction of env.floor_irradiance.mean() keeps the map as the base -- measured: peak radiance 3000 took a lobe to a 0.96 share and the HDRI stopped mattering). The lobe also updates floor_irradiance, dominant_dir and sun_share, so relight_glass shades and shadows consistently and the caustic aims along the strongest lobe. Brightness belongs to exposure (auto-EV from the floor median), never to the lights..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); img=np.zeros((32,64,3),np.float32); img[:16]=0.5; e=m.hdri_env(img); E0=float(e.floor_irradiance.mean()); m.env_add_light(e,(-0.45,0.8,0.4),irradiance=0.8*E0,sigma=0.045); print(round(float(e.floor_irradiance.mean())/E0,2), round(e.sun_share,2))
+```
+*Find it by:* add a key light to the hdri, extra light on top of the environment map, show off the caustics, rim light for the gem, hdri plus studio lights, without blowing out the scene, more sparkle in the crystal, light the crystal for dispersion
 
 ### Object handles over /invoke (name a live object across calls)
 POST /invoke new_scene used to return '<Scene object at 0x7fe17ba58fe0>' -- a memory address is not a handle, so the whole Scene family was listed in /tools and IMPOSSIBLE to call. Now every un-serialisable result also carries ref:Type:N, and any ref passed as an argument resolves back to the live object. With scene_add/scene_edit/scene_remove/scene_undo an HTTP-only agent can build, inspect, FIX and render a scene end to end. Handles are a counter (never id(): a reused address would silently alias). KEPT NEG: process-local, bounded, evicted oldest-first.
@@ -3744,6 +3940,14 @@ import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r = mind.explain_stream
 ```
 *Find it by:* analyse my time series, what should i do with this stream, is my data predictable, explain this signal, what is this data, should i fit a model to this, does my data have a pattern, understand a signal
 
+### Glass as a baked spectral-refractive transfer: trace once, relight by dot product
+bake_glass traces a dielectric's refraction ONCE per pixel for K wavelengths -- entry, interior, deterministic internal TIR bounces, exit direction, Fresnel split -- and relight_glass shades it against an env_field (the light as a hypervector over directions) in one matmul. No Monte Carlo: the tracer's only randomness was its estimator. MEASURED, 1-fold Mandelbox 320x200: bake 1.6s + relight 7s/light vs ~5 min at 192 spp, no grain. KEPT NEGATIVE: bounces past the cap are lost (3.0%%; 65.5%% before the march fix); a sharp light seen through glass reads soft..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.mesh_and_geometry.holographic_sdf import sphere; cam=m.camera(eye=(0,1,4), target=(0,0,0), fov_deg=35, aspect=1.0); b=m.bake_glass(sphere(0.8), cam, 32, 32, floor_y=-0.9); e=m.env_field().add_softbox((3,4,2),(0,0,0),2.0,2.0,40.0); print(m.relight_glass(b, e).shape)
+```
+*Find it by:* render glass fast, glass render without path tracing, relight glass without re-rendering, bake the refraction once, dispersion render in seconds, why does my glass render take an hour, deterministic glass, environment light as a hypervector
+
 ### HRNN domain recipes (forecasting, markets, science, data, text, audio)
 mind.hrnn_recipes(topic) is the use-case front door: a working call sequence per domain -- 'forecasting' (certify-then-extend, horizon-scoped), 'market analysis' (route + fingerprint + drift; returns honestly refused), 'scientific study' (generator existence, causal-state demand, trajectory classification), 'data processing' (per-release fingerprints, triage cascades), 'text generation' (price the corpus; generation routes to n-gram faculties; comprehension to DECLARE), 'audio' (streams route like any signal). Every recipe carries an HONEST field stating what the mechanism will not do..
 
@@ -3751,6 +3955,14 @@ mind.hrnn_recipes(topic) is the use-case front door: a working call sequence per
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.hrnn_recipes()); print(mind.hrnn_recipes('weather forecasting')['how'])
 ```
 *Find it by:* forecast the weather, weather forecasting, analyze market data, predict a time series, process my data with hrnn, scientific data analysis, generate text with hrnn, audio analysis
+
+### Histogram caustic baseline for spectral landings (caustic_histogram_rgb)
+Bin spectral_landings with colour-matching weights and a 1-px Gaussian: the ground truth the holographic caustic is measured against. MEASURED on an amethyst plate (25k landings): the tiled holographic read (grid 12, dim 2048) smeared the filaments into blotches and showed tile seams; the histogram resolved them with dispersion at the edges (test: a point source reads >3x sharper). Use it whenever the landing set exceeds the holographic capacity; feed the result to caustic_pass / composite_caustic as before..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); rng=np.random.default_rng(0); xz=rng.normal([0.3,-0.2],0.01,(2000,2)); lam=rng.uniform(420,680,2000); H=m.caustic_histogram_rgb(xz,lam,((-1,1),(-1,1)),res=64); iy,ix=np.unravel_index(np.argmax(H.mean(-1)),H.shape[:2]); print(abs(np.linspace(-1,1,64)[ix]-0.3)<0.05, abs(np.linspace(-1,1,64)[iy]+0.2)<0.05)
+```
+*Find it by:* caustic looks like a blob, sharper caustics, holographic caustic too blurry, tile seams in the caustic, ground truth caustic image, bin the landings
 
 ### Look-ahead linter (prove the signal only used the past)
 mind.lookahead_lint(signal_fn, x): recomputes signal_fn on truncated prefixes and demands the shared range be IDENTICAL -- a causal pipeline cannot know whether data exists after t, so drift IS leakage: full-sample z-score, centred smoother, global min-max and detrend all caught at machine precision with a first-bad index; trailing EMA/z pass at exactly 0.0. Pair with mind.target_shift_probe (signal AHEAD of its target or explaining it? catches the contemporaneous leak; a symmetric centred-label leak belongs to the lint). Necessary, not sufficient..
@@ -3832,6 +4044,14 @@ import numpy as np, lecore; m=lecore.UnifiedMind(); rng=np.random.default_rng(3)
 ```
 *Find it by:* smallest eigenvector of an operator, dominant eigenpair without scipy, matvec only eigensolver, spectral solve without building the matrix, smallest eigenvalue of a laplacian, inverse iteration eigensolver
 
+### Spectral confetti cure: wavelength stratification + spectral ray differential (lam_jitter, footprint_filter)
+A dispersive body at 11 hero wavelengths paints a checker as coloured confetti, and one wavelength exiting straight at the key reads its peak as a saturated speck. Two default-off cures: bake_glass(samples>1, lam_jitter=True) shifts each sub-bake's wavelength grid (3 x 13 = 39 wavelengths, no extra cost per sub-bake); relight_glass(footprint_filter=True) reads the floor over the footprint the spread between neighbouring wavelengths' exits makes, and each lobe fan-averaged at conserved energy. Zero spread = identical. Measured on a diamond blob: confetti gone, fire kept..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.mesh_and_geometry.holographic_sdf import sphere; cam=m.camera(eye=(0,1.2,3),target=(0,0,0),fov_deg=35,aspect=1.0); b=m.bake_glass(sphere(0.6),cam,16,16,n_d=2.4,abbe=10.0,n_lams=5,floor_y=-0.7,samples=2,lam_jitter=True); ck=lambda P: np.where(((np.floor(P[:,0]/0.2)+np.floor(P[:,2]/0.2)).astype(int)%2==0)[:,None],[[0.9]*3],[[0.1]*3]); env=lambda D: np.ones((len(D),3)); a=m.relight_glass(b,env,floor_albedo=ck); f=m.relight_glass(b,env,floor_albedo=ck,footprint_filter=True); print(len(set(tuple(np.round(s.lams,4)) for s in b.subs))==2, bool(f.std()<=a.std()))
+```
+*Find it by:* confetti in the glass render, coloured speckle in dispersion, noisy rainbow pixels in the diamond, spectral aliasing, more wavelengths without more cost, ray differentials for refraction, checker looks noisy through the glass
+
 ### Spectroscopist's bench (lines, identity with abstention, redshift verdict, decay)
 mind.spectral_lines: median continuum off, candidates gated against a max-hunting noise-only bootstrap (a permutation null contains its own lines -- pinned), sub-bin centers; with a catalog, cleanup-with-margin identification that ABSTAINS between lines. mind.redshift_verdict: ONE shared shift must explain every line vs scrambled catalogs -- a single match is numerology; z = median per-line. mind.fit_decay: A exp(-lambda t)+C, d^2 delta-method weights (d-weights read 17% low, pinned), bootstrap CI, bias-aware truncation flag. Doppler math delegates to dedoppler.
 
@@ -3879,6 +4099,14 @@ automatic scaling (holographic_scalinglaw): repeatedly diagnose from the current
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.auto_scale(lambda dim: 1.0/dim**0.5, {'dim':64}, target_error=0.05)
 ```
 *Find it by:* automatic scaling, scale until target met, auto scale a workload, adaptive scaling loop, keep doubling until it works, scale up automatically, generic capacity adaptation
+
+### beat_sync
+SYNC: drive the visuals from the music. mind.onset_detect(samples, rate) finds the hits, mind.tempo(times) gives one global BPM, mind.beat_grid(times, secs) predicts where the beats land -- the receiver for the wire audio_param_bus already had a signal on. MEASURED against click tracks with EXACT known beats (+/-50ms): clean 60-175 BPM P=1.00 R=1.00, tempo within 0.05%, grid error 6ms, noise survived to sigma 0.2. IT ABSTAINS: silence and noise (loud or quiet) return ZERO onsets. KEPT NEG: slow attacks are the failure envelope -- precision 0.54 at a 30ms attack. Run: mind.app_run('beat_sync')..
+
+```python
+import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.app_run('beat_sync')
+```
+*Find it by:* detect the beat in an audio track, find onsets in a waveform, drive the visuals from the music, tempo of a track in bpm, trigger an effect on the kick drum, beat detection, sync an effect to music, spectral flux onset novelty
 
 ### decompose_piecewise
 decompose a PIECEWISE signal (holographic_scaffold): segment at the statistics shifts first (segment_stream), then fit a law PER SEGMENT with decompose_signal -- a regime-built signal fits a global formula badly (no 'switch at t' atom in the dictionary). MEASURED vs the global baseline on a 3-regime signal: residual RMS 0.5001 -> 0.0013, MDL bits 2723 -> 588 (4.6x better compression). The result CARRIES its baseline, so a signal where segmentation does not pay is visible.
@@ -5116,6 +5344,13 @@ mind.merge_trees(ours, theirs, base=None, apply=False) -- the branch-merge decis
 import lecore, tempfile, os; m=lecore.UnifiedMind(); a=tempfile.mkdtemp(); b=tempfile.mkdtemp(); open(os.path.join(a,'f.py'),'w').write('x=1'); open(os.path.join(b,'f.py'),'w').write('x=2'); print(m.merge_trees(a,b)['n_both_changed'])
 ```
 
+### Mixed minerals in one growth: per-seed habits with their own lattices (grow_on habit=list|callable)
+crystal_grow_on / crystal_cluster / crystal_geode take habit=('quartz','cube','dodecahedron') (each seed draws one, seeded) or habit=lambda p: 'calcite-like cube' if a field says so else 'quartz' -- and size={habit: s} per mineral. Every habit keeps its own Bravais system and forms (HABITS), so a hexagonal point grows beside a cubic one as itself. The single-name path is byte-identical to before (pinned by test). Culling works across habits (one bounding radius each)..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); Q=np.random.default_rng(0).uniform(-1,1,(3000,3)); d=np.asarray(m.crystal_cluster(count=8,habit=('quartz','cube'),size={'quartz':0.35,'cube':0.22},seed=3,cull=True).eval(Q)); print(bool((d<0).any()))
+```
+
 ### Model tolerance + exact geometric predicates
 the geometry kernel foundation: ONE ModelTolerance authority (abs/rel/angular) every boolean/snap/intersection consults so they agree on equal, plus orient2d/orient3d EXACT-sign predicates (float fast path, Fraction exact fallback) that decide collinear/coplanar ties deterministically instead of by a fuzzy epsilon. See holographic_geomkernel..
 
@@ -5854,6 +6089,13 @@ Which faculties have LOST a parameter their module function still accepts? mind.
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.delegation_drift()
 ```
 
+### dispersion_scale
+The DISPERSION SLIDER: stretch a glass's index spread about its mean. 1.0 is PHYSICAL, larger is the look. Why it exists, measured: real dispersion is SMALL -- across 420-680nm fused silica spans 0.0123 of index, BK7 0.0148, SF11 (a dense flint, the hardest here) only 0.0597. The Cycles 'dispersion glass' setup people recognise stacks IOR 1.35/1.55/1.75 -- spread 0.40, 6.7x SF11, needing an Abbe number near 2.5 that no real glass has. An artistic control, named as one. Accepted by dispersive_render AND spectral_caustics so one scene has one glass..
+
+```python
+import lecore; from holographic.rendering.holographic_dispersion import exaggerate; print([round(float(v),4) for v in exaggerate([1.77,1.80,1.83], 6.0)])
+```
+
 ### docs_generate
 Generate a deterministic markdown REFERENCE for any python/js/c tree: every file, every definition with signature and line number, plus the author's own first docstring sentence where present -- docgen generalized from leCore's tree to arbitrary roots..
 
@@ -6260,6 +6502,13 @@ Check a spec/SOP against a source tree WITHOUT hallucination: atomic claims, mec
 import lecore; m=lecore.UnifiedMind(dim=256, seed=0); print(m.spec_conformance('Provides `SpecChecker`.', 'holographic/io_and_interop')['report'][0]['verdict'])
 ```
 
+### specular_connect
+Solve for the point on a refractive surface connecting a LIGHT to a SHADE POINT -- the caustic connection plain next-event estimation CANNOT make: NEE uses a straight shadow ray and a caustic path goes THROUGH glass, which bends it. The gap Manifold NEE and Specular Manifold Sampling (Zeltner et al. 2020, used by Cycles) close: solve for the specular vertex instead of hoping a bounce hits it. A Newton step in the tangent plane, re-projected onto the SDF -- iterate a projection. Check `converged`. ONE interface..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64, seed=0); from holographic.mesh_and_geometry.holographic_sdf import sphere; o=m.specular_connect(sphere(1.0), np.array([[0.,1.,0.]]), np.array([[-1.,3.,0.4]]), np.array([[0.6,-2.2,-0.3]]), 1/1.5); print(bool(o['converged'][0]))
+```
+
 ### sphere_trace_trapped
 sphere-trace rays AND return each ray's ORBIT TRAP -- the closest approach of its march to a trap set (the Quilez fractal-colouring scalar). Returns (hit, t, pos, trap_val); hit/t/pos are identical to sphere_trace, trap_val is the per-ray minimum distance to the trap (point/origin/axis/plane). Feed trap_val through a cosine palette. Use orbit_trap_render for the whole render in one call.
 
@@ -6325,4 +6574,4 @@ from holographic.caching_and_storage.holographic_substrate import write_multicha
 
 ---
 
-*811 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*842 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

@@ -168,6 +168,35 @@ you can run — `applications/art/texture_composite.py` — not a screenshot of 
 
 ---
 
+## Demo scene: sync
+
+![Beat-synced feedback tunnel](gallery/beat_sync.png)
+
+*`mind.app_run('beat_sync')` — a feedback tunnel whose zoom rate and decay are driven by beats **detected
+from the audio alone**. A demo that doesn't hit on the beat is a screensaver; the question is whether it
+actually hits, so every stage is measured against ground truth the fixture owns:*
+
+| stage | result |
+|---|---|
+| onsets vs known beats (±50 ms) | **P = 1.00, R = 1.00** |
+| tempo (true 120 BPM) | **119.95 BPM** — 0.045 % error |
+| beat grid fit | **6.2 ms** mean error (a random phase averages 125 ms) |
+| **the visual landing on the beat** | **33.3 ms** — exactly one frame at 30 fps |
+| silence, quiet noise, loud noise | **0 onsets — abstains** |
+
+*The wire already had a signal on it: `param_bus` was computing spectral flux and exposing it as
+`bus.onset` all along. What was missing was the **receiver** — turning a novelty curve into events. The
+existing 4-band flux was raced against a full-spectrum one and **won on precision** (1.00 vs 0.94), so
+nothing new was built in the analysis stage.*
+
+***Kept negative — the failure envelope, measured not guessed:*** *a flux detector keys on a sharp rise,
+so **slow attacks are where it breaks** — precision falls to **0.54** at a 30 ms attack (recall stays
+1.00: it finds every beat and adds as many again). Use it on percussive material. The audio is also
+**synthetic**, which is the easy case, and the analysis is **offline** — `param_bus` normalises over the
+whole track, so this serves a demo with a fixed soundtrack, not a live visualiser.*
+
+---
+
 ## Demo scene: as above, so below
 
 ![Mandelbrot deep zoom rendered by a feedback buffer](gallery/infinite_zoom.png)

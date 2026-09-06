@@ -218,12 +218,23 @@ def test_kept_negative_a_cheap_function_of_a_large_array_loses():
             fn()
         return (time.perf_counter() - t0) / n
 
-    t_key = _t(lambda: _arg_fingerprint((A,)))
-    t_cheap = _t(lambda: cheap_pure(A))
-    t_expensive = _t(lambda: expensive_pure(A), n=3)
+    # PAIRED, AND THE MEDIAN OF THREE. These are three wall-clock measurements compared against each
+    # other, and taken once each they are decided by whichever one happened to land on a contended
+    # core: this test passed three times out of three alone and failed under `pytest -n 4`. Sampling
+    # all three together, three times, and taking the median of each RATIO puts the comparisons under
+    # the same load and stops one spike deciding the verdict. Third occurrence of this fix in the
+    # repo (infinite_zoom twice, then the gather unit) -- the ordering claim is real, the single
+    # sample was not.
+    key_over_cheap, expensive_over_key = [], []
+    for _ in range(3):
+        t_key = _t(lambda: _arg_fingerprint((A,)))
+        t_cheap = _t(lambda: cheap_pure(A))
+        t_expensive = _t(lambda: expensive_pure(A), n=3)
+        key_over_cheap.append(t_key / max(t_cheap, 1e-12))
+        expensive_over_key.append(t_expensive / max(t_key, 1e-12))
 
-    assert t_key > t_cheap                                     # the key costs more than the cheap call
-    assert t_expensive > t_key                                 # ... and less than the expensive one
+    assert sorted(key_over_cheap)[1] > 1.0, key_over_cheap          # the key costs more than the cheap call
+    assert sorted(expensive_over_key)[1] > 1.0, expensive_over_key  # ... and less than the expensive one
 
 
 def test_the_expensive_function_actually_pays():

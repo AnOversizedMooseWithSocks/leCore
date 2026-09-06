@@ -581,13 +581,471 @@ class _UnifiedPart11:
         from holographic.rendering.holographic_globalillum import read_cache
         return read_cache(cache, query_points, k=k)
 
-    def caustics(self, sdf, light_dir=(0, -1, 0), receiver_y=-0.9, extent=2.0, res=128, ior=1.5, n_side=200, seed=0):
+    def caustics(self, sdf, light_dir=(0, -1, 0), receiver_y=-0.9, extent=2.0, res=128, ior=1.5, n_side=200, seed=0,
+                 center=(0.0, 0.0), window=None, refracted_only=False, emitter_center=None, aim=None):
         """Caustics by forward light tracing: shoot parallel light rays, refract them through the object, and
         SPLAT where they land on the receiver plane with np.add.at -- the scatter that is the engine's bundle.
         Where refracted rays converge the bundle piles up: the caustic. Returns a (res,res) intensity map.
-        See holographic_globalillum.caustics."""
+        `n_d` + `abbe` + `dispersion_scale` take the SAME parameterisation as dispersive_render, so the caustic
+        a scene casts is cast by the same glass the camera sees -- passing a glass name to one and a slider to the
+        other puts two different materials in one image.
+        `aim=(x,y,z)` points the EMITTER at a target. The ray grid launches from y=3.0 centred on the origin,
+        which is right only for a light travelling straight down: under an oblique light the rays drift sideways
+        on the way down and can miss the object entirely, giving an EMPTY caustic with nothing to say why.
+        `refracted_only=True` splats only rays that HIT the object -- essential when compositing, because the
+        rays that miss splat as a hard-edged bright quadrilateral (the square emitter aperture's own shadow)
+        that reads as a broken render. `center=(x, z)` / `window` frame the RECEIVER independently of the light grid -- needed when an oblique
+        light throws the caustic off-centre, because `extent` alone widens the light source as it widens the view.
+        Defaults reproduce the original exactly. See holographic_globalillum.caustics."""
         from holographic.rendering.holographic_globalillum import caustics
-        return caustics(sdf, light_dir=light_dir, receiver_y=receiver_y, extent=extent, res=res, ior=ior, n_side=n_side, seed=seed)
+        return caustics(sdf, light_dir=light_dir, receiver_y=receiver_y, extent=extent, res=res, ior=ior,
+                        n_side=n_side, seed=seed, center=center, window=window,
+                        refracted_only=refracted_only, emitter_center=emitter_center, aim=aim)
+
+    def sellmeier_ior(self, wavelength_nm, glass="BK7"):
+        """The refractive index of a real glass AT a wavelength, via the Sellmeier equation. This is the piece
+        that was missing: dispersion_spread() could already split a ray bundle across several IORs, but nothing
+        in the engine could say which IOR a colour actually has, so its own test had to hand-pick two numbers.
+        glass is 'BK7', 'SF11' or 'fused_silica'. Vectorised over wavelength.
+        See holographic_dispersion.sellmeier_n."""
+        from holographic.rendering.holographic_dispersion import sellmeier_n
+        return sellmeier_n(wavelength_nm, glass=glass)
+
+    def abbe_number(self, glass="BK7"):
+        """How hard a glass disperses, as the optics industry states it: V_d = (n_d-1)/(n_F-n_C) over the
+        Fraunhofer d/F/C lines. LOW V means strong dispersion (SF11 flint, 25.7); high V means weak (BK7 crown,
+        64.2). Use it to pick a glass for a visible rainbow rather than guessing IORs.
+        See holographic_dispersion.abbe_number."""
+        from holographic.rendering.holographic_dispersion import abbe_number
+        return abbe_number(glass=glass)
+
+    def holographic_caustic(self, sdf, n_d=1.55, abbe=25.68, light_dir=(0, -1, 0), receiver_y=-0.9, extent=2.0,
+                            n_side=300, window=None, center=(0.0, 0.0), dispersion_scale=1.0, dim=4096,
+                            bandwidth=None, lam_lo=420.0, lam_hi=680.0, seed=0, aim=None):
+        """The caustic as ONE HYPERVECTOR with wavelength as an axis -- RENDER = QUERY, on the substrate
+        (holographic_holocaustic). Trace the light ONCE with a continuous per-ray spectrum, BUNDLE the landings
+        into an FPE field, and READ the image out at any resolution: .read_rgb(xs, zs, cmf) is three unbinds (the
+        colour-matching integral folded into the query) and one matmul. .translate is a bind; .add superposes a
+        second object's caustic. Replaces 'trace once per hero wavelength, splat into a fixed histogram'
+        (spectral_caustics / caustics) with the engine's own bind/bundle/unbind -- the mechanism that stores a
+        sentence, pointed at light.
+
+        Measured: agrees with the histogram (corr 0.80 at dim 1024 -> 0.95 at 16384), 5x smoother at equal rays,
+        one bundle reads consistently at 64^2 and 128^2 (corr 1.000). KEPT NEGATIVE, loud: colour separation is
+        CAPACITY-BOUNDED -- two same-geometry reads at different wavelengths correlate at only ~0.75 (dim 2048),
+        which is the lambda crosstalk floor, and physical dispersion through a sphere is a ~3% effect, so at
+        dim <= 4096 crosstalk exceeds it. Raise dim or tile; do not call crosstalk colour. For the RGB read pass
+        cmf=self.wavelength_cmf (the engine's CIE-derived weights) or holocaustic.gaussian_cmf."""
+        from holographic.rendering.holographic_holocaustic import holographic_caustic
+        return holographic_caustic(sdf, n_d=n_d, abbe=abbe, light_dir=light_dir, receiver_y=receiver_y,
+                                   extent=extent, n_side=n_side, window=window, center=center,
+                                   dispersion_scale=dispersion_scale, dim=dim, bandwidth=bandwidth,
+                                   lam_lo=lam_lo, lam_hi=lam_hi, seed=seed, aim=aim)
+
+    def holographic_caustic_tiled(self, sdf, n_d=1.55, abbe=25.68, light_dir=(0, -1, 0), receiver_y=-0.9,
+                                  extent=2.0, n_side=300, window=None, center=(0.0, 0.0), dispersion_scale=1.0,
+                                  grid=8, dim=2048, bandwidth=None, lam_lo=420.0, lam_hi=680.0, seed=0, aim=None):
+        """holographic_caustic with the receiver split into grid x grid tile vectors -- the capacity wall broken
+        the way TiledRadianceField breaks it (holographic_holocaustic.TiledHolographicCaustic). Trace once,
+        bundle per tile, read routes each pixel to its tile. MEASURED on a 1-fold Mandelbox, 397k landings:
+        build 50.7s (one dim-16384 vector) -> 4.6-11s (tiles), agreement with the true (smoothed) caustic 0.87 at
+        equal ray budget. KEPT NEGATIVE: when landings per tile still exceed the tile's dim, each tile carries its
+        own crosstalk realisation and the read shows a PATCHWORK at tile borders -- use more tiles, not more dim.
+        And the plain histogram (spectral_caustics) on an analytic SDF is 2.3s and shows dispersion cleanly: the
+        substrate's wins here are resolution independence, composability and one-pass spectrum, not raw speed."""
+        from holographic.rendering.holographic_holocaustic import holographic_caustic_tiled
+        return holographic_caustic_tiled(sdf, n_d=n_d, abbe=abbe, light_dir=light_dir, receiver_y=receiver_y,
+                                         extent=extent, n_side=n_side, window=window, center=center,
+                                         dispersion_scale=dispersion_scale, grid=grid, dim=dim, bandwidth=bandwidth,
+                                         lam_lo=lam_lo, lam_hi=lam_hi, seed=seed, aim=aim)
+
+    def bake_glass(self, sdf, camera, width, height, n_d=1.55, abbe=25.68, dispersion_scale=1.0, n_lams=7,
+                   lam_lo=430.0, lam_hi=670.0, floor_y=None, max_internal=4, samples=1, seed=0, material=None,
+                   opaque=None, lam_jitter=False):
+        """Trace a glass object's refraction geometry ONCE and keep it (holographic_glassbake.bake_glass) -- the
+        light-independent half of a render. Per pixel, for n_lams wavelengths: entry, interior transit, internal
+        TIR bounces (deterministic, up to max_internal), exit direction, Fresnel split, path length. NO Monte
+        Carlo: the path tracer's only randomness was its estimator (reflect-or-refract coin, wavelength draw), and
+        the geometry underneath was always deterministic. Returns a GlassBake for relight_glass(). PRT generalised
+        from diffuse SH to spectral refractive transfer -- the render audit's named next rung.
+
+        MEASURED, 1-fold Mandelbox 320x200, 7 wavelengths: bake 1.6s; relight 7s per light; the MC path tracer took
+        ~5 minutes at 192 spp for the same object and was still grainy. KEPT NEGATIVE: internal bounces beyond the
+        cap are lost (3.0% of glass-wavelength pairs after the interior-march fix; 65.5% before it).
+
+        `opaque` (default None): a second SDF shaded as Lambert rock -- a geode's rind, the matrix under a druse.
+        It wins the pixel where nearer than the glass, and exit/reflection rays that strike it are recorded so the
+        relight shows the cavity wall THROUGH the crystals. Without it a geode's rind renders as glass.
+        `lam_jitter=True` (with samples>1): each sub-bake shifts its wavelength grid -- spectral stratification, the
+        cure for the confetti a strongly dispersive body makes of a checker background at 11 hero wavelengths."""
+        import numpy as np
+        from holographic.rendering.holographic_glassbake import bake_glass
+        from holographic.rendering.holographic_dispersion import cauchy_n, exaggerate
+        if material is not None:
+            # 'ruby', 'diamond', 'water'... -- the material library's index AND dispersion (glass_optics), so a
+            # named physical material disperses like itself instead of like whatever glass constant was typed
+            from holographic.materials_and_texture.holographic_matlib import glass_optics
+            go = glass_optics(material); n_d, abbe = go["n_d"], go["abbe"]
+        lams = np.linspace(float(lam_lo), float(lam_hi), int(n_lams))
+        iors = np.asarray(exaggerate([float(cauchy_n(l, n_d, abbe)) for l in lams], dispersion_scale), float)
+        ior_fn = lambda lam: float(np.interp(lam, lams, iors))
+        # samples>1 = the path tracer's own jittered antialias offsets, applied to the bake (relight is linear, so
+        # averaging relit sub-bakes IS the box-filtered pixel). A one-ray bake of a faceted body stair-steps.
+        return bake_glass(sdf, camera, width, height, ior_fn, lams, floor_y=floor_y, max_internal=max_internal,
+                          samples=samples, seed=seed, opaque=opaque, lam_jitter=lam_jitter)
+
+    def env_field(self, dim=512, seed=0):
+        """The environment light as ONE hypervector per colour channel over the sphere of directions
+        (holographic_glassbake.EnvField): .add_softbox / .add_sky / .deposit bundle lights in, .radiance(dirs) reads
+        them out as a matmul. A light is superposition -- add one by adding its samples. dim 512 by default: a light
+        field is smooth, ~8 degrees of angular resolution, and relight cost is O(pixels x wavelengths x dim).
+        REUSE: `.add_sky(self.studio_sky('classic'))` drops the engine's three-point studio rig straight in (any
+        sky(D)->rgb callable works, an HDRI's sampler included) -- found by asking the memory-booted engine."""
+        from holographic.rendering.holographic_glassbake import EnvField
+        return EnvField(dim=dim, seed=seed)
+
+    def relight_glass(self, bake, env, floor_albedo=(0.30, 0.30, 0.30), glass_tint=(1.0, 1.0, 1.0), absorb=0.0,
+                      sdf=None, sun_dir=None, material=None, shadow_transmittance=0.85, sun_solid_angle=1.0,
+                      opaque_albedo=(0.42, 0.40, 0.38), ambient_samples=48, background=None,
+                      flaw_volume=None, flaw_sigma=1.0, flaw_albedo=(1.0, 1.0, 1.0),
+                      absorb_volume=None, absorb_volume_sigma=(0.0, 0.0, 0.0), opaque_bounce=0.0,
+                      opaque_bounce_where=None, footprint_filter=False):
+        """The dot product: shade a GlassBake against an EnvField -> (H,W,3) linear HDR. No tracing (one optional
+        shadow ray per floor pixel toward sun_dir when sdf is given). Change the light, call again; the bake does
+        not change. Colour-matching weights come from self.wavelength_cmf so this agrees with the hero-wavelength
+        path on what a wavelength looks like. `env` may be an EnvField OR any plain callable D->(n,3) -- e.g.
+        self.studio_sky('classic') -- read directly with no field and therefore no crosstalk; use the field when
+        you want algebra on the light, the callable when the light is already a smooth function.
+        `opaque_albedo` / `ambient_samples` shade the bake's opaque body (bake_glass(..., opaque=rock)): Lambert with
+        the map read over a cosine-weighted hemisphere about the normal plus each analytic lobe with a shadow ray.
+        floor_albedo and opaque_albedo may be CALLABLES P->(m,3) (a checkerboard, a noise-mottled rock).
+        `background=(r,g,b)` paints the pixels that see nothing a flat colour while the map keeps lighting,
+        reflecting and refracting -- 'use the HDRI for light, not as the backdrop'.
+        `flaw_volume` (a gem_flaw_volume): imperfections INSIDE the glass -- the density's integral along each
+        pixel's interior path is read in closed form and applied as extinction exp(-flaw_sigma tau) plus a
+        single-scatter glow flaw_albedo * E_amb/pi * (1 - T): milky quartz, rutile needles, a cloudy base.
+        `absorb_volume` + `absorb_volume_sigma` (rgb): COLOUR ZONING -- a density of where the chromophore sits,
+        applied as per-RGB Beer-Lambert along the same interior path (amethyst purple only at the tips).
+        `opaque_bounce` = rho/(1-rho): one-number indirect light for a concave rock cavity (radiosity closure);
+        0 keeps the old direct-only shading; `opaque_bounce_where(P)->[0,1]` confines it to the concave part.
+        `footprint_filter=True`: the spectral ray differential -- the floor albedo is read over the footprint that
+        the spread between neighbouring wavelengths' exit directions makes on the floor, instead of at a point
+        (the cure for confetti where a dispersive body's TIR paths diverge per wavelength)."""
+        if material is not None:
+            from holographic.materials_and_texture.holographic_matlib import glass_optics
+            absorb = glass_optics(material)["absorb"]          # per-RGB Beer-Lambert: a thick ruby is redder
+        return bake.relight(env, self.wavelength_cmf, floor_albedo=floor_albedo, glass_tint=glass_tint,
+                            absorb=absorb, sdf=sdf, sun_dir=sun_dir, shadow_transmittance=shadow_transmittance,
+                            sun_solid_angle=sun_solid_angle, opaque_albedo=opaque_albedo, ambient_samples=ambient_samples,
+                            background=background, flaw_volume=flaw_volume, flaw_sigma=flaw_sigma, flaw_albedo=flaw_albedo,
+                            absorb_volume=absorb_volume, absorb_volume_sigma=absorb_volume_sigma, opaque_bounce=opaque_bounce,
+                            opaque_bounce_where=opaque_bounce_where, footprint_filter=footprint_filter)
+
+    def hdri_env(self, env_img, exposure=1.0, sun_cone=0.20):
+        """A measured environment map as the LIGHT for relight_glass (holographic_glassbake.HdriEnv). Wraps an
+        equirect (H,W,3) linear radiance image from load_hdr / load_exr behind .radiance(dirs) via sky_dome, and
+        integrates the map's own pixels once for what the floor needs: .floor_irradiance (the exact cosine-weighted
+        hemisphere integral -- one rgb, since a floor is a plane), .dominant_dir (the brightest lobe -- aim the
+        caustic along it) and .sun_share (that lobe's fraction of the irradiance: 0.41 for a lounge with a sun
+        through a window, 0.11 for a cafeteria's ceiling lights -- the MAP decides how hard the shadow is).
+        Measured lesson: a Fibonacci sample of the sphere missed a 41,984-radiance sun (2% share); the pixel
+        integral is exact and cheap."""
+        from holographic.rendering.holographic_glassbake import HdriEnv
+        return HdriEnv(env_img, exposure=exposure, sun_cone=sun_cone)
+
+    def gem_flaw_volume(self, field=None, bounds=((-1, 1), (-1, 1), (-1, 1)), inclusions=None, radius=0.035, res=20,
+                        dim=4096, seed=0):
+        """Imperfections inside a gem as ONE hypervector with a closed-form line integral
+        (holographic_gemvolume.FlawVolume). Give `field` (any P->[0,1]: crystal_cloudiness, crystal_inclusions,
+        crystal_fractures, a sum of them) sampled on a res^3 lattice over `bounds`, or `inclusions` (blob centres,
+        kernel width `radius`) bundled directly. Hand the result to relight_glass(flaw_volume=...): every pixel's
+        interior path reads its optical depth as one inner product per segment -- no marching through the crystal.
+        MEASURED: closed form vs a 400-step march 6.8%; empty-space crosstalk floor 9.7% of a through-blob read at
+        dim 4096 (the bundle's capacity limit; raise dim to lower it). Ambient single scatter only."""
+        from holographic.rendering.holographic_gemvolume import FlawVolume
+        if inclusions is not None:
+            return FlawVolume.from_inclusions(inclusions, radius=radius, bounds=list(bounds), dim=dim, seed=seed)
+        if field is None:
+            raise ValueError("gem_flaw_volume: give field= or inclusions=")
+        return FlawVolume.from_field(field, list(bounds), res=res, dim=dim, seed=seed)
+
+    def env_add_light(self, env, direction, radiance=None, sigma=0.06, irradiance=None):
+        """Add an extra analytic light (a Gaussian lobe: direction, peak rgb radiance, angular width sigma in radians)
+        on top of an hdri_env -- the 'HDRI as base lighting plus a key/rim to show off dispersion and caustics'
+        rig (holographic_glassbake.HdriEnv.add_light). The lobe also updates the env's floor_irradiance,
+        dominant_dir and sun_share, so relight_glass shades the floor and shadows consistently and the caustic pass
+        can be aimed along it. Keep the peak radiance modest relative to the map (a few times its brightest
+        window), or size it by `irradiance=` (its floor contribution, e.g. 0.5 * env.floor_irradiance.mean()) --
+        brightness should come from exposure, not from a lobe that clips the tonemapper. Returns env."""
+        return env.add_light(direction, radiance, sigma=sigma, irradiance=irradiance)
+
+    def caustic_histogram_rgb(self, xz, lam, bounds_xz, res=512, blur_px=1.0, weights=None):
+        """The baseline spectral caustic image: bin spectral_landings (xz, lam) with colour-matching weights and blur
+        by the emitter cell's footprint (holographic_holocaustic.histogram_caustic_rgb). Use it where the holographic
+        caustic's capacity is exceeded -- measured on a 25k-landing amethyst plate, the tiled holographic read smeared
+        the filaments and showed tile seams; the histogram resolved them with dispersion at the edges. Feed the result
+        to caustic_pass / composite_caustic exactly like the holographic read."""
+        from holographic.rendering.holographic_holocaustic import histogram_caustic_rgb
+        return histogram_caustic_rgb(xz, lam, self.wavelength_cmf, bounds_xz, res=res, blur_px=blur_px, weights=weights)
+
+    def wavelength_cmf(self, lams):
+        """RGB colour-matching weights for an array of wavelengths (nm) -> (n, 3), from the engine's own
+        spectrum_to_rgb -- the CMF a HolographicCaustic.read_rgb folds into its query vectors. One door for
+        'what colour is this wavelength' so the holographic caustic and the hero-wavelength path agree."""
+        import numpy as np
+        from holographic.rendering.holographic_dispersion import wavelength_rgb
+        lams = np.atleast_1d(np.asarray(lams, float))
+        return np.stack([np.asarray(wavelength_rgb(float(l), self.spectrum_to_rgb), float) for l in lams], axis=0)
+
+    def spectral_caustics(self, sdf, glass="BK7", count=4, u=0.5, anchors=None, light_dir=(0, -1, 0),
+                          receiver_y=-0.9, extent=2.0, res=128, n_side=200, seed=0, lo=380.0, hi=780.0,
+                          center=(0.0, 0.0), window=None, refracted_only=False,
+                          n_d=None, abbe=None, dispersion_scale=1.0, emitter_center=None, aim=None):
+        """A caustic WITH ITS COLOUR -- self.caustics traced once per hero wavelength at that wavelength's
+        Sellmeier IOR, combined through the engine's own observer. Hero Wavelength Spectral Sampling (Wilkie et
+        al., EGSR 2014) is the SOTA stratification and is what `count` and `u` implement.
+
+        `anchors=k` is the holographic shortcut past it: the per-wavelength layer family is rank-3 (99.94% of
+        SVD energy in three singular values), so k traces plus interpolation reconstruct all `count` of them.
+        Measured BK7, C=16, 96x96, against the C-trace ground truth: k=3 gives 4.9x at relative RGB error
+        0.0072, keeping 100.1% of the chromatic saturation (k=2 6.1x/0.0116; k=4 3.8x/0.0085). anchors=None
+        (default) traces every wavelength and is byte-identical to the un-accelerated path. KEPT NEGATIVE:
+        bracketing on the HERO-ORDER axis instead of the sorted-IOR one interpolates between the wrong pair and
+        inflates saturation to 108.5% while rel-err stays a respectable 0.0236 -- a wrong picture that reads as
+        a mild accuracy cost.
+
+        `center=(x, z)` / `window` pass straight through to self.caustics to FRAME the receiver -- needed to
+        actually see dispersion, which is a fixed world-space separation and so only visible zoomed in.
+        Returns {'rgb': (res,res,3), 'wavelengths', 'iors', 'per_wavelength', 'traced', ...}.
+        See holographic_dispersion.spectral_caustics."""
+        from holographic.rendering.holographic_dispersion import spectral_caustics
+        return spectral_caustics(self.caustics, self.spectrum_to_rgb, glass=glass, count=count, u=u,
+                                 anchors=anchors, lo=lo, hi=hi, sdf=sdf, light_dir=light_dir,
+                                 receiver_y=receiver_y, extent=extent, res=res, n_side=n_side, seed=seed,
+                                 center=center, window=window, refracted_only=refracted_only,
+                                 n_d=n_d, abbe=abbe, dispersion_scale=dispersion_scale,
+                                 emitter_center=emitter_center, aim=aim)
+
+    def rgb_to_spectrum(self, rgb, samples=90, illuminant=None):
+        """RGB -> a smooth, physical reflectance SPECTRUM (the inverse of spectrum_to_rgb). This is the door
+        that makes the spectral machinery usable on real scenes: every material is authored in RGB, so without
+        it you could only render things whose spectrum you already had.
+
+        Jakob & Hanika's sigmoid-of-a-quadratic function space (Eurographics 2019) -- three coefficients, and
+        the sigmoid keeps the reflectance inside [0,1] so it cannot invent energy. Where the paper ships a 9 MiB
+        precomputed table (their fit needs CERES + autodiff), this solves on demand: a closed-form Vandermonde
+        seed plus Levenberg-Marquardt over three unknowns. Measured max round-trip error 9.4e-13 over 400 random
+        sRGB colours -- the paper's zero-error claim, with 0 bytes of table.
+
+        COST: ~0.6 ms per fit. This is BAKE-ONCE. Fit each material once and keep the coefficients (see
+        rgb_to_spectrum_coeffs / spectrum_from_coeffs); never call it per pixel.
+        See holographic_spectralup.rgb_to_spectrum."""
+        from holographic.rendering.holographic_observer import human_cie
+        from holographic.rendering.holographic_spectralup import rgb_to_spectrum
+        return rgb_to_spectrum(rgb, human_cie(samples), illuminant=illuminant)
+
+    def rgb_to_spectrum_coeffs(self, rgb, samples=90, illuminant=None):
+        """The three coefficients behind rgb_to_spectrum -- fit once, keep, evaluate anywhere for ~6 flops.
+        Accepts one colour or a whole array of them (identical colours are de-duplicated before fitting, which
+        is what makes a texture affordable). See holographic_spectralup.fit_palette."""
+        from holographic.rendering.holographic_observer import human_cie
+        from holographic.rendering.holographic_spectralup import fit_palette
+        import numpy as _np
+        out = fit_palette(rgb, human_cie(samples), illuminant=illuminant)
+        return out[0] if _np.asarray(rgb, float).ndim == 1 else out
+
+    def spectrum_from_coeffs(self, coeffs, wavelengths_nm, lo=380.0, hi=780.0):
+        """The CHEAP path: coefficients from rgb_to_spectrum_coeffs -> reflectance at any wavelengths. Six
+        flops, no solve. This is the call that belongs in an inner loop.
+        See holographic_spectralup.spectrum_of."""
+        from holographic.rendering.holographic_spectralup import spectrum_of
+        return spectrum_of(coeffs, wavelengths_nm, lo=lo, hi=hi)
+
+    def reflectance_to_rgb(self, spectrum, samples=90, illuminant=None):
+        """A REFLECTANCE spectrum -> linear sRGB: the exact forward partner of rgb_to_spectrum, closing that
+        round trip to machine precision.
+
+        USE THIS, NOT spectrum_to_rgb, FOR REFLECTANCES. spectrum_to_rgb is built for EMISSION -- its 'none'
+        mode divides XYZ by a constant calibrated for blackbody radiance, so a reflectance in [0,1] clips to
+        BLACK with nothing to say why, and its 'hue' mode discards luminance by design. Both are right about
+        their own quantity; radiance and reflectance are different physical things.
+        See holographic_spectralup.reflectance_to_rgb."""
+        from holographic.rendering.holographic_observer import human_cie
+        from holographic.rendering.holographic_spectralup import reflectance_to_rgb
+        return reflectance_to_rgb(spectrum, human_cie(samples), illuminant=illuminant)
+
+    def spectral_material_ball(self, rgb, count=16, res=192, u=0.5, lo=380.0, hi=780.0, **ball_kw):
+        """THE MATERIAL BALL, RENDERED SPECTRALLY -- the same preview environment (orthographic unit sphere, one
+        directional light, Cook-Torrance) shaded once per wavelength instead of once in RGB.
+
+        `rgb` is the material as authored; it is fitted to a physical reflectance (rgb_to_spectrum_coeffs) and
+        evaluated at `count` hero wavelengths. Unlike an RGB ball -- which multiplies ONE shaded image by three
+        numbers, giving every wavelength the same highlight -- each wavelength here is its own light-transport
+        answer, combined in linear radiance and tone-mapped once.
+
+        Measured against the RGB ball on the same material: max per-pixel difference 0.151, mean 0.018 -- the
+        spectral answer is a genuinely different image, not a re-tint.
+
+        KEPT NEGATIVE, AND IT IS WHY THERE IS NO `glass=` ARGUMENT HERE. A first cut took a glass name and
+        modulated each wavelength by its Sellmeier index, to show dispersion on the ball. It does not work and
+        cannot: an opaque Cook-Torrance BRDF has NO TRANSMITTED PATH, so there is no refraction for an index to
+        bend, and the modulation collapses to a near-constant gain. Measured max difference against no glass at
+        all: BK7 0.00028, SF11 0.00101 -- invisible, on a [0,1] image. The knob was removed rather than shipped,
+        because a parameter that claims an effect it cannot produce is worse than no parameter. DISPERSION LIVES
+        IN THE TRANSMITTED PATH: use mind.spectral_caustics for the rainbow, and this for reflectance.
+        Returns (res, res, 3) in [0,1]. See holographic_preview.spectral_material_ball."""
+        from holographic.misc.holographic_preview import spectral_material_ball
+        from holographic.rendering.holographic_dispersion import hero_wavelengths, wavelength_rgb
+        lams = hero_wavelengths(u, count=count, lo=lo, hi=hi)
+        return spectral_material_ball(self.rgb_to_spectrum_coeffs(rgb), self.spectrum_from_coeffs,
+                                      lambda l: wavelength_rgb(l, self.spectrum_to_rgb),
+                                      lams, res=res, **ball_kw)
+
+    def cauchy_ior(self, wavelength_nm, n_d=1.5168, abbe=64.17):
+        """Refractive index from a DISPERSION SLIDER: (n_d, Abbe) via Cauchy, n = A + B/lambda^2. The same two
+        numbers Blender's Cycles, LuxCore and Octane expose, so a glass authored in one of them transfers here by
+        its numbers rather than by eye. Use sellmeier_ior when you have a catalogued glass instead.
+        See holographic_dispersion.cauchy_n."""
+        from holographic.rendering.holographic_dispersion import cauchy_n
+        return cauchy_n(wavelength_nm, n_d=n_d, abbe=abbe)
+
+    def dispersive_render(self, sdf, camera, glass=None, n_d=1.5168, abbe=64.17, count=8, u=0.5,
+                          lo=420.0, hi=680.0, anchors=None, width=96, height=96, spp=16, max_bounce=8,
+                          material=None, sky=None, seed=0, dispersion_scale=1.0):
+        """DISPERSIVE GLASS IN THE VIEW PATH -- what you SEE through glass: every internally refracted edge
+        splits into rainbow fringes. This is the camera-path twin of spectral_caustics (which is the light path).
+
+        Path-traces the scene once per hero wavelength at that wavelength's index and combines through the
+        engine's own observer. `glass` names a catalogued glass; `n_d` + `abbe` is the slider parameterisation
+        Cycles/LuxCore/Octane share. `material` is your normal path-tracer material callback; wherever it returns
+        a non-zero IOR, that IOR is REPLACED by the wavelength's own -- which is what makes the object dispersive
+        without rewriting the material.
+
+        TWO THINGS THAT DECIDE WHETHER YOU SEE ANYTHING, both measured. (1) The view path splits colour only
+        where the REFRACTED IMAGE HAS EDGES: under a smooth gradient sky every wavelength sees the same picture
+        and saturation sits at 0.25; against a studio sky with HDR ceiling panels it is 0.46. Light the scene
+        with structure. (2) The band defaults to 420-680nm because outside it the CIE curves nearly vanish and
+        the hue-lift invents saturated, wrong colour.
+
+        `dispersion_scale` stretches the index spread about its mean -- 1.0 is PHYSICAL, larger is the look.
+        REAL DISPERSION IS SMALL: SF11, the hardest-dispersing glass here, spans only 0.0597 of index across
+        420-680nm, while the widely used Cycles "dispersion glass" setup stacks IORs at 1.35/1.55/1.75, a spread
+        of 0.40 -- 6.7x, needing an Abbe number near 2.5 that no real glass has. That is why a physically correct
+        render of real glass looks almost achromatic. Both are available; neither is disguised as the other.
+
+        COST IS HONEST AND LARGE: one full path trace PER WAVELENGTH, ~107 s each at 288x288 spp40 on this
+        NumPy CPU brain. anchors= is accepted but does NOT pay here -- see the kept negative in
+        holographic_dispersion.spectral_render: path-traced layers carry Monte Carlo noise, and noise is
+        full-rank. See holographic_dispersion.spectral_render."""
+        import numpy as _np
+        from holographic.rendering.holographic_dispersion import spectral_render
+
+        def trace_one(ior, **_kw):
+            def _mat(P):
+                from holographic.rendering.holographic_pathtrace import _unpack_mat
+                base = material(P) if material is not None else (
+                    _np.full((len(P), 3), 0.8), _np.zeros(len(P)), _np.full(len(P), 0.3),
+                    _np.zeros((len(P), 3)), _np.zeros(len(P)))
+                alb, met, rough, emis, old_ior, sss, irid, absorb = _unpack_mat(base, len(P))
+                # Swap the WAVELENGTH's index in wherever the material said "this is glass". Keeping the
+                # material's own mask is what lets an existing scene become dispersive unchanged.
+                return (alb, met, rough, emis, _np.where(old_ior > 1.0, float(ior), 0.0), sss, irid, absorb)
+            img = self.path_trace(sdf, camera, width=width, height=height, spp=spp,
+                                  max_bounce=max_bounce, material=_mat, sky=sky, seed=seed)
+            return _np.asarray(img, float).mean(-1)          # monochrome radiance; colour comes from the observer
+
+        return spectral_render(trace_one, self.spectrum_to_rgb, glass=glass, n_d=n_d, abbe=abbe,
+                               count=count, u=u, lo=lo, hi=hi, anchors=anchors,
+                               dispersion_scale=dispersion_scale)
+
+    def caustic_pass(self, caustic_rgb, camera, width, height, plane_y, window, center=(0.0, 0.0),
+                     occluder_sdf=None):
+        """Project a forward-traced caustic map onto the camera's view of a plane -> (H,W,3) to composite
+        onto a beauty render. Pair with composite_caustic.
+
+        WHY A SEPARATE PASS: brute-force path tracing is the wrong algorithm for a caustic -- this tracer has
+        no next-event estimation, so a small bright source arrives as fireflies (measured: raising the key
+        panel 95 -> 220 made raw grain WORSE, 0.76 -> 1.19). mind.caustics forward-traces instead, which is
+        deterministic and clean. Render the beauty however you like, cast the caustic with caustics/
+        spectral_caustics at the SAME window=/center=, project here, composite. Pass `occluder_sdf` (the glass)
+        or the pattern paints over the object casting it. Plane receivers only -- declared, not discovered.
+        See holographic_causticpass.project_to_plane."""
+        from holographic.rendering.holographic_causticpass import project_to_plane
+        import numpy as _np
+        _, dirs = camera.ray_dirs(int(width), int(height))
+        D = _np.asarray(dirs, float).reshape(int(height), int(width), 3)
+        return project_to_plane(caustic_rgb, camera.eye, D, plane_y, window, center=center,
+                                occluder_sdf=occluder_sdf)
+
+    def composite_caustic(self, beauty, caustic_px, strength=1.0, receiver_mask=None):
+        """beauty + a projected caustic, normalised by the pattern's 99th percentile so `strength` means the
+        same thing across scenes (its peak is a few colliding splat cells -- an outlier, not the pattern).
+        `receiver_mask` (H,W) bool = the pixels that show the floor (bake.floor.reshape(H,W)); without it the
+        projected pattern paints over whatever stands on the floor. See holographic_causticpass.composite."""
+        from holographic.rendering.holographic_causticpass import composite
+        return composite(beauty, caustic_px, strength=strength, receiver_mask=receiver_mask)
+
+    def exaggerate_dispersion(self, iors, scale=1.0):
+        """Stretch a set of refractive indices about their MEAN by `scale` -- the dispersion slider, as a verb.
+
+        scale=1.0 is PHYSICAL and byte-identical. Stretching about the mean is the point: the mean index sets
+        how much the glass bends light at all, the SPREAD sets the rainbow, and only the second should move.
+        Real dispersion is small -- SF11, the hardest-dispersing glass shipped, spans 0.0597 of index across
+        420-680nm, while the widely used Cycles look stacks IOR 1.35/1.55/1.75 (spread 0.40, 6.7x, an Abbe
+        number near 2.5 that no glass has). An artistic control, named as one.
+        See holographic_dispersion.exaggerate."""
+        from holographic.rendering.holographic_dispersion import exaggerate
+        return exaggerate(iors, scale=scale)
+
+    def combine_render_buckets(self, partials, n_done=None, reject=0.0):
+        """Combine progressive render buckets -> the mean image, with optional FIREFLY REJECTION.
+
+        `reject=k` drops bucket values more than k median-absolute-deviations from the per-pixel median and
+        averages the rest. A firefly is one rare bright path, so it lands in ONE bucket and the others disagree
+        -- independent estimates per pixel make that measurable. Unlike clamp_fireflies (which compares a pixel
+        to a GLOBAL percentile and so cannot tell a firefly from a real highlight), this compares a pixel to
+        ITSELF across buckets, leaving consensus untouched. reject=0.0 is the plain mean.
+        See holographic_progressive.combine_buckets."""
+        from holographic.rendering.holographic_progressive import combine_buckets
+        return combine_buckets(partials, n_done=n_done, reject=reject)
+
+    def specular_connect(self, sdf, X0, light_pos, shade_pos, eta, iters=24, tol=1e-5):
+        """Solve for the point on a refractive surface that connects a LIGHT to a SHADE POINT -- the caustic
+        connection ordinary next-event estimation cannot make.
+
+        NEE joins a shade point to a light with a straight shadow ray, and a caustic's path goes THROUGH glass,
+        which bends it. So even perfect NEE finds caustics only by the luck of a bounce landing on a light after
+        refraction. This is the estimator gap that Manifold Next-Event Estimation (Hanika et al.) and Specular
+        Manifold Sampling (Zeltner, Georgiev & Jakob, SIGGRAPH 2020 -- what Cycles uses) exist to close: SOLVE
+        for the specular vertex instead of hoping for it.
+
+        It is a projection iteration, which is why it is small: this engine already says IK, PBD, PnP and the
+        resonator "are all iterate a projection", and the missing piece was the CONSTRAINT, not a solver. The
+        constraint is zero exactly when the ray from the light, refracted at the vertex, points at the shade
+        point; the Newton step lives in the surface tangent plane and re-projects onto the SDF each iteration.
+
+        Returns {'X', 'residual', 'converged', 'valid'}. CHECK `converged` -- a Newton solve on a non-convex
+        surface does not always land, and a caustic drawn from an unconverged vertex puts light where none goes.
+        SCOPE: ONE interface (a water surface, a thin shell, a lens from inside). Real glass refracts on entry
+        AND exit; the two-vertex chain is the next rung and is not silently approximated here.
+        See holographic_specularconnect.connect."""
+        import numpy as _np
+        from holographic.mesh_and_geometry.holographic_sdf import sdf_normal
+        from holographic.rendering.holographic_specularconnect import connect
+
+        def _n(X):
+            return sdf_normal(sdf, _np.atleast_2d(_np.asarray(X, float)))
+
+        def _proj(X):
+            # Walk back onto the zero level set: a few Newton steps along the gradient, which is what
+            # keeps the solved vertex ON the geometry rather than drifting off it.
+            X = _np.atleast_2d(_np.asarray(X, float)).copy()
+            for _ in range(4):
+                d = _np.asarray(sdf.eval(X) if hasattr(sdf, "eval") else sdf(X), float)
+                X = X - d[:, None] * _n(X)
+            return X
+
+        return connect(_n, _proj, X0, light_pos, shade_pos, eta, iters=iters, tol=tol)
 
     def morph_scene(self, img_a, img_b, steps=9, method="dct", post=None):
         """Morph between two images. method='dct' (default) blends in the DCT-coefficient domain (structure

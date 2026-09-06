@@ -24,12 +24,13 @@ it costs 2.1 ms/frame of the budget. At band=4 (18.7 ms/frame) the whole thing i
 before trails, so the effect is only real-time at band=8. That is stated rather than hidden behind an
 average.
 
-KEPT NEGATIVE, and it cost a flaky test to learn: THE 60 fps FIGURE BELONGS TO AN UNLOADED BOX. The
-selftest originally asserted `ms_per_frame < 16.7` outright; it passed alone and failed under
-`pytest -n 4`, because four workers contending for the same cores are not the machine the number was
-measured on. The gate is now the SPEEDUP -- two measurements taken under the same load, so contention
-cancels -- with a generous absolute ceiling behind it. A wall-clock assertion is a claim about a
-machine, and CI is a different machine every time.
+KEPT NEGATIVE, and it cost TWO flaky tests to learn, which is why it is written this loudly: THE 60 fps
+FIGURE BELONGS TO AN UNLOADED BOX. The selftest first asserted `ms_per_frame < 16.7` outright; it passed
+alone and failed under `pytest -n 4`. That was replaced by a ratio gate -- correct -- but with a
+"generous" absolute ceiling of 60 ms left behind it, and THAT failed too, under a heavier seven-file
+parallel run, while still passing in isolation. There is no generous-enough wall-clock ceiling: it is a
+claim about a machine, and CI is a different machine every time. The gate is now the median of three
+paired ratios and nothing else. The 60 fps number is REPORTED, never asserted.
 """
 import hashlib
 import os
@@ -124,10 +125,18 @@ def _selftest():
     #    The speedup is two measurements taken under the SAME load, so it survives contention and is
     #    the honest gate; the absolute figure is reported and given a generous ceiling that still
     #    catches a real regression. The 60 fps claim belongs to an unloaded box and says so.
-    live = mind.deep_zoom(centre=TARGET, frames=10, width=320, height=180, max_iter=64, band=8)
-    base = mind.deep_zoom(centre=TARGET, frames=10, width=320, height=180, max_iter=64, band=1)
-    assert base["ms_per_frame"] / live["ms_per_frame"] > 4.0, (live["ms_per_frame"], base["ms_per_frame"])
-    assert live["ms_per_frame"] < 60.0, "regressed badly: %.1f ms/frame" % live["ms_per_frame"]
+    #    THE FIX HAD TO BE MADE TWICE, which is the lesson worth keeping. Round 5 removed the outright
+    #    `< 16.7 ms` assertion and gated on the ratio -- but left an absolute `< 60 ms` ceiling behind
+    #    it, and that ceiling failed again under a HEAVIER parallel run (seven files, `-n 4`) while
+    #    passing in isolation. A wall-clock ceiling is a claim about a machine no matter how generous it
+    #    looks. It is gone. What remains is the ratio, taken as the MEDIAN of paired runs so a single
+    #    contention spike in either measurement cannot decide the verdict.
+    ratios = []
+    for _ in range(3):
+        live = mind.deep_zoom(centre=TARGET, frames=10, width=320, height=180, max_iter=64, band=8)
+        base = mind.deep_zoom(centre=TARGET, frames=10, width=320, height=180, max_iter=64, band=1)
+        ratios.append(base["ms_per_frame"] / max(live["ms_per_frame"], 1e-9))
+    assert sorted(ratios)[1] > 4.0, ratios
     # 4. THE WALL is bracketed and in the right decade -- the number the brief asked for.
     assert 13.0 < p["float64_decades"] < 14.5 and p["wall_verified"], p
     # 5. IT STOPS THERE rather than rendering noise.

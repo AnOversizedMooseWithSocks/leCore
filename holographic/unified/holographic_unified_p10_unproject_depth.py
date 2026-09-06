@@ -23,6 +23,26 @@ from holographic.misc.holographic_creature import HolographicMind
 from holographic.unified import check_part
 
 
+_PROGRESSIVE_MIND = None
+
+
+def _progressive_bucket_worker(bucket, cache=None):
+    """One sample batch of a progressive render. MODULE-LEVEL on purpose: the job checkpoint stores the
+    worker by NAME and re-resolves the code on restore, so a closure here would make a render un-resumable
+    across a process restart -- which is the entire feature."""
+    import lecore
+    import numpy as _np
+    from holographic.rendering.holographic_progressive import rehydrate_args
+    c = dict(cache or {})
+    global _PROGRESSIVE_MIND
+    if _PROGRESSIVE_MIND is None:                        # boot once per process, not once per bucket
+        _PROGRESSIVE_MIND = lecore.UnifiedMind(dim=64, seed=0)
+    fn = getattr(_PROGRESSIVE_MIND, c["faculty"])
+    out = fn(seed=int(bucket["seed"]), spp=int(bucket["spp"]), **rehydrate_args(c.get("args") or {}))
+    img = out[0] if isinstance(out, tuple) else out          # adaptive tracers return (image, report)
+    return _np.asarray(img, float)
+
+
 class _UnifiedPart10:
 
     def unproject_depth(self, depth, fx, fy, cx, cy):
@@ -674,6 +694,65 @@ class _UnifiedPart10:
         from holographic.misc.holographic_parambus import param_bus, DEFAULT_BANDS
         return param_bus(samples, rate, hop=hop, size=size,
                          bands=bands if bands is not None else DEFAULT_BANDS, smooth=smooth)
+
+    def onset_detect(self, samples, rate=None, hop=512, size=2048, delta=0.02, refractory=0.08,
+                     k_mad=6.0, structure=1.30, smooth=1):
+        """WHERE ARE THE HITS? Discrete onset TIMES from audio -> {times, frames, strengths, n,
+        structure_ratio, abstained} (holographic_parambus.detect_onsets). The receiver for the wire
+        audio_param_bus already had a signal on: param_bus computes spectral flux and exposes it as
+        `bus.onset`, and what was missing was the DECISION -- curve to events.
+        MEASURED against click tracks with EXACT known onsets, +/-50 ms tolerance: clean clicks
+        60/90/120/140/175 BPM all P=1.00 R=1.00; additive noise survived to sigma 0.20 at P=1.00 and
+        sigma 0.50 at P=0.88.
+        IT ABSTAINS, and that is the property it is judged on: silence, quiet noise AND loud noise all
+        return ZERO onsets, because a gain-invariant structure gate (peak/mean of raw band energy,
+        measured 4.52 for clicks at any gain, 1.10 for noise at any gain) refuses a track with no
+        transient structure. Normalisation erases loudness, so noise fills 0..1 exactly as music does --
+        without that gate the detector fired 62 times on silence-with-noise.
+        KEPT NEG, the failure envelope, measured not guessed: SLOW ATTACKS. A flux detector keys on a
+        sharp rise, so at a 30 ms attack precision falls to 0.54 (recall stays 1.00 -- it finds every
+        beat and adds as many again). Use it on percussive material.
+        KEPT NEG: an onset at exactly t=0 is undetectable -- flux[0] is 0 by construction, there being
+        no previous frame to difference against. See holographic_parambus.detect_onsets."""
+        from holographic.misc.holographic_parambus import detect_onsets, param_bus, DEFAULT_BANDS
+        if hasattr(samples, "onset"):
+            bus = samples                      # already-analysed ParamBus: it carries its own rate
+        elif rate is None:
+            raise ValueError("onset_detect(samples, rate) needs `rate` for raw audio; pass a ParamBus "
+                             "from mind.audio_param_bus(...) to reuse an analysis you already have")
+        else:
+            bus = param_bus(samples, rate, hop=hop, size=size, bands=DEFAULT_BANDS, smooth=smooth)
+        return detect_onsets(bus, delta=delta, refractory=refractory, k_mad=k_mad, structure=structure)
+
+    def tempo(self, times, bpm_range=(50.0, 200.0), tol=0.12):
+        """ONE GLOBAL TEMPO in BPM from onset times -> {bpm, confidence, interval, n_intervals}
+        (holographic_parambus.estimate_tempo). Feed it mind.onset_detect(...)["times"].
+        The median inter-onset interval -- robust, since one missed onset doubles a single interval and
+        a mean would carry that into the answer -- then REFINED by a least-squares fit of onset times
+        against integer beat indices. That refinement is not cosmetic: onset times are quantised to
+        analysis frames (23 ms at hop=512), and the median alone read 117.45 BPM for a true 120, a miss
+        that compounded into a 40 ms beat-grid error over eight seconds. With the fit: 119.9 BPM and a
+        6 ms grid error. MEASURED exact to under 0.3% on clean clicks from 60 to 175 BPM.
+        `confidence` is the fraction of intervals agreeing with the chosen one, and it EARNS its place:
+        on a syncopated pattern it drops to 0.52 while the BPM reads 184.6 -- the classic subdivision
+        (octave) error, correctly flagged as unsteady rather than reported as fact.
+        KEPT NEG: ONE global tempo. No tempo curve, no rubato, no downbeat or metre. A track that speeds
+        up gets a single number fitting neither end. See holographic_parambus.estimate_tempo."""
+        from holographic.misc.holographic_parambus import estimate_tempo
+        return estimate_tempo(times, bpm_range=bpm_range, tol=tol)
+
+    def beat_grid(self, times, duration, bpm=None, bpm_range=(50.0, 200.0)):
+        """THE BEAT GRID: predicted beat times over `duration` -> {beats, bpm, phase, mean_abs_error}
+        (holographic_parambus.beat_grid). Tempo alone cannot place a beat -- 120 BPM says the spacing,
+        not where the downbeats land -- so the phase is chosen by scanning one period and keeping the
+        offset whose grid sits closest to the detected onsets.
+        `mean_abs_error` is the honest quality number and it comes with its own null: a RANDOM phase
+        averages a quarter of the period (125 ms at 120 BPM), so the MEASURED 6 ms is a real fit rather
+        than luck. This is what a demo syncs to -- the grid predicts beats the detector has not seen
+        yet, which is what lets an effect hit ON the beat instead of just after it.
+        See holographic_parambus.beat_grid."""
+        from holographic.misc.holographic_parambus import beat_grid
+        return beat_grid(times, duration, bpm=bpm, bpm_range=bpm_range)
 
     def milk_parse(self, text):
         """PARSE a Milkdrop `.milk` preset's TEXT into a MilkPreset (holographic_milkdrop) -- settings +
@@ -1421,6 +1500,127 @@ class _UnifiedPart10:
         mgr.start(job_id, background=background)
         return job_id
 
+    def render_progressive(self, faculty, args=None, n_buckets=8, spp=16, seed0=0, job_id=None,
+                           background=True, batch=1, workers=0):
+        """A render you can PAUSE, RESUME, WATCH WHILE IT RUNS, and finish across process restarts -- so a
+        limited environment stops capping the quality you can ever reach.
+
+        `faculty` is any tracing faculty by name ('path_trace', 'path_trace_adaptive', ...) and `args` its
+        scene/camera/size arguments. The samples are split into `n_buckets` batches of `spp`, each with its OWN
+        seed, and reduced by summing -- because Monte Carlo samples are iid, an image is a MEAN of batches, so
+        order does not matter and the render is exactly the checkpointed monoid work holographic_jobs already
+        runs. Pause with job_pause(id), continue with job_resume(id), and read the image at ANY time with
+        progressive_preview(id) -- a partial render is a real render of fewer samples, not a broken one.
+
+        THIS IS THE FIX FOR job_submit's DECLARED LIMIT. That method says of itself: "ATOMIC. One bucket, so
+        progress is 0 then 1 ... do not expect a partial render." Splitting the SAMPLES rather than the image is
+        what removes that limit, and it needs no new machinery -- pause, resume, restart-survival and the
+        network farm all come from the existing job manager.
+
+        THE SEED IS LOAD-BEARING: buckets sharing a seed return copies of the same image, whose mean is that
+        image -- an hour of rendering with the noise of one bucket and a progress bar saying it worked.
+        sample_buckets makes that impossible by construction.
+
+        SURVIVES A PROCESS RESTART: the scene is checkpointed as its SDF DSL string and the camera as its
+        numbers, so the whole job state is JSON. Reopen a mind, job_resume(id), and it continues -- which is
+        what makes an arbitrarily long render reachable from a short-lived environment. An argument that cannot
+        be serialised is left alone and the job reports persisted=False rather than failing.
+
+        `workers=N` runs the buckets on N SEPARATE PROCESSES (mind.local_pool), each its own interpreter with
+        its own GIL, so GIL-bound NumPy tracing actually runs in parallel. The result is BYTE-IDENTICAL to the
+        serial render (verified atol=0) -- which is the monoid paying off again: the same buckets, combined by
+        the same sum, wherever they ran. Measured on a 2-core box: 10.4s serial -> 5.9s on 2 workers, 1.76x,
+        88% parallel efficiency. (4 workers gave 1.91x on those same 2 cores -- that is oversubscription, not
+        scaling, and is reported as such.) Use batch>=workers or the pool sits idle: the dispatcher only runs
+        `batch` buckets concurrently.
+
+        Total samples are n_buckets*spp. Smaller buckets pause more responsively; larger ones dispatch more
+        concurrently. See holographic_progressive."""
+        from holographic.rendering.holographic_progressive import jsonify_args, sample_buckets
+        if not faculty or not isinstance(faculty, str) or faculty.startswith("_"):
+            raise ValueError("invalid or private faculty name: %r" % (faculty,))
+        if not callable(getattr(self, faculty, None)):
+            raise ValueError("no such faculty: %r" % (faculty,))
+        import uuid
+        job_id = job_id or ("render-%s-%s" % (faculty, uuid.uuid4().hex[:8]))
+        if int(workers or 0) > 1:
+            # A pool-backed manager of its own: the shared manager's backend is in-process, and swapping it
+            # underneath would change how every OTHER live job runs. Same store_dir, so the checkpoint still
+            # lands where job_resume looks for it after a restart.
+            from holographic.scene_and_pipeline.holographic_jobs import JobManager
+            mgr = JobManager(self.local_pool(int(workers)),
+                             store_dir=getattr(self._job_manager, "store_dir", ".lecore_jobs"))
+            batch = max(int(batch or 1), int(workers))    # or the pool sits idle
+        else:
+            mgr = self._job_manager
+        self._progressive_managers = getattr(self, "_progressive_managers", {})
+        self._progressive_managers[job_id] = mgr
+        mgr.register_worker("progressive_render_bucket", _progressive_bucket_worker)
+        mgr.create(job_id, buckets=sample_buckets(n_buckets, spp=spp, seed0=seed0),
+                   worker="progressive_render_bucket", reduce="sum",
+                   cache={"faculty": faculty, "args": jsonify_args(args or {})},
+                   meta={"faculty": faculty, "spp_per_bucket": int(spp), "n_buckets": int(n_buckets)})
+        mgr.start(job_id, background=background, batch=batch)
+        return job_id
+
+    def _progressive_manager(self, job_id):
+        """Which manager owns this job -- the pool-backed one if it was started with workers>1, else the shared
+        one. A render on its own backend must not be looked up in the shared manager, or preview/pause silently
+        act on nothing."""
+        return getattr(self, "_progressive_managers", {}).get(job_id, self._job_manager)
+
+    def progressive_checkpoint(self, job_id, path=None):
+        """Write a progressive render's checkpoint to disk -> the path, or None if it is not JSON-serialisable.
+
+        Resolves WHICH manager owns the job (a render started with workers>1 runs on its own pool-backed
+        manager), so callers do not have to know. Checkpoints are also written automatically at every stopping
+        point; this is the explicit "save now" for a caller about to lose its process."""
+        return self._progressive_manager(job_id).save(job_id, path=path)
+
+    def progressive_restore(self, job_id, path=None):
+        """Load a progressive render's checkpoint into this mind -> its status dict, ready for job_resume.
+
+        This is the other half of surviving a restart: a fresh process has no job table, so the checkpoint has
+        to be read back and the bucket worker re-registered by name before the remaining buckets can run."""
+        mgr = self._job_manager
+        mgr.register_worker("progressive_render_bucket", _progressive_bucket_worker)
+        mgr.load(job_id, path=path)
+        self._progressive_managers = getattr(self, "_progressive_managers", {})
+        self._progressive_managers[job_id] = mgr
+        return self.progressive_preview(job_id)
+
+    def progressive_preview(self, job_id):
+        """The image SO FAR from a progressive render -> {image, buckets_done, buckets_total, spp, fraction}.
+
+        Valid at any point, including while the job is running: a partially complete Monte Carlo render is a
+        real render of fewer samples, with noise falling as 1/sqrt(buckets done). `spp` is what the preview
+        actually represents, which is the honest quality label -- 'how far along' and 'how good' are different
+        questions. See holographic_progressive.preview."""
+        from holographic.rendering.holographic_progressive import preview, spp_so_far
+        job = self._progressive_manager(job_id).jobs[job_id]
+        img, done, frac = preview(job)
+        return {"image": img, "buckets_done": done, "buckets_total": len(job.buckets),
+                "spp": spp_so_far(job), "fraction": frac, "status": job.status}
+
+    def progressive_render_for(self, job_id, seconds, poll=0.25):
+        """Run a progressive render for a WALL-CLOCK BUDGET, then pause and checkpoint -> the status dict.
+
+        The answer to a limited environment: spend the time you actually have, keep what you got, come back.
+        The budget is honoured at BUCKET BOUNDARIES (the job manager's cooperative-control rule), so the real
+        stop is at most one bucket late -- pick the bucket size for the granularity you need rather than
+        expecting a hard interrupt."""
+        import time as _t
+        mgr = self._progressive_manager(job_id)
+        job = mgr.jobs[job_id]
+        if job.status in ("paused", "created"):
+            mgr.resume(job_id, background=True)
+        deadline = _t.time() + float(seconds)
+        while _t.time() < deadline and mgr.jobs[job_id].status == "running":
+            _t.sleep(float(poll))
+        if mgr.jobs[job_id].status == "running":
+            mgr.pause(job_id)
+        return self.progressive_preview(job_id)
+
     def bake_cloud_job(self, center=(0.0, 0.0, 0.0), radius=1.0, seed=0, grid=32, octaves=4, gain=0.58,
                        n_buckets=8, job_id=None, background=True):
         """Start the SLOW part of make_cloud (the fBm noise bake -- grid=32 ~60s) as a real background JOB you can
@@ -1441,33 +1641,37 @@ class _UnifiedPart10:
     def job_status(self, job_id):
         """{id, status: created/running/paused/done/cancelled/failed, progress in [0,1], done, total, error} for
         any job started with bake_cloud_job (or any job on the shared manager)."""
-        return self._job_manager.status(job_id)
+        return self._progressive_manager(job_id).status(job_id)
 
     def job_pause(self, job_id):
         """Ask a running job to pause at its next checkpoint boundary (waits for it to actually stop). Safe to
         call from another thread/process context; the job's progress is preserved and resumable."""
-        self._job_manager.pause(job_id)
-        return self._job_manager.status(job_id)
+        self._progressive_manager(job_id).pause(job_id)
+        return self._progressive_manager(job_id).status(job_id)
 
     def job_resume(self, job_id, background=True):
         """Continue a paused job from where it left off (only the remaining buckets run)."""
-        self._job_manager.resume(job_id, background=background)
-        return self._job_manager.status(job_id)
+        self._progressive_manager(job_id).resume(job_id, background=background)
+        return self._progressive_manager(job_id).status(job_id)
 
     def job_cancel(self, job_id):
         """Stop a job for good (not resumable) at its next checkpoint boundary."""
-        self._job_manager.cancel(job_id)
-        return self._job_manager.status(job_id)
+        self._progressive_manager(job_id).cancel(job_id)
+        return self._progressive_manager(job_id).status(job_id)
 
     def job_result(self, job_id):
         """The finished job's result (for bake_cloud_job: the baked (grid,grid,grid) noise array). Raises if the
         job isn't done yet -- check job_status(job_id)['status'] == 'done' first."""
-        return self._job_manager.result(job_id)
+        return self._progressive_manager(job_id).result(job_id)
 
     def job_list(self):
         """{job_id: status} for every job on the shared manager (this process's, plus any reopened from
         .lecore_jobs/ via job_status on a known id)."""
-        return {jid: self._job_manager.status(jid) for jid in self._job_manager.jobs}
+        out = {jid: self._job_manager.status(jid) for jid in self._job_manager.jobs}
+        for jid, mgr in getattr(self, "_progressive_managers", {}).items():
+            if jid not in out and jid in mgr.jobs:      # a pooled render lives on its own manager
+                out[jid] = mgr.status(jid)
+        return out
 
     # -- the NAVIGATOR: the creature, repurposed to search the data tree with a LEARNED adaptive budget ---------
     # State lives on the mind (a trained agent is expensive to build), and every method takes/returns plain data.

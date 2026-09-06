@@ -121,12 +121,16 @@ class _UnifiedPart09:
         from holographic.misc.holographic_dirtyfield import DirtyField
         return DirtyField(shape, lo=lo, hi=hi, base=base)
 
-    def bake_sdf(self, sdf, lo, hi, res):
+    def bake_sdf(self, sdf, lo, hi, res, exact_near=False, band=None):
         """PRECOMPUTE a scene SDF (anything with `.eval`, and optionally `.ids`) onto a grid, then sample it O(1) --
         the realtime distance-field shortcut. Cost of a sample is independent of the number of primitives, so the ONE
         baked grid speeds every SDF consumer at once (the shader's trace/shadows/AO/reflections, navigation, collision,
         emission). Amortises over many rays/frames/queries. Returns a GridSDF (a drop-in union). See holographic_sdfbake."""
-        from holographic.mesh_and_geometry.holographic_sdfbake import GridSDF
+        from holographic.mesh_and_geometry.holographic_sdfbake import GridSDF, HybridSDF
+        if exact_near:
+            # grid FAR, analytic NEAR (within `band`, default 3 cells): exact surface and normals, O(1) marching --
+            # the render-quality form of the bake (holographic_sdfbake.HybridSDF). Default off = the classic GridSDF.
+            return HybridSDF.bake(sdf, lo, hi, res, band=band)
         return GridSDF.bake(sdf, lo, hi, res)
 
     def dispatch_methods(self, x, tags, ops, default=None):

@@ -1011,7 +1011,8 @@ class _UnifiedPart07:
         from holographic.mesh_and_geometry.holographic_sdf import menger
         return menger(iterations, size)
 
-    def fold_fractal(self, iterations=12, scale=2.0, min_radius=0.5, fold_limit=1.0):
+    def fold_fractal(self, iterations=12, scale=2.0, min_radius=0.5, fold_limit=1.0,
+                     bailout=None, solid=False):
         """The KALEIDOSCOPIC-IFS / MANDELBOX distance-estimator SDF -- the general FOLD ENGINE behind the fractal-
         forums 3D fractals and the Yohei-Nishitsuji tweet-shader look (holographic_sdf). Iterates box-fold (conditional
         reflection) + sphere-fold (inversion through nested spheres) + scale/translate, tracking the derivative for a
@@ -1019,9 +1020,18 @@ class _UnifiedPart07:
         `fold_limit` the box-fold extent. All conformal transforms, so it raymarches and orbit-traps cleanly with the
         existing renderer. A four-float recipe that regenerates megabytes of deterministic self-similar structure.
         Returns an SDF. Kept negative: INEXACT (a distance ESTIMATE) -- the in-engine raymarcher steps conservatively,
-        but the GLSL emitter refuses it (a shader consumer must hand-tune the step size)."""
+        but the GLSL emitter refuses it (a shader consumer must hand-tune the step size).
+
+        TO RENDER IT AS A SOLID (glass, refraction, caustics, or a mesh), pass `bailout=4.0, solid=True`.
+        Both are opt-in and the defaults are byte-identical to the historical field. Without `solid` the
+        field is ALL-POSITIVE -- a set-proximity estimate with no interior -- so a refracted ray has nothing
+        to be inside of and marching at level 0 finds no crossing. Without `bailout` the estimate collapses
+        by scale^4 = 16x per 4 extra iterations (0.02174 -> 0.00131 -> 0.00008 at radius 1.0 for 4/8/12
+        iterations); a trace still converges on it, at 108 steps and a 1.0e-03 p99 residual instead of 79
+        and 1.0e-04. Keep `bailout` modest (~4): escape is what defines "outside", so at 16 or 64 almost
+        nothing escapes in 8 iterations and 95%/99% of the box is reported as interior."""
         from holographic.mesh_and_geometry.holographic_sdf import fold_fractal
-        return fold_fractal(iterations, scale, min_radius, fold_limit)
+        return fold_fractal(iterations, scale, min_radius, fold_limit, bailout=bailout, solid=solid)
 
     def mandelbulb(self, power=8.0, iterations=8, bailout=2.0):
         """The MANDELBULB distance-estimator SDF (holographic_sdf) -- White & Nylander's polar-power fractal, the 3D
@@ -1046,6 +1056,15 @@ class _UnifiedPart07:
         return escape_time(width=width, height=height, center=center, span=span, max_iter=max_iter,
                            power=power, julia_c=julia_c, bounds_ratio=bounds_ratio,
                            fast_square=fast_square)
+
+    def splat_denoise(self, noisy, K, scales=(1.0, 2.0, 3.5, 6.0)):
+        """Denoise a 2-D field by fitting K Gaussian splats and rendering them back -- the smooth
+        basis IS the prior, so nothing but the number of splats decides how much detail survives.
+        The demo-scene review named this the next of the seven rendering cards after aces_tonemap,
+        and the reason is the same one: it was declared in the catalog and not callable over
+        /invoke. See holographic_splat.splat_denoise."""
+        from holographic.rendering.holographic_splat import splat_denoise
+        return splat_denoise(noisy, K, scales=scales)
 
     def aces_tonemap(self, hdr, exposure=1.0, auto=True, key=0.18):
         """HDR -> viewable pixels: ACES filmic tonemap with optional auto-exposure. A physically-lit
@@ -1477,18 +1496,45 @@ class _UnifiedPart07:
             self.learn_procedure(name, prog)
         return {"program": prog, "generalizes": generalizes, "fit": float(_np.mean(fits)), "worst": worst}
 
-    def path_trace(self, sdf, camera, width=96, height=96, spp=16, max_bounce=4, material=None, sky=None, seed=0):
+    def path_trace(self, sdf, camera, width=96, height=96, spp=16, max_bounce=4, material=None, sky=None,
+                   seed=0, lights=None, antialias=False, **kw):
         """Monte-Carlo PATH TRACER for true multi-bounce global illumination -- the core of V-Ray/Redshift/Arnold.
         Solves the full rendering equation over an SDF scene by following random light paths and averaging:
         BRDF importance sampling (cosine + GGX), Russian roulette, vectorised over rays. Indirect light (color
         bleeding, soft GI in concavities) falls out for free, unlike the engine's single-bounce irradiance cache.
         Returns an (H,W,3) HDR image. MEASURED: unbiased (white-furnace -> albedo), noise ~1/sqrt(spp), color
-        bleed reproduced; 128^2/96spp ~13-16s (OFFLINE NumPy brain, NOT GPU-realtime). KEPT NEGATIVE: no
-        next-event estimation, so light is gathered only when a bounce hits the emissive environment -- great for
-        a big sky, very noisy for small emitters (NEE/MIS is the next step). See holographic_pathtrace.path_trace."""
+        bleed reproduced; 128^2/96spp ~13-16s (OFFLINE NumPy brain, NOT GPU-realtime).
+
+        PASS `lights=` FOR NEXT-EVENT ESTIMATION -- a list from mind.make_light. Without it, light is found only
+        when a random bounce happens to hit an emitter, which is fine for a big sky and catastrophic for the
+        small bright lamps that make glass and caustics read: they arrive as fireflies. With it, every bounce
+        also looks straight at each light down a shadow ray. Put the LAMPS in `lights` and leave only the
+        ambient in `sky`, and nothing is double-counted.
+
+        `antialias=True` supersamples the pixel footprint -- the fix for stair-stepped silhouettes on a faceted
+        object, which no amount of extra spp removes because it is a sampling-position problem, not a noise one.
+
+        CORRECTION, RECORDED LOUDLY: this docstring previously carried "KEPT NEGATIVE: no next-event estimation
+        ... NEE/MIS is the next step". That was FALSE and had been for some time -- holographic_pathtrace.
+        path_trace has taken `lights` and called holographic_lights.direct_lighting (whose own docstring opens
+        "Next-event estimation") throughout. What was missing was this WRAPPER: the faculty exposed nine
+        parameters of the module's twenty, so NEE and antialiasing were unreachable through the surface every
+        agent actually uses, and the stale negative was quoted as fact in two later sweeps' write-ups. A wrapper
+        that silently narrows its implementation is worse than no wrapper, because the capability looks absent.
+        See holographic_pathtrace.path_trace."""
         from holographic.rendering.holographic_pathtrace import path_trace
         return path_trace(sdf, camera, width=width, height=height, spp=spp, max_bounce=max_bounce,
-                          material=material, sky=sky, seed=seed)
+                          material=material, sky=sky, seed=seed, lights=lights, antialias=antialias, **kw)
+
+    def make_light(self, kind="sun", target=None, width=1.0, height=1.0, up=(0.0, 1.0, 0.0), **kw):
+        """Build a path-tracer light by NAME -- 'sun', 'point', 'spot', 'area'/'softbox', 'dome' -- for the
+        `lights=` argument of path_trace / path_trace_adaptive, i.e. for next-event estimation.
+
+        This is the door that makes NEE usable: `lights` needs light OBJECTS with a sampleable shape, and a
+        procedural sky closure is not one. Keep the lamps here and the ambient in `sky=`.
+        See holographic_lights.make_light."""
+        from holographic.rendering.holographic_lights import make_light
+        return make_light(kind=kind, target=target, width=width, height=height, up=up, **kw)
 
     def render_auto(self, sdf, camera, width=96, height=96, material=None, sky=None, quality="high",
                     max_bounce=4, seed=0, return_stats=False, **kw):

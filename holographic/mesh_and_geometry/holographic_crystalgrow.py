@@ -41,21 +41,60 @@ HABITS = {
     "octahedron":   ("cubic",     ((1, 1, 1),),           (1.00,)),
     "dodecahedron": ("cubic",     ((1, 1, 0),),           (1.00,)),
     "needle":       ("hexagonal", ((1, 0, 0), (1, 0, 1)), (0.12, 1.00)),
+    # DRUSE: the stubby quartz of a geode lining or an amethyst plate -- prism radius 0.55 of the c-length instead
+    # of 0.30. WHY (measured): with "quartz" at size 0.115, 560 seeds paved only 32% of a 0.72 cavity wall -- each
+    # point is a needle 0.07 wide -- and the geode looked bald. Real druse crystals are short and fat because they
+    # grew shoulder to shoulder and could only extend along c.
+    "druse":        ("hexagonal", ((1, 0, 0), (1, 0, 1)), (0.55, 1.00)),
+    # AMETHYST DRUSE: geode amethyst "often lacks prism development, displaying primarily pyramidal terminations"
+    # (Wikipedia, Amethyst) -- the paved cobblestone of six-sided pyramids every cut geode shows. Prism radius 0.8 of
+    # the c-length makes the rhombohedral faces meet before a prism face can form.
+    "amethyst_druse": ("hexagonal", ((1, 0, 0), (1, 0, 1)), (0.80, 1.00)),
+    # MEASURED CORRECTION (sweep 157). The two entries above were wrong in a way worth keeping on record: the (1,0,1)
+    # form caps the c-axis at the SAME z (1.5 x size) whatever the prism radius is, so widening the prism made fat
+    # CYLINDERS 3x longer than intended, not pyramids -- "druse" is a 1.10 x 1.50 drum, "amethyst_druse" a
+    # 1.57 x 1.50 one. A pyramidal termination needs the pyramid distance BELOW the prism's: the (1,0,1) planes then
+    # meet before a prism face can grow. Probed at size 1 (radius x half-length, pyramid fraction of the length):
+    #   quartz_point       0.90 x 0.90, 53% pyramid  -- the stubby point of a cluster / plate
+    #   amethyst_pyramid   1.05 x 0.75, ~70% pyramid -- geode amethyst, "primarily pyramidal terminations"
+    # Extents scale linearly with `size`; a placed crystal is centred at its root, so about half projects.
+    "quartz_point":     ("hexagonal", ((1, 0, 0), (1, 0, 1)), (0.45, 0.60)),
+    # QUARTZ_LONG: the Brazilian-cluster point, 2-3x longer than wide (prism 0.22 of the pyramid distance: radius
+    # 0.43 x size, half-length 1.5 x size; ~1.15 x size projects past the root -> height/width ~1.35).
+    "quartz_long":      ("hexagonal", ((1, 0, 0), (1, 0, 1)), (0.22, 1.00)),
+    "amethyst_pyramid": ("hexagonal", ((1, 0, 0), (1, 0, 1)), (0.55, 0.50)),
 }
 
 
-def habit_sdf(name="quartz", size=1.0):
+#: REAL UNIT CELLS (axial ratios, a = 1) for the minerals the habits stand for. The lattice basis defaults to c = a,
+#: which is NOT quartz: quartz has a = 4.913, c = 5.405 A (c/a = 1.1001), and the angle the rhombohedron makes with
+#: the prism -- the m^r interfacial angle every mineralogy text quotes as 141 deg 47' -- comes out 139.1 deg from the
+#: default cell and 141.8 deg from the real one (measured below in the selftest). Physical accuracy of the FORM is
+#: the cell; the face list alone is not enough. beryl: a = 9.21, c = 9.19 A. Cubic minerals need nothing.
+CELLS = {
+    "quartz": {"c": 1.1001}, "needle": {"c": 1.1001}, "druse": {"c": 1.1001}, "amethyst_druse": {"c": 1.1001},
+    "quartz_point": {"c": 1.1001}, "amethyst_pyramid": {"c": 1.1001}, "quartz_long": {"c": 1.1001},
+    "beryl": {"c": 0.9976},
+}
+
+
+def habit_sdf(name="quartz", size=1.0, real_cell=False):
     """One crystal of a named habit, centred at the origin with its c-axis along +z.
 
     +z because that is the lattice's c-axis in `crystal_habit`'s reciprocal basis; `grow_on` rotates
     it onto each seed's normal. Keeping the convention in ONE place is what lets every growth mode
     share a single placement path.
+
+    `real_cell=True` builds the form on the mineral's REAL axial ratio (CELLS) instead of the c = a
+    default -- for quartz that is the difference between a 139.1 and a 141.8 degree prism-rhombohedron
+    angle. Default off only to keep every existing field byte-identical; new work should pass True.
     """
     if name not in HABITS:
         raise ValueError("unknown habit %r; one of %s" % (name, sorted(HABITS)))
     system, faces, rel = HABITS[name]
     sizes = tuple(float(size) * float(r) for r in rel)
-    return crystal_habit(system, faces, sizes, form=True)
+    cell = CELLS.get(name, {}) if real_cell else {}
+    return crystal_habit(system, faces, sizes, form=True, **cell)
 
 
 def _align(a, b):
@@ -169,6 +208,64 @@ def union(fields):
     return f
 
 
+def bounding_radius(sdf, probe=1.6, res=41):
+    """Radius of the smallest origin-centred sphere containing `sdf`'s interior, from a grid probe -- the one
+    number `culled_union` needs per base form. Padded by one probe cell so the bound is conservative."""
+    g = np.linspace(-probe, probe, int(res))
+    G = np.stack(np.meshgrid(g, g, g, indexing="ij"), -1).reshape(-1, 3)
+    ins = G[np.asarray(sdf(G), float).ravel() < 0.0]
+    if len(ins) == 0:
+        return float(probe)
+    return float(np.linalg.norm(ins, axis=1).max() + (g[1] - g[0]))
+
+
+def culled_union(fields, centers, radii):
+    """EXACT hard union of many placed forms that evaluates each member only where it can matter -- lever 5
+    (tile the domain) applied to a crystal druse. Each member has a bounding sphere (center, radius), so
+    b_i(P) = |P - c_i| - r_i is a LOWER bound on its distance. Pass 1 evaluates, per point, just the member with
+    the smallest bound: that gives an UPPER bound u(P) on the union. Pass 2 evaluates member i exactly only on the
+    points where b_i(P) < u(P) -- every member that could still win -- and takes the min. The result equals the
+    plain union to the last bit (it is the min of the same floats), but a 60-crystal geode costs ~2-3 member
+    evaluations per point instead of 60.
+
+    WHY NOT JUST RETURN min_i b_i FAR AWAY: the bound is ZERO on the bounding sphere, so a tracer would see phantom
+    spheres. Exactness is the point; the pruning is only in what gets evaluated. This is the honest version of the
+    refuted `batched_union`: that one did the same work in a different layout, this one does less work.
+    MEASURED (11-crystal cluster, 200k points): loop 1.79 s, culled 0.40 s (4.4x); 60-crystal geode: 9.1 s vs
+    0.71 s (12.8x); bake_glass of the cluster at 640x400x2: 344 s -> see NOTES sweep 154."""
+    fs = tuple(fields); C = np.asarray(centers, float); R = np.asarray(radii, float).ravel()
+    if not fs:
+        raise ValueError("nothing to union")
+
+    def f(P, _fs=fs, _C=C, _R=R, _chunk=16384):
+        Q = P if (type(P) is np.ndarray and P.ndim == 2 and P.dtype == np.float64) \
+            else np.atleast_2d(np.asarray(P, float))
+        n = len(Q); u = np.empty(n)
+        # CHUNKED over points so the (N, chunk) bound matrix stays cache-sized: measured, the (60, 200k) float64
+        # temporaries cost 1.3 s of memory traffic against 0.07 s of actual member evaluations -- the pruning was
+        # paying for itself in bandwidth. |P-c|^2 = |P|^2 - 2 P.c + |c|^2 as one small matmul per chunk.
+        c2 = (_C * _C).sum(1)[:, None]
+        for s0 in range(0, n, _chunk):
+            Qc = Q[s0:s0 + _chunk]; nc = len(Qc)
+            B = _C @ Qc.T                                                          # (N, nc)
+            B *= -2.0; B += c2; B += (Qc * Qc).sum(1)[None, :]
+            np.maximum(B, 0.0, out=B); np.sqrt(B, out=B); B -= _R[:, None]         # b_i(P) = |P - c_i| - r_i, in place
+            first = np.argmin(B, axis=0)                                            # most promising member per point
+            uc = np.empty(nc)
+            for i in range(len(_fs)):                                                # pass 1: one exact eval per point
+                sel = np.nonzero(first == i)[0]
+                if len(sel):
+                    uc[sel] = np.asarray(_fs[i](Qc[sel]), float).ravel()
+            cand = B < uc[None, :]; cand[first, np.arange(nc)] = False               # pass 2: members that can still win
+            for i in np.nonzero(cand.any(1))[0]:
+                sel = np.nonzero(cand[i])[0]
+                uc[sel] = np.minimum(uc[sel], np.asarray(_fs[i](Qc[sel]), float).ravel())
+            u[s0:s0 + nc] = uc
+        return u
+    f.eval = f
+    return f
+
+
 def seed_surface(sdf, count, bounds, where=None, seed=0):
     """Points and outward normals on `sdf`'s surface, optionally gated by a field.
 
@@ -187,7 +284,8 @@ def seed_surface(sdf, count, bounds, where=None, seed=0):
 
 
 def grow_on(sdf, bounds, count=24, habit="quartz", size=0.18, size_jitter=0.45,
-            inward=False, tilt=0.18, where=None, seed=0, substrate=True, batched=False):
+            inward=False, tilt=0.18, where=None, seed=0, substrate=True, batched=False, cull=False,
+            real_cell=False, pack=None, clip_to_substrate=False, seeds=None):
     """GROW CRYSTALS ON A SURFACE -- the one call the other modes are special cases of.
 
     Seeds land on `sdf`'s surface (gated by `where`), and each crystal's c-axis is aligned to the
@@ -200,14 +298,60 @@ def grow_on(sdf, bounds, count=24, habit="quartz", size=0.18, size_jitter=0.45,
 
     `substrate=True` keeps the host solid in the result, so crystals emerge FROM the rock rather than
     floating beside it. Set it False to get only the crystals.
+
+    MIXED HABITS: `habit` may also be a sequence of names (each seed draws one, seeded) or a callable
+    seed_point (3,) -> name (a field decides the mineral: calcite on the veins, quartz elsewhere). Every
+    habit keeps its own lattice system and forms (HABITS), so a quartz next to a cube next to a
+    dodecahedron each grows as itself. `size` may likewise be a dict {habit: size} for per-mineral scale.
+    The default single-name path is byte-identical to before.
+
+    COMPETITIVE GROWTH (`pack`): in a real druse every crystal grows until it meets its neighbours, so a
+    crystal's SIZE is set by the room around its seed, not drawn independently. `pack=k` sets each
+    crystal's size to k x (distance to its nearest neighbouring seed) -- k ~ 0.5-0.6 for a habit whose
+    radius is ~0.9 x size makes neighbours touch along their prism faces with little interpenetration;
+    `size` then only caps it. MEASURED NEED: 110 independently-sized points on a 1.24 x 0.84 plate had a
+    footprint 22x the plate's area, and the union of that many interpenetrating polyhedra was a field of
+    shards -- Moose: "jagged weird noise isn't crystal formation". Neighbours in contact are the formation.
+    Default None = the old independent draw.
+
+    `clip_to_substrate=True`: a crystal grows OUTWARD from its root and nowhere else. Each placed habit is a full
+    bipyramid centred near the surface, so its lower half ran into the rock and, on a thin host, out through the
+    bottom (Moose: "growth going below the surface they are growing from"; measured on a 0.22-thick nodule with
+    1.35-long points -- they hung out underneath). Two clips, both exact CSG on distance bounds: (a) each crystal is
+    cut by the plane through its own root perpendicular to its c-axis (nothing behind the root), and (b) the host
+    volume is subtracted (nothing inside the rock). Default off for compatibility.
+
+    `seeds=(P, N)`: explicit seed points and outward normals instead of the random emitter -- how a specimen is
+    ART-DIRECTED (a dominant central point, a ring of smaller ones) while everything else stays physical. With
+    explicit seeds `size` may also be a per-seed sequence.
     """
-    P, N = seed_surface(sdf, count, bounds, where=where, seed=seed)
+    if seeds is not None:
+        P = np.atleast_2d(np.asarray(seeds[0], float)); N = np.atleast_2d(np.asarray(seeds[1], float))
+        N = N / (np.linalg.norm(N, axis=1, keepdims=True) + 1e-12)
+    else:
+        P, N = seed_surface(sdf, count, bounds, where=where, seed=seed)
+    size_seq = None
+    if not isinstance(size, (dict, int, float)):
+        size_seq = np.asarray(size, float).ravel()
+    d_nn = None
+    if pack is not None and len(P) > 1:
+        # nearest-neighbour seed spacing, per seed: the room each crystal had to grow into
+        D2 = ((P[:, None, :] - P[None, :, :]) ** 2).sum(-1); np.fill_diagonal(D2, np.inf)
+        # the room is the VORONOI cell, not the single closest seed: the mean of the three nearest spacings.
+        # Measured with the nearest only: 40 points on a plate touched one neighbour each and left bare rock
+        # everywhere else (union volume 0.015) -- the cell radius is what a crystal actually grows to.
+        k3 = min(3, len(P) - 1)
+        d_nn = np.sqrt(np.sort(D2, axis=1)[:, :k3]).mean(axis=1)
     if len(P) == 0:
         raise ValueError("no seeds landed on the surface -- check bounds and `where`")
     rng = np.random.default_rng(int(seed) + 1)
-    base = habit_sdf(habit, 1.0)
-    zc = np.array([0.0, 0.0, 1.0])
-    out = []
+    mixed = not isinstance(habit, str)
+    bases = {} if mixed else {habit: habit_sdf(habit, 1.0, real_cell=real_cell)}
+    base = None if mixed else bases[habit]
+    if mixed and not callable(habit):
+        habit_list = list(habit); hrng = np.random.default_rng(int(seed) + 7)    # separate stream: the single-habit
+    zc = np.array([0.0, 0.0, 1.0])                                                 # path's draws stay untouched
+    out = []; names = []; axes_ = []
     for i in range(len(P)):
         n = N[i] * (-1.0 if inward else 1.0)
         if float(tilt) > 0.0:
@@ -216,11 +360,20 @@ def grow_on(sdf, bounds, count=24, habit="quartz", size=0.18, size_jitter=0.45,
         if ln < 1e-9:
             continue
         n = n / ln
-        s = float(size) * (1.0 + float(size_jitter) * rng.uniform(-1.0, 1.0))
+        if mixed:
+            name = habit(P[i]) if callable(habit) else habit_list[int(hrng.integers(len(habit_list)))]
+            if name not in bases:
+                bases[name] = habit_sdf(name, 1.0, real_cell=real_cell)
+        else:
+            name = habit
+        sz = float(size_seq[i]) if size_seq is not None else float(size[name] if isinstance(size, dict) else size)
+        if d_nn is not None:
+            sz = min(sz, float(pack) * float(d_nn[i]))                      # grow into the room you have, no further
+        s = sz * (1.0 + float(size_jitter) * rng.uniform(-1.0, 1.0))
         s = max(s, 1e-4)
         # Sink the crystal slightly INTO the substrate so it is rooted, not balanced on the surface.
         root = P[i] - n * s * 0.35
-        out.append((_align(zc, n), root, s))
+        out.append((_align(zc, n), root, s)); names.append(name); axes_.append(n)
     if not out:
         raise ValueError("every seed was rejected")
     # PLAIN UNION BY DEFAULT, and this is a MEASURED refutation of the obvious optimisation.
@@ -232,8 +385,37 @@ def grow_on(sdf, bounds, count=24, habit="quartz", size=0.18, size_jitter=0.45,
     # bulk-query case; the default stays the loop. RE-MEASURED after the tracer learned to compact:
     # batching is slower at EVERY size tried (6.5x on a 20k bulk query), so the "bulk" caveat was
     # itself wrong -- see batched_union's docstring.
-    crystals = (batched_union(base, [o[0] for o in out], [o[1] for o in out], [o[2] for o in out])
-                if batched else union([placed(base, R, t, s) for R, t, s in out]))
+    def _member(i):
+        R, t, s = out[i]; f = placed(bases[names[i]], R, t, s)
+        if not clip_to_substrate:
+            return f
+        n_ax = axes_[i]
+
+        def g(Q, _f=f, _n=n_ax, _t=t, _s=s):                                     # (a) nothing behind the root plane
+            Q = np.atleast_2d(np.asarray(Q, float))
+            return np.maximum(np.asarray(_f(Q), float).ravel(), -((Q - _t[None, :]) @ _n) - 0.35 * _s)
+        g.eval = g
+        return g
+
+    if cull:
+        # `cull=True` (default off, result identical): bounding-sphere pruning so each query point evaluates only
+        # the crystals that can be nearest -- see culled_union. The bounding radius of each unit habit is probed
+        # once; each placed copy's sphere is (root, r * scale). Mixed habits: one radius per habit.
+        rbs = {nm: bounding_radius(b) for nm, b in bases.items()}
+        crystals = culled_union([_member(i) for i in range(len(out))],
+                                [o[1] for o in out], [rbs[nm] * o[2] for o, nm in zip(out, names)])
+    elif mixed or clip_to_substrate:
+        crystals = union([_member(i) for i in range(len(out))])
+    else:
+        crystals = (batched_union(base, [o[0] for o in out], [o[1] for o in out], [o[2] for o in out])
+                    if batched else union([placed(base, R, t, s) for R, t, s in out]))
+    if clip_to_substrate:
+        inner = crystals
+
+        def crystals(Q, _f=inner, _h=sdf):
+            Q = np.atleast_2d(np.asarray(Q, float))
+            return np.maximum(np.asarray(_f(Q), float).ravel(), -np.asarray(_h(Q), float).ravel())   # crystal minus host
+        crystals.eval = crystals
     return union([sdf, crystals]) if substrate else crystals
 
 
@@ -250,12 +432,13 @@ def cluster(count=9, habit="quartz", size=0.30, radius=0.22, seed=0, **kw):
         Q = np.atleast_2d(np.asarray(P, float))
         return np.linalg.norm(Q, axis=1) - _r
     base.eval = base
-    b = 1.6 * (r + float(size))
+    b = 1.6 * (r + float(max(size.values()) if isinstance(size, dict) else size))   # per-habit sizes: bound by the largest
     return grow_on(base, ((-b, -b, -b), (b, b, b)), count=count, habit=habit, size=size,
                    seed=seed, **kw)
 
 
-def geode(radius=0.7, shell=0.16, count=60, habit="quartz", size=0.13, seed=0, where=None, **kw):
+def geode(radius=0.7, shell=0.16, count=60, habit="quartz", size=0.13, seed=0, where=None, parts=False,
+          clip_to_skin=False, skin_margin=0.0, **kw):
     """A GEODE: a hollow nodule whose CAVITY WALL is lined with crystals pointing inward.
 
     Built from the physics rather than as a special shape -- the cavity is a sphere, the crystals are
@@ -265,6 +448,17 @@ def geode(radius=0.7, shell=0.16, count=60, habit="quartz", size=0.13, seed=0, w
 
     `where` gates the lining, so a field can leave part of the wall bare -- which is what makes one
     geode look grown rather than machined.
+
+    `parts=True` returns (rind, lining) separately instead of their union -- the rind is ROCK and the lining is
+    GLASS, and a renderer that knows the difference (bake_glass(lining, opaque=rind)) needs them apart. Default
+    unchanged.
+
+    `clip_to_skin=True` intersects the lining with the outer sphere. Each placed habit is a full bipyramid centred
+    near the cavity wall, so its BACK half runs out through a rind thinner than the crystal is long -- rendered with
+    an opaque rind those backs stuck out of the nodule like spines (seen on the 90-crystal, size 0.21 geode). Rock
+    stops growth, so the clip is the physics; default off to leave the historical field untouched. `skin_margin`
+    pulls the clip inside the skin by that much: a lining traced from a baked GRID blurs over one cell, and a
+    clip exactly at the skin let facets show through the rind as a skin of crystal (seen at h = 0.007).
     """
     R = float(radius); t = float(shell)
     cav = R - t
@@ -283,6 +477,15 @@ def geode(radius=0.7, shell=0.16, count=60, habit="quartz", size=0.13, seed=0, w
     b = 1.25 * R
     lining = grow_on(cavity, ((-b, -b, -b), (b, b, b)), count=count, habit=habit, size=size,
                      inward=True, where=where, seed=seed, substrate=False, **kw)
+    if clip_to_skin:
+        inner = lining
+
+        def lining(P, _f=inner, _R=R - float(skin_margin)):
+            Q = np.atleast_2d(np.asarray(P, float))
+            return np.maximum(np.asarray(_f(Q), float).ravel(), np.linalg.norm(Q, axis=1) - _R)   # intersection
+        lining.eval = lining
+    if parts:
+        return rind, lining
     return union([rind, lining])
 
 
@@ -325,6 +528,20 @@ def vein_field(scale=6.0, threshold=0.55, seed=0, sharpness=6.0):
         v = v / _a.sum()
         return 1.0 / (1.0 + np.exp(-_k * (v - (2.0 * _t - 1.0))))
     return f
+
+
+def _selftest_real_cell():
+    """Pin quartz's m^r interfacial angle: 141 deg 47' with the real cell (c/a 1.1001), not with c = a."""
+    from holographic.mesh_and_geometry.holographic_bravais import lattice_basis, reciprocal_basis
+    def m_r_angle(c):
+        basis, _ = lattice_basis("hexagonal", a=1.0, c=c); B = reciprocal_basis(basis)
+        n_r = np.array([1.0, 0.0, 1.0]) @ B; n_r /= np.linalg.norm(n_r)
+        n_m = np.array([1.0, 0.0, 0.0]) @ B; n_m /= np.linalg.norm(n_m)
+        return 180.0 - np.degrees(np.arccos(float(np.clip(n_r @ n_m, -1, 1))))
+    real, default = m_r_angle(CELLS["quartz"]["c"]), m_r_angle(1.0)
+    assert abs(real - 141.78) < 0.1, real
+    assert abs(default - 141.78) > 1.0, default
+    print("real-cell selftest OK: quartz m^r = %.2f deg (default cell %.2f; textbook 141 deg 47')" % (real, default))
 
 
 def _selftest():
@@ -410,3 +627,4 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+    _selftest_real_cell()

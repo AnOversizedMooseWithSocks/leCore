@@ -51,6 +51,12 @@ except Exception:
 # remove the entry, or accept it as a benign homonym / pinned divergence and leave it -- WITH the reason on the
 # line. Never add an entry just to make the test pass without reading. The budget may shrink, never grow.
 KNOWN_COLLISIONS = {
+    # sweep-138, both bodies read: codestructure.signature_of takes an AST NODE and derives a call
+    # shape from SOURCE without importing anything (that is the point -- the merge census must read a
+    # file it cannot safely execute); shapeprobe.signature_of takes a LIVE CALLABLE and uses
+    # inspect.signature. Neither can delegate to the other: one has no object, the other has no
+    # source. Same verb, opposite side of the import boundary, both public on purpose.
+    "signature_of": frozenset({"codestructure", "shapeprobe"}),
     # sweep-97 merge, bodies read: mathcheck.check/evaluate are arithmetic verifiers;
     # proglib.check and navigator.evaluate are program/route scorers -- same verb,
     # different domains, both public on purpose.
