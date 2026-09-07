@@ -55,6 +55,12 @@ DOCS = [
      "the App substrate: per-app per-user memory with physical isolation, "
      "remember/recall with provenance, observe/suggest/habits so the app grows with the "
      "person using it, a capability preflight, and the honest limits"),
+    ("How do I add a capability WITHOUT growing the core, or leave the optional ones out?",
+     "docs/PLUGINS.md", "hand-written",
+     "the plugin door: bundled / LECORE_PLUGIN_PATH folder / pip entry-point discovery, "
+     "plugins=() for a slim mind, plugin_list() as the honest preflight, the two-part "
+     "contract (PLUGIN dict + register), what the loader refuses and why, and the "
+     "operator-vs-agent security boundary"),
     ("What IS lever 7, and why should I trust it?", "docs/LEVER7.md", "hand-written",
      "the displacement trace: the superposed algebra, the delta-rule write, the "
      "governance table (calibration, veto, sessions, receipts, provenance), where it sits "

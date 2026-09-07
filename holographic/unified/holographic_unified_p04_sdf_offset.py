@@ -309,8 +309,15 @@ class _UnifiedPart04:
         faculties are not part of the contract, and a client that discovers one has found a footgun, not a
         feature."""
         if names is None:
-            return {n: True for n in sorted(dir(self))
-                    if not n.startswith("_") and callable(getattr(type(self), n, None))}
+            # getattr(type(self), ...) reads the CLASS, which is right for faculties and WRONG
+            # for plugin verbs -- those bind to the INSTANCE. Reading the class alone made
+            # features() answer False for a verb features(["name"]) answered True for, on the
+            # same mind, in the same breath. The plugin door is the second source of truth.
+            out = {n: True for n in sorted(dir(self))
+                   if not n.startswith("_") and callable(getattr(type(self), n, None))}
+            for rec in self.plugin_manifest():
+                out[rec["name"]] = True
+            return dict(sorted(out.items()))
         if isinstance(names, str):
             names = [names]
         return {n: (not str(n).startswith("_")) and callable(getattr(self, n, None)) for n in names}
@@ -1517,42 +1524,6 @@ class _UnifiedPart04:
         if isinstance(fn, str):
             return emit_source(fn, dialect=str(dialect))     # the kernel is text; a string is a valid kernel
         return emit(fn, dialect=str(dialect))
-
-    def validate_kernel(self, fn, calls, dialect="c_f64"):
-        """Compile the emitted C with `cc`, RUN it on `calls`, and compare to the Python original: {dialect, n,
-        max_abs_diff, max_rel_diff, bit_identical}. `c_f64` comes out BIT-IDENTICAL. `c_f32` cannot -- and its
-        error (2.9e-07 on an SDF) IS the tolerance a WGSL port must be judged against, because WGSL is f32 and
-        NumPy is f64. That is why `c_f32` exists: so the tolerance is MEASURED, not chosen.
-        Zig dialects (`zig_f64` / `zig_f32`) route to validate_zig -- compiled `-O ReleaseSafe` with the OPT-IN
-        `ziglang` wheel (exactly numba's contract: everything passes without it, absence reported loudly).
-        Measured: zig_f64 BIT-IDENTICAL on builtin-intrinsic kernels; std.math.pow is a declared 1-ulp negative.
-        See holographic_emit.validate_c / validate_zig."""
-        from holographic.io_and_interop.holographic_emit import validate_c, validate_zig
-        calls = [tuple(float(x) for x in c) for c in calls]
-        if str(dialect).startswith("zig"):
-            return validate_zig(fn, calls, dialect=str(dialect))
-        return validate_c(fn, calls, dialect=str(dialect))
-
-    def zig_batch_eval(self, kernel, arrays, dtype="f64", simd=0, opt="safe"):
-        """Compile a scalar kernel to a native shared library (content-hash cached, `ziglang` wheel, OPT-IN like
-        numba) and batch-evaluate it over P same-length arrays. `opt='safe'` is deterministic (f64 scalar measured
-        BIT-IDENTICAL to the NumPy evaluation); `simd=8` with dtype='f32' is the measured throughput sweet spot.
-        Returns the results as a list. First call pays ~1-2 s of compiler, then ~0 -- a one-shot small-n call is a
-        LOSS and this method does not pretend otherwise. See holographic_zigrun.ZigKernel."""
-        from holographic.io_and_interop.holographic_zigrun import ZigKernel
-        import numpy as _np
-        cols = [_np.asarray(a, dtype=float) for a in arrays]
-        return [float(x) for x in ZigKernel(kernel, dtype=str(dtype), simd=int(simd), opt=str(opt))(*cols)]
-
-    def zig_regime_map(self, kernel, sizes=(1000, 100000, 1000000), repeats=5, seed=0, simd_width=8):
-        """Z3's honest measurement: race numpy / zig scalar f64 / zig simd f32 across sizes. Every row carries the
-        baseline, the spread, and a correctness max-abs-err -- a fast wrong answer is not a result. MEASURED verdict
-        on the round-box SDF: a modest real 2-5x, peaking near n=1e5, compressing to ~2x at n=1e6 where everything
-        goes memory-bandwidth bound. No order-of-magnitude win exists and none is claimed.
-        See holographic_zigrun.regime_map."""
-        from holographic.io_and_interop.holographic_zigrun import regime_map
-        return regime_map(kernel, sizes=tuple(int(s) for s in sizes), repeats=int(repeats),
-                          seed=int(seed), simd_width=int(simd_width))
 
     def kernel_from_description(self, text, name="scene", dialect="python"):
         """Generate a geometry KERNEL from a controlled-vocabulary description (C3): registered parametric SDF

@@ -70,13 +70,14 @@ from holographic.unified.holographic_unified_p22_zoo2 import _UnifiedPart22
 from holographic.unified.holographic_unified_p23_zoo3 import _UnifiedPart23
 from holographic.unified.holographic_unified_p24_wired import _UnifiedPart24
 from holographic.unified.holographic_unified_p25_swarm_roles import _UnifiedPart25
+from holographic.unified.holographic_unified_p26_plugins import _UnifiedPart26
 # MERGE 2026-08: upstream shipped its OWN _UnifiedPart19 (p19_verify -- answer
 # verification faculties). Both live here: upstream's rides as _UnifiedPart19V, ours
 # keeps the alias; MRO puts our arc first (p20 > p19_lever7 > p19_verify > base parts).
 from holographic.unified.holographic_unified_p19_verify import _UnifiedPart19 as _UnifiedPart19V
 
 
-class UnifiedMind(_UnifiedPart21, _UnifiedPart22, _UnifiedPart23, _UnifiedPart20, _UnifiedPart20B, _UnifiedPart19, _UnifiedPart19V, _UnifiedPart01, _UnifiedPart02, _UnifiedPart03, _UnifiedPart03B, _UnifiedPart04, _UnifiedPart05, _UnifiedPart06, _UnifiedPart07, _UnifiedPart08, _UnifiedPart09, _UnifiedPart09B, _UnifiedPart10, _UnifiedPart11, _UnifiedPart12, _UnifiedPart13, _UnifiedPart14, _UnifiedPart15, _UnifiedPart16, _UnifiedPart17, _UnifiedPart18, _UnifiedPart24, _UnifiedPart25):
+class UnifiedMind(_UnifiedPart21, _UnifiedPart22, _UnifiedPart23, _UnifiedPart20, _UnifiedPart20B, _UnifiedPart19, _UnifiedPart19V, _UnifiedPart01, _UnifiedPart02, _UnifiedPart03, _UnifiedPart03B, _UnifiedPart04, _UnifiedPart05, _UnifiedPart06, _UnifiedPart07, _UnifiedPart08, _UnifiedPart09, _UnifiedPart09B, _UnifiedPart10, _UnifiedPart11, _UnifiedPart12, _UnifiedPart13, _UnifiedPart14, _UnifiedPart15, _UnifiedPart16, _UnifiedPart17, _UnifiedPart18, _UnifiedPart24, _UnifiedPart25, _UnifiedPart26):
     """Perceive once, into one space; remember, organize, recall, and decide over it.
 
     THE THREE MINDS -- one division of labour, so this never gets confusing again:
@@ -116,7 +117,24 @@ class UnifiedMind(_UnifiedPart21, _UnifiedPart22, _UnifiedPart23, _UnifiedPart20
     _FORMAT_CORPUS_CAP = 40000     # chars per sub-format kept for fitting the gate
 
     def __init__(self, dim=1024, seed=0, number_range=(-4.0, 4.0), maintain='auto',
-                 check_every=60, text_window=2, coherence_floor=None):
+                 check_every=60, text_window=2, coherence_floor=None, plugins="auto",
+                 plugin_config=None):
+        # WHICH BUNDLED PLUGINS THIS MIND CARRIES. Default "bundled" = load them all, so the
+        # verb surface is IDENTICAL to before the plugin door existed (m.lean_verify still
+        # resolves); the engine's rule is that existing decisions never flip, so the de-bloat
+        # is something an embedder OPTS IN to, never something an upgrade imposes.
+        #   plugins="auto"         everything discovery finds (default, unchanged surface):
+        #                          the bundled folder, LECORE_PLUGIN_PATH folders, pip entry points
+        #   plugins=()             a SLIM mind -- none of them, smallest GET /tools
+        #   plugins=("lean4",)     exactly the ones this app wants, by name
+        # Loading happens at the END of __init__ (see below): a plugin's register() receives
+        # this mind, so every faculty it might touch must already exist.
+        self._plugins_requested = plugins
+        # PER-PLUGIN CONFIGURATION, keyed by plugin name: {"voice": {"rate": 1.2}}. Handed to
+        # that plugin's register(mind, config) at load. This is how an app adapts a plugin to
+        # its workflow without editing the plugin -- the same dict a hand _plugin_load(config=)
+        # would pass, just declared once at construction for everything discovery finds.
+        self._plugin_config = dict(plugin_config or {})
         self.dim = dim
         self.seed = seed                   # remembered for owned faculties (scene, morph)
         self.maintain = maintain
@@ -167,6 +185,55 @@ class UnifiedMind(_UnifiedPart21, _UnifiedPart22, _UnifiedPart23, _UnifiedPart20
         self._format_corpus = {}     # modality -> accumulated raw chars
         self._format_gate = None     # modality -> fitted SchemaGenerator
         self._format_fitted_at = {}  # modality -> corpus size when its schema was fit
+        self._load_bundled_plugins()
+
+    def _load_bundled_plugins(self):
+        """Bind the plugins this mind asked for.  LAST STEP OF __init__, because a plugin's
+        register() is handed this mind and may read any faculty on it.
+
+        WHAT `plugins` MEANS:
+          "auto" / "bundled"   everything holographic.plugins.discover() finds -- the bundled
+                               folder, the LECORE_PLUGIN_PATH folders, pip entry points.
+                               ("bundled" is kept as a synonym so the first cut's spelling
+                               still works; both are the default behaviour.)
+          ()                   a SLIM mind: none of them.
+          ("zig", "lean4")     exactly these, by name, from whatever discovery found.
+
+        CATALOG REGISTRATION IS SKIPPED for discovered plugins (register_in_catalog=False)
+        and that is the load-bearing detail: register_capability forces the lazy capability
+        catalog to build, which seeds from every engine module.  Doing that at construction
+        would turn a ~1 ms boot into a catalog build for every mind ever made.  The catalog's
+        seed_from_mind walks the INSTANCE now (its class-only blind spot was fixed in this
+        sweep), so discovered verbs are carded the moment the catalog is first built -- no
+        loss of discoverability, no boot-time cost.  A plugin loaded later by _plugin_load
+        DOES register at once, because the catalog may already exist by then.
+
+        A plugin that fails to LOAD is a hard error, not a warning: the default path loads
+        all of them, so a silent skip would mean a mind quietly missing faculties the caller
+        has every reason to expect.  A plugin whose optional DEPENDENCY is missing is not a
+        failure -- it loads, its verbs bind and fail honestly when called, and plugin_list()
+        says available=False with the install hint (see holographic.plugins).
+        """
+        want = getattr(self, "_plugins_requested", "auto")
+        if not want:
+            return
+        from holographic.plugins import discover
+        found = discover()
+        if want in ("auto", "bundled"):
+            chosen = found
+        else:
+            names = [str(n) for n in want]
+            by_name = {}
+            for n, ref, source in found:
+                by_name.setdefault(n, (ref, source))
+            unknown = [n for n in names if n not in by_name]
+            if unknown:
+                raise ValueError("unknown plugin(s) %s -- discovered: %s"
+                                 % (unknown, sorted(by_name)))
+            chosen = [(n, by_name[n][0], by_name[n][1]) for n in names]
+        for name, ref, source in chosen:
+            self._plugins.load(ref, config=self._plugin_config.get(name),
+                               register_in_catalog=False, source=source, expect_name=name)
 
 
 

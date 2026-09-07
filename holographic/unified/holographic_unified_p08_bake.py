@@ -551,6 +551,11 @@ class _UnifiedPart08:
         if cat is None:
             from holographic.caching_and_storage.holographic_catalog import default_catalog, seed_from_mind, seed_from_modules
             cat = seed_from_modules(seed_from_mind(default_catalog(), self))
+            # PLUGIN CARDS LAST, so a plugin's declared does/aliases override the docstring
+            # card seed_from_mind derived for the same verb. See PluginHost.register_all.
+            host = getattr(self, "_plugin_host_obj", None)
+            if host is not None:
+                host.register_all(cat)
             self._catalog_cache = cat
         return cat
 

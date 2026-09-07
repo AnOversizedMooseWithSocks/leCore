@@ -286,7 +286,16 @@ def audit_home_examples():
             terse.append((mod, fn, home, summary))
     # 2. mind.method references -- must name a real, public UnifiedMind method
     import holographic.misc.holographic_skills as sk
-    methods = sk.mind_methods()
+    methods = set(sk.mind_methods())
+    # PLUS THE PLUGIN VERBS a default mind carries. mind_methods() reads the class; a bundled
+    # plugin's verb (zig_batch_eval, lean_verify, ...) binds to the instance and is exactly as
+    # callable from an example's `mind.X(...)`. Checking the class alone flagged every migrated
+    # verb's card as BROKEN the moment it moved -- the card was right, the check was stale.
+    try:
+        import lecore as _lc
+        methods |= {r["name"] for r in _lc.UnifiedMind(dim=64, seed=0).plugin_manifest()}
+    except Exception:
+        pass
     for fn, home in sorted(mind_refs.items()):
         if fn not in methods:
             broken.append(("mind", fn, home, "not a UnifiedMind method"))

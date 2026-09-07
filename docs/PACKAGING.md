@@ -139,8 +139,20 @@ The core requires **only NumPy**. Everything else is declared as a named "extra"
 | `mcp` | *(nothing)* | the stdio MCP server needs only the core; `lecore-mcp` is on your PATH after any install. Named so `pip install leos-core[mcp]` reads as intent |
 | `all` | numba, pyfftw, sympy, flask, pillow, pytest, matplotlib, ziglang, nltk, **wgpu** | everything portable, in one shot (CuPy excluded — wgpu is not) |
 
+**Extras and plugins are one thing under two names (sweep 164).** The verbs that need an extra's dependency
+are not on the core class; they live in a **bundled plugin** of the same name under `holographic/plugins/`
+and bind to a mind at construction. `jit`, `symbolic`, `zig`, `wgsl` and `gpu` above each have a plugin twin
+(plus `lean4`, whose dependency is a Lean binary rather than a wheel). So `pip install leos-core[zig]` installs
+what the `zig` plugin needs, `UnifiedMind(plugins=("zig",))` binds only that plugin's verbs, and
+`UnifiedMind(plugins=())` is a slim mind with none of them. Without the extra the plugin still loads and its
+verbs still bind — each fails with its own clear message — and `mind.plugin_list()` reports
+`available=False`, what is `missing`, and the install command. Third-party plugins declare a
+`lecore.plugins` entry point; per-app plugins go in a folder named by `LECORE_PLUGIN_PATH`. The guide is
+[`PLUGINS.md`](PLUGINS.md).
+
 **One distribution, by decision (sweep 117).** Python extras can only pull *dependencies*, not payload, so
-"optional components" means optional third-party packages — which is exactly the table above. The wheel
+"optional components" means optional third-party packages — which is exactly the table above. The plugin
+system does not change that: bundled plugins are *in* the wheel; what is optional is whether a mind binds them. The wheel
 itself is one thing: measured at 10.0 MB compressed / 21.8 MB installed on 0.7.81, of which 3.4 MB is the
 bundled knowledge data (WordNet dictionary + default corpus) that ships with every install so the dictionary,
 word-index and corpus faculties work offline out of the box. A separate data distribution was built, measured
@@ -165,8 +177,9 @@ returns `False`, `mind.place_work(...)` answers `cpu`, and the device kernels ra
 naming the install rather than silently falling back — a caller who explicitly asked for the device deserves
 to know they did not get it.
 
-To add a new optional dependency later, add a line to `extras_require` in `setup.py` — nothing else changes,
-and the core stays NumPy-only.
+To add a new optional dependency later: add a line to `extras_require` in `setup.py`, and put the verbs that
+need it in `holographic/plugins/<same name>.py` (copy `_template.py`; set `PLUGIN["requires"]` and
+`PLUGIN["install"]`). The core stays NumPy-only and the core class does not grow.
 
 ## Subsetting & embedding the engine (Pyodide, flat bundles)
 

@@ -68,27 +68,6 @@ class _UnifiedPart05:
         from holographic.io_and_interop.holographic_codeverbal import register_composition_form
         return register_composition_form(str(name), str(distance_expr_src))
 
-    def zig_dispatch_policy(self, n, calls_expected, min_calls_to_compile=3, min_n=4096, toolchain=None):
-        """Z5: which backend (numpy | zig) the native-kernel dispatcher would choose for arrays of length `n`
-        called `calls_expected` times, WITH the reason -- the policy is data, sized to the measured 2-5x regime
-        and the ~1-2 s first-call compile. Compose with mind.zig_batch_eval to act on the answer.
-        See holographic_zigrun.dispatch_policy (AutoKernel enforces the same policy in-process, identity-gated:
-        a native result that is not bit-identical to numpy in safe mode refuses the substitution permanently)."""
-        from holographic.io_and_interop.holographic_zigrun import dispatch_policy
-        return dispatch_policy(int(n), int(calls_expected), int(min_calls_to_compile), int(min_n), toolchain=toolchain)
-
-    def zig_march_compare(self, kernel=None, width=96, height=72, max_steps=96, out_dir=None, opt='safe'):
-        """Z4's executed bar: sphere-trace the SAME rays through the engine's Python marcher and a natively
-        compiled Zig loop (same scene SDF text, shared dialect table), shade both with the SAME code, and return
-        {t_max_abs_diff, hit_flips, bit_identical, frames_byte_identical}. MEASURED verdict on the demo scene:
-        f64 BIT-IDENTICAL, frames byte-identical, zig 3.8x on 110k rays x 96 steps -- and safe-vs-fast is a wash,
-        so determinism costs nothing here. Pass out_dir to also write both PPM frames.
-        See holographic_zigmarch.render_compare."""
-        from holographic.io_and_interop.holographic_zigmarch import DEMO_SCENE, render_compare
-        return render_compare(kernel if kernel is not None else DEMO_SCENE, width=int(width),
-                              height=int(height), max_steps=int(max_steps), out_dir=out_dir, opt=opt)
-
-    # -- C3: canonical element + delta chain (instancing, generalised) --------------------------------------
     def canonical_form(self, V, family="similarity"):
         """Split an element into (canonical, delta) with `V = canonical @ A.T + b`, EXACTLY (1e-12). `family` is
         rigid | similarity | affine, and choosing it is the whole decision: too small and nothing is recognised,

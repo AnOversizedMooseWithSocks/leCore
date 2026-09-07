@@ -520,7 +520,12 @@ def _slot_observations(chunks, ns=3):
 # meta reports cache:'hit'|'miss' and compute_ms stays HONEST (near-zero on hits, payload
 # billed the same -- the wire still carries the bytes). LECORE_MCP_MEMO=0 kills it.
 _MEMO_PURE_TOOLS = ("series_analyze", "dataset_decompose", "math_eval", "chart_make",
-                    "lecore_find", "lecore_describe", "lecore_map")
+                    "lecore_find", "lecore_describe")
+# lecore_map LEFT OUT (sweep 166): it now reports which plugins THIS mind carries and whether
+# each dependency is installed, so it is a function of the served mind, not of its arguments.
+# Memoised by (tool, args) it kept answering with the first mind's plugin list for every
+# later one -- measured as a fresh server reporting no 'plugins' key at all, served from a
+# memo written before the key existed. It costs one plugin_list() call; not worth a lie.
 _MEMO_MAX = 128
 _MEMO_ENTRY_CAP = 2 * 1024 * 1024
 
@@ -1786,9 +1791,18 @@ class MCPServer:
                             "tags": h.get("tags", [])} for h in hits]
                 elif tool == "lecore_map":
                     n = len(self.service.mind._capability_catalog().all())
-                    out = {"total_capabilities": n, "families": _FAMILY_MAP,
+                    # PLUGINS THIS NODE CARRIES. An MCP client has no other way to learn which
+                    # optional verbs exist here (and whether their dependency is installed) short
+                    # of knowing to invoke plugin_list -- the map is where a stranger looks first.
+                    _pl = getattr(self.service.mind, "plugin_list", None)
+                    plugins = [{"name": p["name"], "available": p["available"], "verbs": p["verbs"],
+                                "missing": p["missing"], "install": p["install"]}
+                               for p in (_pl() if callable(_pl) else [])]
+                    out = {"total_capabilities": n, "families": _FAMILY_MAP, "plugins": plugins,
                            "how": "pick a family, pass an ask_for phrase (or your own words) "
-                                  "to lecore_find, then lecore_invoke the method it names"}
+                                  "to lecore_find, then lecore_invoke the method it names; "
+                                  "'plugins' lists this node's optional verbs and whether each "
+                                  "dependency is installed"}
                 elif tool == "corpus_bind":
                     out = self._corpus_bind(**a)               # handler owns alias tolerance
                 elif tool == "corpus_ask":

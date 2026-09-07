@@ -18,6 +18,12 @@ from holographic.unified import check_part
 
 
 class _UnifiedPart18:
+    # MIGRATED OUT (sweep: the plugin door): lean_export / lean_verify / lean_status /
+    # lean_fuzz now live in holographic/plugins/lean4.py and bind at construction via the
+    # `plugins` argument, which defaults to loading every bundled plugin -- so the mind's
+    # surface is unchanged. They moved because they are the EXTERNAL-BINARY surface; the
+    # pure Horn kernel below (logic_* / proof_*) needs nothing outside the wheel and stays.
+
 
     def logic_prove(self, goal, rules, max_steps=10000, strategy="naive"):
         """Prove a ground goal from Horn facts/rules by deterministic forward chaining.
@@ -40,33 +46,6 @@ class _UnifiedPart18:
         from holographic.agents_and_reasoning import holographic_lean as _L
         rs = _L.rules_from_wire(rules)
         return _L.check_proof(_L.proof_from_wire(proof, rs), rs)
-
-    def lean_export(self, goal, rules, theorem_name="derived", check=True):
-        """Prove a goal and emit self-contained Lean 4 source (axioms + term-mode theorem).
-        HONEST SCOPE: Lean verifies the proof FOLLOWS from the rules; it does NOT verify the
-        rules are consistent -- an inconsistent rule set proves anything and typechecks doing
-        it (see logic_consequences' absurdity smoke). check levels: True/"internal" runs the
-        independent in-process checker before emitting; "external" ALSO round-trips through an
-        installed lean binary and refuses ok=True unless BOTH agree (the de Bruijn criterion:
-        two independent checkers, agreement as the deliverable) -- with no binary, ok is False
-        and external.available says why, never faked. Returns {"ok","lean","proof"[,"external"]};
-        ok=False, lean=None when underivable. See holographic_lean.to_lean."""
-        from holographic.agents_and_reasoning import holographic_lean as _L
-        rs = _L.rules_from_wire(rules)
-        p = _L.prove(_L.atom_from_wire(goal), rs)
-        if p is None:
-            return {"ok": False, "lean": None, "proof": None}
-        if check:
-            _L.check_proof(p, rs)
-        src = _L.to_lean(p, rs, theorem_name=theorem_name)
-        out = {"ok": True, "lean": src, "proof": _L.proof_to_wire(p)}
-        if check == "external":
-            res = _L.lean_check(src)
-            out["external"] = res
-            # agreement is the deliverable: internal passed above; ok stands only if the
-            # external kernel ALSO said proved (available and ok) -- absence is a loud False
-            out["ok"] = bool(res.get("available")) and bool(res.get("ok"))
-        return out
 
     def logic_query(self, goal, rules, budget=2000, fallback=True):
         """GOAL-DIRECTED evaluation with TABLING: answer a goal that may contain variables
@@ -123,14 +102,6 @@ class _UnifiedPart18:
         _L.check_proof(pr, rs)
         return _L.proof_measure(pr)
 
-    def lean_verify(self, source, timeout=60):
-        """Round-trip Lean 4 source through an installed `lean` binary (opt-in bridge,
-        numba-style; the engine never requires it). Returns {"available", "ok", ...} --
-        {"available": False} when no binary exists, stated honestly rather than pretended.
-        See holographic_lean.lean_check."""
-        from holographic.agents_and_reasoning import holographic_lean as _L
-        return _L.lean_check(source, timeout=timeout)
-
     def logic_decode_atom(self, vec, preds, symbols, max_args=2, floor=0.25):
         """Decode a fact vector back to (pred, args) with honest abstention -- encode_atom's
         inverse via the engine's own unbind + nearest cleanup (Rule-0 record: the resonator
@@ -177,18 +148,6 @@ class _UnifiedPart18:
         return _L.conjecture_and_refute(bg, pos, neg, target, dict(body_preds),
                                         max_body=max_body, max_vars=max_vars,
                                         theorem_name=theorem_name)
-
-    def lean_fuzz(self, n=30, seed=0):
-        """Differential oracle over the whole logic chain: n random HOSTILE theories (Lean
-        keywords, collision pairs, digit-led names) through prove-both-strategies -> check
-        -> export -> external Lean when installed (which is itself probed with a corrupted
-        term each run). Failures return with their seed for pinning as Lean-free regression
-        tests -- the distillation contract: Lean finds a bug once, the repo keeps the pin,
-        the binary stays optional. Standing result on record: 300 theories, 793 exports,
-        0 failures. An empty list is a measured statement about n seeds, not a proof.
-        See holographic_lean.fuzz_export."""
-        from holographic.agents_and_reasoning import holographic_lean as _L
-        return _L.fuzz_export(n=int(n), seed=int(seed))
 
     def _proof_mem(self):
         """Lazy per-mind store behind proof_store/proof_recall: parallel lists of goal
@@ -1083,26 +1042,6 @@ class _UnifiedPart18:
         lean/LeCoreHeadSpec.lean. See holographic_headspec.check_invariants."""
         from holographic.mesh_and_geometry import holographic_headspec as _HS
         return _HS.check_invariants(params)
-
-    def lean_status(self):
-        """Report the Lean 4 dependency tier without downloading or requiring anything.
-        TIER 0 (always on, NumPy+stdlib): kernel, independent checker, Lean-source EMITTER,
-        induction, fuzz oracle's non-Lean stages, proof memory at provenance 'checked'.
-        TIER 1 (opt-in, ~1.3 GB installed): an external Lean binary -- buys exactly the
-        'lean_verified' provenance tier. Install/remove via tools/install_lean.py (version
-        and sha256 PINNED; a verifier downloaded unverified would be a joke at our own
-        expense). Returns {"tier", "on_path", "local_install", "version", "pinned_version",
-        "path_hint", "install_hint"}."""
-        import importlib.util, os, sys
-        spec = importlib.util.spec_from_file_location(
-            "lecore_install_lean", os.path.join(os.path.dirname(os.path.dirname(
-                os.path.dirname(os.path.abspath(__file__)))), "tools", "install_lean.py"))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        st = mod.status()
-        st["tier"] = 1 if st["version"] else 0
-        st["install_hint"] = None if st["version"] else "python3 tools/install_lean.py"
-        return st
 
     def wrap_to_field(self, vertices, faces, field, rounds=6, **kw):
         """Wrap a template mesh onto a target field while KEEPING IT A USABLE MESH.

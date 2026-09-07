@@ -34,8 +34,14 @@ def find_modules(root):
         if rel != "." and not (rel == "holographic" or rel.startswith("holographic" + os.sep)):
             dirnames[:] = []  # don't descend further (skip tests/, tools/, docs/, etc.)
             continue
+        in_plugins = os.path.basename(dirpath) == "plugins" and rel.startswith("holographic")
         for name in sorted(filenames):
             if name.startswith("holographic_") and name.endswith(".py") and not name.startswith("test_"):
+                mods.append(Path(dirpath) / name)
+            # BUNDLED PLUGINS are named after their pip extra (zig.py, jit.py, lean4.py), not
+            # holographic_*.py, so the prefix rule skipped them and the reference had no page for
+            # the verbs an agent can call on every default mind. Public plugin files only.
+            elif in_plugins and name.endswith(".py") and not name.startswith("_"):
                 mods.append(Path(dirpath) / name)
     return sorted(mods, key=lambda p: p.name)
 
@@ -99,6 +105,8 @@ FAMILY_PREFIXES = ("mesh", "splat", "ray", "sdf", "scene")
 
 def family_of(module_name):
     """Group key from a module name: the first matching family prefix, else the module's own name."""
+    if not module_name.startswith("holographic_"):
+        return "plugins"                                     # a bundled plugin: one family of its own
     stem = module_name[len("holographic_"):-len(".py")]      # "holographic_meshqem.py" -> "meshqem"
     for prefix in FAMILY_PREFIXES:
         if stem.startswith(prefix):

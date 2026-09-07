@@ -406,9 +406,69 @@ class AnswerLadder:
             # this, every restart relabelled deliberate teaches as model-cached (the
             # record was [q, a] and replay could only guess). Rows are [q, a] historic,
             # [q, a, sess] cp36+, [q, a, sess, provenance] now -- readers tolerate all.
-            self.taught_log.append([str(question_text), str(answer_text), "shared",
-                                    provenance or getattr(self, "_provenance_hint",
-                                                          "model-cached")])
+            self._log_taught([str(question_text), str(answer_text), "shared",
+                              provenance or getattr(self, "_provenance_hint",
+                                                    "model-cached")])
+
+    def _log_taught(self, row):
+        """Append a [q, a, session, provenance] row to the durable teaching record -- UNLESS an
+        identical row is already there.
+
+        THE BLOAT THIS STOPS, measured (sweep 166): a shipped learning container held 263,023
+        rows of which 385 were distinct; one row ("pin provenance q", ...) appeared 42,496 times.
+        Every test run re-taught the same pins, every teach appended a row, the file was never
+        compacted -- 78 MB of JSON in the manifest and a 225 s learning_load spent replaying the
+        same fact forty thousand times. An exact-duplicate row carries no information: replay of
+        an identical [q, a, session, provenance] is a no-op on every structure it feeds. Rows
+        that DIFFER (a new answer for an old question, a new session, a new provenance) are still
+        appended, because order and history are the record. Returns True if appended."""
+        row = [str(x) for x in row]
+        seen = self._taught_seen_set()
+        key = tuple(row)
+        if key in seen:
+            # MOVE TO THE END, do not drop. Measured wrong the first way: keeping the FIRST copy
+            # broke "blue -> grey -> blue again": the log held [blue, grey], replay ended on grey,
+            # and a reloaded mind disagreed with the live one. Replay is last-wins per question,
+            # so the one copy we keep must sit where the LATEST teach put it. O(n) on a repeat
+            # only; the seen-set keeps the common path O(1).
+            for i in range(len(self.taught_log) - 1, -1, -1):
+                if tuple(str(x) for x in self.taught_log[i]) == key:
+                    del self.taught_log[i]
+                    break
+            self.taught_log.append(row)
+            return False
+        seen.add(key)
+        self.taught_log.append(row)
+        return True
+
+    def _taught_seen_set(self):
+        """The set of rows already on the books, kept in step with `taught_log`.
+
+        Keyed to the LIST OBJECT'S IDENTITY: curation and distillation REASSIGN taught_log
+        (memcurate, distill_certificates) rather than mutating it, and a cached set built from
+        the old list would then refuse rows the new list no longer holds. A reassignment gives a
+        new id, so the set is rebuilt exactly when it could be stale, and never otherwise --
+        an O(n) rebuild per curation, not per append."""
+        if not hasattr(self, "taught_log"):
+            self.taught_log = []
+        if getattr(self, "_taught_seen_for", None) is not id(self.taught_log):
+            self._taught_seen = set(tuple(str(x) for x in r) for r in self.taught_log)
+            self._taught_seen_for = id(self.taught_log)
+        return self._taught_seen
+
+    def _relog_last(self, row):
+        """Replace the LAST logged row (the one _remember just wrote under the salted key) with
+        `row` -- the replay loop's way of restoring the original session column -- keeping the
+        seen-set in step. If the replacement is already on the books elsewhere, the last row is
+        dropped instead of duplicated."""
+        row = [str(x) for x in row]
+        seen = self._taught_seen_set()
+        if not self.taught_log:
+            return self._log_taught(row)
+        old = tuple(str(x) for x in self.taught_log[-1])
+        seen.discard(old)
+        self.taught_log.pop()
+        return self._log_taught(row)           # same last-wins rule as every other append
 
 
 # ---------------------------------------------------------------------------------------------

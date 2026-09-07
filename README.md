@@ -162,6 +162,18 @@ And the measurement culture, in pictures:
 
 It's a plain Python library. The core needs **only NumPy** — nothing else is ever required. Everything beyond that (the web UI, image I/O, tests and plots, and the `numba`/CuPy/SymPy/Zig accelerators) is **opt-in**, and you pull in exactly what you want with pip "extras."
 
+The optional parts of the engine itself are **plugins**. Everything that needs a dependency outside the wheel — the Zig kernels, the SymPy derivations, the Numba JIT renderer, the WGSL runtime, the CuPy device path, the Lean 4 bridge — lives in `holographic/plugins/`, binds to a mind at construction, and can be left out. Plugins and extras share names, so `pip install leos-core[zig]` installs what the `zig` plugin needs:
+
+```python
+import lecore
+m = lecore.UnifiedMind()                        # every plugin discovery finds
+m = lecore.UnifiedMind(plugins=())              # a slim mind: none of them
+m = lecore.UnifiedMind(plugins=("zig", "lean4"))   # exactly these
+m.plugin_list()                                 # preflight: available / missing / install, per plugin
+```
+
+Plugins can also build ON the framework: `holographic/plugins/_example_tags.py` is a tag memory made from the HRR algebra in about sixty lines, with abstention. Your own plugins are found the same way: drop a file in a folder named by `LECORE_PLUGIN_PATH`, or publish one with a `lecore.plugins` entry point. Copy `holographic/plugins/_template.py` to start; the whole contract is a `PLUGIN` dict and a `register(mind, config)` function, and every verb a plugin adds is a first-class faculty — callable, `/invoke`-able, listed in `/tools`, and surfaced by `find_capability`. The guide is **[`docs/PLUGINS.md`](docs/PLUGINS.md)**.
+
 **The quick way — install from PyPI.** The package is published as **`leos-core`** (the core of the larger **leOS** project); the import name stays `lecore`:
 
 ```bash
@@ -427,7 +439,8 @@ time. The full argument, with the measured receipts behind every claim, is in
 
 If you contribute or build on it, these are the load-bearing rules — they're what keep it trustworthy:
 
-- **NumPy / stdlib only** in the core. No PyTorch, no scikit-learn, no pretrained models. (`numba`, CuPy, and SymPy are opt-in extras, never required.)
+- **NumPy / stdlib only** in the core. No PyTorch, no scikit-learn, no pretrained models. (`numba`, CuPy, SymPy, Zig, wgpu and Lean are opt-in extras, never required — and the verbs that need them are **plugins**, not core.)
+- **Optional means plugin.** Anything that needs a dependency outside the wheel lives in `holographic/plugins/`, binds at construction, and can be left out with `plugins=()`. The test is *does this need something outside the wheel*, not *does the word appear in it* — a faculty with a Numba fast path and a NumPy fallback is core.
 - **No learned weights, no black boxes.** Everything is an explicit, inspectable computation.
 - **Deterministic.** Fixed seeds, stable sorts, reproducible bit-for-bit.
 - **Additive and backward-compatible.** New capability is added; existing behavior isn't broken.
@@ -446,6 +459,7 @@ Like leOS, leCore is **free and open source**, and the work that keeps it free i
 - **[`docs/USE_CASES.md`](docs/USE_CASES.md)** — **three swarms that run**: customer service that learns from its humans, a development swarm with one understanding of the codebase, a lab of focused roles on one bus and one memory.
 - **[`integrations/openzoo/PLATFORM_GUIDE.md`](integrations/openzoo/PLATFORM_GUIDE.md)** — the **platform operator's guide** (openzoo and any harness): booting, isolation, exposing faculties, teaching, sharing, faster inference.
 - **[`docs/WHATS_NEW.md`](docs/WHATS_NEW.md)** — **feature by feature, one example each**, newest first.
+- **[`docs/PLUGINS.md`](docs/PLUGINS.md)** — **extending leCore without growing the core**: using the bundled plugins, the three places a plugin can live (bundled, `LECORE_PLUGIN_PATH`, pip entry points), writing one from the template, what the loader refuses and why, and the operator-vs-agent security boundary. Every snippet runs.
 - **[`docs/PACKAGING.md`](docs/PACKAGING.md)** — **how the wheel is built and published**: one distribution, opt-in extras, auto-publish on every green merge, the `lecore-mcp` / `lecore-service` entry points.
 - **[`FEATURE_GUIDE.md`](FEATURE_GUIDE.md)** — a **hands-on how-to** for the most recently added features: composable
   materials/textures, the describe-a-scene authoring flow (naming, texturing, external files), external-asset
@@ -506,7 +520,7 @@ and forget to document or register it, CI tells you which one.
 
 ## Status
 
-Active research engine, and a large one — 805 `holographic_*` modules, ~2,370 mind verbs behind 850 catalog capabilities, and 7,000+ collected tests (7,135), all green in CI (the full suite runs sharded, with a per-test budget that skips anything slow unless it is marked critical). It's real and it runs, but it's a research project under steady development, not a finished product. Expect sharp edges, expect it to keep growing, and expect every surprising result to come with the measurement that earned it.
+Active research engine, and a large one — 805 `holographic_*` modules plus 6 bundled plugins, ~2,410 mind verbs behind 867 catalog capabilities, and 7,000+ collected tests (7,181), all green in CI (the full suite runs sharded, with a per-test budget that skips anything slow unless it is marked critical). It's real and it runs, but it's a research project under steady development, not a finished product. Expect sharp edges, expect it to keep growing, and expect every surprising result to come with the measurement that earned it.
 
 ## License
 

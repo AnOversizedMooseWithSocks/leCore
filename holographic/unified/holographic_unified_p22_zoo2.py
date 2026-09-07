@@ -1424,29 +1424,53 @@ class _UnifiedPart22:
                                             "stored arrays instead" % (n_audit, n_taught))
         tiles = []
         aud_arrays = {}
+        # INSTANCED GEOMETRY FOR THE AUDIT FLOOR (sweep 167). The floor is a SEQUENCE of
+        # (key, value) writes, and the sequence -- its order and its repeats -- is the
+        # semantics: replay applies every write, so a repeated pair is a second delta-rule
+        # reinforcement and must replay as one. But the BYTES of a repeated row need to
+        # exist once. Measured on the shipped partition: 795 rows, 307 distinct keys, 307
+        # distinct values -- 62% of the stored bytes were copies. So, exactly like a scene
+        # with one mesh and many instances: one table of unique keys, one of unique values,
+        # and per tile an int32 REFERENCE sequence into them. Replay reads the references
+        # in order and sees the identical sequence it always did -- same repeats, same
+        # order, same q8 per-row reconstruction (the pack is per-row, so a row packed once
+        # in the table reconstructs bit-for-bit as it did packed in place). A pure change
+        # of what is stored, never of what is replayed.
+        _k_index, _v_index = {}, {}                 # float32 bytes -> row in the table
+        _k_rows, _v_rows = [], []
         for ti, t in enumerate(self.experience.tiles):
             st = t.to_state()
             aud = st.pop("audit", None)
             if aud:
-                ks = np.stack([np.asarray(k, np.float32) for k, _ in aud])
-                vs = np.stack([np.asarray(v, np.float32) for _, v in aud])
-                # int8 PER ROW -- the audit arrays were 15.6 MB of a 16.2 MB
-                # partition (96%) once the semantic array was packed. Same
-                # scheme, third site. Measured 4.0x at cosine min 0.99996.
-                _kq, _klo, _khi = _q8_pack(ks)
-                _vq, _vlo, _vhi = _q8_pack(vs)
-                aud_arrays["aud_kq_%d" % ti] = _kq
-                aud_arrays["aud_klo_%d" % ti] = _klo
-                aud_arrays["aud_khi_%d" % ti] = _khi
-                aud_arrays["aud_vq_%d" % ti] = _vq
-                aud_arrays["aud_vlo_%d" % ti] = _vlo
-                aud_arrays["aud_vhi_%d" % ti] = _vhi
+                kref, vref = [], []
+                for k, v in aud:
+                    kb = np.asarray(k, np.float32); vb = np.asarray(v, np.float32)
+                    ki = _k_index.get(kb.tobytes())
+                    if ki is None:
+                        ki = _k_index[kb.tobytes()] = len(_k_rows); _k_rows.append(kb)
+                    vi = _v_index.get(vb.tobytes())
+                    if vi is None:
+                        vi = _v_index[vb.tobytes()] = len(_v_rows); _v_rows.append(vb)
+                    kref.append(ki); vref.append(vi)
+                aud_arrays["aud_kref_%d" % ti] = np.asarray(kref, np.int32)
+                aud_arrays["aud_vref_%d" % ti] = np.asarray(vref, np.int32)
                 st["audit_in_arrays"] = True
             else:
                 st["audit"] = []                          # an EMPTY journal keeps its key
                                                           # (pop stripped it and
                                                           # from_state rightly demanded it)
             tiles.append(st)
+        if _k_rows:
+            # int8 PER ROW -- the audit arrays were 15.6 MB of a 16.2 MB partition (96%)
+            # once the semantic array was packed. Same scheme, third site. Measured 4.0x
+            # at cosine min 0.99996. Now applied ONCE per unique row.
+            _kq, _klo, _khi = _q8_pack(np.stack(_k_rows))
+            _vq, _vlo, _vhi = _q8_pack(np.stack(_v_rows))
+            aud_arrays.update({"aud_K_q": _kq, "aud_K_lo": _klo, "aud_K_hi": _khi,
+                               "aud_V_q": _vq, "aud_V_lo": _vlo, "aud_V_hi": _vhi})
+            self._audit_instanced = {"rows": int(sum(len(r) for k, r in aud_arrays.items()
+                                                      if k.startswith("aud_kref_"))),
+                                     "unique_keys": len(_k_rows), "unique_values": len(_v_rows)}
         if not self._audit_regen_applied:
             secs.append({"kind": "lecore.learning.experience", "id": "v1",
                          "meta": {"tiles": tiles}, "arrays": aud_arrays})

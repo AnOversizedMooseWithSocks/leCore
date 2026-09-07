@@ -183,7 +183,10 @@ class Service:
         none. Returns: {ok, tools:[...]}. This is the shape a harness, an LLM, or another leCore reads to drive us."""
         from holographic.misc.holographic_skills import manifest
         tools = []
-        for m in manifest(include_methods=True).get("methods", []):
+        # PASS THE MIND so this node's PLUGIN verbs are advertised too. Without it a plugin
+        # verb was reachable through POST /invoke but absent from GET /tools -- callable by
+        # an agent that already knew the name, discoverable by none.
+        for m in manifest(include_methods=True, mind=self.mind).get("methods", []):
             name = m["name"]
             # params = the argument names from the introspected signature, minus self (best-effort, for display)
             call = m.get("call", "")

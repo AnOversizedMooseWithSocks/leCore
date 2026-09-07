@@ -1643,30 +1643,6 @@ class _UnifiedPart11:
         self._machine().define(name, program)
         return self
 
-    def gradient_cache_symbolic(self, expr, anchors, variables=("x", "y", "z")):
-        """Build an irradiance/GI-style GradientCache with EXACT Jacobians from a symbolic field (SymPy) instead of
-        finite differences -- no truncation error in the cached gradients, so first-order interpolation is more
-        accurate at the same anchors. Needs sympy. See holographic_cache.gradient_cache_symbolic."""
-        from holographic.caching_and_storage.holographic_cache import gradient_cache_symbolic
-        return gradient_cache_symbolic(expr, anchors, variables)
-
-    def render_sdf_fast(self, expr, camera, width=256, height=256, light_dir=(-0.4, 0.7, -0.3),
-                        base_color=(0.85, 0.5, 0.35), ao=True, shadows=True, ambient=0.25, sky=None):
-        """Render an analytic SDF (given as a symbolic expression) with the fully-JIT'd renderer: the whole march --
-        primary ray, exact normal, AO, soft shadow -- compiles into one njit kernel (the closure barrier is gone),
-        ~9-15x the numpy renderer for the field-native shading. Compiled renderer cached per SDF. Needs sympy+numba;
-        falls back is the caller's (use render_sdf without jit_expr). See holographic_sdf_render.render_analytic."""
-        from holographic.rendering.holographic_sdf_render import render_analytic
-        return render_analytic(expr, camera, width=width, height=height, light_dir=light_dir,
-                               base_color=base_color, ao=ao, shadows=shadows, ambient=ambient, sky=sky)
-
-    def compiled_sdf_numba(self, expr, variables=("x", "y", "z")):
-        """SymPy -> Numba, cached: compile a symbolic 3-D SDF to njit scalar+grid value/normal kernels ONCE and
-        reuse them. The scalar njit SDF composes into other njit loops (a sphere-trace march) -- the closure barrier
-        that blocked Numba from the raymarch is gone. Needs sympy + numba. See holographic_compile.compiled_sdf_numba."""
-        from holographic.scene_and_pipeline.holographic_compile import compiled_sdf_numba
-        return compiled_sdf_numba(expr, variables)
-
     def compile_program(self, program):
         """Assemble a HoloMachine program (list of (opcode, operand)) into its program vector ONCE via the compile
         cache and reuse it -- re-running the SAME program skips the ~L-bind assembly (measured ~15 ms / 60 instr).
@@ -1674,27 +1650,11 @@ class _UnifiedPart11:
         from holographic.scene_and_pipeline.holographic_compile import compiled_program
         return compiled_program(self._machine(), program)
 
-    def compiled_sdf_normal(self, expr, variables=("x", "y", "z")):
-        """Compile a symbolic SDF's exact normal ONCE and reuse it via the content-addressed compile cache: the
-        same expr returns the cached (value_fn, normal_fn) instantly instead of re-running the ~140-390 ms sympy
-        lambdify, and recompiles only when the expr changes. The runtime use of the codegen pipeline -- compile a
-        spec, cache the compiled version, hand it out everywhere. See holographic_compile.compiled_sdf_normal."""
-        from holographic.scene_and_pipeline.holographic_compile import compiled_sdf_normal
-        return compiled_sdf_normal(expr, variables)
-
     def compile_cache_stats(self):
         """Stats for the process-wide compile cache: hits/misses/compiles/evictions, size, hit_rate. See
         holographic_compile.DEFAULT_CACHE."""
         from holographic.scene_and_pipeline.holographic_compile import DEFAULT_CACHE
         return dict(DEFAULT_CACHE.stats, size=len(DEFAULT_CACHE), hit_rate=round(DEFAULT_CACHE.hit_rate(), 3))
-
-    def exact_sdf_normal(self, expr, variables=("x", "y", "z")):
-        """Derive an EXACT SDF surface normal from a symbolic SDF expression (SymPy, design-time) and return
-        (value_fn, normal_fn) of pure NumPy -- no finite-difference step-size error, no autodiff. The Quilez-seat
-        path: e.g. exact_sdf_normal('sqrt(x**2+y**2+z**2)-1.0'). Needs sympy (requirements-accel.txt); the returned
-        functions are pure NumPy. See holographic_codegen.sdf_normal_fn."""
-        from holographic.misc.holographic_codegen import sdf_normal_fn
-        return sdf_normal_fn(expr, variables)
 
     def symbolic_gradient(self, expr, variables):
         """Exact gradient of a symbolic scalar field as a pure-NumPy function (force = -symbolic_gradient(energy)).

@@ -1804,3 +1804,216 @@ weakness is visible rather than papered over.
 
 Tests: 7,108 -> 7,135 (+6 appserver, +8 qualitygate, +3 app_lint, +9 doc snippets, +2 lews). Cards 845 -> 850.
 Modules 803 -> 805.
+
+## Sweep 164 -- the plugin door: extend a mind without growing the core, and move the optional parts out
+
+Moose: "I think we need to have a plugin system that allows additional functionality to be registered to run
+inside of leCore ... Lean4 for example is an optional dependency and it should probably be a plugin ... plugins
+need to be able to be self discovered by just being placed in a plugin folder. All optional components and
+capabilities should be plugins, since they already have fallbacks ... plugins as an optional install flag in
+pypi." Rule-0: eight stranger phrasings returned only fallbacks; four NEIGHBOURS reused rather than rebuilt
+(mind.invoke already dispatches by instance getattr; mind.register_capability already writes a PER-MIND catalog
+-- measured, it does not leak; mind.orchestrator.register takes callables; _register_command set the security
+precedent).
+
+MEASURED BEFORE BUILDING, and it decided the design:
+- A plain setattr(mind, "tts_speak", fn) was callable via invoke() and visible to features(["tts_speak"]) but
+  INVISIBLE to features(), skills.complete(), skills.manifest() -> GET /tools. All three read the CLASS,
+  module-cached ("the class doesn't change at runtime"). Callable-but-undiscoverable: the doctrine's own failure
+  mode, half-satisfied.
+- A plugin could silently SHADOW any core faculty: setattr(m, "version", ...) -> m.version() and invoke() return
+  the plugin's body while GET /tools keeps advertising the real signature. A manifest that lies.
+- 2,410 faculties, GET /tools = 1.69 MB. Import 0.135 s, boot 11 ms -- the bloat is the manifest an agent must
+  read, not import time.
+
+Built (all wired, carded, tested; audits 0/0/0; swarm gate within its original budget of 12):
+- holographic_plugin (io_and_interop): PluginHost load/list/unload/manifest/register_all. Contract: a module
+  with PLUGIN={name,version,does,requires,install} and register(mind, config) -> verb dicts {name, fn, does,
+  example, aliases, consumes, produces}. Collision with a core faculty or another plugin's verb is REFUSED, no
+  override flag (an override allowed once is an override relied upon; the core faculty can then never be fixed).
+  ALL-OR-NOTHING: verbs validated and collision-checked before any binds. Contract violations are one
+  PluginError with a sentence. Catalog.unregister added (clears the fc bake).
+- _UnifiedPart26: _plugin_load / _plugin_unload PRIVATE (the _register_command precedent: a public loader is
+  remote code execution via POST /invoke; measured: both names refused over the wire), plugin_list /
+  plugin_manifest public. UnifiedMind(plugins="auto"|()|("zig",...)).
+- holographic/plugins/: DISCOVERY. Bundled folder, then LECORE_PLUGIN_PATH folders (os.pathsep), then pip entry
+  points (group lecore.plugins). Sorted names within each source; the same install yields the same verb surface
+  every run. A name appearing twice is refused loudly, not de-duplicated. "requires"/"install": a plugin whose
+  dependency is absent STILL loads and its verbs STILL bind (each already fails honestly -- unbinding would
+  replace a clear error with an AttributeError); plugin_list reports available=False, missing, install.
+- Six bundled plugins, named after their pip extras so `pip install leos-core[zig]` and `plugins=("zig",)` are
+  one thing: zig (5 verbs), symbolic (3), jit (2), wgsl (1), gpu (1), lean4 (4). 16 verbs moved VERBATIM by
+  tools/migrate_to_plugins.py; three-way census: every def in its plugin, out of core, zero collateral. What
+  deliberately STAYED: the pure Horn kernel (logic_*/proof_*, 1,318 stdlib lines other faculties build on),
+  signed_distance_field and every faculty with a numba/cupy FAST PATH and a NumPy fallback (the accelerator
+  pattern -- it works without the dependency, which is the opposite of a plugin), the WGSL emitter, the reporters
+  (engine_status / accelerator_report / optional_backends -- they report ON plugins). The line: "does this need
+  something outside the wheel", not "does the word appear in it".
+- The class-only blind spot fixed in SIX places, each measured as a plugin verb that answered /invoke and was
+  absent from a surface that advertises it: skills.mind_methods/manifest/complete (mind= arg, byte-identical
+  without it), features() no-arg form, catalog.seed_from_mind (walked dir(mind), read type(mind)), service
+  /tools (passes its mind), swarm_audit L1/L2, skill_lint example check, reachability_audit surface text.
+  docgen gained a plugins family (the files are not holographic_*.py). Catalog cards for discovered plugins are
+  written by the mind's LAZY catalog build (PluginHost.register_all), so aliases survive with no boot cost.
+
+KEPT NEGATIVES / decisions on record:
+- SUPERSEDED: "no directory auto-scan" (the first cut's position). It confused what a scan does with who
+  controls it. The boundary is OPERATOR-vs-AGENT: folders are configured before the process starts, scanning
+  runs at construction, and writing into a plugin folder already needs host access. What stays forbidden: a
+  public faculty loading from a caller path, or one adding a folder at runtime. Both positions are in the
+  docstrings.
+- NO sandbox claimed. A plugin runs with full process privilege like any import; the gate is who may load.
+- NO process-global registry: plugins bind to one mind, matching the per-mind catalog. A global registry would
+  re-introduce a verb visible in every mind but callable in one.
+- unload cannot revoke a reference a caller already took. Stated, not hidden.
+- HONEST SIZE: 16 of ~2,410 faculties is ~0.7% of the manifest. Not a size win; not sold as one. What it buys is
+  the pattern and the option -- the next optional thing (voice, ComfyUI, a post-effect pass, openzoo) has a home
+  that is not core, and plugins=() is a real switch. The bloat argument is about the NEXT thousand faculties.
+- Bundled plugins skip catalog registration at construction (register_capability would force the lazy catalog
+  build, turning a ~1 ms boot into a catalog build per mind).
+
+BUGS THE MIGRATION CAUGHT (all pinned):
+- LoadedPlugin held a live module object -> every mind with a plugin unpicklable; the unified app's taught-mind
+  cache died with "cannot pickle 'module' object". Stores the name now.
+- tools/migrate_to_plugins.py first run: inspect.getsource reads through linecache, stale after part 11 was
+  rewritten for `symbolic`, so `jit` extracted compile_program under the name compiled_sdf_numba and REMOVED
+  THE WRONG METHOD from core. Reverted the five touched parts to the pristine upload (consecutive regression ->
+  revert, never repair blind); the generator now reads every source from disk before writing anything.
+- Restoring p04 from baseline silently reverted the features() fix; the end-to-end folder test caught it.
+- The catalog card tripped the 600-char does lint twice (tightened to 598, not budgeted) and the ghost-method
+  lint once (example called m.demo_double(, created at runtime; now m.invoke).
+
+PRE-EXISTING (reproduced on the clean upload, unchanged): test_buried_audit::test_no_dark_method_capabilities,
+test_holographic_skills::test_module_duplicates_do_not_dilute_confidence.
+
+Tests: 7,135 -> 7,181 (+46 test_plugin). Cards 866 -> 867. Modules 803 -> 805 holographic_* + 6 bundled
+plugins. Default-mind verbs 2,410 -> 2,412 (+plugin_list, plugin_manifest); slim mind 2,396.
+
+## Sweep 165 -- the plugin sweep: nothing broke, adding one is a copy, and it is written down
+
+Moose: "Do a sweep to make sure the new plugin architecture didn't break anything, and that we can easily add
+new plugins through this method. Then make sure it's properly documented, and update the readme as well."
+
+REGRESSION. Targeted: 49 tests in test_plugin (+3: template selftest-and-not-discovered, copy-rename authoring
+path, pip entry-point discovery), the 123 across every file touching a migrated verb, every plugin and part
+selftest, audits 0/0/0, swarm gate within its original budget of 12. Full 7,181-test suite run in the
+background (~3 h at one worker); three failures mapped to ids by progress-line position:
+test_buried_audit::test_no_dark_method_capabilities (PRE-EXISTING, reproduced on the clean upload) and two
+crystal_render_rig add_light tests. The crystal pair passes in isolation, passes paired with
+test_code_zig_integration, passes paired with the failing buried_audit test, passes on baseline, and passed
+in a 597-test run of the same preceding FILES -- so it is an ORDER dependency, and my first reproduction used
+`sort -u` file order rather than pytest's collection order, which is a different interleaving. Second
+reproduction uses the exact first 613 collected ids. Verified the obvious plugin side-effect is absent:
+constructing a default mind vs plugins=() leaves the global NumPy RNG and the mind RNG bit-identical, and
+plugin loading consumes no RNG and imports nothing at module level. (Verdict appended below when it lands.)
+
+AUTHORING, proven with real artifacts, not read-throughs:
+- FOLDER: cp holographic/plugins/_template.py -> app/plugins/voice.py, rename PLUGIN['name'] and the verb
+  prefix, run the file (its own selftest), set LECORE_PLUGIN_PATH, discovered. THE TEMPLATE HAD A BUG on
+  first contact: its selftest asserted plugin_list()==["template"], so a renamed copy failed the moment a
+  stranger tried it. Fixed to PLUGIN["name"]; pinned as test_copy_rename_authoring_path. Dogfooding the
+  authoring path is the only way that bug gets found before a user finds it.
+- PIP: a two-file distribution with [project.entry-points."lecore.plugins"] echo="lecore_plugin_echo",
+  pip-installed for real: source='installed', verb callable, find_capability surfaces it, gone after
+  uninstall. Pinned with a fake importlib.metadata so CI needs no network.
+- EXPLICIT: _plugin_load(path, config=...) with config reaching a closure verb.
+- _template.py: private name so discovery skips it; its selftest loads THIS file explicitly onto a slim mind,
+  so it works from any folder whether or not discovery would find it.
+
+DOCUMENTATION, every snippet executed rather than written:
+- docs/PLUGINS.md (new): using, the three sources and their order, writing one, what the loader refuses and
+  why (each with the measured reason), the operator-vs-agent boundary, what a plugin is NOT (no sandbox, not
+  process-global, not revocable once referenced, not a size win by itself), the core-or-plugin rule. 6/6 code
+  blocks run by a harness (python, sh with the template recipe, the contract example, toml, load/unload).
+- README: plugin paragraph + snippet (run) in "How do you use it"; a new rule ("Optional means plugin ... the
+  test is does this need something outside the wheel, not does the word appear in it"); Learning-more entry.
+- docs/PACKAGING.md: extras and plugins as one thing under two names; the add-a-dependency recipe now says
+  where the verbs go. DEVELOPMENT_STRATEGY.md: the core-or-plugin fork before step 2, checklist box.
+  AGENTS.md: doc link, key fact, stale counts refreshed (~600->~800 modules, 6,300->7,100+ tests).
+  docmap.py registers PLUGINS.md; regen_docs --check clean.
+
+KEPT: the crystal pair is NOT explained away as flaky until the exact-order reproduction says so. A test
+that fails only in one interleaving is a real order dependency with a real cause; "passes alone" is a fact
+about the test, not an explanation.
+
+VERDICT on the crystal pair: the exact-order reproduction (the real run's first 613 collected ids, same
+PYTHONHASHSEED, one process) is GREEN -- 586 passed, only the pre-existing buried_audit failure. Identical
+order + identical seed + identical code does not reproduce it. What was NOT identical: the full run shared the
+container with my own concurrent activity, including `pip install` / `pip uninstall` of a real entry-point
+plugin package (lecore-plugin-echo) and several other pytest processes, at roughly the time those two tests
+ran. A full-suite run is only evidence about the tree if the environment holds still underneath it; this one
+did not, so the two F's are evidence about my process discipline, not about the plugin door. Rule kept for
+next time: the full suite runs ALONE, or its failures are re-run in a clean process before they count.
+
+## Sweep 166/167 -- plugins for builders, and the memory that was 27 MB of one fact
+
+PLUGINS (robustness for people building ON and connecting TO leCore):
+- UnifiedMind(plugin_config={name: {...}}) reaches that plugin's register(); _plugin_load("zig") by BARE
+  NAME resolves through discovery (re-add what plugins=() left out, no path needed); _plugin_load(module)
+  takes a module OBJECT -- the embedding case, a host program's own code, no file/env/entry point.
+- ENFORCED: discovery name (file stem / entry-point name) == PLUGIN["name"]. Measured wrong first: a
+  mismatch made plugin_list() show one name while plugins=(...) selected by another.
+- The HRR ALGEBRA HAD NO CATALOG CARD. find_capability("bind two vectors") returned drift models. Card
+  added for holographic_ai (derived_atom/bind/bundle/unbind/nearest/cosine); 8/8 stranger battery.
+- holographic/plugins/_example_tags.py: a one-vector tag memory with abstention, ~60 lines on the algebra.
+  Private, so it never auto-loads. TWO NEGATIVES FOUND WRITING IT: (1) trace = bundle([trace, new]) on
+  every add is an exponentially-DECAYING memory -- bundle() renormalises. Looked like capacity until
+  recall did not lift with dim (1/6, 2/6, 1/6, 3/6 at 64..4096); a real capacity limit lifts, decay
+  cannot. Plain sum fixed it (4/6 -> 6/6 at 1024). (2) the actual capacity ceiling at dim=64/40 facts is
+  measured in the selftest, with the dim=1024 recovery as the check that it IS capacity.
+- MCP: lecore_find surfaces plugin verbs, lecore_invoke calls them, the loader is refused. lecore_map now
+  reports the node's plugins + availability -- and was REMOVED FROM THE CROSS-RUN MEMO: memoised by
+  (tool, args) it served a stale map (a fresh server reported no 'plugins' key, from a memo written before
+  the key existed). Costs one plugin_list(); not worth a lie.
+- Tests: test_plugin 49 -> 57.
+
+THE MEMORY BUG (found timing the MCP test: lecore_invoke of a trivial verb took 226 s):
+- _zoo_load -> learning_load("./lecore_memory") took 225 s on the SHIPPED partition. The container's
+  manifest.json was 77 MB: the taught section held 263,023 rows, 385 DISTINCT, one row ("pin provenance
+  q") 42,496 times. Every test run re-taught the same pins; every teach appended a row; nothing compacted.
+  Load/save alone was already idempotent (4 cycles at 449 rows -- the cp28 fix holds); the growth was at
+  the WRITE.
+- FIX at the write: AnswerLadder._log_taught -- an exact-duplicate [q, a, session, provenance] row is not
+  appended; every raw taught_log.append now goes through it; the seen-set is keyed to the LIST OBJECT'S
+  IDENTITY so curation/distillation (which reassign taught_log) rebuild it rather than going stale.
+- FIX at the load: dedupe before replay, so learning_load(root); learning_save(root) IS the repair.
+- MY OWN BUG, caught by measurement: keep-FIRST dedupe broke "blue -> grey -> blue again" (log [blue,
+  grey], replay ended on grey, reload disagreed with live). Replay is last-wins per question, so the one
+  copy kept must sit where the LATEST teach put it: a repeated row MOVES TO THE END. Verified both orders.
+- The loader crashed (KeyError 'aud_k_0') on a container with no audit arrays -- a merely compact
+  partition could not be opened. Tolerated now; replay rebuilds the text-backed writes.
+- RESULT: 225 s -> 2.0 s; 13.8 MB -> 2.9 MB; 300 identical teaches -> 1 row; 5 teach/save/load cycles hold
+  5,710 bytes.
+
+WHAT CANNOT BE REGENERATED, measured not assumed: the experience audit floor. Stripped the audit arrays
+and rebuilt from texts alone: 1,110 writes in the floor, 373 rebuilt; the rebuilt trace REFUSED 315 reads
+as null that the real one fires on. The floor is the record, not a cache. Kept.
+
+INSTANCED GEOMETRY FOR THE FLOOR (Moose: "we can just have references that point at the full data"):
+62% of the floor's bytes were copies -- 795 rows, 307 distinct keys, 307 distinct values -- but the
+SEQUENCE (order + repeats) is the semantics: a repeat is a second delta-rule reinforcement and must replay
+as one. So: one table of unique keys, one of unique values, per-tile int32 REFERENCE sequences. Replay
+reads the references in order and sees the identical sequence; the q8 pack is per-row, so a row packed
+once in the table reconstructs bit-for-bit as it did packed in place. A change of what is STORED, never
+of what is REPLAYED: two loads (stacked-format vs instanced) give bit-identical traces, identical audit
+sequences, identical stats, 385/385 identical answers. 2.94 MB -> 1.36 MB. Old-format containers still
+load; re-saving one produces the instanced form.
+KEPT NEGATIVE: unique_values == unique_keys here (307/307) because value atoms are content-derived from
+the (q, a) PAIR, so a shared answer text is still one atom per question -- instancing values separately
+buys nothing today, but costs nothing and is right when a plugin writes shared response vectors.
+
+THE OTHER GROWTH CHANNEL, measured and REPORTED, not changed (it is policy): learning.semantic's ctx table.
+385 exact-hit asks had grown it to 2,924 words x 2 KB = 6 MB, the largest thing in that container; 38% of
+the vocabulary (1,104 words) is non-word tokens ('#print', "'active'", '(0.02s)'). Two questions for
+Moose: should an exact-hit ask ingest at all, and should tokens like those survive the norm filter.
+Rows are per-word (no duplicates); this is SCOPE, not duplication.
+
+SHIPPED PARTITION COMPACTED IN PLACE: lecore_memory 27 MB -> 2.7 MB (both generations; the rolled
+snapshot state-20260830-154407Z.lecore was the bloated one and is what the resolver picks as newest),
+385/385 answers agree with the original.
+
+Tests: +8 tests/test_learning_dedupe.py (identical teaches, last-wins both orders, reassignment, bloated
+repair, instanced bit-identity, instanced smaller, old-format loads, no-audit loads). 734 passed across
+every zoo/teach file; the two test_integration failures are pre-existing on the upload.
+PROCESS NEGATIVE: the first instanced-bit-identity test compared LIVE vs LOADED and failed on the q8
+quantisation that pre-dates this sweep (cosine 0.99996). The contract is two LOADS agree; asserted so.

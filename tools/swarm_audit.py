@@ -172,7 +172,16 @@ def derived_matrix(mind, root="."):
     from holographic.misc.holographic_skills import manifest
 
     cards = [c for c in default_catalog().all() if getattr(c, "method", None)]
-    man = {x["name"] for x in manifest(include_methods=True).get("methods", [])}
+    # THE MANIFEST OF THIS MIND, plugins included. manifest() with no mind reads the CLASS and
+    # is what GET /tools served before the plugin door; the service now passes its mind, so
+    # the audit must too or it measures a manifest nobody serves. This is the FOURTH place
+    # the same class-only blind spot turned up (skills.mind_methods, features(),
+    # catalog.seed_from_mind, and here) -- each one made a plugin verb that answered
+    # /invoke correctly look absent from the surface that advertises it.
+    man = {x["name"] for x in manifest(include_methods=True, mind=mind).get("methods", [])}
+    # L1 is "on the facade": a plugin verb bound to the instance at construction IS on the
+    # facade every caller gets, even though it is not a class attribute.
+    plugin_verbs = {r["name"] for r in mind.plugin_manifest()} if hasattr(mind, "plugin_manifest") else set()
     obj_methods, mod_funcs = _repo_defs(root)
     mcp_calls = _surface_calls(os.path.join(root, "holographic_mcp.py"), "mind")
     chat_calls = _surface_calls(os.path.join(root, "chat_server.py"), "m")
@@ -197,7 +206,7 @@ def derived_matrix(mind, root="."):
         seen.add(meth)
         l0 = hasattr(mind, meth)
         row = {"capability": c.name, "method": meth, "L0": l0,
-               "L1": bool(l0 and hasattr(lecore.UnifiedMind, meth)),
+               "L1": bool(l0 and (hasattr(lecore.UnifiedMind, meth) or meth in plugin_verbs)),
                "L2": meth in man, "L2d": meth in mcp_calls, "L3": meth in chat_calls,
                "L4": meth in tests_tokens}
         rows.append(row)

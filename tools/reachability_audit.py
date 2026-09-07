@@ -138,6 +138,13 @@ def audit(root):
     _unified = glob.glob(os.path.join(root, "holographic", "**", "holographic_unified.py"), recursive=True) \
                or glob.glob(os.path.join(root, "holographic_unified.py"))
     _unified += sorted(glob.glob(os.path.join(root, "holographic", "unified", "holographic_unified_p*.py")))
+    # AND THE BUNDLED PLUGINS. The surface moved again (the plugin sweep): optional-dependency
+    # verbs now bind from holographic/plugins/*.py at construction, so a module reached only
+    # through one of those (zigrun, zigmarch, sdf_render, devicerun) is reachable as a faculty
+    # on every default mind. Reading only the parts reported those four as import-only --
+    # the references did not disappear, they moved. Same lesson as the line above.
+    _unified += sorted(p for p in glob.glob(os.path.join(root, "holographic", "plugins", "*.py"))
+                       if not os.path.basename(p).startswith("_"))
     mind_src = "\n".join(open(p, encoding="utf-8", errors="replace").read() for p in _unified)
 
     modules = _engine_modules(root)

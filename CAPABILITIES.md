@@ -5511,6 +5511,13 @@ mind.across_regimes(values, series=...): evaluate an effect inside EVERY measure
 import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); r=np.random.default_rng(0); v=r.normal(0,1,600); v[150:300]+=1.2; a=mind.across_regimes(v,segments=[(0,150),(150,300),(300,450),(450,600)]); print(round(a['concentration'],2), a['consistent'])
 ```
 
+### Plugins (extend a mind's verbs without growing the core)
+A plugin is a module with PLUGIN={name,version,does,requires,install} and register(mind, config) returning verb dicts. DISCOVERED at construction: holographic/plugins/ (bundled jit, symbolic, zig, wgsl, gpu, lean4 -- each optional dependency's verbs, named after its pip extra), LECORE_PLUGIN_PATH folders (per app), pip entry points (lecore.plugins). UnifiedMind(plugins=()) is slim; plugins=('zig',) picks by name. plugin_list() is the preflight: available/missing/install. Verbs bind AND get cards; shadowing a core faculty is refused. Loading from a caller path is private (holographic_plugin)..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print([(p['name'], p['available']) for p in m.plugin_list()]); print(hasattr(lecore.UnifiedMind(dim=64,seed=0,plugins=()), 'zig_batch_eval'))
+```
+
 ### Polarized light (Stokes state)
 the STATE of polarized light as a Stokes vector [S0,S1,S2,S3] (holographic_stokes): total intensity plus linear (Q,U) and CIRCULAR (V / handedness) polarization. Field-native (a whole image is (...,4)); reports degree-of-polarization, e-vector angle and handedness; scalar radiance lifts/round-trips byte-identically. The circular channel is the one the mantis shrimp uniquely sees.
 
@@ -5792,6 +5799,13 @@ sweep a circular cross-section whose RADIUS varies along the path, in a rotation
 
 ```python
 import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); P = np.stack([np.zeros(6), np.zeros(6), np.linspace(0, 1, 6)], 1); m = mind.sweep_profile(P, np.linspace(0.1, 0.01, 6))
+```
+
+### The HRR algebra for builders (bind / bundle / unbind / cosine / nearest / derived_atom)
+The primitives the engine is built from, in one readable module (holographic_ai): derived_atom(seed, name, dim) mints a vector that is a pure function of its name; bind(a, b) associates two (circular convolution: resembles neither, pairing recoverable); bundle(vs) superposes a set (resembles each member); unbind(c, a) recovers the other half, noisily; nearest(q, codebook) / cosine(a, b) snap and score. What a PLUGIN reaches for to add a capability ON the framework -- see holographic/plugins/_example_tags.py, a one-vector tag memory with abstention. Plate 1995..
+
+```python
+from holographic.agents_and_reasoning import holographic_ai as A; k=A.derived_atom(0,'key',256); v=A.derived_atom(0,'value',256); t=A.bind(k,v); print(round(A.cosine(A.unbind(t,k), v), 2))
 ```
 
 ### The above/below sweep (is every declared capability reachable at every layer?)
@@ -6636,4 +6650,4 @@ from holographic.caching_and_storage.holographic_substrate import write_multicha
 
 ---
 
-*850 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*852 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

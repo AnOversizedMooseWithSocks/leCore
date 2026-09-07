@@ -762,6 +762,43 @@ def register_p08_digest(c):
                  "both renders have the same artifact"),
         module="holographic_qualitygate", method="render_quality_gate", native=True,
     )
+    c.register_capability(
+        "Plugins (extend a mind's verbs without growing the core)",
+        "A plugin is a module with PLUGIN={name,version,does,requires,install} and register(mind, config) "
+        "returning verb dicts. DISCOVERED at construction: holographic/plugins/ (bundled jit, symbolic, zig, wgsl, "
+        "gpu, lean4 -- each optional dependency's verbs, named after its pip extra), LECORE_PLUGIN_PATH folders "
+        "(per app), pip entry points (lecore.plugins). UnifiedMind(plugins=()) is slim; plugins=('zig',) picks by "
+        "name. plugin_list() is the preflight: available/missing/install. Verbs bind AND get cards; shadowing a "
+        "core faculty is refused. Loading from a caller path is private (holographic_plugin).",
+        example="import lecore; m=lecore.UnifiedMind(dim=64,seed=0); "
+                "print([(p['name'], p['available']) for p in m.plugin_list()]); "
+                "print(hasattr(lecore.UnifiedMind(dim=64,seed=0,plugins=()), 'zig_batch_eval'))",
+        aliases=("plugin system", "add a plugin", "load a plugin", "extension point", "hook system for user code",
+                 "register a new tool the mind can call", "add custom functionality without changing core",
+                 "third party addon", "extend lecore per app", "register an extension at runtime",
+                 "optional feature as a plugin", "add a verb at runtime", "unload a plugin",
+                 "what plugins are loaded", "keep optional deps out of core", "slim mind without optional stuff",
+                 "which optional dependencies are installed", "plugin folder", "pip extra for a plugin"),
+        module="holographic_plugin", method="plugin_list", native=True,
+    )
+    c.register_capability(
+        "The HRR algebra for builders (bind / bundle / unbind / cosine / nearest / derived_atom)",
+        "The primitives the engine is built from, in one readable module (holographic_ai): derived_atom(seed, "
+        "name, dim) mints a vector that is a pure function of its name; bind(a, b) associates two (circular "
+        "convolution: resembles neither, pairing recoverable); bundle(vs) superposes a set (resembles each "
+        "member); unbind(c, a) recovers the other half, noisily; nearest(q, codebook) / cosine(a, b) snap and "
+        "score. What a PLUGIN reaches for to add a capability ON the framework -- see "
+        "holographic/plugins/_example_tags.py, a one-vector tag memory with abstention. Plate 1995.",
+        example="from holographic.agents_and_reasoning import holographic_ai as A; "
+                "k=A.derived_atom(0,'key',256); v=A.derived_atom(0,'value',256); "
+                "t=A.bind(k,v); print(round(A.cosine(A.unbind(t,k), v), 2))",
+        aliases=("bind two vectors", "bundle several vectors", "unbind a pair", "the hrr algebra",
+                 "holographic reduced representation", "role filler binding", "circular convolution bind",
+                 "superpose vectors", "make a vector from a name", "deterministic atom for a symbol",
+                 "cosine similarity of hypervectors", "nearest vector in a codebook",
+                 "how do i build on the holographic framework", "primitives for a plugin"),
+        module="holographic_ai", method=None, native=True,
+    )
 
 _PART = "holographic_catalog_p08"
 

@@ -14,6 +14,7 @@
 | Is the tree still ORGANIZED (misc budget, giants, section markers)? | `(report)` | `tools/structure_audit.py` | budgeted-baseline structural gates; fails only on regression |
 | How will the void explorer let us leap beyond known data, honestly? | `docs/VOID_EXPLORER_PLAN.md` | `hand-written` | the metaball model (expand radii, collide, mix at the lens), the propose-validate-research-record pipeline built from existing organs, provenance rungs for conjectures, composability in plans/apps/hosted, and the honest limits |
 | I am building an app ON leCore -- where do I start? | `docs/BUILDING_ON_LECORE.md` | `hand-written` | the App substrate: per-app per-user memory with physical isolation, remember/recall with provenance, observe/suggest/habits so the app grows with the person using it, a capability preflight, and the honest limits |
+| How do I add a capability WITHOUT growing the core, or leave the optional ones out? | `docs/PLUGINS.md` | `hand-written` | the plugin door: bundled / LECORE_PLUGIN_PATH folder / pip entry-point discovery, plugins=() for a slim mind, plugin_list() as the honest preflight, the two-part contract (PLUGIN dict + register), what the loader refuses and why, and the operator-vs-agent security boundary |
 | What IS lever 7, and why should I trust it? | `docs/LEVER7.md` | `hand-written` | the displacement trace: the superposed algebra, the delta-rule write, the governance table (calibration, veto, sessions, receipts, provenance), where it sits against Titans / Larimar / MemoryLLM, and the kept negatives that shaped it |
 | How do I install leCore INTO a model with Unicron? | `docs/UNICRON_INSTALL.md` | `hand-written` | the runbook for tools/unicron_install.py: facts into down_proj, the algebra as circulants, a routed swarm that arrives off, the five-point health gate, budget-by-bisect, cartridges with exact revert, and the honest boundary |
 
@@ -34,7 +35,7 @@ The generators it runs, read from that list at generation time so this page cann
 - `holographic/caching_and_storage/holographic_pipelinemap.py` -> `docs/PIPELINE_MAP.md`, `pipelines.json`
 - `tools/unifiers.py --write` -> `docs/UNIFIERS.md`
 
-## Family layout (800 modules)
+## Family layout (805 modules)
 
 ```mermaid
 graph LR
@@ -42,13 +43,13 @@ graph LR
     H --> misc["misc (151)"]
     H --> mesh["mesh_and_geometry (111)"]
     H --> agen["agents_and_reasoning (108)"]
-    H --> io_a["io_and_interop (94)"]
-    H --> rend["rendering (78)"]
+    H --> io_a["io_and_interop (97)"]
+    H --> rend["rendering (79)"]
     H --> cach["caching_and_storage (59)"]
     H --> samp["sampling_and_signal (58)"]
     H --> simu["simulation_and_physics (53)"]
     H --> scen["scene_and_pipeline (32)"]
-    H --> unif["unified (29)"]
+    H --> unif["unified (30)"]
     H --> mate["materials_and_texture (18)"]
     H --> sema["semantic_router (9)"]
 ```
