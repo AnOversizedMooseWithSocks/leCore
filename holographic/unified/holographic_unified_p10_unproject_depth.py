@@ -1124,6 +1124,13 @@ class _UnifiedPart10:
         slice over a (span x span*h/w) window, min-max normalised. Returns (H,W) floats
         in [0,1]; stack or tint for RGB. Deterministic for fixed seed params."""
         import numpy as np
+        from holographic.misc.holographic_pattern import PATTERNS
+        from holographic.materials_and_texture.holographic_proctex import TEXTURES
+        if name not in PATTERNS and name not in TEXTURES:
+            # a flat image for a misspelt name is the silent failure leStudio shipped (7 of 12 kinds "worked" as
+            # zeros); the pixel door names both menus instead
+            raise ValueError("unknown pattern %r; patterns: %s; textures: %s"
+                             % (name, sorted(PATTERNS), sorted(TEXTURES)))
         f = self.pattern_field(name, **params)
         w, h = int(width), int(height)
         xs = np.linspace(0.0, float(span), w)
@@ -1351,6 +1358,11 @@ class _UnifiedPart10:
         if camera is None:
             camera = Camera(eye=(c[0] + 2.5 * r, c[1] + 0.45 * r, c[2] + 3.4 * r),
                             target=tuple(c), up=(0, 1, 0), fov_deg=40, aspect=width / max(height, 1))
+        else:
+            # JSON-drivable like render_mesh (C2): a plain {'eye','target','up','fov_deg'} dict is a camera too.
+            # leStudio hit "'dict' object has no attribute 'ray_dirs'" here after the same dict worked in render_mesh
+            from holographic.io_and_interop.holographic_coerce import as_camera
+            camera = as_camera(camera)
         field = field if field is not None else cloud_field(c, r * 1.3, density=density, seed=seed, grid=grid)
         # tight, cloud-SHAPED bounds (not a naive symmetric cube): the multi-lobe body in cloud_field sits low
         # (flat base near -0.42 in its own radius units) and rises higher than it sits below centre, so a snug

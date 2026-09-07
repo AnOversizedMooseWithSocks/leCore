@@ -53,16 +53,21 @@ class LiveSession:
 
     # ---- mutation ----
 
-    def bump(self, src, kind="edit", meta=None):
+    def bump(self, src, kind="edit", meta=None, touch=True):
         """Record a mutation. Returns the new revision.
 
         MONOTONIC AND NEVER REUSED, because a client's whole resync strategy is
         "give me everything after N" -- a revision that goes backwards or
-        repeats silently drops edits for every client that already passed it."""
+        repeats silently drops edits for every client that already passed it.
+        `touch=False` (additive, sweep 163) records the change WITHOUT marking
+        `src` present: an app whose src is a per-run client id keeps presence
+        keyed by the PERSON (X-User) and heart-beats that separately -- keying
+        presence by connection is the ghost-editor negative on record."""
         self.rev += 1
         self._log.append({"rev": self.rev, "src": str(src), "kind": str(kind),
                           "meta": dict(meta or {}), "at": float(self._now())})
-        self.touch(src)
+        if touch:
+            self.touch(src)
         return self.rev
 
     # ---- presence ----

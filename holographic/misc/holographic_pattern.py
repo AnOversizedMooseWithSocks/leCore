@@ -357,6 +357,16 @@ def make_pattern(name, **params):
     import inspect
     fn = PATTERNS.get(name)
     if fn is None:
+        # THE OTHER MENU. leStudio measured 7 of 12 "pattern kinds" (marble, wood, brick, voronoi, musgrave, wave,
+        # magic) returning flat zeros from pattern_image: those names live in holographic_proctex.TEXTURES, not here,
+        # and an unknown name fell through to the constant. Same contract (f(points)->[0,1]), so route by name
+        # instead of pretending the texture does not exist. Truly unknown names keep the documented constant.
+        try:
+            from holographic.materials_and_texture.holographic_proctex import TEXTURES, proc_texture
+        except Exception:                                            # proctex unavailable: old behaviour
+            TEXTURES = {}
+        if name in TEXTURES:
+            return proc_texture(name, **params)
         return lambda P: np.full(len(np.atleast_2d(P)), 0.5)
     accepted = set(inspect.signature(fn).parameters)
     # drop ONLY the documented-inert keys the chosen builder does not accept; leave everything else to raise.

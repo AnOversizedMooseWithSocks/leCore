@@ -733,6 +733,35 @@ def register_p08_digest(c):
                  "no model of empty space", "density field as a vector"),
         module="holographic_volint", method="holographic_fog_volume", native=True,
     )
+    c.register_capability(
+        "Gaussian blur an image (reflect or wrap borders, channels untouched)",
+        "m.blur_image(image, sigma, mode='reflect'|'wrap'): the plain Gaussian low-pass every image app needs -- separable "
+        "and reflect-padded for a canvas, FFT-circular for a tiling texture. WHY it is a card: the engine held four "
+        "private Gaussian blurs (autobump, splatsharpen, sharpen, postfx) and exposed none, so leStudio wrote three of "
+        "its own and Poly Studio one -- the most re-implemented helper across the apps (sweep 163 app_lint). Works on "
+        "(H,W) and (H,W,C).",
+        example="import numpy as np, lecore; m=lecore.UnifiedMind(dim=64,seed=0); img=np.zeros((32,32,3)); img[12:20,12:20]=1; "
+                "b=m.blur_image(img, 2.0); print(b.shape, round(float(b.sum()/img.sum()),3), round(float(b[16,16,0]),3))",
+        aliases=("gaussian blur an image", "blur an image", "soften an image", "low pass filter an image", "smooth pixels",
+                 "separable gaussian", "blur with wrap around edges", "feather a mask"),
+        module="holographic_autobump", method="blur_image", native=True,
+    )
+    c.register_capability(
+        "Render quality gate (absolute defect thresholds, not diff-against-last-render)",
+        "m.render_quality_gate(frame, limits, single_round) -> {metrics, failed, ok} (holographic_qualitygate, from Poly "
+        "Studio). Each metric names the defect that shipped: terracing (second-difference steps in the floor band -- "
+        "grid-baked iso-contours; good 0.018, shipped-bad 0.068), edge_tones (silhouette pixels with a partial tone "
+        "nearby -- 0.94 supersampled, 0.00 jagged), fringe_ratio (chroma ADDED to edges by convergence -- a misaligned "
+        "albedo). WHY absolute: a diff against the previous render cannot see a defect both frames share. A metric is "
+        "never sufficient: look at the frames too.",
+        example="import numpy as np, lecore; from holographic.rendering.holographic_qualitygate import _disc; m=lecore.UnifiedMind(dim=64,seed=0); "
+                "good=_disc(120,160,80,60,30,ss=4,contrast=True); jag=_disc(120,160,80,60,30,ss=1,contrast=True); "
+                "print(m.render_quality_gate(good)['ok'], m.render_quality_gate(jag)['failed'])",
+        aliases=("did my render regress", "check a render for terracing", "jagged edges test", "aliasing regression gate",
+                 "colour fringe on silhouettes", "render regression thresholds", "quality gate before shipping a render change",
+                 "both renders have the same artifact"),
+        module="holographic_qualitygate", method="render_quality_gate", native=True,
+    )
 
 _PART = "holographic_catalog_p08"
 

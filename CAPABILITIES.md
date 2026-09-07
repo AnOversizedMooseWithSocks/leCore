@@ -1857,6 +1857,14 @@ import pathlib; p=pathlib.Path('docs/HOSTILE_DATA_GUIDE.md'); t=p.read_text(); p
 ```
 *Find it by:* guide to analyzing hostile data, how to find real structure in noisy data, honest analysis workflow, which honesty tool do I use when, recipe for validating a signal, hostile data checklist, field manual for the honesty layer, order to run the honesty tools
 
+### Ids and presets shared across apps (lews_mint, lecore.preset)
+Two small standards the apps got wrong differently (holographic_lews): lews_mint(root, prefix) issues '<prefix><n>' from ONE persisted counter per prefix, advanced under the workspace lock and journalled -- deterministic on replay, collision-free across apps and processes (leStudio's process-global counters changed ids in a fresh process; Poly Studio reassigns ids on load). lews_preset_section(name, target, params) is a lecore.preset: a named JSON recipe for a brush, material, render or shader any app lists and applies; arrays refused (that is an asset)..
+
+```python
+import tempfile, lecore; m=lecore.UnifiedMind(dim=64,seed=0); d=tempfile.mkdtemp(); w=m.lews_open(d,app='lestudio'); ids=[m.lews_mint(d,'L'), m.lews_mint(d,'L',app='polystudio'), m.lews_mint(d,'O')]; w.put(m.lews_preset_section('soft round','lestudio.brush',{'radius':12,'flow':0.12},tags=['skin'])); print(ids, w.sections('lecore.preset')[0]['meta']['params'])
+```
+*Find it by:* mint a unique id in the workspace, stable object ids across apps, ids reassigned on load, deterministic id counter, save a brush preset other apps can read, material preset library, render preset, share presets between apps
+
 ### Import artist file formats (OBJ/glTF/textures/volume)
 import the files artists hand you: mind.load_obj('model.obj') reads Wavefront geometry + its .mtl (UVs, normals, per-face material, map_* textures); mind.load_glb('model.glb') reads glTF/GLB geometry AND its full PBR channels (base colour / metallic-roughness / normal / occlusion / emissive) with embedded textures and per-vertex UVs/normals, AND for rigged models its ANIMATIONS (keyframed node transforms -- clip.sample(t), rotations slerped) and SKINS (joints + inverse-bind + weights); mind.load_texture_set(folder) turns a folder of Adobe Substance 3D Painter export maps (basecolor/roughness/metallic/normal/height/ao/emissive, matched by name) into one PBRMaterial; mind.load_volume('grid.npy') wraps a 3-D density grid as a field for render_volume. mind.import_asset(path) dispatches by extension. Once a rigged glTF is loaded, mind.deform_mesh(loaded, clip, t) actually MOVES it -- linear-blend skinning by the animated skeleton plus morph-target blending, returning the deformed mesh at time t. Stdlib+NumPy; PIL lazy for textures. HONEST: proprietary .sbsar/.spp and sparse OpenVDB .vdb need their vendor tools -- import the exported open forms..
 
@@ -2441,6 +2449,14 @@ the PIPELINE composing the texture/material/scene graphs: mind.render_graph() re
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); rg = mind.render_graph(); rg.add_texture('rust', graph, static=True).set_scene(scene); rg.plan(); prep = rg.prepare()
 ```
 *Find it by:* render graph, bake texture, bake vs live, prepare scene, resolve textures, orchestrate render, material lod, precompute texture
+
+### Render quality gate (absolute defect thresholds, not diff-against-last-render)
+m.render_quality_gate(frame, limits, single_round) -> {metrics, failed, ok} (holographic_qualitygate, from Poly Studio). Each metric names the defect that shipped: terracing (second-difference steps in the floor band -- grid-baked iso-contours; good 0.018, shipped-bad 0.068), edge_tones (silhouette pixels with a partial tone nearby -- 0.94 supersampled, 0.00 jagged), fringe_ratio (chroma ADDED to edges by convergence -- a misaligned albedo). WHY absolute: a diff against the previous render cannot see a defect both frames share. A metric is never sufficient: look at the frames too..
+
+```python
+import numpy as np, lecore; from holographic.rendering.holographic_qualitygate import _disc; m=lecore.UnifiedMind(dim=64,seed=0); good=_disc(120,160,80,60,30,ss=4,contrast=True); jag=_disc(120,160,80,60,30,ss=1,contrast=True); print(m.render_quality_gate(good)['ok'], m.render_quality_gate(jag)['failed'])
+```
+*Find it by:* did my render regress, check a render for terracing, jagged edges test, aliasing regression gate, colour fringe on silhouettes, render regression thresholds, quality gate before shipping a render change, both renders have the same artifact
 
 ### Render to text from the weights (installed image formation -> PGM)
 mind.raster_program_pgm(machine, program, params, w, h): run an installed image-formation chain (RECTANGULAR linear maps certify -- 3 lights -> 64 pixels) and emit the frame as PGM P2 ASCII -- the picture leaves through the mouth, no file I/O; byte-exact vs the live path (pinned). Quantization to 0..255 ints is the SERIALIZER's job, stated in the docstring..
@@ -3766,6 +3782,14 @@ from holographic_service import serve; serve(host='127.0.0.1', port=8080, token=
 ```
 *Find it by:* serve as a tool, tool server, /tools, /invoke, expose faculties, http api, call leCore remotely, function calling
 
+### Standard agent surface for an app built on leCore (tools, invoke, mind, engine, events, presence)
+What both apps hand-rolled, once (holographic_appserver): m.agent_surface(flask_app, base, app_name, workspace_root, image_routes) mounts GET /agent/tools (manifest from the LIVE url_map, this mount only), POST /agent/invoke (JSON, or a base64 PNG for image routes -- how an agent sees its work), POST /mind (allow-listed engine faculties; a rejected name returns the allowlist WITH signatures), GET /engine (engine_status), GET /events (SSE + heartbeat pings), GET /presence; every mutating request becomes a .lews note a second app sees. Identity: X-Client (run), X-User (person)..
+
+```python
+from holographic.io_and_interop.holographic_appserver import AgentSurface, manifest_from_rules; import lecore; m=lecore.UnifiedMind(dim=64,seed=0); s=AgentSurface(None, base='/api', app_name='demo', mind=m, image_routes=('render',)); print([t['name'] for t in s.manifest([('/api/paint',{'POST'},'p'),('/api/render',{'GET'},'r'),('/x/api/z',{'GET'},'z')])['tools']], s.mind_call('nope',{})[0], sorted(m.engine_status()['extras'])[:2])
+```
+*Find it by:* expose my app to agents, tool manifest from flask routes, agent invoke endpoint for my app, let an agent call the engine through my app, server sent events for my app, which engine build am I running, engine status panel, capability preflight for an app
+
 ### Study a directory (macro comprehension: the substrate orchestrates)
 mind.study(root) -- ONE call comprehends a large tree, no per-step LLM orchestration: ingest_files map, repo_map (symbols, dep graph, PageRank, budgeted skeleton), document_digest per doc, CODE DOCSTRINGS harvested into the corpus (sweep 94: a pure-code tree refused everything), an ask() closure (idf-weighted lexical retrieval, declared verdict, refuses off-corpus), ladder=True climbs the material MDL-gated (tower size set by GAIN not corpus size -- massive behaves like small; a flat terminal is a loud RESULT), caps DECLARED in 'truncation'. 794 modules in 8.7s, measured..
 
@@ -4524,6 +4548,22 @@ from holographic.scene_and_pipeline.holographic_jobs import JobManager; m.create
 ```
 *Find it by:* job, start, pause, resume, cancel, checkpoint, render job, long running
 
+### Journal-first documents in the workspace (content-addressed assets + op journals, GC)
+The determinism doctrine as two canonical .lews kinds (holographic_lews): lecore.asset -- a blob stored ONCE, id 'asset:<sha256>' (lews_put_asset returns the key; an identical array costs no write), and lecore.journal -- JSON ops with explicit seeds and asset keys that render a target section deterministically (lews_journal_section refuses inline arrays: that is the snapshot disease). lews_gc_assets removes what nothing references. leStudio measured one stroke: ~21 MB as a snapshot, ~2.7 KB as a path record -- so pixels are a render of the journal, never the truth..
+
+```python
+import numpy as np, tempfile, lecore; m=lecore.UnifiedMind(dim=64,seed=0); d=tempfile.mkdtemp(); w=m.lews_open(d,app='lestudio'); k=m.lews_put_asset(d,np.ones((3,3),np.float32),'tip'); k2=m.lews_put_asset(d,np.ones((3,3),np.float32),'again'); w.put(m.lews_journal_section('img',[{'op':'stamp','asset':k,'x':1,'y':1,'seed':3}])); o=m.lews_put_asset(d,np.zeros(2),'orphan'); print(k==k2, m.lews_gc_assets(d)==[o], m.lews_get_asset(d,k).shape)
+```
+*Find it by:* store an image asset once, content addressed blob in the workspace, deduplicate pasted pixels, op journal instead of pixel snapshots, replay a document from its journal, garbage collect unused assets, journal-first document, every stroke is an op
+
+### Live shared workspace (.lews standard): versioned kinds, canonical sections, apps editing together
+The .lews STANDARD on the container (holographic_lews): a schema version per section kind with migrations (a section newer than the build is carried read-only), canonical kinds lecore.mesh / material (physical-library name + overrides) / sdf / camera / scene (bindings by section id) beside lecore.image, and a LIVE Workspace directory apps hold open together: puts are locked, atomic and journalled with revisions; changes_since(rev) lets the modeller see the painter's texture land. m.lews_open(root, app) -> Workspace; lews_describe / lews_changes are JSON-safe..
+
+```python
+import numpy as np, tempfile, lecore; m=lecore.UnifiedMind(dim=64,seed=0); d=tempfile.mkdtemp(); p=m.lews_open(d,app='painter'); q=m.lews_open(d,app='modeller'); from holographic.io_and_interop.holographic_container import image_section; s=image_section(np.ones((4,4,3)),name='t'); s['id']='tex'; r=p.put(s); q.put(m.lews_mesh_section([[0,0,0],[1,0,0],[0,1,0]],[[0,1,2]],sid='m')); q.put(m.lews_scene_section([{'id':'o','mesh':'m','texture':'tex'}])); print([e['kind'] for e in p.changes_since(r)], m.lews_describe(d)['rev'])
+```
+*Find it by:* lews file format, shared workspace between apps, workspace versioning, schema version for a section kind, migrate old workspace files, two apps editing the same project, image editor and 3d modeller share textures, live workspace journal of changes
+
 ### Messaging across machines (distributed bus)
 the same publish/subscribe/send bus, spread across nodes: mind.distributed_bus(peers, token, node_id) publishes locally AND fans out to peer nodes (each running holographic_distbus.serve_bus), so agents on different machines share topics -- a swarm coordinates across the farm the way it does in one process. Received messages deliver local-only (no loops), dedup by a global id, and a dead peer never blocks the publisher. Bound a mailbox (open_mailbox(maxlen=)) for backpressure at high fan-out..
 
@@ -4635,6 +4675,14 @@ installable, runnable 'stored procedures' that are hypervectors the machine exec
 from holographic.agents_and_reasoning.holographic_queryprog import ProgramCatalog; cat.install(...); cat.find('cluster a series')
 ```
 *Find it by:* stored procedure, install program, execute program, udf, pg_proc, find program, run program, vsa program
+
+### Who is in the workspace (cross-app presence, host, notes, long-poll, open an app's .lews file)
+The .lews workspace as a LIVE SESSION shared by every app (holographic_lews.Workspace = the LiveSession contract on a directory): lews_touch(root, who, activity, name) heart-beats a PERSON or agent, never a connection (leStudio's ghost-editor lesson); lews_presence(root, ttl) -> who is here across apps, with activity and host = earliest-joined still alive; lews_note announces a non-section change as one journal line (no container rewrite); lews_wait long-polls the feed minus your own echo; lews_import(file, root) opens any app's single-file .lews as a live directory (leStudio goldens pinned)..
+
+```python
+import tempfile, lecore; m=lecore.UnifiedMind(dim=64,seed=0); d=tempfile.mkdtemp(); m.lews_open(d,app='lestudio'); m.lews_touch(d,'moose',activity={'tool':'brush'},name='Moose',app='lestudio'); m.lews_touch(d,'agent7',activity={'tool':'extrude'},app='polystudio'); r=m.lews_note(d,'moose','selection',{'layer':3}); print([(p['who'],p['app'],p['host']) for p in m.lews_presence(d)], m.lews_wait(d,0,timeout=0.2,exclude='nobody')[-1]['kind'], r)
+```
+*Find it by:* who else is editing this workspace, presence across apps, show other users cursors tools, host of the session, heartbeat participant, long poll workspace changes, server sent events for the workspace, open a lews file from another app
 
 ### Workspace folders
 a shallow grouping tree over a database's tables (database > folder > table): each table has one HOME folder (ownership -> lifecycle/tier) plus any number of ASSOCIATION links (grouping, no deletion on unlink). Scoped search runs over just a subtree. Folders reference existing tables, they do not copy them.
@@ -5155,6 +5203,13 @@ a quadrature rule, a filter stencil or a set of light samples -- sum_j w_j f(u_j
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); b = mind.bake_field(xs, ys); Q = mind.gather_rule(b, us, ws); v = mind.gather_field(b, Q)
 ```
 
+### Gaussian blur an image (reflect or wrap borders, channels untouched)
+m.blur_image(image, sigma, mode='reflect'|'wrap'): the plain Gaussian low-pass every image app needs -- separable and reflect-padded for a canvas, FFT-circular for a tiling texture. WHY it is a card: the engine held four private Gaussian blurs (autobump, splatsharpen, sharpen, postfx) and exposed none, so leStudio wrote three of its own and Poly Studio one -- the most re-implemented helper across the apps (sweep 163 app_lint). Works on (H,W) and (H,W,C)..
+
+```python
+import numpy as np, lecore; m=lecore.UnifiedMind(dim=64,seed=0); img=np.zeros((32,32,3)); img[12:20,12:20]=1; b=m.blur_image(img, 2.0); print(b.shape, round(float(b.sum()/img.sum()),3), round(float(b[16,16,0]),3))
+```
+
 ### Generation audit (memorisation + coverage gate)
 novelty and mode coverage of generated samples against their training set in ONE report, because memorisation manifests as SUCCESS (perfect samples) and fixing it usually costs coverage -- so both are measured together. novelty ~0 = memorised (nearest-training distance in units of the training set's own NN scale); coverage = fraction of k data modes some sample lands nearest to. mind.generate_media attaches this automatically; nothing generated should ship without it.
 
@@ -5230,6 +5285,13 @@ control who reads what. mind.invite(kind, grants) mints a token admitting a gues
 
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); code = mind.invite(kind='user', grants={'read':['lab/scene']}); g = mind.admit(code, 'visitor'); mind.grant(g, read='lab/notes')
+```
+
+### Is my app a good leCore citizen? (app_lint: the foundation an app should stand on)
+m.app_lint(root) / python3 tools/app_lint.py <app>: lints an app tree for what the foundation replaces -- hash() seeds, class-level id counters, own container format, own tool manifest / SSE / undo stack / job table / quality gate, wall clock in render paths -- and for what it should be on: capability gating, X-User identity, the .lews workspace, a /mind door. Hand-rolled helpers get the engine's nearest card and code hit (Rule 0 as a tool). Measured on the two apps: leStudio 5/16, Poly Studio 4/16 before adoption. Hits are places to look, not verdicts. Companion: docs/APP_FOUNDATION.md..
+
+```python
+import lecore, tempfile, os; m=lecore.UnifiedMind(dim=64,seed=0); d=tempfile.mkdtemp(); open(os.path.join(d,'app.py'),'w').write('import time\nclass L:\n    _next = 1\nk = hash((1,2))\n'); r=m.app_lint(d, suggest=False); print(r['checks']['hash_seed']['hits'], r['checks']['class_counter_ids']['hits'], r['score'])
 ```
 
 ### Iterative linear solve (shared conjugate gradient, complex-aware)
@@ -6574,4 +6636,4 @@ from holographic.caching_and_storage.holographic_substrate import write_multicha
 
 ---
 
-*842 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*850 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

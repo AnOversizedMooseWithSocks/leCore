@@ -547,6 +547,177 @@ class _UnifiedPart04:
         from holographic.io_and_interop.holographic_container import save_container
         return save_container(sections, meta=meta, compress=compress)
 
+    def lews_open(self, root, app="app", app_version="", lock_timeout=30.0):
+        """Open (or create) a LIVE shared workspace directory that several leCore apps edit together
+        (holographic_lews.Workspace): `<root>/workspace.lews` is always a complete container, every put/delete is
+        locked + atomic + journalled with a revision, and any app catches up with `changes_since(rev)`. The .lews
+        STANDARD: LEWS_SPEC meta on the file, `meta["schema"]` per section, canonical kinds lecore.mesh / material /
+        sdf / camera / scene (bindings by section id) alongside lecore.image, migrations per kind, newer-than-known
+        sections carried read-only. Returns the Workspace (put / get / sections / describe / changes_since /
+        wait_for_change / export_bytes)."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, app=app, app_version=app_version, lock_timeout=lock_timeout)
+
+    def lews_describe(self, root):
+        """What a shared workspace holds without opening anything: {app, rev, lews, sections:[{id, kind, schema,
+        known, rev}]} -- a UI lists foreign kinds by name instead of hiding them. JSON-safe (agent-callable)."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).describe()
+
+    def lews_changes(self, root, since_rev=0):
+        """Journal entries after `since_rev`: [{rev, op, id, kind, app, sha, t}] -- how an app (or an agent) learns
+        what other apps changed in the workspace. JSON-safe."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).changes_since(since_rev)
+
+    def lews_wait(self, root, since_rev=0, timeout=5.0, exclude=None):
+        """Block up to `timeout` seconds until the workspace moves past `since_rev`, then return the new journal
+        entries (section writes AND notes), minus `exclude`'s own echo. The long-poll an agent or a second app uses
+        instead of spinning on lews_changes; an SSE endpoint is one loop around it. JSON-safe."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        ws = Workspace(root, create=False)
+        ws.wait_for_change(since_rev, timeout=timeout)
+        return ws.since(since_rev, exclude=exclude)
+
+    def lews_note(self, root, src, kind="note", meta=None):
+        """Announce a non-section change ("selection moved", "render done") to everyone holding the workspace: one
+        journal line, no container rewrite, returns the new rev. LiveSession.bump realised on the directory."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).bump(src, kind, meta)
+
+    def lews_touch(self, root, who, activity=None, name=None, app="app"):
+        """Heart-beat a participant (a PERSON or agent id, never a connection) with an optional activity dict
+        ({tool, section}) and display name, so peers in OTHER apps see them in lews_presence. Call every few seconds
+        while alive; silence past the ttl removes them. Returns the current rev."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False, app=app).touch(who, activity=activity, name=name, app=app)
+
+    def lews_presence(self, root, ttl=30.0):
+        """Who is in the workspace right now, across every app: [{who, name, app, activity, joined, age, host}],
+        oldest-joined first; `host` is the earliest-joined participant still alive. Heartbeats older than `ttl`
+        seconds are gone (and reaped). JSON-safe."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).roster(ttl=ttl)
+
+    def lews_leave(self, root, who):
+        """Remove a participant immediately (a clean exit) and return who remains."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).drop(who)
+
+    def lews_import(self, lews_file, root, app="app", app_version=""):
+        """Open a single-file .lews saved by any app (leStudio's download, Poly Studio's save) as a live workspace
+        directory at `root`, every section carried verbatim, one 'import' journal line. Returns lews_describe(root)."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace.from_file(lews_file, root, app=app, app_version=app_version).describe()
+
+    def lews_put_asset(self, root, data, name="", app="app"):
+        """Store a blob in the workspace ONCE, content-addressed (lecore.asset), and return its sha256 key; an
+        identical array already present costs no write and no rev. Journal ops reference assets by this key."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False, app=app).put_asset(data, name)
+
+    def lews_get_asset(self, root, key):
+        """The array behind an asset key (or None). See lews_put_asset."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).get_asset(key)
+
+    def lews_journal_section(self, target, ops, sid="", name="journal"):
+        """A lecore.journal section: JSON ops (explicit 'seed's, 'asset' keys, never inline arrays -- refused) that
+        render `target` deterministically. The journal-first document doctrine, portable between apps."""
+        from holographic.io_and_interop.holographic_lews import journal_section
+        return journal_section(target, ops, sid=sid, name=name)
+
+    def lews_gc_assets(self, root, dry_run=False, app="app"):
+        """Remove every lecore.asset no journal or section references any more; returns the keys removed (or, with
+        dry_run, the keys that would be). The natural GC on save."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False, app=app).gc_assets(dry_run=dry_run)
+
+    def agent_surface(self, flask_app, base="/api", app_name="app", workspace_root=None, image_routes=(),
+                      stream_routes=(), mind_allow=None, hints=None, mount=True):
+        """Mount the STANDARD agent surface on an app's Flask object: GET base/agent/tools (manifest from the live
+        url_map, this mount only), POST base/agent/invoke (JSON, or base64 PNG for image_routes), POST base/mind
+        (allow-listed engine faculties; a rejected name returns the allowlist with signatures), GET base/engine,
+        GET base/events (SSE with heartbeat pings) and GET base/presence -- plus an after_request hook that notes
+        every mutating request on the .lews workspace at `workspace_root` (or an in-process LiveSession) and
+        heart-beats X-User. Returns the AgentSurface. See holographic_appserver."""
+        from holographic.io_and_interop.holographic_appserver import AgentSurface, DEFAULT_MIND_ALLOW
+        s = AgentSurface(flask_app, base=base, app_name=app_name, mind=self, workspace_root=workspace_root,
+                         mind_allow=tuple(mind_allow) if mind_allow else DEFAULT_MIND_ALLOW,
+                         image_routes=image_routes, stream_routes=stream_routes, hints=hints)
+        return s.mount() if mount else s
+
+    def engine_status(self):
+        """One preflight dict for an app's 'Engine status' panel and feature gating: engine version, capabilities
+        schema, faculty count, optional extras present (numba/sympy/cupy/wgpu/flask), the GPU report, the
+        determinism policy (bit_exact and what would break it) and the CPU budget. JSON-safe. See
+        holographic_appserver.engine_status."""
+        from holographic.io_and_interop.holographic_appserver import engine_status
+        return engine_status(self)
+
+    def lews_mint(self, root, prefix="S", app="app"):
+        """A fresh, never-reissued id '<prefix><n>' for this workspace: one persisted counter per prefix, advanced
+        under the workspace lock and journalled, so ids are deterministic on replay and collision-free across apps
+        and processes (leStudio's per-document-counter lesson; Poly Studio's ids-reassigned-on-load negative)."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False, app=app).mint(prefix)
+
+    def lews_preset_section(self, name, target, params, sid="", tags=(), author=""):
+        """A lecore.preset section: a named JSON parameter set for a target kind (a brush, a material, a render
+        setup, a shader) any app can list and apply. Arrays are refused -- a preset is a recipe, a texture is an asset."""
+        from holographic.io_and_interop.holographic_lews import preset_section
+        return preset_section(name, target, params, sid=sid, tags=tags, author=author)
+
+    def app_lint(self, root, include_tests=False, suggest=True):
+        """Lint an app tree built on leCore for the patterns the foundation replaces (hash() seeds, class-level id
+        counters, own container format, own tool manifest / SSE / undo / jobs / quality gate, wall clock in render
+        paths) and the foundations it should be on (capability gating, X-User identity, the .lews workspace, a /mind
+        door), plus hand-rolled helpers with the engine's nearest faculty. Returns the report dict (tools/app_lint.py
+        prints it). Hits are places to look, not verdicts."""
+        import os as _os, sys as _sys
+        _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))))
+        from tools.app_lint import lint_tree
+        return lint_tree(root, mind=self if suggest else None, include_tests=include_tests, suggest=suggest)
+
+    def lews_section(self, kind, sid="", meta=None, arrays=None):
+        """A section stamped with its kind's schema version (holographic_lews.make_section); canonical builders:
+        lews_mesh_section / lews_material_section / lews_sdf_section / lews_camera_section / lews_scene_section."""
+        from holographic.io_and_interop.holographic_lews import make_section
+        return make_section(kind, sid, meta, arrays)
+
+    def lews_mesh_section(self, verts, faces, sid="", name="mesh", uv=None, normals=None):
+        """Canonical lecore.mesh section (verts (N,3) f32, faces (M,3) i32, optional uv/normals)."""
+        from holographic.io_and_interop.holographic_lews import mesh_section
+        return mesh_section(verts, faces, sid=sid, name=name, uv=uv, normals=normals)
+
+    def lews_material_section(self, name, sid="", library=None, overrides=None):
+        """Canonical lecore.material: a PHYSICAL material-library name (glass_optics / matlib vocabulary) plus channel
+        overrides, so a painter and a modeller mean the same thing by 'amethyst'."""
+        from holographic.io_and_interop.holographic_lews import material_section
+        return material_section(name, sid=sid, library=library, overrides=overrides)
+
+    def lews_sdf_section(self, dsl, sid="", name="sdf"):
+        """Canonical lecore.sdf: the engine's SDF dialect text, re-evaluable by any app."""
+        from holographic.io_and_interop.holographic_lews import sdf_section
+        return sdf_section(dsl, sid=sid, name=name)
+
+    def lews_camera_section(self, eye, target, fov_deg=40.0, aspect=1.0, sid=""):
+        """Build a canonical lecore.camera section (eye, target, fov, aspect) for lews_open().put. See holographic_lews.camera_section."""
+        from holographic.io_and_interop.holographic_lews import camera_section
+        return camera_section(eye, target, fov_deg=fov_deg, aspect=aspect, sid=sid)
+
+    def lews_scene_section(self, objects, sid="scene", name="scene"):
+        """Canonical lecore.scene: objects = [{id, mesh, material, texture, transform}] binding sections BY ID --
+        'the painter's texture is on the modeller's mesh' is one of these records."""
+        from holographic.io_and_interop.holographic_lews import scene_section
+        return scene_section(objects, sid=sid, name=name)
+
+    def lews_register_kind(self, kind, version=1, describe=""):
+        """Declare an app's own section kind and the schema version this build reads/writes (migrations are
+        registered in code via holographic_lews.register_kind_schema). Unknown kinds are always carried verbatim."""
+        from holographic.io_and_interop.holographic_lews import register_kind_schema
+        return register_kind_schema(kind, version=version, describe=describe)
+
     def load_container(self, data):
         """Inverse of save_container: container bytes -> {"meta", "sections": [{kind, id, meta, arrays}, ...]}
         (holographic_container). Sections come back in saved order with numeric arrays reconstructed; a kind this

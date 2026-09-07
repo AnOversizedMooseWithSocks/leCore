@@ -415,6 +415,93 @@ def register_p02(c):
                                                 "persist a scene", "restore a workspace", "export a scene",
                                                 "workspace save and load", "manage scenes", "checkpoint a scene",
                                                 "named save point", "restore a checkpoint", "branch a workspace"))
+    c.register_capability("Live shared workspace (.lews standard): versioned kinds, canonical sections, apps editing together",
+                          "The .lews STANDARD on the container (holographic_lews): a schema version per section kind with "
+                          "migrations (a section newer than the build is carried read-only), canonical kinds lecore.mesh / "
+                          "material (physical-library name + overrides) / sdf / camera / scene (bindings by section id) beside "
+                          "lecore.image, and a LIVE Workspace directory apps hold open together: puts are locked, atomic and "
+                          "journalled with revisions; changes_since(rev) lets the modeller see the painter's texture land. "
+                          "m.lews_open(root, app) -> Workspace; lews_describe / lews_changes are JSON-safe.",
+                          example="import numpy as np, tempfile, lecore; m=lecore.UnifiedMind(dim=64,seed=0); d=tempfile.mkdtemp(); "
+                          "p=m.lews_open(d,app='painter'); q=m.lews_open(d,app='modeller'); "
+                          "from holographic.io_and_interop.holographic_container import image_section; s=image_section(np.ones((4,4,3)),name='t'); s['id']='tex'; r=p.put(s); "
+                          "q.put(m.lews_mesh_section([[0,0,0],[1,0,0],[0,1,0]],[[0,1,2]],sid='m')); q.put(m.lews_scene_section([{'id':'o','mesh':'m','texture':'tex'}])); "
+                          "print([e['kind'] for e in p.changes_since(r)], m.lews_describe(d)['rev'])",
+                          native=True, aliases=("lews file format", "shared workspace between apps", "workspace versioning",
+                                                "schema version for a section kind", "migrate old workspace files",
+                                                "two apps editing the same project", "image editor and 3d modeller share textures",
+                                                "live workspace journal of changes", "canonical mesh material scene sections",
+                                                "apps built on lecore work together", "hook my app into the workspace"))
+    c.register_capability("Who is in the workspace (cross-app presence, host, notes, long-poll, open an app's .lews file)",
+                          "The .lews workspace as a LIVE SESSION shared by every app (holographic_lews.Workspace = the LiveSession "
+                          "contract on a directory): lews_touch(root, who, activity, name) heart-beats a PERSON or agent, never a "
+                          "connection (leStudio's ghost-editor lesson); lews_presence(root, ttl) -> who is here across apps, with "
+                          "activity and host = earliest-joined still alive; lews_note announces a non-section change as one journal "
+                          "line (no container rewrite); lews_wait long-polls the feed minus your own echo; lews_import(file, root) "
+                          "opens any app's single-file .lews as a live directory (leStudio goldens pinned).",
+                          example="import tempfile, lecore; m=lecore.UnifiedMind(dim=64,seed=0); d=tempfile.mkdtemp(); m.lews_open(d,app='lestudio'); "
+                          "m.lews_touch(d,'moose',activity={'tool':'brush'},name='Moose',app='lestudio'); m.lews_touch(d,'agent7',activity={'tool':'extrude'},app='polystudio'); "
+                          "r=m.lews_note(d,'moose','selection',{'layer':3}); print([(p['who'],p['app'],p['host']) for p in m.lews_presence(d)], m.lews_wait(d,0,timeout=0.2,exclude='nobody')[-1]['kind'], r)",
+                          native=True, aliases=("who else is editing this workspace", "presence across apps", "show other users cursors tools",
+                                                "host of the session", "heartbeat participant", "long poll workspace changes",
+                                                "server sent events for the workspace", "open a lews file from another app",
+                                                "import lestudio workspace", "announce a change to other apps", "multiplayer editing"))
+    c.register_capability("Standard agent surface for an app built on leCore (tools, invoke, mind, engine, events, presence)",
+                          "What both apps hand-rolled, once (holographic_appserver): m.agent_surface(flask_app, "
+                          "base, app_name, workspace_root, image_routes) mounts GET /agent/tools (manifest from the LIVE url_map, this "
+                          "mount only), POST /agent/invoke (JSON, or a base64 PNG for image routes -- how an agent sees its work), "
+                          "POST /mind (allow-listed engine faculties; a rejected name returns the allowlist WITH signatures), "
+                          "GET /engine (engine_status), GET /events (SSE + heartbeat pings), GET /presence; every mutating request "
+                          "becomes a .lews note a second app sees. Identity: X-Client (run), X-User (person).",
+                          example="from holographic.io_and_interop.holographic_appserver import AgentSurface, manifest_from_rules; import lecore; m=lecore.UnifiedMind(dim=64,seed=0); "
+                          "s=AgentSurface(None, base='/api', app_name='demo', mind=m, image_routes=('render',)); "
+                          "print([t['name'] for t in s.manifest([('/api/paint',{'POST'},'p'),('/api/render',{'GET'},'r'),('/x/api/z',{'GET'},'z')])['tools']], s.mind_call('nope',{})[0], sorted(m.engine_status()['extras'])[:2])",
+                          native=True, aliases=("expose my app to agents", "tool manifest from flask routes", "agent invoke endpoint for my app",
+                                                "let an agent call the engine through my app", "server sent events for my app",
+                                                "which engine build am I running", "engine status panel", "capability preflight for an app",
+                                                "X-User X-Client identity headers", "make my app a good lecore citizen"))
+    c.register_capability("Ids and presets shared across apps (lews_mint, lecore.preset)",
+                          "Two small standards the apps got wrong differently (holographic_lews): lews_mint(root, prefix) issues "
+                          "'<prefix><n>' from ONE persisted counter per prefix, advanced under the workspace lock and journalled -- "
+                          "deterministic on replay, collision-free across apps and processes (leStudio's process-global counters "
+                          "changed ids in a fresh process; Poly Studio reassigns ids on load). lews_preset_section(name, target, "
+                          "params) is a lecore.preset: a named JSON recipe for a brush, material, render or shader any app lists and "
+                          "applies; arrays refused (that is an asset).",
+                          example="import tempfile, lecore; m=lecore.UnifiedMind(dim=64,seed=0); d=tempfile.mkdtemp(); w=m.lews_open(d,app='lestudio'); "
+                          "ids=[m.lews_mint(d,'L'), m.lews_mint(d,'L',app='polystudio'), m.lews_mint(d,'O')]; "
+                          "w.put(m.lews_preset_section('soft round','lestudio.brush',{'radius':12,'flow':0.12},tags=['skin'])); "
+                          "print(ids, w.sections('lecore.preset')[0]['meta']['params'])",
+                          native=True, aliases=("mint a unique id in the workspace", "stable object ids across apps", "ids reassigned on load",
+                                                "deterministic id counter", "save a brush preset other apps can read", "material preset library",
+                                                "render preset", "share presets between apps"))
+    c.register_capability("Is my app a good leCore citizen? (app_lint: the foundation an app should stand on)",
+                          "m.app_lint(root) / python3 tools/app_lint.py <app>: lints an app tree for what the foundation replaces "
+                          "-- hash() seeds, class-level id counters, own container format, own tool manifest / SSE / undo stack / "
+                          "job table / quality gate, wall clock in render paths -- and for what it should be on: capability gating, "
+                          "X-User identity, the .lews workspace, a /mind door. Hand-rolled helpers get the engine's nearest card and "
+                          "code hit (Rule 0 as a tool). Measured on the two apps: leStudio 5/16, Poly Studio 4/16 before adoption. "
+                          "Hits are places to look, not verdicts. Companion: docs/APP_FOUNDATION.md.",
+                          example="import lecore, tempfile, os; m=lecore.UnifiedMind(dim=64,seed=0); d=tempfile.mkdtemp(); "
+                          "open(os.path.join(d,'app.py'),'w').write('import time\\nclass L:\\n    _next = 1\\nk = hash((1,2))\\n'); "
+                          "r=m.app_lint(d, suggest=False); print(r['checks']['hash_seed']['hits'], r['checks']['class_counter_ids']['hits'], r['score'])",
+                          native=True, aliases=("lint my app", "audit an app built on lecore", "is my app using the engine properly",
+                                                "find hand rolled helpers the engine already has", "app foundation checklist",
+                                                "what should my app use from lecore", "good lecore citizen"))
+    c.register_capability("Journal-first documents in the workspace (content-addressed assets + op journals, GC)",
+                          "The determinism doctrine as two canonical .lews kinds (holographic_lews): lecore.asset -- a blob stored "
+                          "ONCE, id 'asset:<sha256>' (lews_put_asset returns the key; an identical array costs no write), and "
+                          "lecore.journal -- JSON ops with explicit seeds and asset keys that render a target section "
+                          "deterministically (lews_journal_section refuses inline arrays: that is the snapshot disease). "
+                          "lews_gc_assets removes what nothing references. leStudio measured one stroke: ~21 MB as a snapshot, "
+                          "~2.7 KB as a path record -- so pixels are a render of the journal, never the truth.",
+                          example="import numpy as np, tempfile, lecore; m=lecore.UnifiedMind(dim=64,seed=0); d=tempfile.mkdtemp(); w=m.lews_open(d,app='lestudio'); "
+                          "k=m.lews_put_asset(d,np.ones((3,3),np.float32),'tip'); k2=m.lews_put_asset(d,np.ones((3,3),np.float32),'again'); "
+                          "w.put(m.lews_journal_section('img',[{'op':'stamp','asset':k,'x':1,'y':1,'seed':3}])); o=m.lews_put_asset(d,np.zeros(2),'orphan'); "
+                          "print(k==k2, m.lews_gc_assets(d)==[o], m.lews_get_asset(d,k).shape)",
+                          native=True, aliases=("store an image asset once", "content addressed blob in the workspace", "deduplicate pasted pixels",
+                                                "op journal instead of pixel snapshots", "replay a document from its journal",
+                                                "garbage collect unused assets", "journal-first document", "every stroke is an op",
+                                                "deterministic document replay across apps"))
     c.register_capability("Typed-section container (app-neutral workspace file)", "an app-neutral CONTAINER file "
                           "(holographic_container): a zip of a manifest + numeric array payloads, its body a list of "
                           "TYPED SECTIONS {kind, id, meta, arrays}. A section whose kind a reader does not understand "

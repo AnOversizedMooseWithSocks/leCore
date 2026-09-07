@@ -37,16 +37,27 @@ from holographic.misc.holographic_blendhome import Blend        # slerp via the 
 # 1. IMAGE / VIDEO -- coefficient-domain slerp morph
 # ===========================================================================
 
+def _dct_pair(M):
+    """M may be one square DCT matrix (the archive's .M, H == W) or a (Mh, Mw) pair for a non-square image.
+    leStudio hit the square-only limit ("morph_scene requires SQUARE images; its DCT matrix is one-dimensional") and
+    resized around it; a separable 2-D DCT is simply two matrices, so the pair form removes the limit."""
+    if isinstance(M, (tuple, list)):
+        return M[0], M[1]
+    return M, M
+
+
 def _dct_channels(M, img):
-    """Per-channel 2D DCT of an image (H,W) or (H,W,C)."""
+    """Per-channel 2D DCT of an image (H,W) or (H,W,C). M: a square DCT matrix or an (Mh, Mw) pair."""
+    Mh, Mw = _dct_pair(M)
     if img.ndim == 2:
-        return (M @ img @ M.T)[..., None]
-    return np.stack([M @ img[..., c] @ M.T for c in range(img.shape[-1])], -1)
+        return (Mh @ img @ Mw.T)[..., None]
+    return np.stack([Mh @ img[..., c] @ Mw.T for c in range(img.shape[-1])], -1)
 
 
 def _idct_channels(M, coeff):
     """Inverse of _dct_channels, clipped back to a valid image in [0,1]."""
-    chans = [M.T @ coeff[..., c] @ M for c in range(coeff.shape[-1])]
+    Mh, Mw = _dct_pair(M)
+    chans = [Mh.T @ coeff[..., c] @ Mw for c in range(coeff.shape[-1])]
     img = np.stack(chans, -1) if coeff.shape[-1] > 1 else chans[0]
     return np.clip(img, 0, 1)
 

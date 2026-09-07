@@ -1674,3 +1674,133 @@ base light only: share 0.16, E 2.4); museum lighting; match a reference photo of
   the rock is a smooth nodule, not a fractured matrix; no grain boundaries between intergrown points.
 - Deltas: clip_to_substrate, seeds=, per-seed size, quartz_long habit; +1 test (9 in
   test_real_cells_and_library_optics); demos/cluster_museum.py.
+
+## Sweep 161 -- the .lews STANDARD: versioned kinds, canonical sections, a live workspace apps edit together
+
+Moose handed over polystudio_standalone.zip: find what was hand-rolled because the engine lacked it, and make the
+`.lews` workspace a standard every leCore app can hook into -- versioned, so data is read/written in the right
+format -- with an image editor and a modeller seeing each other's work.
+
+Audit (rule 0): `.lews` is leCore's own `holographic_container` (typed sections, unknown kinds round-trip); Poly
+Studio and leStudio already trade files that way; polystudio's `ccrun` C-runner is already upstreamed as
+holographic_ccrun. What did NOT exist: a schema version per kind (the container had one number for the whole file),
+canonical kinds beyond lecore.image (each app pair needed its own adapter), and any LIVE sharing -- export/import
+only. Full table in docs/POLYSTUDIO_AUDIT.md; the app also duplicated UV unwrap, midpoint subdivision, banded grid
+bake and a render cache the engine has (a discoverability failure -> aliases), and built one thing worth taking:
+quality_gate.py, absolute-threshold render regression metrics.
+
+Built: holographic_lews (io_and_interop). LEWS_SPEC "1.0" meta on the file; `meta["schema"]` per section with
+register_kind_schema(kind, version, migrate={old: fn}) and upgrade_section (older -> migrated; NEWER than the build ->
+`_read_only`, carried, refused for write); canonical lecore.mesh / material (physical-library name + overrides, name
+validated against matlib) / sdf (dialect text) / camera / scene (bindings by section id); `Workspace(root, app)`: a
+directory whose workspace.lews is always a complete container, puts locked (O_EXCL lock, stale-breakable), re-read,
+atomic (os.replace), journalled (journal.ndjson: rev, op, id, kind, app, sha, t); changes_since(rev),
+wait_for_change, put(expected_rev) -> ConflictError. Mind verbs lews_open / lews_describe / lews_changes /
+lews_*_section / lews_register_kind; catalog card; docs/LEWS_SPEC.md.
+
+Measured: demos/lews_two_apps.py runs a painter and a modeller as SEPARATE PROCESSES on one directory; the modeller
+publishes mesh + scene, the painter repaints the texture three times, the modeller catches each change by revision
+and re-renders (3 frames, journal 5 entries, no lock left behind). Tests: 6 (test_lews_workspace) + selftest.
+Kept negatives: no merge of two edits to one section; polling not push; whole-file rewrite per put (shard by section
+when measured to hurt). Next from the audit: path_trace(region=, base=) (LC-1), quality_gate upstream, edit_history
+branch-and-replay.
+
+## Sweep 162 -- leStudio audit: the workspace becomes the live session, journal-first kinds, five engine bugs fixed
+
+Moose handed over lestudio.zip (the image editor, R54, 570 tests, 26 backlog docs): "swarm sessions have been tested
+many times... hand rolled tech that needs to make its way back to leCore". Audit (rule 0) before building: its
+`.lews` is already the engine's container; LECORE_BACKLOG items 1-12 already landed; a prior sweep had lifted the
+CONTRACT of its multiplayer (`live_session`, in-process) but nothing cross-process, and sweep 161's Workspace had a
+journal but no presence -- two halves of one thing, never joined. Full table: docs/LESTUDIO_AUDIT.md.
+
+Built (holographic_lews, extended): the Workspace now realises LiveSession on the directory. `bump`/`lews_note`
+appends a journal line WITHOUT rewriting the container (rev = max(container meta rev, journal tail rev); both advance
+under the one lock -- pinned: size and mtime of workspace.lews unchanged by a note, and the next put continues the
+same counter). `touch`/`roster`/`participants`/`drop`: presence as heartbeat files `presence/<sha(who)>.json` with
+activity, name, app, joined; host = earliest joined still alive. `since(rev, exclude)` drops your own echo.
+`Workspace.from_file`/`lews_import` opens any app's single-file .lews as a live directory; leStudio's golden fixtures
+now live in tests/fixtures/lews and are pinned to open and hash-identically survive another app's put. Journal-first
+kinds: `lecore.asset` (content-addressed, put_asset stores identical bytes ONCE -- no write, no rev) and
+`lecore.journal` (JSON ops, explicit seeds, asset keys; inline arrays REFUSED), `journal_asset_refs`, `gc_assets`.
+Verbs: lews_note / lews_wait / lews_touch / lews_presence / lews_leave / lews_import / lews_put_asset /
+lews_get_asset / lews_journal_section / lews_gc_assets (all round-tripped over POST /invoke). Two catalog cards.
+
+Lessons carried from leStudio's R-series, now in the module rather than in one app's server: key presence by PERSON
+not connection (five reloads gave one user five ghost chips); host = earliest joined still present (the role flapped
+on reload); a stream that only writes on change never learns its socket died (a heartbeat with a ttl has no such
+failure mode); the document is an op journal, pixels are a render (one stroke: ~21 MB snapshot, 0.13 MB windowed,
+~2.7 KB as a path record).
+
+Engine bugs leStudio reported and worked around, fixed at the source with tests/test_lestudio_reported_bugs.py:
+pattern_image returned flat zeros for marble/wood/brick/voronoi/musgrave/wave/magic (those names live in proctex;
+make_pattern now routes them, pattern_image raises on a name in neither menu); sky_model(sun_intensity) scaled only
+the 1.4-degree disk so a 200x120 sample grid saw nothing -- the glow scales with it, relative to the default so
+renders at 18.0 are bit-identical; make_cloud rejected the dict camera render_mesh accepts (as_camera); sharpen_image
+was 1-D only (rfft along the last axis with a first-axis frequency grid -- square images blurred rows only, RGB
+blurred across channels; now n-D separable, 1-D bit-identical); morph_scene needed square images (a separable DCT is
+two matrices). Measured honestly: Van Cittert on a hard edge reaches 0.60 of the blurred error at 40 iterations and
+0.54 at 300 (Gibbs) -- the test pins 0.65, not a wish.
+
+Deferred to sweep 163 with reasons on record: HoloScore v2 (score-based one-shot patch diffusion; imports PIL, hard-
+coded stills, four measured laws to pin) and importance-ordered anisotropic splat pursuit. Kept negatives from the
+app's own measurements (pattern_image 0.5x its grid path; load_image 10x slower than its decode; a per-frame content
+hash cost more than it saved) recorded in the audit doc so they are not re-litigated.
+
+Tests: 7,096 -> 7,108 (+7 lews, +5 reported bugs). Cards 843 -> 845. Modules unchanged (803).
+
+## Sweep 163 -- the app foundation: what both apps built twice, provided once (leStudio + Poly Studio audit)
+
+Moose: "do a thorough sweep of both the 2d and 3d apps... find anything we need to bring into leCore itself and
+make standard across all implementations... swarms, agents, file formats, ways of representing / partitioning /
+generating information... perhaps more documentation." Method: booted the mind and audited both trees through
+file_grep (24 cross-cutting probes: routes, identity headers, jobs, capability gating, .lews, ids, undo, determinism,
+presets, assets, schema doors, quality, cache, SSE, memory, GLSL, timeline, materials, export formats, partitioning,
+graphs, locks, re-implemented helpers), then find_capability per finding. The pattern: the SAME layer built twice
+in mirror image -- leStudio has identity/presence/SSE/jobs/capability gating and Poly has none; Poly has a url_map
+tool manifest with base64 image returns and a render quality gate, leStudio has a manifest without them; leStudio
+mints ids from process-global counters (its P0.3), Poly reassigns ids on load; both wrote Gaussian blurs (three in
+leStudio), both wrote undo stacks, both ship their own presets shape.
+
+Built (all wired, carded, tested; audits 0/0/0):
+- holographic_appserver (io_and_interop): AgentSurface -- the union of both apps' agent doors, mounted on a Flask app
+  in one call (m.agent_surface): GET /agent/tools from the LIVE url_map filtered to THIS mount (Poly's gallery lesson:
+  blueprint names lie, the request path does not), POST /agent/invoke with base64 PNG for image routes (Poly 1.2.0:
+  "the only way an agent sees its own work") and a refusal-with-path for streams, POST /mind allow-listed to read-only
+  engine faculties (leStudio: a rejected name returns the allowlist WITH signatures), GET /engine (m.engine_status:
+  version, faculties, extras, GPU report, determinism policy, CPU budget), GET /events SSE with the 2 s comment ping
+  (leStudio's ghost-socket fix) and GET /presence; an after_request hook turns every mutating request into a .lews
+  note and heart-beats X-User (presence by PERSON, never connection). Flask imported only in mount(); the manifest,
+  identity, JSON coercion and SSE generator are plain functions the selftest runs without it. LiveSession.bump and
+  Workspace.bump gained touch= (default True) so a per-run client id never lands in presence.
+- holographic_lews: Workspace.mint(prefix) -- one persisted counter per prefix (ids.json) under the lock, journalled;
+  lecore.preset kind (preset_section refuses arrays). Verbs lews_mint / lews_preset_section.
+- holographic_qualitygate (rendering): Poly's absolute-threshold render gate upstreamed -- terracing (2nd difference
+  in the floor band), edge_tones, fringe_ratio, gate(). Edge metric REBUILT with measurement: Poly's top-1%-gradient
+  mask tied the score to how much of the frame is edge (same supersampled disc: 0.92 at 160 px, 0.35 at 640 px), and
+  its absolute 0.05/0.95 tone bounds scored the engine's own jagged rasteriser 1.0 because the default background is
+  0.06 grey. Now: mask = gradient > 30% of the frame max, partial = between the LOCAL 5x5 min/max by a 15% margin, in
+  a 3x3 neighbourhood -- 0.93-0.96 across sizes and grounds, 0.00 jagged. FIRST CATCH ON THE ENGINE: render_mesh does
+  not antialias silhouettes (edge_tones 0.07 at 160 px, 0.02 at 640 px) -- pinned as a known gap in
+  tests/test_qualitygate.py, not hidden.
+- blur_image verb: the engine held FOUR private Gaussian blurs (autobump, splatsharpen, sharpen, postfx) and exposed
+  none -- the most re-implemented helper across the apps. Now one door (reflect = separable autobump, wrap = FFT).
+- tools/app_lint.py + m.app_lint: lints an app tree for the patterns the foundation replaces (hash() seeds, class
+  counters, own container / manifest / SSE / undo / jobs / gate, wall clock, legacy RNG, PIL) and the foundations it
+  should be on (gating, X-User, workspace, /mind), and names the engine's nearest card + code hit for each hand-rolled
+  helper. Measured: leStudio R54 5/16, Poly Studio 1.2.0 4/16 (reports in docs/app_lint/). It reproduced the manual
+  Poly audit unaided (_auto_uv -> mesh_uv_unwrap, _midpoint_refine -> mesh_subdivide, fbm2 -> fractal_field).
+- docs/APP_FOUNDATION.md -- the standard: one mind + preflight; the workspace as document, bus and session (kinds,
+  ids, journal-first, presence); agents (mount, don't write); swarms (dispatch_roles, shared_workspace, registry,
+  codebase_sync, serve/escalate); jobs; per-user memory (app_substrate); presets, gates, golden fixtures, fake
+  engines; what stays in the app; a checklist. Every python block is executed by tests/test_app_foundation_doc.py
+  (9 tests). Linked from docs/INDEX.md; LEWS_SPEC 4c added.
+
+Kept negatives / open: a fake engine for app tests stays app-side (Poly's pattern is right; the engine's promise is
+that features()/engine_status() are cheap enough for every test). Frame-source protocol (LECORE_BACKLOG 12) still a
+design pass. HoloScore + aniso splat pursuit still deferred (sweep 162 note). find_capability is weak on plain image
+verbs ("gaussian blur an image" ranked the Extended Gaussian Image first before the new card) -- the catalog needs a
+pass of user-language aliases for the ordinary image toolbox; app_lint shows both the card and the code hit so the
+weakness is visible rather than papered over.
+
+Tests: 7,108 -> 7,135 (+6 appserver, +8 qualitygate, +3 app_lint, +9 doc snippets, +2 lews). Cards 845 -> 850.
+Modules 803 -> 805.

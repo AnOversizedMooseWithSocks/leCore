@@ -779,6 +779,31 @@ class _UnifiedPart11:
         brightness should come from exposure, not from a lobe that clips the tonemapper. Returns env."""
         return env.add_light(direction, radiance, sigma=sigma, irradiance=irradiance)
 
+    def blur_image(self, image, sigma=2.0, mode="reflect"):
+        """Gaussian-blur an image (H,W) or (H,W,C), channels untouched. mode='reflect' is the separable, reflect-padded
+        blur (holographic_autobump.gaussian_blur -- what a paint app wants at the borders); mode='wrap' is the FFT
+        circular blur (holographic_splatsharpen.gauss_blur2 -- what a tiling texture wants). WHY a verb: the engine
+        held four private Gaussian blurs and exposed none, so leStudio wrote three of its own and Poly Studio one
+        (sweep 163 app_lint) -- the most re-implemented helper across the apps."""
+        import numpy as _np
+        a = _np.asarray(image, float)
+        if mode == "wrap":
+            from holographic.rendering.holographic_splatsharpen import gauss_blur2
+            if a.ndim == 3:
+                return _np.stack([gauss_blur2(a[..., c], sigma) for c in range(a.shape[-1])], -1)
+            return gauss_blur2(a, sigma)
+        from holographic.mesh_and_geometry.holographic_autobump import gaussian_blur
+        return gaussian_blur(a, sigma)
+
+    def render_quality_gate(self, frame, limits=None, single_round=None):
+        """Measure a rendered frame against ABSOLUTE defect thresholds -- terracing (grid-baked iso-contour steps in
+        the floor band), edge_tones (jagged vs supersampled silhouettes), fringe_ratio (colour added to edges between
+        a single round and the converged frame; needs `single_round`). Returns {metrics, limits, failed, ok}. WHY:
+        comparing a render against the previous render cannot see a defect both share (Poly Studio shipped one that
+        way; sweep 151's aliasing was the engine's own case). See holographic_qualitygate.gate."""
+        from holographic.rendering.holographic_qualitygate import gate
+        return gate(frame, limits=limits, single_round=single_round)
+
     def caustic_histogram_rgb(self, xz, lam, bounds_xz, res=512, blur_px=1.0, weights=None):
         """The baseline spectral caustic image: bin spectral_landings (xz, lam) with colour-matching weights and blur
         by the emitter cell's footprint (holographic_holocaustic.histogram_caustic_rgb). Use it where the holographic
@@ -1064,10 +1089,19 @@ class _UnifiedPart11:
         else:
             from holographic.misc.holographic_archive import HolographicArchive
             from holographic.misc.holographic_generate import morph_images
-            S = img_a.shape[0]
-            arch = HolographicArchive(shape=img_a.shape, capacity=2,
-                                      keep=min(900, (S * S) // 2), dim=32768, seed=self.seed)
-            frames = morph_images(arch.M, img_a, img_b, steps=steps)
+            img_a = np.asarray(img_a, float); img_b = np.asarray(img_b, float)
+            if img_a.shape != img_b.shape:
+                raise ValueError("morph_scene: images must share a shape, got %s and %s" % (img_a.shape, img_b.shape))
+            H, W = img_a.shape[:2]
+            if H == W:
+                arch = HolographicArchive(shape=img_a.shape, capacity=2,
+                                          keep=min(900, (H * H) // 2), dim=32768, seed=self.seed)
+                M = arch.M                                   # the square path, unchanged to the bit
+            else:
+                # non-square: a separable DCT is two matrices (leStudio's square-only workaround retired)
+                from holographic.io_and_interop.holographic_image import _dct_matrix
+                M = (_dct_matrix(H), _dct_matrix(W))
+            frames = morph_images(M, img_a, img_b, steps=steps)
         if post is not None:                                  # polish each generated frame (post-fx pipeline)
             frames = [post.apply(np.clip(np.asarray(f, float), 0.0, 1.0)) for f in frames]
         return frames
