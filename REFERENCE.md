@@ -139,8 +139,8 @@
 | [`holographic_backwardwarp.py`](#holographic-backwardwarp) | Backward warping is hole-free by construction -- which is what the engine's unbind already is. | 73 |
 | [`holographic_bandwidth.py`](#holographic-bandwidth) | Spectral bandwidth + a fractal-dimension cross-check (holographic_bandwidth). | 150 |
 | [`holographic_billionctx.py`](#holographic-billionctx) | BILLIONCTX -- what actually binds context at 1e9 tokens, and what does not. | 195 |
-| [`holographic_bios.py`](#holographic-bios) | BIOS -- enumerate the machine before booting an operating system on it. | 217 |
 | [`holographic_bios.py`](#holographic-bios) | holographic_bios.py -- THE BIOS AND BOOT SEQUENCE for a mind on this substrate (cp34). | 209 |
+| [`holographic_bios.py`](#holographic-bios) | BIOS -- enumerate the machine before booting an operating system on it. | 217 |
 | [`holographic_blackbody.py`](#holographic-blackbody) | holographic_blackbody.py -- T3: a BLACKBODY RADIATOR. Temperature (kelvin) -> the colour it glows. | 136 |
 | [`holographic_blendbasis.py`](#holographic-blendbasis) | Procedural blendshape basis with DECLARED local support. | 146 |
 | [`holographic_blendhome.py`](#holographic-blendhome) | holographic_blendhome.py -- the BLEND home (consolidation backlog H4): one place for "combine these into one", | 139 |
@@ -643,8 +643,8 @@
 | [`holographic_rolling.py`](#holographic-rolling) | holographic_rolling.py -- the CAUSAL rolling / streaming statistics kit: trailing mean, std, min, max, | 378 |
 | [`holographic_roomacoustic.py`](#holographic-roomacoustic) | holographic_roomacoustic.py -- A6: GEOMETRIC ROOM ACOUSTICS. How a room echoes -- reflections and reverb. | 161 |
 | [`holographic_route.py`](#holographic-route) | Representation routing (ARCH-7): route each operation to the representation that supports it -- the policy lay | 183 |
-| [`holographic_router.py`](#holographic-router) | Embedding router -- route a request to the right module by COSINE in nomic's space, not token overlap. | 177 |
 | [`holographic_router.py`](#holographic-router) | ROUTER -- the model DECIDING, inside one forward pass. | 229 |
+| [`holographic_router.py`](#holographic-router) | Embedding router -- route a request to the right module by COSINE in nomic's space, not token overlap. | 177 |
 | [`holographic_runtimebench.py`](#holographic-runtimebench) | BENCH-3 -- RUNTIME-DISCOVERY abstention: does the loop abandon when a task fails AFTER it starts? | 158 |
 | [`holographic_runtimerung.py`](#holographic-runtimerung) | RUNTIME RUNG WITH AUTOMATIC ATTRIBUTION (cp71). | 124 |
 | [`holographic_sampler.py`](#holographic-sampler) | holographic_sampler.py -- the SAMPLER: a placeable read-probe (modeling-app backlog, the capstone item). | 223 |
@@ -2700,6 +2700,40 @@
 
 ### holographic_bios.py
 
+> holographic_bios.py -- THE BIOS AND BOOT SEQUENCE for a mind on this substrate (cp34).
+>
+> leOS gave the lineage its OS instincts (substrate_gather, activity_monitor, the tool
+> loop); Unicron gave it introspection (spectral reading of its own memory). This module
+> makes the boot explicit, the way firmware does:
+>
+>   POST      power-on self test: MEASURED checks -- levers present, ladder serving,
+>             container round-trip, calibration machinery, Unicron spectral health when
+>             learned state exists. Every check returns (name, ok, detail); a red POST is
+>             reported, never papered over.
+>   INVENTORY the machine table an operator reads: lever count, catalog size, faculty
+>             count, partitions found, doctrine state, journal format.
+>   BOOT      boot order: mount the named partition if given (learning_load), else stay
+>             virgin; opt-in doctrine (the seedpack); ensure services (the zoo tenant).
+>             Returns the full boot report.
+>   OS PROMPT the hand-off: a DETERMINISTIC text the attached LLM receives as its
+>             operating system -- identity, POST summary, the syscall table (core
+>             faculties with one-line contracts), the operating rules (distilled
+>             doctrine), memory status, and the escalation contract. This is the BIOS
+>             screen an LLM reads instead of a human.
+>
+> The prompt is generated FROM the live mind (catalog + doctrine + state), so it cannot
+> drift from the engine the way a hand-written primer would -- the same law that keeps
+> CAPABILITIES.md regenerated, applied to the model's own boot screen.
+
+**Public API:**
+
+- `def post(mind)` -- Power-on self test. Returns [(check, ok, detail)] -- measured, never assumed.
+- `def inventory(mind)` -- The machine table.
+- `def boot(mind, partition, doctrine, llm)` -- The boot order: POST -> mount -> doctrine -> services -> report.
+- `def os_prompt(mind, report)` -- The BIOS screen an LLM reads: deterministic, generated from the live mind.
+
+### holographic_bios.py
+
 > BIOS -- enumerate the machine before booting an operating system on it.
 >
 > Moose's observation, and it is the diagnosis for a whole session of bugs: there
@@ -2738,40 +2772,6 @@
 - `def enumerate_machine(weights, cfg, model_dir)` -- Probe the checkpoint. Nothing here is assumed; everything is read.
 - `def fits(profile, payload_bytes, bits)` -- Can this machine hold that payload? A profile exists to make a REFUSAL
 - `def report(weights, cfg, model_dir, probe_ids)` -- The whole BIOS screen: POST, enumeration, and what the OS may assume.
-
-### holographic_bios.py
-
-> holographic_bios.py -- THE BIOS AND BOOT SEQUENCE for a mind on this substrate (cp34).
->
-> leOS gave the lineage its OS instincts (substrate_gather, activity_monitor, the tool
-> loop); Unicron gave it introspection (spectral reading of its own memory). This module
-> makes the boot explicit, the way firmware does:
->
->   POST      power-on self test: MEASURED checks -- levers present, ladder serving,
->             container round-trip, calibration machinery, Unicron spectral health when
->             learned state exists. Every check returns (name, ok, detail); a red POST is
->             reported, never papered over.
->   INVENTORY the machine table an operator reads: lever count, catalog size, faculty
->             count, partitions found, doctrine state, journal format.
->   BOOT      boot order: mount the named partition if given (learning_load), else stay
->             virgin; opt-in doctrine (the seedpack); ensure services (the zoo tenant).
->             Returns the full boot report.
->   OS PROMPT the hand-off: a DETERMINISTIC text the attached LLM receives as its
->             operating system -- identity, POST summary, the syscall table (core
->             faculties with one-line contracts), the operating rules (distilled
->             doctrine), memory status, and the escalation contract. This is the BIOS
->             screen an LLM reads instead of a human.
->
-> The prompt is generated FROM the live mind (catalog + doctrine + state), so it cannot
-> drift from the engine the way a hand-written primer would -- the same law that keeps
-> CAPABILITIES.md regenerated, applied to the model's own boot screen.
-
-**Public API:**
-
-- `def post(mind)` -- Power-on self test. Returns [(check, ok, detail)] -- measured, never assumed.
-- `def inventory(mind)` -- The machine table.
-- `def boot(mind, partition, doctrine, llm)` -- The boot order: POST -> mount -> doctrine -> services -> report.
-- `def os_prompt(mind, report)` -- The BIOS screen an LLM reads: deterministic, generated from the live mind.
 
 ### holographic_blackbody.py
 
@@ -25563,33 +25563,6 @@
 
 ### holographic_router.py
 
-> Embedding router -- route a request to the right module by COSINE in nomic's space, not token overlap.
->
-> WHY THIS EXISTS (measured, backlog N9/N28):
-> The catalog's find_capability scores by shared content words. That is deterministic and needs no model,
-> but it has no notion of MEANING: "squish a big array down for storage" shares no token with
-> `holographic_coldstore`, and "airspeed velocity of an unladen swallow" confidently matched a physics
-> module on the single word "velocity". Measured on the 12-ask suite: token overlap ~2/12 top-1, median
-> rank 13 of 503; the nomic embedding router hit 7/12 top-1, median rank 1.
->
-> WHAT SHIPS (and what does NOT):
-> A 96 KB index -- 503 module vectors at 64d q8, plus the ABTT correction (mu, pc) baked in -- extracted
-> from the build cache by tools/semantic/export_index.py. NO model ships. So this router can only score a
-> query it already has a VECTOR for:
->   * queries embedded at build time and cached (the exam's asks, an app's fixed vocabulary)
->   * a caller that supplies its own query vector (an app that ran the encoder itself)
-> A brand-new free-text query with no vector and no model present CANNOT be embedded here -- and this
-> router says so and returns None, so the caller falls back to the token router rather than guessing. That
-> honesty is the whole point: silence beats a confident wrong route.
->
-> DETERMINISM: q8 dequant + fixed ABTT transform + argsort with a name tie-break. No RNG, no model.
-
-**Public API:**
-
-- `class EmbeddingRouter` -- Loads the shipped q8 index (any dim; 128d is the measured champion) and routes a query VECTOR (or a cached query text) to modules.
-
-### holographic_router.py
-
 > ROUTER -- the model DECIDING, inside one forward pass.
 >
 > Moose raised the architecture that dissolves the wall this project kept hitting:
@@ -25628,6 +25601,33 @@
 - `def fit_router(runtime, cfg, positive, negative, tokenize, layer, ridge, holdout, null_trials)` -- Learn 'does this prompt want the capability?' from an early layer.
 - `def route(runtime, router, text, tokenize)` -- Would this model choose to use the capability on this prompt?
 - `def install_routed(weights, cfg, operator, router, layer, gain, temperature)` -- Install a circuit whose GATE is the router, not a constant.
+
+### holographic_router.py
+
+> Embedding router -- route a request to the right module by COSINE in nomic's space, not token overlap.
+>
+> WHY THIS EXISTS (measured, backlog N9/N28):
+> The catalog's find_capability scores by shared content words. That is deterministic and needs no model,
+> but it has no notion of MEANING: "squish a big array down for storage" shares no token with
+> `holographic_coldstore`, and "airspeed velocity of an unladen swallow" confidently matched a physics
+> module on the single word "velocity". Measured on the 12-ask suite: token overlap ~2/12 top-1, median
+> rank 13 of 503; the nomic embedding router hit 7/12 top-1, median rank 1.
+>
+> WHAT SHIPS (and what does NOT):
+> A 96 KB index -- 503 module vectors at 64d q8, plus the ABTT correction (mu, pc) baked in -- extracted
+> from the build cache by tools/semantic/export_index.py. NO model ships. So this router can only score a
+> query it already has a VECTOR for:
+>   * queries embedded at build time and cached (the exam's asks, an app's fixed vocabulary)
+>   * a caller that supplies its own query vector (an app that ran the encoder itself)
+> A brand-new free-text query with no vector and no model present CANNOT be embedded here -- and this
+> router says so and returns None, so the caller falls back to the token router rather than guessing. That
+> honesty is the whole point: silence beats a confident wrong route.
+>
+> DETERMINISM: q8 dequant + fixed ABTT transform + argsort with a name tie-break. No RNG, no model.
+
+**Public API:**
+
+- `class EmbeddingRouter` -- Loads the shipped q8 index (any dim; 128d is the measured champion) and routes a query VECTOR (or a cached query text) to modules.
 
 ### holographic_runtimebench.py
 
