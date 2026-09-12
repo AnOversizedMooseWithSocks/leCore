@@ -155,6 +155,23 @@ class Verb:
         self.semantic = semantic
         self.plugin = str(plugin)          # which plugin contributed it (for the collision message)
 
+    def semantic_tag(self):
+        """The verb's semantic taxonomy tag: declared if the plugin gave one, else INFERRED from
+        the name and description exactly as a class faculty's is.
+
+        MEASURED REGRESSION this closes (CI, sweep 168): zig_march_compare was the only member of
+        the `render/raymarch` branch, tagged by inference when it was carded off the class. As a
+        plugin verb it was re-carded from the plugin's metadata with semantic=None, the branch
+        went empty, and the taxonomy test failed. A verb does not lose its place in the taxonomy
+        by moving into a plugin."""
+        if self.semantic:
+            return self.semantic
+        try:
+            from holographic.caching_and_storage.holographic_semantictag import infer_semantic
+            return infer_semantic(self.name, self.does)
+        except Exception:
+            return None
+
     def signature(self):
         """The call signature as text, for the manifest.  Best-effort: a builtin or a
         C callable has none, and "(...)" is the honest answer rather than a crash."""
@@ -403,7 +420,7 @@ class PluginHost:
         for name, v in self.verbs().items():
             catalog.register_capability(
                 name, does=v.does, example=v.example, native=False, aliases=v.aliases,
-                method=name, consumes=v.consumes, produces=v.produces, semantic=v.semantic)
+                method=name, consumes=v.consumes, produces=v.produces, semantic=v.semantic_tag())
 
     # ---- the collision gate ----
 
@@ -484,7 +501,7 @@ class PluginHost:
                 self.mind.register_capability(
                     v.name, does=v.does, example=v.example, native=False,
                     aliases=v.aliases, method=v.name,
-                    consumes=v.consumes, produces=v.produces, semantic=v.semantic)
+                    consumes=v.consumes, produces=v.produces, semantic=v.semantic_tag())
         meta = getattr(mod, "PLUGIN", {}) or {}
         rec = LoadedPlugin(name, version, does, module=mod, verbs=verbs,
                            ref=getattr(ref, "__name__", None) or str(ref),

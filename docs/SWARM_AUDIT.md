@@ -66,18 +66,18 @@ The hand-written matrix above covers 21 capabilities and has since cp67. This on
 
 | measure | count |
 |---|---|
-| catalog cards carrying a `method=` | 760 |
-| distinct doors behind them | 685 |
-| L0 engine floor | 660 |
-| L1 reachable on the facade class | 660 |
-| L2 reachable (in the /tools manifest, so `lecore_invoke` can call it) | 660 |
+| catalog cards carrying a `method=` | 763 |
+| distinct doors behind them | 687 |
+| L0 engine floor | 662 |
+| L1 reachable on the facade class | 662 |
+| L2 reachable (in the /tools manifest, so `lecore_invoke` can call it) | 662 |
 | L2 PROMOTED to a dedicated MCP tool | 15 |
 | L3 PROMOTED to a chat verb | 3 |
-| L4 named under tests/ | 528 |
+| L4 named under tests/ | 529 |
 | **genuine gaps** | **12** |
 | not meaningful to ask (object methods) | 13 |
 
-PROMOTION IS A CENSUS, NEVER A GAP. `holographic_mcp` hosts `lecore_invoke(name, args)`, which runs any public faculty, so L2 reachability is universal by construction and a dedicated tool is a curation decision. Scoring 670 unpromoted doors as defects would be the bar nobody clears.
+PROMOTION IS A CENSUS, NEVER A GAP. `holographic_mcp` hosts `lecore_invoke(name, args)`, which runs any public faculty, so L2 reachability is universal by construction and a dedicated tool is a curation decision. Scoring 672 unpromoted doors as defects would be the bar nobody clears.
 
 ### Genuine gaps
 

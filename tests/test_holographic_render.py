@@ -490,4 +490,6 @@ def test_an_hdri_actually_lights_a_scene_directionally(tmp_path):
     left, right = shot(env), shot(env[:, ::-1].copy())
     assert np.abs(left - right).mean() > 1e-3, \
         "mirroring the environment changed nothing -- the map is a tint, not a light"
-    assert "HDRI environment" in str(m.find_capability("image based lighting")[0])
+    # both HDRI cards (.hdr map, .exr lighting) legitimately own this alias; the guard is that IBL routes
+    # to HDRI lighting at all, not to which of the two ranks first (that flipped when the .exr card landed)
+    assert "HDRI" in str(m.find_capability("image based lighting")[0])

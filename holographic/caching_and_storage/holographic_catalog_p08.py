@@ -799,6 +799,38 @@ def register_p08_digest(c):
                  "how do i build on the holographic framework", "primitives for a plugin"),
         module="holographic_ai", method=None, native=True,
     )
+    # Three faculties the buried audit flagged DARK (sweep 168): auto-carded from a docstring, not in
+    # their own top-15, no aliases -- a user could only find them by already knowing the name.
+    c.register_capability(
+        "make_light",
+        "mind.make_light(kind, **params) returns a path-tracer light record by NAME -- 'sun', 'point', 'spot', "
+        "'area' (alias 'softbox'), 'dome' -- with sensible defaults so a scene can be lit in one call and "
+        "adjusted after. The names are the ones a lighting artist uses, not the sampler's.",
+        example="import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(m.make_light('sun'))",
+        aliases=("add a sun light", "make a point light", "create a spotlight", "add an area light",
+                 "softbox light", "dome light", "add a light to the scene", "key light", "light the scene"),
+        module="holographic_lights", method="make_light", native=True,
+    )
+    c.register_capability(
+        "lews_section",
+        "mind.lews_section(kind, sid, meta, arrays) builds a section for a lews container stamped with that kind's "
+        "schema version, so a reader can tell an old section from a new one and migrate rather than guess. "
+        "The canonical builders for the shipped kinds live beside it (holographic_lews.make_section).",
+        example="import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(m.lews_section('lecore.note', 's1', {'text': 'hi'}, {})['meta'])",
+        aliases=("make a container section", "versioned section", "build a lews section", "stamp a schema version",
+                 "add a section to a lews file", "typed section for the container"),
+        module="holographic_lews", method="lews_section", native=True,
+    )
+    c.register_capability(
+        "shared_workspace",
+        "mind.shared_workspace() returns the swarm's shared workspace: named slots that roles read and write "
+        "while collaborating on a scene, so a modeller's output is a rigger's input without a file in between. "
+        "Read to inspect what the roles have exchanged; empty until a swarm runs.",
+        example="import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(type(m.shared_workspace()).__name__)",
+        aliases=("swarm workspace", "shared slots between roles", "what did the roles exchange",
+                 "blackboard for the swarm", "shared scene state", "role handoff workspace"),
+        module="holographic_innereye", method="shared_workspace", native=True,
+    )
 
 _PART = "holographic_catalog_p08"
 

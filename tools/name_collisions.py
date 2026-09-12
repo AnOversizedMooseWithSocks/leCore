@@ -209,8 +209,11 @@ KNOWN_COLLISIONS = {
     "hsv_to_rgb": frozenset({"falsecolor", "vision"}),  # the same hexcone under two conventions: vision
     # takes a packed (...,3) array with H in DEGREES; falsecolor takes separate broadcastable h,s,v in
     # [0,1]. A delegation would be a signature-adapting shim of equal size -- recorded, not rewired.
-    "identity": frozenset({"mueller", "scenegraph"}),  # two trivial np.eye(4) one-liners in different
-    # domains (a 4x4 transform vs the Mueller composition unit). Read; nothing to unify.
+    "identity": frozenset({"appserver", "mueller", "scenegraph"}),  # three bodies read (sweep 168):
+    # mueller/scenegraph are trivial np.eye(4) one-liners in different domains (a 4x4 transform vs the
+    # Mueller composition unit); appserver.identity(headers, args) is WHO IS CALLING -- the (client, user)
+    # pair from request headers -- an unrelated noun that happens to share the word. Nothing to unify;
+    # renaming the request one would break every client sending X-Client/X-User.
     "scaling": frozenset({"scenegraph", "transform"}),           # scenegraph delegates to transform
     "quat_from_axis_angle": frozenset({"cosserat", "transform"}),# cosserat delegates to transform (rev.9 fix)
     "refract_dir": frozenset({"raydiff", "raymarch"}),

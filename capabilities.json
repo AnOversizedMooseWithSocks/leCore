@@ -10547,6 +10547,10 @@
         "path trace",
         "ray tracing",
         "global illumination",
+        "render with global illumination",
+        "render a scene with bounced light",
+        "full lighting simulation",
+        "monte carlo render",
         "camera",
         "depth of field",
         "lens",
@@ -17242,6 +17246,47 @@
     },
     {
       "aliases": [
+        "make a container section",
+        "versioned section",
+        "build a lews section",
+        "stamp a schema version",
+        "add a section to a lews file",
+        "typed section for the container"
+      ],
+      "consumes": [],
+      "does": "mind.lews_section(kind, sid, meta, arrays) builds a section for a lews container stamped with that kind's schema version, so a reader can tell an old section from a new one and migrate rather than guess. The canonical builders for the shipped kinds live beside it (holographic_lews.make_section).",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(m.lews_section('lecore.note', 's1', {'text': 'hi'}, {})['meta'])",
+      "method": "lews_section",
+      "name": "lews_section",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "add a sun light",
+        "make a point light",
+        "create a spotlight",
+        "add an area light",
+        "softbox light",
+        "dome light",
+        "add a light to the scene",
+        "key light",
+        "light the scene"
+      ],
+      "consumes": [],
+      "does": "mind.make_light(kind, **params) returns a path-tracer light record by NAME -- 'sun', 'point', 'spot', 'area' (alias 'softbox'), 'dome' -- with sensible defaults so a scene can be lit in one call and adjusted after. The names are the ones a lighting artist uses, not the sampler's.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(m.make_light('sun'))",
+      "method": "make_light",
+      "name": "make_light",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Scenes you can describe & adjust"
+    },
+    {
+      "aliases": [
         "mandelbulb",
         "3d mandelbrot fractal",
         "power 8 bulb fractal",
@@ -18661,6 +18706,25 @@
     },
     {
       "aliases": [
+        "swarm workspace",
+        "shared slots between roles",
+        "what did the roles exchange",
+        "blackboard for the swarm",
+        "shared scene state",
+        "role handoff workspace"
+      ],
+      "consumes": [],
+      "does": "mind.shared_workspace() returns the swarm's shared workspace: named slots that roles read and write while collaborating on a scene, so a modeller's output is a rigger's input without a file in between. Read to inspect what the roles have exchanged; empty until a swarm runs.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(type(m.shared_workspace()).__name__)",
+      "method": "shared_workspace",
+      "name": "shared_workspace",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Scenes you can describe & adjust"
+    },
+    {
+      "aliases": [
         "fuzzy where clause",
         "rows like this value",
         "similarity filter"
@@ -19310,7 +19374,7 @@
       "theme": "More capabilities"
     }
   ],
-  "count": 852,
+  "count": 855,
   "schema_version": "1.1",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

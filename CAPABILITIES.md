@@ -2480,7 +2480,7 @@ render a scene to an image: path_trace (Monte-Carlo global illumination), a came
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.path_trace(scene); mind.camera(); from holographic.rendering.holographic_raymarch import sphere_trace
 ```
-*Find it by:* render a scene, path trace, ray tracing, global illumination, camera, depth of field, lens, volumetric render
+*Find it by:* render a scene, path trace, ray tracing, global illumination, render with global illumination, render a scene with bounced light, full lighting simulation, monte carlo render
 
 ### Reproject a uv map onto changed topology (seam-aware)
 m.mesh_reproject_uv(source, source_uv, target) puts a uv map back on a mesh whose FACE COUNT CHANGED (decimate, remesh, retopo) so the texture lines up. Per-CORNER and cut-aware: a retopo WELDS both sides of a seam into ONE vertex, which cannot carry a seam's two uvs, so per-vertex transfer smears the faces there. Side is a per-corner CONSTRAINT (majority-vote home, ambiguous samples abstain). Measured: cylinder 3.36% pixels smeared -> 0.00%; sphere incl. poles -> 0 defects. Returns (mesh, uv, report). keep_uv='auto' calls it. Fragmented scan atlas -> raises, names mesh_rebake_texture..
@@ -3478,6 +3478,14 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); t=np.li
 ```
 *Find it by:* audio reactive parameters, drive parameters from audio, music reactive demo, band energy envelope, beat driven scene, onset to parameter, sync visuals to audio, audio param bus
 
+### make_light
+mind.make_light(kind, **params) returns a path-tracer light record by NAME -- 'sun', 'point', 'spot', 'area' (alias 'softbox'), 'dome' -- with sensible defaults so a scene can be lit in one call and adjusted after. The names are the ones a lighting artist uses, not the sampler's..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(m.make_light('sun'))
+```
+*Find it by:* add a sun light, make a point light, create a spotlight, add an area light, softbox light, dome light, add a light to the scene, key light
+
 ### query_fuzzy
 FUZZY role->value scene query: rows whose encoded role is NEAR the probe value -- the scene layer's similarity WHERE..
 
@@ -3485,6 +3493,14 @@ FUZZY role->value scene query: rows whose encoded role is NEAR the probe value -
 scene_index.query_fuzzy('material', 'gold-ish')  # SceneQuery method
 ```
 *Find it by:* fuzzy scene lookup, similar-value scene query
+
+### shared_workspace
+mind.shared_workspace() returns the swarm's shared workspace: named slots that roles read and write while collaborating on a scene, so a modeller's output is a rigger's input without a file in between. Read to inspect what the roles have exchanged; empty until a swarm runs..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(type(m.shared_workspace()).__name__)
+```
+*Find it by:* swarm workspace, shared slots between roles, what did the roles exchange, blackboard for the swarm, shared scene state, role handoff workspace
 
 ### workspace_manager
 a WORKSPACE MANAGER (holographic_workspace) -- durable user data coexisting with transient 3D/sim SCENES, each in its own namespace. SAVE/LOAD a scene: new_workspace, switch_workspace, export_workspace(name) -> a blob, import_workspace(blob) rebuilds it BYTE-IDENTICALLY, combine_workspaces, reset_to_default. Also named CHECKPOINTS: checkpoint(name,label) drops a save-point, restore_checkpoint rolls back to it byte-identically, list_checkpoints. The persistence + save-point layer for a scene.
@@ -6340,6 +6356,13 @@ predict what comes NEXT after a history using the ladder's learned HIERARCHICAL 
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.ladder_predict([0,1,2,3]*40)['prediction'])
 ```
 
+### lews_section
+mind.lews_section(kind, sid, meta, arrays) builds a section for a lews container stamped with that kind's schema version, so a reader can tell an old section from a new one and migrate rather than guess. The canonical builders for the shipped kinds live beside it (holographic_lews.make_section)..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(m.lews_section('lecore.note', 's1', {'text': 'hi'}, {})['meta'])
+```
+
 ### match_prototype
 UNSTRUCTURED classification (holographic_relations, twin of match_record): when an item has NO role schema -- a bag/blend, not a record -- match it to the nearest class PROTOTYPE by cosine. The general form of the VSA intent router: classify a question, gesture, regime, or style by the blend of its features. build_prototypes({class:[examples]}) makes the prototypes; returns ranked [(class,score)]. Pick vs match_record: has named roles -> match_record; role-free bag -> this.
 
@@ -6650,4 +6673,4 @@ from holographic.caching_and_storage.holographic_substrate import write_multicha
 
 ---
 
-*852 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*855 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

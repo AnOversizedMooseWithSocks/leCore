@@ -67,7 +67,9 @@ def register_p01(c):
     c.register_capability("holographic_lightcache", "cached SOFT AREA lights + one-bounce INDIRECT / global "
                           "illumination, baked noise-free at anchors (the shared cached_screen_shade engine)",
                           example="render_scene_document(..., soft_light_cache=True, indirect_cache=True)",
-                          native=True, aliases=("gi", "indirect", "bounce", "area", "penumbra", "shadow", "speckle"))
+                          native=True, aliases=("gi", "indirect", "bounce", "area", "penumbra", "shadow", "speckle",
+                                                "placed light speckle noise", "noisy soft shadows", "speckle in the penumbra",
+                                                "noise-free area light", "cache the indirect light", "bake one bounce"))
     c.register_capability("holographic_modulate", "modulate/demodulate primitive (= bind/unbind): split radiance into "
                           "albedo x irradiance to denoise or upscale the smooth part cleanly",
                           example="from holographic.misc.holographic_modulate import demodulate, remodulate", native=True,
