@@ -1024,7 +1024,7 @@ class _UnifiedPart03:
         return fractal_bands(enc, function, base_period, levels, count=count, decay=decay)
 
     def fractal_volume(self, enc, period, counts, levels, motif=None, beta=2.0, seed=0, motif_size=5,
-                       motif_grid=None, motif_coords=None):
+                       motif_grid=None, motif_coords=None, threshold=0.01):
         """ONE call: inception over ANY VSA object -> one hypervector. The seed can be a precomputed motif
         hypervector (a smoke puff, an SDF surface, an archive image, or ANOTHER fractal_volume's output --
         inception over the engine itself), a NumPy grid (motif_grid, crossed into VSA once), or, by default, a
@@ -1032,7 +1032,7 @@ class _UnifiedPart03:
         vector, composable as any VSA object. See holographic_tiling.fractal_volume."""
         from holographic.mesh_and_geometry.holographic_tiling import fractal_volume
         return fractal_volume(enc, period, counts, levels, motif=motif, beta=beta, seed=seed,
-                              motif_size=motif_size, motif_grid=motif_grid, motif_coords=motif_coords)
+                              motif_size=motif_size, motif_grid=motif_grid, motif_coords=motif_coords, threshold=threshold)
 
     def inception(self, enc, period, counts, depth, motif=None, beta=2.0, seed=0, motif_size=5):
         """One-parameter recursion DEPTH over fractal_volume + an honest capacity-ceiling measurement. Returns

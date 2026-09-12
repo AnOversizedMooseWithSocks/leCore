@@ -49,7 +49,7 @@ def _sample_scalar(material, name, uv, default):
 
 
 def material_ball(material, res=192, base_color=(0.82, 0.80, 0.78), light_dir=(0.6, 0.7, 0.5),
-                  background=0.14, ambient=0.06):
+                  background=0.14, ambient=0.06, linear=False):
     """Render `material` on a preview SPHERE -- the standard 'material ball'. Works on a plain Material or a CMP2/CMP3
     layered/multi material (anything with .sample(channel, uv) + channels). Uses the material's `roughness` and
     `metallic` channels where present (else sensible defaults), and modulates `base_color` by an `albedo` channel if
@@ -57,7 +57,13 @@ def material_ball(material, res=192, base_color=(0.82, 0.80, 0.78), light_dir=(0
     Returns a (res, res, 3) float image in [0,1].
 
     Orthographic camera down -z onto a unit sphere at the origin, one directional light. The only loop is sampling the
-    material at each visible pixel's UV; the shading is vectorised."""
+    material at each visible pixel's UV; the shading is vectorised.
+
+    `linear=True` returns the radiance BEFORE the Reinhard tone-map and without the background gradient (the
+    off-sphere pixels are 0). Default False is byte-identical to the original. WHY IT EXISTS: a spectral render
+    must combine its per-wavelength balls in LINEAR radiance and tone-map ONCE at the end. Tone-mapping each
+    wavelength first and summing afterwards is a different -- and wrong -- image, because x/(1+x) is not additive.
+    See spectral_material_ball, which is the reason this switch is here."""
     from holographic.rendering.holographic_brdf import cook_torrance
 
     base_color = np.asarray(base_color, float)
@@ -73,8 +79,9 @@ def material_ball(material, res=192, base_color=(0.82, 0.80, 0.78), light_dir=(0
     hit = r2 <= 1.0
     Z = np.sqrt(np.clip(1.0 - r2, 0.0, 1.0))               # front-surface z on the unit sphere
 
-    img = np.empty((res, res, 3), float)
-    img[:] = _background(res, background)                   # neutral vertical gradient behind the ball
+    img = np.zeros((res, res, 3), float)
+    if not linear:
+        img[:] = _background(res, background)               # neutral vertical gradient behind the ball
 
     ph, pw = np.where(hit)                                  # the pixels that land on the sphere
     P = np.stack([X[ph, pw], Y[ph, pw], Z[ph, pw]], axis=1)   # surface points (M,3)
@@ -99,9 +106,68 @@ def material_ball(material, res=192, base_color=(0.82, 0.80, 0.78), light_dir=(0
     Nv = np.repeat(N[None, :, :], 1, axis=0)[0]            # (M,3) already
     shaded = cook_torrance(Nv, np.broadcast_to(V, N.shape), np.broadcast_to(L, N.shape), alb, metal, rough)
     shaded = shaded + ambient * alb                        # small ambient so shadowed side isn't pure black
+    if linear:
+        img[ph, pw] = shaded                               # radiance, un-tone-mapped: the spectral path's input
+        return img
     shaded = shaded / (1.0 + shaded)                       # Reinhard tone-map -> [0,1)
     img[ph, pw] = np.clip(shaded, 0.0, 1.0)
     return img
+
+
+def spectral_material_ball(coeffs, spectrum_at, wavelength_rgb, wavelengths, res=192,
+                           background=0.14, tonemap=True, **ball_kw):
+    """THE MATERIAL BALL, RENDERED ONE WAVELENGTH AT A TIME -- the standard preview environment, spectral.
+
+    Same sphere, same orthographic camera, same directional light, same Cook-Torrance BRDF as
+    material_ball: this is the preview environment, not a new one. The only change is that instead of
+    shading once with an RGB tint, it shades once per wavelength with that wavelength's REFLECTANCE as
+    a grey base colour, and combines the results through the observer.
+
+    WHY THIS IS NOT THE SAME AS TINTING AN RGB BALL. An RGB ball multiplies one shaded image by three
+    numbers, so every wavelength gets the identical highlight and falloff. Here each wavelength is a
+    separate light-transport answer, which is what lets a spectral material show colour that varies
+    ACROSS the ball -- the thing dispersion actually does.
+
+    `coeffs` are the three sigmoid coefficients from holographic_spectralup (a material as 3 floats),
+    `spectrum_at(coeffs, lams)` evaluates them, `wavelength_rgb(lam)` gives one wavelength's RGB
+    weight, `wavelengths` is which to render. Returns (res, res, 3) in [0,1] with the preview
+    background, or linear radiance when tonemap=False.
+
+    The combination happens in LINEAR radiance and is tone-mapped ONCE, which is why material_ball
+    grew its `linear` switch: x/(1+x) is not additive, so tone-mapping per wavelength and summing
+    afterwards produces a different and wrong image."""
+    lams = np.asarray(wavelengths, float)
+    refl = np.asarray(spectrum_at(coeffs, lams), float).reshape(-1)
+    if refl.size != lams.size:
+        raise ValueError("spectrum_at returned %d values for %d wavelengths" % (refl.size, lams.size))
+    acc = None
+    for lam, r in zip(lams, refl):
+        # A monochrome ball: the material's reflectance at this wavelength, as a grey tint. Grey is
+        # correct here -- the COLOUR arrives from the observer weight below, not from the shading.
+        mono = material_ball(_PreviewMaterial(), res=res, base_color=(r, r, r), linear=True, **ball_kw)
+        w = np.asarray(wavelength_rgb(float(lam)), float)
+        term = mono[..., :1] * w                       # (res,res,1) radiance x (3,) observer weight
+        acc = term if acc is None else acc + term
+    acc = acc / float(lams.size)
+    if not tonemap:
+        return acc
+    out = acc / (1.0 + acc)                            # the preview's own Reinhard, applied ONCE
+    img = _background(res, background)
+    lit = acc.sum(axis=-1) > 0.0
+    img[lit] = np.clip(out[lit], 0.0, 1.0)
+    return img
+
+
+class _PreviewMaterial(object):
+    """The preview environment's stand-in material: a plain dielectric with the ball's default finish.
+
+    Deliberately channel-free. spectral_material_ball supplies the colour through base_color per
+    wavelength, so a material with its own albedo channel would double-count the tint."""
+
+    channels = ("roughness", "metallic")
+
+    def sample(self, channel, uv):
+        return {"roughness": 0.35, "metallic": 0.0}.get(channel, 0.0)
 
 
 def _background(res, level):

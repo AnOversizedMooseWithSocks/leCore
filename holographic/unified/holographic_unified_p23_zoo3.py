@@ -180,21 +180,60 @@ class _UnifiedPart23:
                         # older ones the float32 aud_k. An existing partition must
                         # keep loading.
                         _A = exp["arrays"]
-                        if ("aud_kq_%d" % ti) in _A:
+                        if ("aud_kref_%d" % ti) in _A:
+                            # INSTANCED form (sweep 167): expand the reference sequence
+                            # against the shared unique tables. Unpack each table ONCE
+                            # per load, not once per tile.
+                            if not hasattr(self, "_aud_tables_tmp"):
+                                self._aud_tables_tmp = (
+                                    _q8_unpack(_A["aud_K_q"], _A["aud_K_lo"], _A["aud_K_hi"]),
+                                    _q8_unpack(_A["aud_V_q"], _A["aud_V_lo"], _A["aud_V_hi"]))
+                            _K, _V = self._aud_tables_tmp
+                            ks = [_K[i] for i in np.asarray(_A["aud_kref_%d" % ti], int)]
+                            vs = [_V[i] for i in np.asarray(_A["aud_vref_%d" % ti], int)]
+                        elif ("aud_kq_%d" % ti) in _A:
                             ks = _q8_unpack(_A["aud_kq_%d" % ti], _A["aud_klo_%d" % ti],
                                             _A["aud_khi_%d" % ti])
                             vs = _q8_unpack(_A["aud_vq_%d" % ti], _A["aud_vlo_%d" % ti],
                                             _A["aud_vhi_%d" % ti])
-                        else:
+                        elif ("aud_k_%d" % ti) in _A:
                             ks = np.asarray(_A["aud_k_%d" % ti], float)
                             vs = np.asarray(_A["aud_v_%d" % ti], float)
+                        else:
+                            # NO AUDIT ARRAYS AT ALL for this tile (a container written by a
+                            # stripped/compact writer, or a hand-edited partition). Not an
+                            # error: the taught replay below rebuilds every text-backed write.
+                            # Measured before this branch existed: KeyError 'aud_k_0', i.e. a
+                            # partition that was merely compact could not be opened at all.
+                            ks, vs = [], []
                         st["audit"] = [(k, v) for k, v in zip(ks, vs)]
+                if hasattr(self, "_aud_tables_tmp"):
+                    del self._aud_tables_tmp              # per-load scratch, never state
                 self.experience_from_state({"tiles": tls})
             # taught replay runs AFTER the experience restore (cp21 ordering bug, caught by
             # the cold cross-check: replay marks written first were WIPED when the trace
             # section replaced the whole trace -- 0/8 T0. Restore the floor, THEN re-teach.)
             ta = by.get("lecore.learning.taught")
             texts = (ta["meta"].get("texts") if ta else None) or []
+            # DEDUPE BEFORE REPLAY, first occurrence wins, order otherwise kept. A container
+            # written before the write-side dedupe (holographic_zoo._log_taught) can carry the
+            # same row hundreds of thousands of times; replaying each copy is a no-op that costs
+            # a full read_gated + key derivation. Measured: 263,023 rows -> 385 distinct, load
+            # 225 s -> under 2 s, and the NEXT save writes the compact record -- so
+            # learning_load(root); learning_save(root) IS the repair for a bloated partition.
+            if texts:
+                # LAST occurrence wins (walk backwards, then reverse): replay is last-wins per
+                # question, so the surviving copy must sit where the latest teach put it.
+                _seen, _rev = set(), []
+                for t_ in reversed(texts):
+                    k_ = tuple(str(x) for x in t_)
+                    if k_ not in _seen:
+                        _seen.add(k_)
+                        _rev.append(t_)
+                _uniq = _rev[::-1]
+                if len(_uniq) != len(texts):
+                    self._learning_load_deduped = len(texts) - len(_uniq)
+                texts = _uniq
             if texts:
                 # MIGRATION BY REPLAY (cp21): question+answer TEXT is the durable record;
                 # each pair re-teaches under the CURRENT key function -- so key-format
@@ -215,8 +254,8 @@ class _UnifiedPart23:
                     key_q = q_ if sess_ == "shared" else "[s:%s] %s" % (sess_, q_)
                     if " ".join(key_q.lower().split()) in getattr(lad, "_vetoed_qs",
                                                                   set()):
-                        lad.taught_log.append([q_, a_, sess_, prov_])  # books keep history;
-                        continue                                       # the veto keeps it dead
+                        lad._log_taught([q_, a_, sess_, prov_])     # books keep history;
+                        continue                                    # the veto keeps it dead
                     qk_ = lad._qkey(key_q)
                     h_ = self.experience.read_gated(qk_)
                     if h_["fired"]:
@@ -226,11 +265,11 @@ class _UnifiedPart23:
                             # would grow the audit journal every load/save cycle (the
                             # cp28 bloat) -- keep the books instead of re-teaching
                             lad._payload_qs.setdefault(pk_, key_q)
-                            lad.taught_log.append([q_, a_, sess_, prov_])
+                            lad._log_taught([q_, a_, sess_, prov_])
                             continue
                     lad._remember(qk_, a_, key_q, provenance=prov_)
                     if lad.taught_log and lad.taught_log[-1][0] == key_q:
-                        lad.taught_log[-1] = [q_, a_, sess_, prov_]
+                        lad._relog_last([q_, a_, sess_, prov_])
                 # the registry DERIVES from the tags in the durable record itself --
                 # it piggybacked on the goals section once and died with it on
                 # goal-less minds (cp36 suite caught it): never store what you can
@@ -394,7 +433,7 @@ class _UnifiedPart23:
             prov_ = t_[3] if len(t_) > 3 else "taught"
             key_q = q_ if sess_ == "shared" else "[s:%s] %s" % (sess_, q_)
             if " ".join(key_q.lower().split()) in vet:
-                lad.taught_log.append([q_, a_, sess_, prov_])   # books keep history;
+                lad._log_taught([q_, a_, sess_, prov_])           # books keep history;
                 skipped_veto += 1                               # the veto keeps it dead
                 continue
             qk_ = lad._qkey(key_q)
@@ -411,12 +450,12 @@ class _UnifiedPart23:
                     # neighbour's atom via shared-word crosstalk, and a fired-only rule
                     # silently dropped it (rollover contract 1). Books keep the history.
                     lad._payload_qs.setdefault(pk_, key_q)
-                    lad.taught_log.append([q_, a_, sess_, prov_])
+                    lad._log_taught([q_, a_, sess_, prov_])
                     skipped_dup += 1
                     continue
             lad._remember(qk_, a_, key_q, provenance=prov_)
             if lad.taught_log and lad.taught_log[-1][0] == key_q:
-                lad.taught_log[-1] = [q_, a_, sess_, prov_]
+                lad._relog_last([q_, a_, sess_, prov_])
             replayed += 1
         return {"replayed": replayed, "skipped_veto": skipped_veto,
                 "skipped_dup": skipped_dup}

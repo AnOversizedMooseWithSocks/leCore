@@ -218,6 +218,506 @@ def byte_report(src, level=9):
             "structure_bytes": total, "ratio_vs_zlib": total / z_raw, "beats_zlib": bool(total < z_raw)}
 
 
+# ---------------------------------------------------------------------------
+# POST-MERGE CENSUS (sweep 129). The rule NOTES states in capitals across sweeps 120, 121
+# and 125 -- "after ANY merge, census DEFINITIONS, SIGNATURES and LINE COUNTS; and before
+# restoring a shrunk file, check whether the content MOVED" -- with an instrument behind it.
+#
+# WHY HERE. `merge_trees` (p21) censuses two trees by sha256 and both-direction unique-LINE
+# counts, at the FILE level, BEFORE a merge, as a decision sheet. It cannot see a definition
+# that vanished inside a file it calls 'differ', and it never runs AFTER. This module already
+# owns the AST census (shape_census, selftest_census) and imports nothing but stdlib, so the
+# structural legs belong here and the mind verb belongs next to merge_trees. Partner, not
+# sibling.
+# ---------------------------------------------------------------------------
+
+CENSUS_IGNORE = (".git", "__pycache__", ".pytest_cache", ".lecore_jobs", "node_modules")
+
+
+def signature_of(node):
+    """A def's full CALL SHAPE as one stable string: decorators, every parameter in order,
+    which parameters carry a default, *args / keyword-only / **kw, and the arity.
+
+    WHY PER-ARGUMENT DEFAULTS AND NOT A COUNT. Sweep 120's second casualty was a lost
+    `record_every` passthrough, which a name-level census passed; the obvious fix is to
+    count defaults, and that is still not enough. Keyword-only parameters may carry defaults
+    in ANY order, so `def h(*, a=1, b)` and `def h(*, a, b=1)` have the same count and
+    different meanings. Recording presence per argument costs nothing and closes that hole
+    (pinned in the selftest).
+
+    KEPT NEGATIVE: default VALUES are not recorded, only their presence. `def f(a=1)` ->
+    `def f(a=2)` is a real behaviour change this census does not see; catching it needs a
+    value-level diff, which is a different and much noisier instrument."""
+    a = node.args
+    parts = []
+    for arg in list(a.posonlyargs) + list(a.args):
+        parts.append(arg.arg)
+    # positional defaults bind to the RIGHTMOST arguments, so mark them from the right
+    npos = len(a.posonlyargs) + len(a.args)
+    for i in range(len(a.defaults)):
+        parts[npos - 1 - i] += "="
+    if a.posonlyargs:
+        parts.insert(len(a.posonlyargs), "/")
+    if a.vararg:
+        parts.append("*" + a.vararg.arg)
+    elif a.kwonlyargs:
+        parts.append("*")
+    for arg, dflt in zip(a.kwonlyargs, a.kw_defaults):
+        parts.append(arg.arg + ("=" if dflt is not None else ""))
+    if a.kwarg:
+        parts.append("**" + a.kwarg.arg)
+    decos = [_deco_name(d) for d in node.decorator_list]
+    head = "".join("@%s " % d for d in decos)
+    return "%sdef %s(%s)" % (head, node.name, ", ".join(parts))
+
+
+def _deco_name(node):
+    """A decorator's dotted name, as written. A call decorator keeps only its callee -- the
+    ARGUMENTS of `@lru_cache(128)` are a tuning change, not a change to the call shape."""
+    if isinstance(node, ast.Call):
+        node = node.func
+    bits = []
+    while isinstance(node, ast.Attribute):
+        bits.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        bits.append(node.id)
+    return ".".join(reversed(bits)) or "<expr>"
+
+
+def def_index(src):
+    """Every name a module DEFINES, as {qualified_name: (kind, signature)}. Raises SyntaxError.
+
+    Kinds: "def" (functions and methods, with the full signature), "class", "import", "assign".
+
+    AN IMPORT ALIAS IS A DEFINITION OF THAT NAME, and this is the kept negative that shaped the
+    whole function. Run on the real sweep-122 merge, a def-only census reported two LOST
+    DEFINITIONS where upstream had promoted a triplicated `_f1` helper into
+    `holographic_occlusion.recall_f1` and replaced each copy with `from ... import recall_f1 as
+    _f1`. Nothing was removed; the census cried wolf twice. A census that cries wolf is a census
+    the next session stops running, so `from X import y as name` binds `name` here.
+
+    Module- and class-level ASSIGNMENTS are indexed too (kind "assign"), because a lost constant
+    table is exactly the kind of thing a clean three-way merge eats and no name-of-a-function
+    census would see it.
+
+    SCOPE, deliberately: top level and class bodies only. A def nested inside a function is an
+    implementation detail of its parent -- indexing it would report every refactor of a local
+    helper as a lost definition, which is the cry-wolf failure in a second costume."""
+    out = {}
+
+    def walk(node, prefix=""):
+        for child in getattr(node, "body", []):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                out[prefix + child.name] = ("def", signature_of(child))
+            elif isinstance(child, ast.ClassDef):
+                bases = ", ".join(_deco_name(b) for b in child.bases)
+                out[prefix + child.name] = ("class", "class %s(%s)" % (child.name, bases))
+                walk(child, prefix + child.name + ".")
+            elif isinstance(child, (ast.Import, ast.ImportFrom)):
+                for alias in child.names:
+                    bound = alias.asname or alias.name.split(".")[0]
+                    if bound != "*":
+                        out[prefix + bound] = ("import", "import " + bound)
+            elif isinstance(child, ast.Assign):
+                for tgt in child.targets:
+                    if isinstance(tgt, ast.Name):
+                        out[prefix + tgt.id] = ("assign", "assign " + tgt.id)
+            elif isinstance(child, ast.AnnAssign) and isinstance(child.target, ast.Name):
+                out[prefix + child.target.id] = ("assign", "assign " + child.target.id)
+
+    walk(ast.parse(src))
+    return out
+
+
+def read_tree(root, ignore=CENSUS_IGNORE, max_bytes=2000000):
+    """Every text file under a directory as {relative_path: source}. Binaries are SKIPPED, not
+    guessed at: a file that does not decode as UTF-8 has no lines and no definitions to census.
+
+    Deterministic: os.walk is sorted at both levels, so two runs enumerate identically."""
+    import os
+
+    out = {}
+    root = str(root)
+    for dp, dn, fn in os.walk(root):
+        dn[:] = sorted(d for d in dn if d not in ignore)
+        for f in sorted(fn):
+            p = os.path.join(dp, f)
+            try:
+                if os.path.getsize(p) > max_bytes:
+                    continue
+                out[os.path.relpath(p, root)] = open(p, encoding="utf-8").read()
+            except (OSError, UnicodeDecodeError):
+                continue
+    return out
+
+
+def read_git_ref(repo, ref, ignore=CENSUS_IGNORE, max_bytes=2000000):
+    """Every text file at a git ref as {relative_path: source}, WITHOUT checking anything out.
+
+    `git archive` streams the whole tree in ONE subprocess and tarfile reads it from memory.
+    The obvious alternative -- `git show ref:path` per file -- costs one process per file
+    (1,788 of them on this repo), which is the difference between an audit you run after every
+    merge and one you do not."""
+    import io
+    import subprocess
+    import tarfile
+
+    r = subprocess.run(["git", "archive", "--format=tar", str(ref)], cwd=str(repo),
+                       capture_output=True)
+    if r.returncode != 0:
+        raise ValueError("git archive %r failed in %r: %s"
+                         % (ref, str(repo), r.stderr.decode(errors="replace")[:200]))
+    out = {}
+    with tarfile.open(fileobj=io.BytesIO(r.stdout)) as tf:
+        for m in tf.getmembers():
+            if not m.isfile() or m.size > max_bytes:
+                continue
+            if any(part in ignore for part in m.name.split("/")):
+                continue
+            f = tf.extractfile(m)
+            if f is None:
+                continue
+            try:
+                out[m.name] = f.read().decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+    return out
+
+
+def _line_sets(texts):
+    """{path: set of non-blank lines} -- the index the moved-content check joins against."""
+    return {p: {ln for ln in t.splitlines() if ln.strip()} for p, t in texts.items()}
+
+
+def merge_census(base, new, shrink_pct=10.0, base_is_ref=None, ignore=CENSUS_IGNORE,
+                 move_gate=0.5, max_rows=200, max_bytes=2000000):
+    """DID THE MERGE LOSE ANYTHING? Census two trees by DEFINITION, SIGNATURE and LINE COUNT,
+    then ask of everything lost or shrunk whether the content MOVED.
+
+    `base` is a directory, or a git ref resolved against the `new` working tree. Ambiguity is
+    REFUSED, never guessed (the merge_trees house rule): a string that is BOTH an existing
+    directory and a valid ref raises, and so does one that is neither -- pass `base_is_ref=`
+    to decide. Returns a report with `verdict` in CLEAN / REVIEW / LOSSES FOUND.
+
+    WHY ONE CALL AND NOT THREE, which is the real design question here. The three legs are not
+    independent, and the history says so twice. Sweep 120: a name-level census passed a function
+    that had quietly lost a `record_every` parameter, so the signature leg only earns its keep
+    run TOGETHER with the definition leg over the same index. Sweep 125: a line-count leg found
+    the catalog had shrunk by 970 lines and the reflex was to restore it -- the lines had MOVED
+    into holographic_catalog_aliases.py, and restoring would have reverted somebody's refactor.
+    A shrink report without the move join is not merely incomplete, it is ACTIVELY MISLEADING,
+    and a caller who has to remember to run leg three after leg one is a caller who will not.
+    So: one call, one index, one verdict -- and `def_index` / `signature_of` stay public for
+    anyone who wants a leg on its own.
+
+    The legs:
+      * definitions -- present in base, absent in new. HARD ERROR unless the name is found
+        elsewhere in the new tree, in which case it is reported as MOVED and does not count
+        against the verdict.
+      * signatures  -- same name, different call shape. REVIEW, never auto-judged: an additive
+        parameter with a default and a deleted passthrough look identical to a counter.
+      * line counts -- files that shrank by more than `shrink_pct`, each with the lines that
+        went missing and the new-or-grown files that now contain them (`move_gate` is the
+        fraction of missing lines a destination must hold to be called a move).
+      * unparseable -- a file that no longer parses is its OWN bucket. The prototype let a
+        SyntaxError in the new copy report every definition in that file as lost: one broken
+        file, a hundred false hard errors. Loud and specific beats loud and wrong. Only a
+        file that parsed in the BASE and does not now counts toward the verdict: this tree
+        has one that fails in both, and counting it pinned the verdict at REVIEW forever.
+
+    Definition legs cover .py only; the line-count leg covers every text file, because the two
+    conflicts in this very merge were a .md and a .json.
+
+    KEPT NEGATIVES, all four load-bearing:
+      * It sees NAMES AND SHAPES, never semantics. A function that survives with its signature
+        intact but whose body was gutted to `pass` passes every leg here. This is the same limit
+        `result_usable` has in a different costume -- an ABSENT thing is detectable, a WRONG one
+        needs a test suite, which is the instrument that runs after this one.
+      * A file larger than `max_bytes` is invisible to every leg, silently. The bound exists so a
+        census of a repo with a checked-in dataset does not read the dataset into memory twice.
+      * The moved-content join is LINE-EXACT. A block that moved AND was reformatted on the way
+        shows up as `unexplained`, which is a false alarm in the safe direction -- it asks for a
+        human look rather than declaring a loss.
+      * Default VALUES are not compared, only their presence (see signature_of)."""
+    import os
+
+    new_root = str(new)
+    if base_is_ref is None:
+        as_dir = os.path.isdir(str(base))
+        as_ref = _is_git_ref(new_root, base)
+        if as_dir and as_ref:
+            raise ValueError(
+                "ambiguous base %r: it is BOTH an existing directory and a valid git ref in %r "
+                "-- pass base_is_ref=True or False" % (str(base), new_root))
+        if not as_dir and not as_ref:
+            raise ValueError(
+                "base %r is neither an existing directory nor a git ref in %r"
+                % (str(base), new_root))
+        base_is_ref = as_ref
+    if base_is_ref:
+        b_texts = read_git_ref(new_root, base, ignore=ignore, max_bytes=max_bytes)
+    else:
+        b_texts = read_tree(base, ignore=ignore, max_bytes=max_bytes)
+    n_texts = read_tree(new_root, ignore=ignore, max_bytes=max_bytes)
+
+    def index(texts):
+        idx, bad = {}, {}
+        for p, t in sorted(texts.items()):
+            if not p.endswith(".py"):
+                continue
+            try:
+                idx[p] = def_index(t)
+            except SyntaxError as e:
+                bad[p] = str(e)[:80]
+        return idx, bad
+
+    b_idx, b_bad = index(b_texts)
+    n_idx, n_bad = index(n_texts)
+
+    # WHERE a name lives NOW: full qualified name and bare leaf, because a def that moves module
+    # usually keeps its leaf and may gain or lose a class prefix on the way.
+    where_qual, where_leaf = {}, {}
+    for p, d in n_idx.items():
+        for name in d:
+            where_qual.setdefault(name, []).append(p)
+            where_leaf.setdefault(name.rsplit(".", 1)[-1], []).append(p)
+
+    def moved_to(name, exclude):
+        hits = set(where_qual.get(name, ())) | set(where_leaf.get(name.rsplit(".", 1)[-1], ()))
+        return sorted(hits - {exclude})
+
+    files_deleted, lost, sig_changed = [], [], []
+    for p in sorted(b_idx):
+        if p not in n_idx:
+            if p in n_texts:
+                continue                      # still there, just unparseable -- reported below
+            names = sorted(b_idx[p])
+            files_deleted.append({"file": p, "defs": len(names),
+                                  "moved": {n: moved_to(n, p) for n in names
+                                            if moved_to(n, p)}})
+            continue
+        after = n_idx[p]
+        for name in sorted(b_idx[p]):
+            kind, sig = b_idx[p][name]
+            if name not in after:
+                dest = moved_to(name, p)
+                lost.append({"file": p, "name": name, "kind": kind, "moved_to": dest})
+            elif after[name][1] != sig:
+                sig_changed.append({"file": p, "name": name, "kind": kind,
+                                    "was": sig, "now": after[name][1]})
+
+    shrunk = []
+    grown_or_new = {p: t for p, t in n_texts.items()
+                    if p not in b_texts or len(t.splitlines()) > len(b_texts[p].splitlines())}
+    cand_lines = _line_sets(grown_or_new)
+    for p in sorted(b_texts):
+        if p not in n_texts:
+            continue
+        b_lines, n_lines = b_texts[p].splitlines(), n_texts[p].splitlines()
+        if not b_lines or len(n_lines) >= len(b_lines) * (1.0 - shrink_pct / 100.0):
+            continue
+        n_set = set(n_lines)
+        missing = sorted({ln for ln in b_lines if ln.strip() and ln not in n_set})
+        found = []
+        for q in sorted(cand_lines):
+            if q == p:
+                continue
+            hit = sum(1 for ln in missing if ln in cand_lines[q])
+            if hit:
+                found.append({"file": q, "lines": hit,
+                              "fraction": round(hit / max(len(missing), 1), 3)})
+        found.sort(key=lambda r: (-r["lines"], r["file"]))
+        best = found[0]["fraction"] if found else 0.0
+        shrunk.append({"file": p, "base_lines": len(b_lines), "new_lines": len(n_lines),
+                       "shrank_pct": round(100.0 * (1 - len(n_lines) / len(b_lines)), 1),
+                       "missing_lines": len(missing), "moved_into": found[:3],
+                       "verdict": "moved" if best >= move_gate else "unexplained"})
+
+    lost_unexplained = [r for r in lost if not r["moved_to"]]
+    deleted_unexplained = [r for r in files_deleted if len(r["moved"]) < r["defs"]]
+    shrunk_unexplained = [r for r in shrunk if r["verdict"] == "unexplained"]
+    # ONLY A *NEW* PARSE FAILURE IS A MERGE FINDING. Found by running this on the real merge:
+    # tools/tour.py has an f-string this interpreter rejects and it fails in BOTH trees, so
+    # counting it pinned the verdict at REVIEW forever -- a permanent yellow light is a light
+    # nobody reads. Pre-existing breakage is the linter's business, not the census's.
+    newly_bad = sorted(p for p in n_bad if p not in b_bad)
+    hard = len(lost_unexplained) + len(deleted_unexplained)
+    review = len(sig_changed) + len(shrunk_unexplained) + len(newly_bad)
+    counts = {"base_files": len(b_texts), "new_files": len(n_texts),
+              "base_py": len(b_idx), "new_py": len(n_idx),
+              "files_deleted": len(files_deleted), "files_added": len(set(n_texts) - set(b_texts)),
+              "lost": len(lost), "lost_moved": len(lost) - len(lost_unexplained),
+              "lost_unexplained": len(lost_unexplained),
+              "lost_by_kind": {k: sum(1 for r in lost_unexplained if r["kind"] == k)
+                               for k in sorted({r["kind"] for r in lost_unexplained})},
+              "signature_changed": len(sig_changed), "shrunk": len(shrunk),
+              "shrunk_moved": len(shrunk) - len(shrunk_unexplained),
+              "shrunk_unexplained": len(shrunk_unexplained),
+              "unparseable_base": len(b_bad), "unparseable_new": len(n_bad),
+              "unparseable_newly": len(newly_bad)}
+    return {"base": str(base), "new": new_root, "base_is_ref": bool(base_is_ref),
+            "counts": counts,
+            "files_deleted": files_deleted[:max_rows],
+            "lost": lost[:max_rows], "signature_changed": sig_changed[:max_rows],
+            "shrunk": shrunk[:max_rows],
+            "unparseable": {"base": sorted(b_bad)[:max_rows], "new": sorted(n_bad)[:max_rows],
+                            "newly": newly_bad[:max_rows]},
+            "truncated": any(len(x) > max_rows for x in (files_deleted, lost, sig_changed,
+                                                         shrunk, b_bad, n_bad)),
+            "verdict": "LOSSES FOUND" if hard else ("REVIEW" if review else "CLEAN"),
+            "advice": ("HARD rows are definitions or files present in base and findable nowhere "
+                       "in the new tree -- restore them. REVIEW rows are judgement calls: a "
+                       "signature change may be an additive default, and a shrunk file whose "
+                       "lines turn up in another file MOVED (sweep 125) -- check moved_into "
+                       "before you restore anything, or you will revert somebody's refactor.")}
+
+
+def _is_git_ref(repo, ref):
+    """Is `ref` resolvable as a tree-ish in this repo? Used only to disambiguate, never to guess."""
+    import subprocess
+
+    try:
+        r = subprocess.run(["git", "rev-parse", "--verify", "--quiet", "%s^{tree}" % (ref,)],
+                           cwd=str(repo), capture_output=True)
+    except OSError:
+        return False
+    return r.returncode == 0
+
+
+_FILLER = "\n".join("# filler line %03d, so mod_a's own line count barely moves and the" % i
+                    for i in range(100))
+
+# The eight injected faults, named once so the selftest, the tests and the report all count the
+# same things. "leg" is which leg is SUPPOSED to catch it; "expect" is the exact row count.
+CENSUS_FAULTS = (
+    ("deleted_def",   "definitions", "a def removed outright"),
+    ("dropped_param", "signatures",  "sweep 120's second casualty: a lost passthrough parameter"),
+    ("moved_def",     "definitions", "a def that moved module -- lost HERE, present THERE"),
+    ("moved_data",    "line_counts", "sweep 125's case: 90 data lines moved to a new file"),
+    ("import_alias",  "none",        "def -> `from X import y as name`: NOTHING was removed"),
+    ("deleted_file",  "definitions", "a whole file gone, its def findable nowhere"),
+    ("kwonly_shuffle", "signatures", "a keyword-only default moved: same COUNT, different meaning"),
+    ("new_syntax_error", "unparseable", "the new copy does not parse: its own bucket, not a storm"),
+)
+
+
+def _census_fixture(base, new):
+    """Write two trees with KNOWN injected damage -- the honest way to measure a census.
+
+    One fault per row of CENSUS_FAULTS, chosen so every leg has something only IT can catch and
+    so the two historical false-positive shapes are both present: the import-alias promotion
+    (which a def-only census reports as a loss) and the moved data block (which a line-count
+    census tells you to restore). Shared by the module selftest and tests/test_merge_census.py so
+    the numbers in both are the same numbers."""
+    import os
+
+    for d in (base, new):
+        os.makedirs(d, exist_ok=True)
+
+    def w(root, rel, text):
+        p = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+        open(p, "w", encoding="utf-8").write(text)
+
+    head = '"""module a"""\nimport os\n\nCONST = 1\n\n' + _FILLER + "\n\n"
+    keep = ("def kept(a, b=1):\n    return a + b\n\n\n")
+    w(base, "mod_a.py", head + keep +
+      "def deleted_def(x):\n    return x\n\n\n"                       # fault: deleted_def
+      "def sim(a, b, record_every=1):\n    return a\n\n\n"            # fault: dropped_param
+      "def travels(q):\n    return q * 2\n\n\n"                       # fault: moved_def
+      "def kwonly(*, a=1, b):\n    return a, b\n\n\n"                 # fault: kwonly_shuffle
+      "def _f1(rec, true_set):\n    return 0.0\n")                    # fault: import_alias
+    w(new, "mod_a.py", head + keep +
+      "def sim(a, b):\n    return a\n\n\n"
+      "def kwonly(*, a, b=1):\n    return a, b\n\n\n"
+      "from pkg.occ import recall_f1 as _f1\n")
+    w(base, "mod_b.py", "def already(x):\n    return x\n")
+    w(new, "mod_b.py", "def already(x):\n    return x\n\n\ndef travels(q):\n    return q * 2\n")
+    w(base, "gone.py", "def orphan():\n    return 1\n")               # fault: deleted_file
+    rows = ["row %03d of the table that moves" % i for i in range(100)]
+    w(base, "data.txt", "\n".join(rows) + "\n")                       # fault: moved_data
+    w(new, "data.txt", "\n".join(rows[:10]) + "\n")
+    w(new, "data_extra.txt", "\n".join(rows[10:]) + "\n")
+    w(base, "broken.py", "def fine():\n    return 1\n")               # fault: new_syntax_error
+    w(new, "broken.py", "def fine(:\n    return 1\n")
+    return CENSUS_FAULTS
+
+
+def _census_selftest():
+    """Detection counts on the injected-damage fixture. Every assertion is a NUMBER, because the
+    only question that matters about a census is how many faults it catches and how many it
+    invents -- and the second number is the one that decides whether anyone runs it twice."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        b, n = td + "/base", td + "/new"
+        _census_fixture(b, n)
+        r = merge_census(b, n, base_is_ref=False)
+        c = r["counts"]
+
+        # -- LEG 1, definitions. deleted_def is unexplained; travels MOVED and must not count
+        #    against the verdict; gone.py is a deleted FILE whose def is findable nowhere.
+        assert c["lost"] == 2 and c["lost_unexplained"] == 1 and c["lost_moved"] == 1, c
+        assert [x["name"] for x in r["lost"] if not x["moved_to"]] == ["deleted_def"]
+        moved = [x for x in r["lost"] if x["moved_to"]]
+        assert [x["name"] for x in moved] == ["travels"]
+        assert moved[0]["moved_to"] == ["mod_b.py"], moved
+        assert c["files_deleted"] == 1 and r["files_deleted"][0]["file"] == "gone.py"
+
+        # -- THE KEPT NEGATIVE, and the reason this fixture exists at all. The sweep-123 `_f1`
+        #    promotion removed NOTHING; a def-only census called it two lost definitions. Zero
+        #    here, forever. A census that cries wolf is a census the next session stops running.
+        assert "_f1" not in [x["name"] for x in r["lost"]], "an import alias was called a loss"
+
+        # -- LEG 2, signatures. THREE, and each is invisible to a leg that is not this one:
+        #    a dropped passthrough, a keyword-only default that moved (the COUNT is unchanged --
+        #    a defaults-counting census misses this one), and def -> import alias.
+        sig = {x["name"]: x for x in r["signature_changed"]}
+        assert c["signature_changed"] == 3, r["signature_changed"]
+        assert set(sig) == {"sim", "kwonly", "_f1"}, sorted(sig)
+        assert sig["sim"]["was"] == "def sim(a, b, record_every=)"
+        assert sig["sim"]["now"] == "def sim(a, b)"
+        assert sig["kwonly"]["was"] == "def kwonly(*, a=, b)"
+        assert sig["kwonly"]["now"] == "def kwonly(*, a, b=)", "kwonly default shuffle missed"
+        assert sig["_f1"]["now"] == "import _f1"
+
+        # -- LEG 3, line counts, WITH the join that makes it safe to act on. data.txt lost 90 of
+        #    100 lines and every one of them is in data_extra.txt: MOVED, do not restore.
+        assert c["shrunk"] == 1 and c["shrunk_moved"] == 1 and c["shrunk_unexplained"] == 0, c
+        s = r["shrunk"][0]
+        assert s["file"] == "data.txt" and s["base_lines"] == 100 and s["new_lines"] == 10
+        assert s["verdict"] == "moved" and s["moved_into"][0]["file"] == "data_extra.txt"
+        assert s["moved_into"][0]["fraction"] == 1.0, s
+
+        # -- LEG 4, unparseable. ONE bucket entry, and -- the prototype's bug -- NOT one lost
+        #    definition per def in the broken file.
+        assert c["unparseable_newly"] == 1 and r["unparseable"]["newly"] == ["broken.py"]
+        assert "fine" not in [x["name"] for x in r["lost"]], "a syntax error became a lost def"
+
+        # -- NO FALSE POSITIVES anywhere else: the untouched names are silent.
+        touched = {x["name"] for x in r["lost"]} | set(sig)
+        assert touched & {"kept", "CONST", "os", "already"} == set(), touched
+
+        assert r["verdict"] == "LOSSES FOUND", r["verdict"]
+
+        # -- AMBIGUITY IS REFUSED, NOT GUESSED (the merge_trees house rule).
+        for bad in ("definitely-not-a-ref-or-a-dir",):
+            try:
+                merge_census(bad, n)
+                raise AssertionError("a base that is neither a dir nor a ref was accepted")
+            except ValueError:
+                pass
+
+        # -- DETERMINISM: same trees, same report, byte for byte.
+        import json as _json
+        assert _json.dumps(merge_census(b, n, base_is_ref=False), sort_keys=True) == \
+            _json.dumps(r, sort_keys=True)
+    return {"faults": len(CENSUS_FAULTS), "lost_unexplained": 1, "lost_moved": 1,
+            "signature_changed": 3, "shrunk_moved": 1, "unparseable_newly": 1,
+            "false_positives": 0}
+
+
 def _selftest():
     """Regression trap for K1/K2: exact reconstruction (the bar), the census at the RIGHT unit, and the kept
     negative that this is not a compressor."""
@@ -289,6 +789,14 @@ def _selftest():
         c = selftest_census(root=td)
         assert c["runnable"] == 1 and c["missing"] == 1
         assert c["missing_modules"][0].endswith("holographic.holographic_demo")
+
+    # 9. THE POST-MERGE CENSUS, on a fixture with eight KNOWN injected faults. Detection is
+    #    counted per leg and the false-positive count is asserted at 0 -- the import-alias
+    #    promotion and the moved data block are both in the fixture precisely because each one
+    #    is a shape a naive census gets WRONG, loudly, on real merges.
+    cen3 = _census_selftest()
+    assert cen3 == {"faults": 8, "lost_unexplained": 1, "lost_moved": 1, "signature_changed": 3,
+                    "shrunk_moved": 1, "unparseable_newly": 1, "false_positives": 0}, cen3
 
     print("OK: holographic_codestructure self-test passed (every statement subtree reconstructs bit-exactly and the "
           "module rebuilds to the normalized source; `a + b` and `x + y` share a shape while `a * b` does not; a "

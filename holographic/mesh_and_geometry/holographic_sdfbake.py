@@ -104,6 +104,52 @@ class GridSDF:
         return self.ids_grid[idx[:, 0], idx[:, 1], idx[:, 2]]
 
 
+class HybridSDF:
+    """Grid FAR, exact NEAR: the baked grid answers every query more than `band` from the surface (O(1), independent
+    of how many primitives the scene has) and the analytic field answers the rest -- so the SURFACE and its NORMALS
+    are exact while the marching steps that dominate a trace are cached. Lever 1 (bake once, sample O(1)) without
+    GridSDF's honest trade: no detail is lost, because nothing near the surface is ever read from the grid.
+
+    WHY THE MARGIN IS SAFE. Sphere tracing needs a LOWER bound on the distance. A Lipschitz-1 field sampled at corner
+    spacing h satisfies d(P) >= d(corner) - |P - corner| for every corner, so the trilinear blend (a convex combination)
+    obeys d(P) >= trilinear(P) - h sqrt(3). We return trilinear - h sqrt(3) where that is still > band, else the exact
+    field: every returned value is <= the true distance (never overshoots) and equals it near the surface. Outside
+    the grid box GridSDF's exact box distance applies.
+
+    MEASURED (11-crystal cluster, bake_glass 160x100): culled exact field 5.6 s; hybrid on a 192^3 grid (bake 6 s,
+    once, reused by every render of that seed) -> see NOTES sweep 154. The bake IS the win: an amethyst cluster's
+    field is a deterministic function of its seed, so lever 3 says the grid can be regenerated, never stored."""
+
+    def __init__(self, exact, grid, band=None):
+        self.exact = exact
+        self.grid = grid
+        h = float(np.max(grid._cell))
+        self.margin = h * np.sqrt(3.0)
+        self.band = float(band) if band is not None else 3.0 * h
+        self.eval = self.__call__
+
+    def __call__(self, P):
+        P = np.atleast_2d(np.asarray(P, float))
+        t = self.grid.eval(P)
+        # SYMMETRIC in sign: an interior march (glass, refraction) steps by |d| and spends ALL its points inside the
+        # body, where the signed value is negative. First version handled only the outside and the hybrid came out
+        # 0.8x -- every interior step fell through to the exact field. Shrinking |t| toward zero by the margin is
+        # conservative on both sides.
+        g = np.sign(t) * np.maximum(np.abs(t) - self.margin, 0.0)
+        far = np.abs(t) - self.margin > self.band
+        out = g
+        if not far.all():
+            out = g.copy()
+            out[~far] = np.asarray(self.exact.eval(P[~far]) if hasattr(self.exact, "eval") else self.exact(P[~far]),
+                                   float).ravel()
+        return out
+
+    @classmethod
+    def bake(cls, exact, lo, hi, res, band=None):
+        """Bake `exact` (anything with .eval) into a grid over [lo, hi] and wrap it as a HybridSDF."""
+        return cls(exact, GridSDF.bake(exact, lo, hi, res), band=band)
+
+
 def _selftest():
     """A baked grid reproduces an analytic sphere's SDF to within the cell size, and evaluating it is O(1) in the
     number of primitives -- a many-primitive union costs the SAME to sample once baked."""
@@ -129,5 +175,22 @@ def _selftest():
           % (err, t_analytic / max(t_baked, 1e-6)))
 
 
+def _selftest_hybrid():
+    """The hybrid never exceeds the exact field, and equals it within the band."""
+    class Sph:
+        def eval(self, P):
+            return np.linalg.norm(np.asarray(P, float), axis=1) - 0.5
+    ex = Sph()
+    hy = HybridSDF.bake(ex, (-1, -1, -1), (1, 1, 1), 33)
+    rng = np.random.default_rng(0); P = rng.uniform(-1, 1, (5000, 3))
+    de = ex.eval(P); dh = hy(P)
+    assert np.all(np.abs(dh) <= np.abs(de) + 1e-12), "hybrid must never claim MORE clearance than the exact field"
+    assert np.all(np.sign(dh[np.abs(de) > hy.band + hy.margin]) == np.sign(de[np.abs(de) > hy.band + hy.margin])), "sign kept far from the surface"
+    near = np.abs(de) < hy.band * 0.5
+    assert np.allclose(dh[near], de[near]), "exact within the band"
+    print("hybrid selftest OK: margin %.4f band %.4f" % (hy.margin, hy.band))
+
+
 if __name__ == "__main__":
     _selftest()
+    _selftest_hybrid()

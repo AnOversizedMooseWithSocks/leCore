@@ -1,4 +1,4 @@
 {
- "unmentioned_budget": 2080,
- "why": "recorded by --rebase; may only shrink -- lower it when docs improve"
+ "unmentioned_budget": 1984,
+ "why": "sweep 129, LOWERED from 2080. Half the drop closes a regression this swarm caused (bounded_preview, value_cost, result_contract, validated_call, merge_census reached 2085 with no human document mentioning them; FEATURE_GUIDE section 10 now documents all five with CI-run guide-check blocks, 2085 -> 2080). The rest is sweep 123's named next rung -- the mesh family, the largest and thinnest-covered: FEATURE_GUIDE section 11 groups all 92 mesh verbs by task with six CI-run pipelines, 2080 -> 1984. MEASURED CAVEAT, read before trusting a future drop: this instrument counts a reference to the CALLABLE (name( or .name), not the name -- those mesh verbs were already documented in prose as `mesh_weld` and counted for NOTHING until they were written as `mesh_weld()`. Of the 96 verbs section 11 newly mentions, 33 came from the runnable blocks and 63 from that punctuation change alone (measured: 2080 -> 2047 -> 1984). A budget drop is evidence a doc was written, never evidence it was read. May only shrink."
 }

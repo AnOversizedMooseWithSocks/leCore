@@ -322,6 +322,40 @@ class _UnifiedPart13:
         from holographic.io_and_interop.holographic_codestructure import selftest_census
         return selftest_census()
 
+    def memory_curate(self, rows=None, d=0.5):
+        """CURATION, DECAY AND REFLECTION over the taught partition -- NOOA section 6 item 5, the
+        subsystem COMPETITIVE_NOOA marks leCore PARTIAL on ("recall exists; the curation/decay/
+        reflection subsystem does not"). Returns a MemoryCurator over this mind's own taught log.
+
+        Three legs on one index: DECAY (ACT-R activation per fact, reusing holographic_actr),
+        CURATION (a bounded hot set, everything else demoted), REFLECTION (a re-taught question is
+        ONE fact whose newest answer is current, the older rows superseded with a pointer).
+
+        IT CANNOT DELETE ANYTHING, and that is the design, not an omission. unicron_turn_memory
+        already paid for this lesson -- "eviction is a loss, and a flat file is the reason it was
+        needed" -- so curation DEMOTES to a restorable archive, journals every action with its
+        reason, and `plan()` mutates nothing at all. `apply(write_through=True)` is the only call
+        that touches the partition and `restore(write_through=True)` returns it byte for byte.
+
+        Time is LOGICAL, never wall-clock: a row's birth is its index in the taught log and
+        `observe(q)` takes the next tick, so the same partition curates identically on any day.
+        Fact identity is sha256 of the normalised question.
+
+        Typical use:
+            c = mind.memory_curate(); c.observe("a question someone asked")
+            c.plan(keep=200)          # pure: what curation WOULD do
+            c.apply(keep=200)         # demote to the archive; c.restore() undoes it
+            c.reflect()               # what is hot, what was superseded, and why
+
+        MEASURED, AND SELF-MEASURED -- no public benchmark scores forgetting, decay or
+        consolidation directly, so this is NOT comparable to LoCoMo/LongMemEval/BEAM. Against a
+        recency window over 20 seeds, activation wins by +0.040 [0.032, 0.048] at drift 0.50 and
+        LOSES by -0.031 [-0.041, -0.020] under a complete topic switch; it ties frequency on a
+        stationary process. Activation is the robust middle, not a dominant policy.
+        See holographic_memcurate.MemoryCurator (and curation_benchmark / drift_sweep there)."""
+        from holographic.caching_and_storage.holographic_memcurate import MemoryCurator
+        return MemoryCurator(self, rows=rows, d=d)
+
     def attribute(self, text, name=None):
         """WHO taught this? If the sequence model was fit on (text, source)
         documents, rank the sources by how much of the passage's transitions
@@ -847,10 +881,15 @@ class _UnifiedPart13:
         from holographic.simulation_and_physics.holographic_nbody import nbody_simulate as _f
         return _f(positions, velocities, masses, dt, steps, G=G, softening=softening, record_every=record_every)
 
-    def nbody_step(self, positions, velocities, masses, dt, G=6.674e-11, softening=0.0):
-        """One velocity-Verlet step of N-body gravity -> (positions, velocities, accel). See holographic_nbody.nbody_step."""
+    def nbody_step(self, positions, velocities, masses, dt, G=6.674e-11, softening=0.0,
+                   accel=None):
+        """One velocity-Verlet step of N-body gravity -> (positions, velocities, accel).
+        `accel` passes back the acceleration the PREVIOUS step already returned, so a chained
+        integration does one force evaluation per step instead of two -- the whole reason
+        velocity-Verlet returns it. It was unreachable through this door until sweep 131.
+        See holographic_nbody.nbody_step."""
         from holographic.simulation_and_physics.holographic_nbody import nbody_step as _f
-        return _f(positions, velocities, masses, dt, G=G, softening=softening)
+        return _f(positions, velocities, masses, dt, G=G, softening=softening, accel=accel)
 
     def nbody_accel(self, positions, masses, G=6.674e-11, softening=0.0):
         """Softened Newtonian acceleration on each body from all others (the O(N^2) direct sum). See

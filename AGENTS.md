@@ -54,6 +54,7 @@ Fastest accurate path:
 - [docs/SHOWCASE.md](docs/SHOWCASE.md): what almost every summary misses; what it is not
 - [docs/ISA.md](docs/ISA.md): the instruction set whose programs are hypervectors
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md): the engineering contracts
+- [docs/PLUGINS.md](docs/PLUGINS.md): extending a mind without growing the core — bundled / folder / pip-installed plugins, the contract, what the loader refuses
 - [docs/INSTALLED.md](docs/INSTALLED.md): manifest schema for model cards + what installs into weights (and what cannot)
 - [docs/NOTES_concepts.md](docs/NOTES_concepts.md): the honest lab notebook (wins AND kept negatives)
 - [REFERENCE.md](REFERENCE.md): full generated module reference
@@ -63,7 +64,10 @@ Fastest accurate path:
 - Pure NumPy + Flask + stdlib + hashlib. No torch, no GPU, no learned weights in core.
 - Deterministic: bit-reproducible under any PYTHONHASHSEED; one stated tie rule everywhere.
 - Every claim ships with its measurement; refuted ideas are kept on record as negatives.
-- ~600 modules, one UnifiedMind facade, ~2,000 faculties, 6,300+ tests, audits at 0/0/0.
+- ~800 modules, one UnifiedMind facade, ~2,400 faculties, 7,100+ tests, audits at 0/0/0.
+- Optional dependencies are plugins (`holographic/plugins/`): they bind at construction, can be left out
+  with `plugins=()`, and `mind.plugin_list()` is the honest preflight (available / missing / install).
+  Loading is operator-only (`_plugin_load` is private); `plugin_list` / `plugin_manifest` are public.
 - Approximate search must measure its own recall on YOUR data or demote to exact.
 - Retrieval can refuse (calibrated abstention) instead of hallucinating a match.
 - Programs compile into certified model weights (residual + conditioning +

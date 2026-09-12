@@ -102,15 +102,35 @@ class HolographicVolume:
         weights = [1.0] * len(centers) if weights is None else list(weights)
         return cls(encoder, encoder.bundle(centers, weights), calibration_steps=calibration_steps)
 
-    def optical_depth(self, O, D, L, chunk=4096, _calibrated=True):
+    def optical_depth(self, O, D, L, chunk=4096, _calibrated=True, real_form=False, single=False):
         """Closed-form integral of the field's density along rays [O_r, O_r + L_r D_r]. O, D: (R,n) ; L: scalar or
         (R,). Returns (R,) optical depth (clamped at 0 -- density is non-negative; KDE interference can dip slightly
         negative). This is the marching loop replaced by one inner product per ray. Rays are processed in chunks so
-        the (chunk, dim) complex temporaries stay small (image-scale ray counts would otherwise need many GB)."""
+        the (chunk, dim) complex temporaries stay small (image-scale ray counts would otherwise need many GB).
+
+        `real_form=True` evaluates the SAME sum with real trigonometry: with F_j = a_j + i b_j,
+            Re[ F_j e^{-i phi} (1 - e^{-i w L}) / (i w) ] = [ b_j (cos phi - cos(phi + wL)) + a_j (sin(phi + wL) - sin phi) ] / w
+        (and -> L (a_j cos phi + b_j sin phi) as w -> 0). Four real trig arrays instead of two complex exponentials
+        and a complex divide. MEASURED, 30,000 rays x dim 2048: complex 9.5 s, real float64 10.9 s (a KEPT NEGATIVE --
+        the cost IS the transcendental count, 61M of them either way; agrees to 2e-12), real float32 (`single=True`)
+        2.7 s at 8e-4 relative -- shading-grade, deterministic. Default off so existing results stay bit-identical."""
         O = np.atleast_2d(np.asarray(O, float)); D = np.atleast_2d(np.asarray(D, float))
         R = len(O)
         Lf = np.broadcast_to(np.asarray(L, float).reshape(-1) if np.ndim(L) else np.full(R, float(L)), (R,))
         out = np.empty(R)
+        if real_form:
+            dt = np.float32 if single else np.float64
+            Th = self.Theta.astype(dt)
+            a = np.real(self.F_spec).astype(dt)[None, :]; b = np.imag(self.F_spec).astype(dt)[None, :]
+            for s in range(0, R, chunk):
+                e = min(R, s + chunk)
+                phi = O[s:e].astype(dt) @ Th; omega = D[s:e].astype(dt) @ Th; Lc = Lf[s:e].astype(dt)[:, None]
+                phi2 = phi + omega * Lc
+                small = np.abs(omega) < (1e-6 if single else 1e-7)
+                num = b * (np.cos(phi) - np.cos(phi2)) + a * (np.sin(phi2) - np.sin(phi))
+                lim = Lc * (a * np.cos(phi) + b * np.sin(phi))
+                out[s:e] = np.where(small, lim, num / np.where(small, 1.0, omega)).sum(axis=1)
+            return np.clip(out * (self._cal if _calibrated else 1.0), 0.0, None)
         for s in range(0, R, chunk):
             e = min(R, s + chunk)
             phi_O = O[s:e] @ self.Theta                        # (c, dim) phase at the ray origin

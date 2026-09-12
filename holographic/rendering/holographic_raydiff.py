@@ -101,14 +101,25 @@ def lobe_sigma(P, D2, s, roughness=0.0, light_half_angle=0.0):
 
 def refract_dir(D, N, eta):
     """Snell refraction of unit D through a surface with outward normal N and index ratio eta = n_in / n_out. Returns
-    the refracted unit direction (falls back to the reflection on total internal reflection)."""
+    the refracted unit direction (falls back to the reflection on total internal reflection).
+
+    `eta` may be a SCALAR (one index for every ray -- the original contract, byte-identical) or a PER-RAY array of
+    shape (N,). The per-ray form is what lets ONE ray set carry a whole spectrum: give each ray its own wavelength,
+    hence its own index, and refract them all in one pass -- instead of re-tracing the scene once per wavelength
+    band, which is how a spectral render costs count-of-wavelengths times a monochrome one."""
     D = np.atleast_2d(D).astype(float); N = np.atleast_2d(N).astype(float)
+    eta = np.asarray(eta, float)
+    if eta.ndim > 0:                                           # per-ray: (N,) -> broadcast against (N,) then (N,3)
+        eta = eta.reshape(-1)
+        if eta.shape[0] != D.shape[0]:
+            raise ValueError("per-ray eta needs one value per ray: got %d for %d rays" % (eta.shape[0], D.shape[0]))
     cosi = -(D * N).sum(1)
     flip = cosi < 0                                            # ensure the normal faces the incoming ray
     N = np.where(flip[:, None], -N, N); cosi = np.abs(cosi)
     k = 1.0 - eta * eta * (1.0 - cosi * cosi)
     tir = k < 0
-    T = eta * D + (eta * cosi - np.sqrt(np.maximum(k, 0.0)))[:, None] * N
+    eta_col = eta[:, None] if eta.ndim else eta                # (N,1) against D's (N,3); a scalar stays a scalar
+    T = eta_col * D + (eta * cosi - np.sqrt(np.maximum(k, 0.0)))[:, None] * N
     refl = D - 2.0 * (D * N).sum(1)[:, None] * N
     return np.where(tir[:, None], refl, T / (np.linalg.norm(T, axis=1, keepdims=True) + 1e-12))
 

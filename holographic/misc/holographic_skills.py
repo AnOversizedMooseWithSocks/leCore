@@ -75,11 +75,35 @@ def mind_methods():
     return _MIND_METHODS
 
 
-def complete(prefix, k=15):
+def plugin_methods(mind):
+    """Plugin-contributed verbs on `mind`, in the same record shape as the class methods.
+
+    ONE HOME for the fold-in, because manifest() and complete() disagreeing about whether a
+    verb exists is exactly the class of bug this whole path was built to remove. Returns []
+    for None, for a mind with no plugins, and for an object that has no plugin door at all --
+    so a caller passing a fake/duck-typed mind in a test never crashes here."""
+    host = getattr(mind, "plugin_manifest", None)
+    if not callable(host):
+        return []
+    out = []
+    for rec in host():
+        out.append({"kind": "method", "name": rec["name"], "call": rec["call"],
+                    "summary": rec.get("summary", rec.get("description", "")),
+                    "plugin": rec.get("plugin", "")})
+    return out
+
+
+def complete(prefix, k=15, mind=None):
     """Method-name AUTOCOMPLETE: UnifiedMind methods starting with `prefix` (sorted), each with its signature -- what
     an agent (or an IDE) offers as you type `mind.<prefix...`."""
     p = str(prefix).lower()
-    ms = mind_methods()
+    ms = dict(mind_methods())
+    # COPY, then fold in plugin verbs: mind_methods() returns the module-level CACHE, and
+    # mutating it would leak one mind's plugins into every other caller in the process.
+    for rec in plugin_methods(mind):
+        call = rec["call"]
+        ms[rec["name"]] = {"signature": call[call.find("("):] if "(" in call else "(...)",
+                           "summary": rec["summary"]}
     hits = sorted(n for n in ms if n.lower().startswith(p))
     return [{"name": n, "signature": ms[n]["signature"], "summary": ms[n]["summary"]} for n in hits[:k]]
 
@@ -175,9 +199,15 @@ def skill_card(name):
     return None
 
 
-def manifest(include_methods=True):
+def manifest(include_methods=True, mind=None):
     """The full machine-readable skill list: every curated capability home, plus (optionally) every UnifiedMind method
-    with its signature. What an agent loads ONCE to know the whole surface it can drive."""
+    with its signature. What an agent loads ONCE to know the whole surface it can drive.
+
+    `mind` (optional) folds in that mind's PLUGIN verbs. WHY IT IS OPTIONAL AND WHY IT MATTERS: the method list
+    below is read off the UnifiedMind CLASS and cached module-wide, so a verb a plugin bound to an INSTANCE was
+    measurably callable via mind.invoke() yet absent from this manifest -- i.e. from GET /tools, which is the only
+    place an agent learns what it may call. Passing the mind closes that gap. Omitting it returns the previous
+    result byte for byte, so every existing caller is unaffected."""
     cat = _catalog()
     caps = [{"kind": "capability", "name": c.name, "does": c.does, "example": c.example, "aliases": list(c.aliases)}
             for c in cat.all()]
@@ -186,6 +216,10 @@ def manifest(include_methods=True):
     ms = mind_methods()
     methods = [{"kind": "method", "name": n, "call": "mind.%s%s" % (n, ms[n]["signature"]),
                 "summary": ms[n]["summary"]} for n in sorted(ms)]
+    # PLUGIN VERBS, appended after the class methods so the core ordering never shifts.
+    # A plugin verb cannot collide with a core faculty (holographic_plugin refuses to bind
+    # one that would), so this is an append and never a merge.
+    methods.extend(plugin_methods(mind))
     return {"capabilities": caps, "methods": methods, "counts": {"capabilities": len(caps), "methods": len(methods)}}
 
 

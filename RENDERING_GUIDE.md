@@ -447,3 +447,410 @@ tax.
 *Kept negative:* this does **not** dissolve the `splatsharpen` negative, contrary to the prediction that motivated
 it. That negative was recorded on a sharp edge, and there the lift buys +0.2 dB. Widening a basis pays only when the
 widening matches the content's structure.
+
+
+## 10. Colour that is actually light: spectral rendering
+
+Everything above treats colour as three numbers. Real optics does not: a prism splits light because
+glass bends each *wavelength* differently, and no amount of RGB arithmetic will produce that. This
+section is the spectral path — three doors, and they compose.
+
+### 10a. Wavelength → refractive index (`sellmeier_ior`, `abbe_number`)
+
+```python
+m.sellmeier_ior(587.5618, "BK7")   # 1.5168 — the index opticians quote for the helium d-line
+m.abbe_number("SF11")              # 25.68 — LOW means it disperses hard
+```
+
+Three glasses ship: `BK7` (crown, Abbe 64.2, a gentle rainbow), `SF11` (flint, 25.7, a strong one)
+and `fused_silica`. Pick by Abbe number: if you want visible colour separation, pick the flint.
+
+### 10b. A caustic with its colour (`spectral_caustics`)
+
+```python
+sphere = lambda p: np.linalg.norm(p, axis=-1) - 1.0
+out = m.spectral_caustics(sphere, glass="SF11", count=16, receiver_y=-1.6, extent=2.5, res=256)
+out["rgb"]              # (256, 256, 3) — the rainbow
+out["per_wavelength"]   # (16, 256, 256) — each wavelength on its own, for when the sum surprises you
+```
+
+`count` and `u` are Hero Wavelength Spectral Sampling (Wilkie et al., EGSR 2014) — the standard way to
+pick which wavelengths to trace. **`anchors=k` is the shortcut past it.** The per-wavelength layers are
+a rank-3 family (99.94% of the SVD energy in three singular values), so tracing three of them
+reconstructs all sixteen: measured 4.9× at relative RGB error 0.0072, keeping 100.1% of the chromatic
+saturation. `anchors=None` (the default) traces every wavelength and is byte-identical to the
+un-accelerated path, so turning this on is always your choice.
+
+Sanity check while you work: a **monochrome** caustic through the same observer has saturation exactly
+0.0. If your spectral render is grey, the spectrum collapsed somewhere.
+
+### 10c. RGB → a physical spectrum (`rgb_to_spectrum`, and its cheap path)
+
+The doors above need a *spectrum*, and every material you author is RGB. This is the way in:
+
+```python
+coeffs = m.rgb_to_spectrum_coeffs((0.95, 0.35, 0.25))   # fit ONCE — three numbers
+m.spectrum_from_coeffs(coeffs, [450.0, 550.0, 650.0])   # then sample anywhere, ~6 flops
+```
+
+The function space is Jakob & Hanika's (Eurographics 2019): a sigmoid of a quadratic, whose three
+coefficients are the whole material. The sigmoid keeps the reflectance inside `[0, 1]`, so a fitted
+material can never invent energy. Round-trip error over the sRGB gamut is ~1e-13 — the paper's
+zero-error claim — and unlike the paper there is **no 9 MiB lookup table**, because the fit is solved
+on demand from a closed-form seed.
+
+**Two things will bite you, so they are said plainly.**
+
+*The fit costs ~0.6 ms. It is bake-once.* Fit each **material**, keep the coefficients, and use
+`spectrum_from_coeffs` in the loop. Fitting per pixel would take twenty minutes for one 1080p frame.
+`m.rgb_to_spectrum_coeffs(texture)` accepts a whole image and de-duplicates repeated colours for you.
+
+*Use `reflectance_to_rgb`, not `spectrum_to_rgb`, to go back.* `spectrum_to_rgb` is built for
+**emission**, and it fails in two different ways depending on its mode — neither of which announces
+itself. With `mode="none"` it divides XYZ by a constant calibrated for blackbody radiance, so a
+reflectance in `[0,1]` clips to **black**. With the default `mode="hue"` it discards luminance and
+renormalises, so you get a **plausible-looking but wrong** colour, which is the more dangerous of the
+two. They are simply different physical quantities:
+
+```python
+sp = m.rgb_to_spectrum((0.8, 0.2, 0.2))
+m.reflectance_to_rgb(sp)          # [0.8, 0.2, 0.2] — closes to machine precision
+m.spectrum_to_rgb(sp)             # [1.0, 0.483, 0.472] — wrong, and looks fine
+m.spectrum_to_rgb(sp, mode="none")# [0.0, 0.0, 0.0] — wrong, and looks broken
+```
+
+### 10d. All three together
+
+`applications/demoscene/spectral_glass.py` is the worked example — an RGB tint becomes a reflectance,
+the reflectance weights each hero wavelength, and each wavelength is traced at its own Sellmeier index:
+
+```python
+m.app_run("spectral_glass", tint=(0.95, 0.35, 0.25), glass="SF11")
+```
+
+Run `m.app_run("prism")` for the dispersion half on its own.
+
+### 10e. Dispersion in the VIEW path (`dispersive_render`, `cauchy_ior`)
+
+Sections 10a–10d are the *light* path: light through glass onto a receiver. This is the *camera* path —
+what you see looking **through** glass, where every internally refracted edge splits into rainbow
+fringes. It is the effect Blender exposes as the Glass BSDF's dispersion slider.
+
+```python
+m.dispersive_render(scene, camera, glass="SF11", count=12,
+                    width=288, height=288, spp=40, material=my_material, sky=studio)
+```
+
+Wherever your material returns a non-zero IOR, that IOR is replaced by each wavelength's own — so an
+existing scene becomes dispersive without rewriting its material.
+
+**Two things decide whether you see anything, and both are measured.**
+
+*Light the scene with structure.* The view path splits colour only where the **refracted image has
+edges**. Under a smooth gradient sky every wavelength sees the same picture and chromatic saturation
+sits at **0.25** — visually grey. Against a studio sky with HDR ceiling panels the same scene measures
+**0.46**. If your dispersive glass looks colourless, the environment is the first thing to check.
+
+*The band defaults to 420–680 nm.* Outside it the CIE curves nearly vanish, and the observer's hue-lift
+then divides by almost nothing — an early version rendered 380 nm as blue and 713 nm as yellow.
+
+**Authoring by slider, the way other renderers do it.** When you have a catalogued glass, name it. When
+you have two numbers, `cauchy_ior(nm, n_d, abbe)` is Cauchy's `n = A + B/λ²` solved from the Abbe
+definition — the same parameterisation Cycles, LuxCore and Octane share, so a material transfers by its
+numbers rather than by eye:
+
+```python
+m.cauchy_ior(450.0, n_d=1.5168, abbe=25.0)   # low Abbe = strong dispersion
+```
+
+**Cost is honest and large:** one full path trace *per wavelength*, ~107 s at 288×288 spp40 on this
+NumPy CPU brain. `anchors=` is accepted but does **not** pay here — path-traced layers carry Monte
+Carlo noise, and noise is full-rank, so interpolation reproduces neither the signal nor the noise. That
+lever belongs to the deterministic caustic path in 10b.
+
+### 10f. Getting a caustic INTO a render (`caustic_pass`, `composite_caustic`)
+
+Sections 10a–10b cast a caustic onto its own image. Getting one into a *rendered scene* is a different
+problem, and the direct approach does not work: **brute-force path tracing is the wrong algorithm for a
+caustic.** The tracer has no next-event estimation, so light is gathered only when a bounce happens to
+hit an emitter — and a caustic needs a small bright source, which is exactly what random sampling
+almost never hits. Measured while trying: raising the key light from 95 to 220 to strengthen the
+caustic made the raw grain **worse**, 0.76 → 1.19. Every extra stop concentrates the same light into
+fewer, hotter, rarer paths. That is the estimator, not a setting.
+
+So use the algorithm built for each path and composite — what production renderers do with a
+photon-mapped caustic pass:
+
+```python
+# 1. beauty: however you like (dispersive_render for glass with fringes)
+# 2. caustic: forward-traced, deterministic, clean
+cs = m.spectral_caustics(glass_sdf, glass="SF11", count=16, light_dir=travel,
+                         receiver_y=FLOOR_Y, window=1.5, center=(0.0, 0.0))
+# 3. project onto the camera's view of the floor — SAME window and center
+px = m.caustic_pass(cs["rgb"], camera, W, H, plane_y=FLOOR_Y, window=1.5,
+                    center=(0.0, 0.0), occluder_sdf=glass_sdf)
+final = m.composite_caustic(beauty, px, strength=1.1)
+```
+
+The projection is **exact**: a plane is analytic, so each pixel's floor hit is a closed-form ray/plane
+intersection — no G-buffer, no reprojection error. Two things to get right:
+
+*Pass `occluder_sdf`.* Without it the caustic paints straight over the object casting it, which looks
+exactly like a rendering bug.
+
+*Use the same `window` and `center` in both calls.* They are what turn a world position into a texel.
+
+**Limits, both measured.** This is a **plane-only** pass — curved or multiple receivers need a real
+photon map, which is a different build. And `strength` is normalised by the pattern's 99th percentile
+(its peak is a few colliding splat cells, an outlier); that statistic needs enough lit pixels to be
+stable — one 500× spike moves the normalised body by 99.8% at 65 lit pixels and by **0.0%** at 200 or
+more. Real caustics light thousands, so this bounds degenerate inputs, not normal use.
+
+### 10g. Lighting a glass render so both effects are visible
+
+Both dispersion and caustics want the same thing — **high contrast** — and the same mistakes kill both.
+
+*A bright uniform sky is the enemy.* At sky mean 0.68 the floor sits at 0.57 and a caustic, which is a
+*ratio* above its surroundings, has nothing to stand out from; the glass has no dark background to
+fringe against. A dark surround with small very bright emitters is how glass is photographed, and it is
+what these renders use: ~2.5% of the sphere emitting, 180:1 contrast.
+
+*`aces_tonemap` has auto-exposure and is scale-invariant.* Scaling its input by 0.25× or 4× changes the
+output by under 0.001, so hand-computed white points are silently ignored. Its actual control is `key`
+— the middle-grey target. The default 0.18 is wrong for a dark studio plate: it lifts black background
+to 0.38 grey. Lower the key, don't raise the exposure.
+
+*The post chain owns the tonemap.* `post_process`'s default chain is
+`exposure → bloom → aces → chromatic_aberration → vignette → film_grain → gamma`. It takes **linear
+HDR**. Feeding it an already-graded image applies ACES twice and washes the frame out. Build the chain
+explicitly for a denoised render — drop `film_grain` (it puts back the grain SVGF just removed) and
+turn `bloom` up, because a caustic is focused light and bloom is what makes focused light read as
+*bright* rather than merely white.
+
+### 10h. Renders that outlive their process (`render_progressive`)
+
+A path trace is normally one long call: it either finishes or it did not happen. In a limited
+environment that caps the quality you can *ever* reach — if a render needs forty minutes and the
+process gets ten, you never get it, however many times you try.
+
+```python
+jid = m.render_progressive("path_trace", args, n_buckets=24, spp=24, workers=2)
+m.progressive_render_for(jid, 90)        # spend the time you have, then checkpoint
+m.progressive_preview(jid)               # the image SO FAR — a real render of fewer samples
+m.progressive_checkpoint(jid)            # explicit save before you lose the process
+# ... new process, later ...
+m.progressive_restore(jid); m.job_resume(jid)
+```
+
+**Why this needs no new machinery.** Monte Carlo samples are iid, so an image is a *mean of batches* —
+order does not matter, and batches can be computed anywhere, any time, and combined by addition. That
+is exactly the `(buckets, sum, checkpoint)` shape `holographic_jobs` already runs, so pause, resume,
+restart-survival and the network farm all come free. It fixes `job_submit`'s own declared limit
+("ATOMIC. One bucket… do not expect a partial render") by splitting the **samples** rather than the
+image.
+
+**Verified as equality, not similarity.** A render paused at 5/10 buckets and resumed is
+**byte-identical** to one that ran straight through — and so is one paused in one process and finished
+in a completely different one. `workers=N` runs buckets on separate processes and is byte-identical
+too: measured 10.4s → 5.9s on 2 workers on a 2-core box (1.76×, 88% efficiency; 4 workers gave 1.91×
+on those same 2 cores, which is oversubscription, not scaling).
+
+**Every bucket needs its own seed**, and `sample_buckets` exists so you cannot get that wrong by hand.
+The tracer is deterministic in its seed — that is what the engine's reproducibility rests on — so N
+buckets at one seed return N copies of the same image, whose mean is that image. You would render for
+an hour, get the noise of one bucket, and the progress bar would say it worked.
+
+**What survives a restart, and what does not.** The scene is checkpointed as its SDF DSL string and the
+camera as its numbers (both round-trip bit-exactly, verified on a twisted/rotated/translated torus). A
+sky given as `{"model": {...}}` is rebuilt from its parameters. A **material callback cannot be
+checkpointed** — it is an arbitrary Python function, and there is no honest way to serialise one. Such
+a render runs and pauses fine but reports `persisted=False`; for one that must survive a restart,
+describe the scene as a scene document (JSON by construction) rather than handing a closure to a
+checkpoint.
+
+**Buckets are equal on purpose.** Equal spp keeps the readout a plain mean and the reducer the stock
+`"sum"`; unequal buckets would need a weighted mean, a wider checkpoint format, and a new way to be
+subtly wrong. The cost is that `spp` granularity is the bucket size — choose it for the pause
+responsiveness you want.
+
+---
+
+## 10i. Baking a big mesh into a field without getting OOM-killed
+
+If a `mesh_to_sdf_grid` / `mesh_distance_grid` call dies with no traceback — just `Killed` — the process
+hit the OOM killer, and until sweep 148 that happened on this repo's own test asset above ~112³.
+
+**It was never the output.** A 176³ float64 grid is 43 MB. The cost was in the kernel underneath:
+`point_set_to_mesh_grid` materialises a `(N, (2r+1)^3, 3)` neighbour block plus a candidate edge list —
+**36.8 KB of peak RSS per query at radius 2**, linear in N. A 176³ surface shell is ~1M voxels, so it
+demanded ~37 GB to produce that 43 MB answer.
+
+It now streams. Ask what a budget buys before you start:
+
+```python
+m.mesh_query_chunk(radius=2)                          # 14208 queries per block at the default 512 MB
+m.mesh_query_chunk(radius=3)                          #  5178 -- cost scales with RADIUS, not mesh size
+m.mesh_query_chunk(radius=2, max_bytes=64*1024**2)    # a tighter budget buys a smaller block
+```
+
+and raise or lower the budget on the call itself:
+
+```python
+d = m.mesh_point_distance(mesh, points, radius=2, signed=True, max_bytes=1024**3)
+```
+
+Chunking is **exact**: bit-identical at any chunk size, signed and unsigned, pinned by
+`tests/test_meshdistance_stream.py`. `max_bytes` and `chunk` cannot change your answer, only your
+peak memory. Measured: 200k queries went from OOM-killed to 0.579 GB, and 800k queries — four times the
+work — to 0.624 GB.
+
+### Do not decimate to fit a bake
+
+The decimate-first habit existed to dodge the ceiling above. Measured on a 151,582-face `.glb` at the
+same 192³, decimating to 29,594 faces first:
+
+| | surface normals disagreeing >20° | signed interior |
+|---|---|---|
+| decimated (29,594 faces) | 1.5% | 0.073 |
+| full (151,582 faces) | 0.1% | 0.178 |
+
+Less than half the body was being signed as solid — glass renders were refracting through a partly
+hollow object. Bake the full mesh.
+
+### Signing a scan soup without paying for it everywhere
+
+`sign="winding"` is the robust answer for an imported `.glb` (see 10c), but it prices the generalised
+winding number at **every voxel** — 38.8 minutes for a 192³ bake of that ladybird. Most of that is spent
+where the answer was never in doubt.
+
+```python
+grid, axes = m.mesh_to_sdf_grid(mesh, bounds, res=192, sign="winding_flood")
+```
+
+Winding signs only the **band** — a watertight blocking shell is all `flood_fill_sign` needs — and the
+flood does the interior. The band is O(surface area) and its share of the volume *falls* as resolution
+rises (17.5% of voxels at 128³, 11.6% at 192³, 8.4% at 288³), so it saves most where the full path hurts
+most. Paired at 128³: **519.5s → 237.9s, with 0 of 2,097,152 voxels differing in sign** and the marched
+meshes vertex-identical.
+
+**It is not a drop-in replacement, and it tells you so.** The two methods answer different questions —
+`winding` asks *is this point enclosed by the solid angle*, `winding_flood` asks *can this point escape to
+the grid boundary*. They agree only when no opening lets the grid flood walk in. A hole 0.8 band widths
+across already flips 5% of voxels, and it **under**-fills, which would ship a silently hollow object. So
+the path verifies against a random winding subsample and raises rather than returning it:
+
+```
+ValueError: sign='winding_flood' disagrees with the solid-angle answer on 5.1% of a 4096-point
+sample (tolerance 1.0%). ... Use sign='winding' ... or pass verify=0 ...
+```
+
+Pass `verify=0` only if you deliberately want the connectivity answer.
+
+### Budget for the render afterwards
+
+A correctly-signed field is **more expensive to render**, and that is the right direction: rays now spend
+their bounces refracting through a body instead of passing through a hollow shell. Measured at
+160×100×8spp on the same scene: **26.8s at 8 bounces, 17.9s at 4, 12.1s at 2**. Field smoothing does not
+help (26.8s unblurred vs 27.4s blurred) and, at these resolutions, makes the normals slightly worse
+(0.5% → 0.7%) while eating thin features — the 2× 1-2-1 blur from sweep 147 is superseded. Re-plan
+sample budgets against the corrected field, or run the pass through `m.render_progressive` (§10g) so it
+can be paused and resumed.
+
+---
+
+## 10j. The holographic render path — read this before reaching for `path_trace`
+
+This engine renders by **projecting from a superposition**. Sections 10a–10i above are the conventional path
+(Monte-Carlo, hero wavelengths, photon-splat caustics, progressive buckets); they work, and they are how Cycles
+does it. They are not how *this* engine was built to do it, and for eleven sweeps they were the only path the
+catalog would surface. `docs/RENDER_PATH_AUDIT.md` has the full account. The short version:
+
+```python
+m.plan_render(objects, frames=8, relight=True)      # what the adaptive pipeline WOULD do, with reasons
+m.render_adaptive(objects, cam, ...)                # one call: bake / collapse / trace chosen from measured break-evens
+sc = m.bake_scene(sdf, cam, w, h, methods, colors)  # trace visibility ONCE; every frame after is...
+m.render_baked(sc, light)                           # ...a dot product. 57x per relight.
+m.radiance_transfer(sdf, pts, normals)              # PRT: the "collapse the wave function" answer to path tracing
+m.holographic_fog_volume(centers, weights, bounds)  # density as ONE vector; ray integral in closed form; no marching
+```
+
+And for caustics, the substrate version:
+
+```python
+h = m.holographic_caustic(sdf, light_dir=L, receiver_y=FLOOR, extent=..., window=..., dim=4096, aim=CTR)
+img = h.read_rgb(xs, zs, m.wavelength_cmf)           # trace once, bundle; read at ANY resolution; RGB = three unbinds
+h.translate(dx, dz)                                  # move the caustic with one bind
+```
+
+Read the caustic's kept negatives before trusting its colours: it is capacity-bounded (√dim cells per axis), the
+λ crosstalk floor is ~0.75 at dim 2048, and the plain `spectral_caustics` histogram is faster on an analytic SDF.
+Its wins are resolution independence, composability and a one-pass spectrum. The build that attacks the actual
+render-time problem — a per-pixel spectral-refractive transfer, PRT generalised — is the named next rung.
+
+### 10k. Glass in seconds: `bake_glass` / `env_field` / `relight_glass`
+
+```python
+bake = m.bake_glass(sdf, cam, 320, 200, n_d=1.55, abbe=25.68, dispersion_scale=4.0, floor_y=FLOOR)   # 1.6 s, once
+env  = m.env_field().add_sky(m.studio_sky("classic"))                                                # the light as a field
+env.add_softbox(position, target, w, h, intensity, color=(1, .98, .94))                             # superposition: just add
+img  = m.relight_glass(bake, env, sdf=sdf, sun_dir=KEY)                                              # ~7 s, no tracing
+```
+
+Change the light, call `relight_glass` again — the bake does not change. Measured on the 1-fold Mandelbox: the MC
+path tracer took ~5 minutes at 192 spp and was still grainy; bake + two relights took under 20 seconds with no
+noise. Internal TIR bounces are followed deterministically (up to `max_internal=4`; 3% of glass-wavelength pairs
+are still lost past the cap). The env field is a kernel estimate, so a sharp light seen *through* the glass reads
+soft. Composite the floor caustic separately (`holographic_caustic` / `caustic_pass`).
+
+### 10l. Crystals as gems: HDRI base + extra lobes, rock and glass apart
+
+```python
+env = m.hdri_env(hdri)                                   # the photograph is the base light (floor irradiance, reflections)
+E0, share = float(env.floor_irradiance.mean()), env.sun_share
+m.env_add_light(env, KEY, sigma=0.045, irradiance=1.4 * E0 * max(share, 0.15))   # a key, sized by what it ADDS to the floor
+m.env_add_light(env, RIM, sigma=0.06,  irradiance=0.5 * E0 * max(share, 0.15))   # a rim behind the stone, for the facets
+s     = m.crystal_single("quartz", 0.95)                               # or crystal_cluster(..., cull=True)
+grid  = m.bake_sdf(s, lo, hi, 256)                                     # many crystals? bake the union once, trace the grid (4x)
+bake  = m.bake_glass(grid, cam, W, H, material="amethyst", floor_y=FLOOR, samples=2)
+img   = m.relight_glass(bake, env, sdf=grid, sun_dir=tuple(env.dominant_dir), material="amethyst")
+# geode: rock is opaque, only the lining is glass
+rind, lining = m.crystal_geode(parts=True, clip_to_skin=True, skin_margin=0.025, cull=True, count=90, size=0.21)
+bake  = m.bake_glass(m.crystal_cut(lining, n, p), cam, W, H, material="amethyst", opaque=m.crystal_cut(rind, n, p))
+img   = m.relight_glass(bake, env, opaque_albedo=(0.40, 0.36, 0.33), ...)
+```
+
+Three rules that came out of measurement. **Size lights by irradiance, set brightness by exposure**: a lobe of
+peak radiance 3000 made the map irrelevant (0.96 share); `irradiance=` keeps the HDRI as the base, and the frame's
+exposure is `EV = log2(0.22 / median floor luminance)` — no clipped pixels in any frame. **Measure the caustic
+strength** with `caustic_concentration` (the 99th-percentile landings-per-emitter-cell: 3–5x for these bodies) —
+the Lambert term alone made the hotspot dimmer than the floor. **Bake many-crystal unions to a grid**: the exact
+union costs per *call* (~1 ms fixed), a march makes thousands of calls, and a 256³ trilinear grid reproduces planar
+facets exactly — 4x faster with a 1.2% mean difference. The culled union (`cull=True`, 8x on bulk queries) and the
+hybrid grid-far/exact-near field (`bake_sdf(..., exact_near=True)`, 0.9x) are both there, measured, and the
+numbers say which to use for a render. A bowl-shaped geode must be lit from its open side; a key from behind the
+rind is correctly dark.
+
+Textures and backdrop (154b): `floor_albedo` / `opaque_albedo` accept callables — a checkerboard is a parity test on
+`floor(x/s)+floor(z/s)`; rock is a baked holographic fBm (`procedural_noise(...).sample_grid_fast(48)`) read through
+`GridSDF`, used both to displace the rind (×0.6 to stay Lipschitz) and to darken its pits. `background=(r,g,b)` keeps
+the HDRI as light but not as backdrop. Pass `receiver_mask=bake.floor.reshape(H,W)` to `composite_caustic` so the
+projected caustic stays off the body, and `occluder=rind` to `spectral_landings` so rock blocks light — the geode's
+floor caustic then honestly vanishes (125k landings → 25).
+
+### 10m. Imperfections inside the gem, holographically (sweep 155)
+
+```python
+cloud = m.crystal_cloudiness(freq=7.0, seed=5)                          # any P -> [0,1] field
+fv    = m.gem_flaw_volume(field=lambda P: cloud(P) * base_weight(P), bounds=bb, res=22, dim=2048)   # ONE hypervector
+zone  = m.gem_flaw_volume(field=lambda P: tip_weight(P), bounds=bb, res=18, dim=2048)              # where the colour is
+img   = m.relight_glass(bake, env, material="quartz", flaw_volume=fv, flaw_sigma=14, flaw_albedo=(0.96, 0.94, 0.95),
+                        absorb_volume=zone, absorb_volume_sigma=(6, 12, 2.4),            # amethyst: purple at the tips
+                        opaque=..., opaque_bounce=1.2, opaque_bounce_where=in_cavity)    # a lit white cavity wall
+```
+
+The bake records each pixel's interior path (entry → TIR bounces → exit) as segments; the flaw density is one FPE
+vector and every segment reads its integral in closed form (`holographic_volint`) — no marching inside the crystal.
+`flaw_sigma` carries the physical scale (the density is [0,1]): a 0.11 druse point needs ~14, a 0.42 cluster ~3.5.
+Mixed minerals: `crystal_geode(habit=("quartz","quartz","needle"), size={"quartz": 0.115, "needle": 0.13})` — each
+habit keeps its own lattice. Measured limits are in NOTES sweep 155: 12% vs a marched reference, ~10% crosstalk
+floor, and a uniform environment is invariant under the glow (white furnace), so judge it under a real map.

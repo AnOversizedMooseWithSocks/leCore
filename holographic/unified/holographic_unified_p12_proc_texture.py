@@ -830,13 +830,13 @@ class _UnifiedPart12:
         from holographic.rendering.holographic_lens import deflect
         return deflect(query, attractors, masses=masses, sigma=sigma, strength=strength)
 
-    def detect_caustic(self, query, attractors, masses=None, sigma=0.5):
+    def detect_caustic(self, query, attractors, masses=None, sigma=0.5, significant=0.5):
         """Routing-ambiguity (caustic) score at a query: high when the two strongest attractors pull in opposite
         directions with similar strength -- a fold/decision-boundary where a tiny move flips the winner.
         Complementary to RecallNull ('is this a match?') -- this asks 'is this AMBIGUOUS between matches?'. Returns
         (caustic_score in [0,1], n_significant_attractors). See holographic_lens.detect_caustic."""
         from holographic.rendering.holographic_lens import detect_caustic
-        return detect_caustic(query, attractors, masses=masses, sigma=sigma)
+        return detect_caustic(query, attractors, masses=masses, sigma=sigma, significant=significant)
 
     def navigate_field(self, query, attractors, masses=None, sigma=0.5, strength=0.6):
         """Climb the attractor field from a query toward an attractor (iterated, decaying-step deflection),
@@ -955,21 +955,6 @@ class _UnifiedPart12:
         correctness CI-testable on a runner with no GPU."""
         from holographic.io_and_interop.holographic_wgpurun import device_info
         return device_info()
-
-    def run_wgsl_kernel(self, fn, data, extra_args=(), workgroup=64):
-        """RUN AN ANNOTATED PYTHON KERNEL ON ANY GPU via its own WGSL projection (holographic_wgpurun).
-        emit_kernel already turned `fn` into WGSL; this wraps it in a @compute entry point with storage
-        bindings and a bounds guard, dispatches it, and returns float32.
-        SCOPE: elementwise maps over a 1-D array, f32 only (WGSL has no f64). A bounded `for range(N)` is
-        fine; a CROSS-INVOCATION REDUCTION -- what bundle and cleanup need -- is not solved here.
-        RAISES rather than falling back when wgpu is absent: a caller who explicitly asked for the device
-        path deserves to know they did not get it. (use_gpu falls back silently, which is right for a
-        transparent accelerator and wrong for an explicit request.)
-        Use verify_wgsl_kernel to check the projection against the Python original on your own data --
-        exactness holds for single-expression kernels and NOT for accumulating ones."""
-        from holographic.io_and_interop.holographic_wgpurun import run_kernel
-        from holographic.io_and_interop.holographic_emit import emit
-        return run_kernel(emit(fn, "wgsl"), fn.__name__, data, extra_args=extra_args, workgroup=workgroup)
 
     def wgsl_reduce(self, op, data, workgroup=64):
         """REDUCE A 1-D ARRAY ON ANY GPU: 'sum' | 'max' | 'min' (holographic_wgpurun, W1).

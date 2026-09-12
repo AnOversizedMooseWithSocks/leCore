@@ -26,6 +26,12 @@ Pick your seat; read two documents, not fifty.
 2. **REFERENCE.md** (generated) and **docs/FEATURE_GUIDE.md** for depth.
 3. **docs/UNICRON_INSTALL.md** for installing leCore *inside* a model
    (AlphaEdit-protected; qwen3.5:0.8b runbook included).
+4. **Building an APP on the engine** (an editor, a modeller, a tool other apps
+   must talk to): **docs/APP_FOUNDATION.md** — one mind, the `.lews` workspace
+   (docs/LEWS_SPEC.md), the standard agent surface, swarms, jobs, memory, gates;
+   every snippet runs in CI. `python3 tools/app_lint.py <app>` checks an app tree
+   against it. Audits of the two existing apps: docs/LESTUDIO_AUDIT.md,
+   docs/POLYSTUDIO_AUDIT.md.
 
 ## "I want the history and the proofs"
 - **CHANGELOG_lever7.md** — 80 checkpoint entries, every number with its command.

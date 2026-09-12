@@ -294,6 +294,38 @@ _ABSORB = {
     "water_deep": (0.35, 0.12, 0.05),
 }
 
+# ABBE NUMBERS -- how strongly each transmissive material DISPERSES (lower = more colour spread). The library had an
+# index and a Beer-Lambert absorption per gem but no dispersion at all, so a 'ruby' could never split light: every
+# spectral render took its dispersion from a hand-typed BK7/SF11 constant regardless of material. Catalogue values
+# (V_d = (n_d-1)/(n_F-n_C)): diamond's famous "fire" is a MODEST Abbe number (44.3) acting on a very high index
+# (2.42) -- the two together make the spread; sapphire/ruby are corundum (72.2, low dispersion), emerald is beryl
+# (56), quartz 70, ice ~ water (55.7), the clear glass entry is BK7 (64.2) and the tinted one a flint-ish 40.
+_ABBE = {
+    "diamond": 44.3, "sapphire": 72.2, "ruby": 72.2, "emerald": 56.0, "amethyst": 70.0, "quartz": 70.0,
+    "jade": 60.0, "ice": 55.7, "water": 55.7, "water_deep": 55.7, "oil": 45.0, "honey": 50.0,
+    "glass_clear": 64.2, "glass_tinted": 40.0,
+}
+_CLASS_ABBE = {"glass": 64.2, "gem": 60.0, "liquid": 55.7}
+
+
+def glass_optics(name):
+    """ONE DOOR for a transmissive material's optics: {'n_d', 'abbe', 'absorb' (per-RGB Beer-Lambert sigma),
+    'tint'} -- everything a physically-based glass render needs to disperse, refract and colour it. Reads the
+    library's index (_IOR), dispersion (_ABBE) and absorption (_ABSORB) tables so 'ruby', 'diamond', 'water' mean the
+    same thing to bake_glass, spectral_caustics and the path tracer. Raises KeyError for a material that is not
+    transmissive (an opaque preset has no index to refract with)."""
+    if name not in RENDER_MATERIALS:
+        raise KeyError("unknown material %r" % (name,))
+    cls, rgb, metallic, rough, emis, alpha = RENDER_MATERIALS[name]
+    if name not in _IOR and cls not in _CLASS_IOR:
+        raise KeyError("%r is not a transmissive material (class %r has no index of refraction)" % (name, cls))
+    n_d = _IOR.get(name, _CLASS_IOR.get(cls, 1.5))
+    abbe = _ABBE.get(name, _CLASS_ABBE.get(cls, 60.0))
+    absorb = _ABSORB.get(name, (0.0, 0.0, 0.0))
+    return {"name": name, "n_d": float(n_d), "abbe": float(abbe), "absorb": tuple(float(a) for a in absorb),
+            "tint": tuple(float(c) for c in rgb)}
+
+
 # subsurface strength for translucent materials (0 = opaque). Wax/skin glow softly; jade/marble a bit; honey/milk too.
 _SSS = {"wax": 1.0, "skin_light": 0.9, "skin_dark": 0.7, "jade": 0.8, "marble": 0.5, "milk": 0.9,
         "honey": 0.6, "flesh": 0.9, "leaf": 1.0}

@@ -46,9 +46,22 @@ noise self-test now guards the fast-bake's exactness to 1e-10).
 Give every public function a real docstring. A module with no docstring is **undiscoverable** by
 `find_capability` — the audit flags this as a hard error.
 
+**Core or plugin?** Ask one question before step 2: *does the verb need something outside the wheel?* If yes —
+a wheel that is not NumPy, a binary, a service — the verb is a **plugin**, not a core faculty. Put the logic in
+its family module as usual (the module stays importable and self-tested), but expose the verb from
+`holographic/plugins/<name>.py` (copy `_template.py`; name it after the pip extra that installs the dependency,
+and set `PLUGIN["requires"]` / `PLUGIN["install"]`). It binds at construction, is `/invoke`-able and
+`find_capability`-visible like any faculty, and can be left out with `plugins=()`. If the verb has a fallback
+that works without the dependency — a Numba fast path over a NumPy body — it is core: that is the accelerator
+pattern, and it belongs on the class. The test is what it *needs*, not what words appear in it. Guide:
+[`docs/PLUGINS.md`](docs/PLUGINS.md).
+
 ---
 
 ## 2. Wire it to a faculty — never leave it import-only
+
+*(For a plugin verb, step 2 is the `register()` list in the plugin file; the collision gate refuses any name
+that already exists on the mind, so pick a distinct one. Steps 3–6 apply unchanged.)*
 
 A module reachable only by `import` is a gap. Expose it through a method on `UnifiedMind`
 (`holographic/misc/holographic_unified.py`), delegating to the module:
@@ -83,9 +96,8 @@ Run all three, in order. Static alone is not enough (it has repeatedly passed co
 
 ```bash
 # static: syntax / compile / broken-import across the whole tree
-python3 -c "from reorganize_repo import analyze_repo, verify, DEFAULT_IGNORE; from pathlib import Path; \
-f=analyze_repo(Path('src'), DEFAULT_IGNORE); r=verify(Path('src'), f); \
-print(len(f), len(r['syntax_errors']), len(r['compile_errors']), len(r['broken_local_imports']))"
+python3 -m compileall -q holographic lecore.py app.py holographic_service.py   # syntax + compile
+python3 tools/audit_imports.py                                                 # broken + flat local imports
 
 # module self-test
 python3 -m holographic.<family>.holographic_<name>      # runs _selftest()
@@ -151,6 +163,7 @@ will rot.
 
 - [ ] **Audited** with `find_capability` before building; reused what existed.
 - [ ] Logic in the right family module, with a `_selftest()` that fails loudly, and docstrings on all public defs.
+- [ ] Core-or-plugin decided by *what it needs*: a verb needing something outside the wheel is in `holographic/plugins/`, not on the class.
 - [ ] **Wired** to a `UnifiedMind` method (so it's `/invoke`-able) — nothing left import-only.
 - [ ] **Registered** in the catalog with a runnable example + search aliases; confirmed discoverable.
 - [ ] Verified **static + self-test + end-to-end** (and HTTP `/invoke` if agent-facing); `file_python_check` clean.

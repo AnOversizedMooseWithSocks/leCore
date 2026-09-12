@@ -64,6 +64,14 @@ ARITY = {
 # raymarch, but the emitter refuses it (a shader consumer needs the shorter-step warning we cannot bake in).
 INEXACT = {"twist", "displace", "bend", "ellipsoid", "fold_fractal", "mandelbulb"}
 
+# OPTIONAL TRAILING PARAMS a kind will accept ABOVE its ARITY count. ARITY stays the DSL's contract -- the
+# grammar, the parser and every saved 4-param fold_fractal node are untouched -- while the Python constructor
+# may pass extras that only the evaluator reads. Kept as its own table rather than widening ARITY because
+# those are two different questions: "what does the text grammar accept" vs "what can the evaluator use".
+OPTIONAL_PARAMS = {
+    "fold_fractal": 2,        # bailout, solid -- see fold_fractal(); both default to the historical behaviour
+}
+
 
 def as_eval(sdf):
     """Return a plain callable `P:(M,D) -> distances:(M,)` for ANY of the engine's three ways of naming an SDF:
@@ -111,10 +119,12 @@ class SDF:
         if kind not in ARITY:
             raise ValueError(f"unknown SDF kind: {kind}")
         npar, nch = ARITY[kind]
+        extra = OPTIONAL_PARAMS.get(kind, 0)
         self.params = tuple(float(p) for p in params)
         self.children = list(children)
-        if len(self.params) != npar or len(self.children) != nch:
-            raise ValueError(f"{kind} needs {npar} params and {nch} children, "
+        if not (npar <= len(self.params) <= npar + extra) or len(self.children) != nch:
+            raise ValueError(f"{kind} needs {npar}"
+                             f"{f'-{npar + extra}' if extra else ''} params and {nch} children, "
                              f"got {len(self.params)} and {len(self.children)}")
         self.kind = kind
 
@@ -310,7 +320,7 @@ def menger(iterations=3, size=1.0):
     return SDF("menger", (iterations, size))
 
 
-def fold_fractal(iterations=12, scale=2.0, min_radius=0.5, fold_limit=1.0):
+def fold_fractal(iterations=12, scale=2.0, min_radius=0.5, fold_limit=1.0, bailout=None, solid=False):
     """The KALEIDOSCOPIC-IFS / MANDELBOX distance-estimator SDF -- the general 'fold engine' behind the fractal-forums
     3D fractals and the Yohei-Nishitsuji tweet-shader look. Iterate, `iterations` times: a BOX FOLD (conditional
     reflection -- reflect each coordinate outside +/-`fold_limit` back inward, `p = clamp(p,-L,L)*2 - p`), then a
@@ -325,8 +335,32 @@ def fold_fractal(iterations=12, scale=2.0, min_radius=0.5, fold_limit=1.0):
     deterministic self-similar structure -- the 'determinism instead of storage' lever, as geometry.
 
     NOTE: like menger, this is an INEXACT distance (a distance ESTIMATE, standard for fractals) -- the raymarcher
-    already steps conservatively for iterative SDFs, but a shader consumer must know to shorten steps near it."""
-    return SDF("fold_fractal", (iterations, scale, min_radius, fold_limit))
+    already steps conservatively for iterative SDFs, but a shader consumer must know to shorten steps near it.
+
+    `bailout` and `solid` are OPT-IN and default to the historical behaviour (byte-identical without them).
+    Set them to RENDER this fractal rather than merely probe it:
+
+      * `bailout` (try 4.0) stops folding a point once |z| exceeds it. Without one the loop keeps multiplying
+        the running derivative by |scale| after a point has already escaped, while |z| stays bounded, so the
+        estimate COLLAPSES GEOMETRICALLY -- MEASURED at radius 1.0: 0.02174 at 4 iterations, 0.00131 at 8,
+        0.00008 at 12, i.e. scale^4 = 16x lost per 4 extra iterations. HONEST ABOUT WHAT THAT COSTS: a sphere
+        trace still CONVERGES on the collapsed estimate (a too-small step is safe, only slow) -- it just pays
+        for it. Measured over 3000 rays fired at the body: 108 steps and a p99 residual of 1.0e-03 without a
+        bailout, against 79 steps and 1.0e-04 with one -- 27% fewer steps and 10x tighter convergence. An
+        earlier draft of this note claimed the trace "never arrives"; it does, and the measurement said so.
+      * `solid=True` signs the field: a point that never escapes is INSIDE, so the estimate goes negative
+        there. THIS is the change that unlocks glass -- an all-positive field has no interior, so a refracted
+        ray has nothing to be inside of, and marching at level 0 finds no crossing (the previous docs recorded
+        that as a fact of life). `solid` needs a MODEST bailout to mean anything: escape is what defines
+        "outside", so at bailout=16 or 64 almost nothing escapes within 8 iterations and the field reports
+        95%/99% of the box as interior. Measured interior fraction over [-3,3]^3 at 8 iterations: 0.072 at
+        bailout=4, 0.952 at 16, 0.996 at 64, 1.000 at 1000. Use ~4.
+
+    KEPT HONEST: `solid` needs `bailout` to mean anything (without one, nothing is ever marked escaped), and
+    the interior value is the DE's own magnitude negated, not a true interior distance -- correct in SIGN and
+    near the surface, which is what marching and refraction use, but do not read it as a depth."""
+    return SDF("fold_fractal", (iterations, scale, min_radius, fold_limit,
+                                0.0 if bailout is None else float(bailout), bool(solid)))
 
 
 def mandelbulb(power=8.0, iterations=8, bailout=2.0):
@@ -371,7 +405,7 @@ def octahedron(s=1.0):
 
 
 def escape_time(width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=100,
-                power=2.0, julia_c=None, bounds_ratio=None):
+                power=2.0, julia_c=None, bounds_ratio=None, fast_square=False):
     """The 2D ESCAPE-TIME fractal FIELD -- Mandelbrot (`julia_c=None`) or Julia (`julia_c=(re,im)`), the classic
     z -> z^power + c iteration in the complex plane. Returns a (height, width) float array of SMOOTH (continuous)
     escape counts in [0, max_iter]: for each pixel, iterate until |z| exceeds 2, and record iter + the fractional
@@ -380,7 +414,15 @@ def escape_time(width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=10
     z^n+c recurrence, read as a field instead of a distance. Vectorised over the whole grid, deterministic.
 
     Mandelbrot: c = the pixel, z starts at 0. Julia: c = `julia_c` (fixed), z starts at the pixel. `center`/`span`
-    frame the view (span = width of the window in complex units); `power`=2 is the classic set."""
+    frame the view (span = width of the window in complex units); `power`=2 is the classic set.
+
+    `fast_square=True` replaces `np.power(z, 2.0)` with `z*z` when `power` is exactly 2 -- MEASURED 5.7x on the
+    array op, and it is most of this function's cost, which is why the demo-scene sweep found this loop before it
+    found anything else. IT IS OPT-IN AND IT MUST BE. The two are NOT bit-identical: np.power on a complex array
+    goes through exp/log, and over 200,000 random complex128 values 57,908 of them differ, max |diff| 3.55e-15.
+    This repo's rule is that a change bit-identical to 1e-12 has still flipped a creature's trajectory, so a
+    silent swap is forbidden however small the delta -- the speed is real and it has to be ASKED for. Ignored
+    unless power == 2; a non-integer power has no fast path."""
     cx, cy = center
     half = span * 0.5
     xs = np.linspace(cx - half, cx + half, width)
@@ -395,9 +437,16 @@ def escape_time(width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=10
         z = C_grid.copy()
     out = np.full(C_grid.shape, float(max_iter))
     escaped = np.zeros(C_grid.shape, dtype=bool)
+    # Resolved ONCE, outside the loop: an `if` per iteration on a value that cannot change mid-run is
+    # exactly the kind of per-frame cost this sweep exists to remove.
+    square_fast = bool(fast_square) and float(power) == 2.0
     for n in range(max_iter):
         live = ~escaped
-        z[live] = np.power(z[live], power) + c[live]
+        if square_fast:
+            zl = z[live]
+            z[live] = zl * zl + c[live]
+        else:
+            z[live] = np.power(z[live], power) + c[live]
         az = np.abs(z)
         now = live & (az > 2.0)
         if np.any(now):
@@ -571,12 +620,28 @@ def _eval(node, P):
         return d
     if k == "fold_fractal":    # Mandelbox / KIFS: iterate box-fold, sphere-fold, scale; track the derivative for a DE
         iters, scale, min_r, L = int(p[0]), float(p[1]), float(p[2]), float(p[3])
+        # OPTIONAL TRAILING PARAMS, both defaulting to the historical behaviour so every existing node --
+        # and every 4-param DSL node, whose ARITY is deliberately still 4 -- evaluates BIT-IDENTICALLY.
+        bail = float(p[4]) if len(p) > 4 and p[4] else 0.0       # 0 = the historical "never bail out"
+        solid = bool(p[5]) if len(p) > 5 else False
         min_r2 = min_r * min_r
         fixed_r2 = 1.0                                            # outer sphere-fold radius^2 (the classic Mandelbox)
         offset = P.copy()                                        # the Mandelbox adds the ORIGINAL point each step
         z = P.copy()
         dr = np.ones(P.shape[0])                                 # running derivative (scale factor of the map)
+        # WHY THE BAILOUT MATTERS, MEASURED: without it the loop keeps folding points that have already escaped,
+        # and `dr` keeps being multiplied by |scale| every iteration while |z| stays bounded -- so the estimate
+        # |z|/dr COLLAPSES GEOMETRICALLY. At radius 1.0 from the origin it reads 0.02174 at 4 iterations,
+        # 0.00131 at 8 and 0.00008 at 12: scale^4 = 16x lost per 4 extra iterations. A too-small step is SAFE,
+        # only slow, so the trace still converges -- it pays 108 steps and a 1.0e-03 p99 residual instead of 79
+        # and 1.0e-04. `mandelbulb`, twenty lines below in this same file, always had its bailout.
+        active = np.ones(P.shape[0], dtype=bool) if bail > 0.0 else None
+        bail2 = bail * bail
         for _ in range(iters):
+            if active is not None:
+                if not np.any(active):
+                    break
+                z_prev, dr_prev = z, dr
             z = np.clip(z, -L, L) * 2.0 - z                     # BOX FOLD: reflect coords outside +/-L back inward
             r2 = np.sum(z * z, axis=1)                          # SPHERE FOLD: invert through nested spheres
             r2 = np.maximum(r2, 1e-12)                          # guard the inversion at the exact origin (r2 -> 0)
@@ -589,7 +654,23 @@ def _eval(node, P):
             dr = dr * m + 1.0
             z = z * scale + offset                              # linear part: scale + translate by the seed
             dr = dr * abs(scale)
-        return np.linalg.norm(z, axis=1) / np.abs(dr)           # distance estimate = |z| / |dz/dp|
+            if active is not None:                              # keep the frozen points exactly as they were
+                z = np.where(active[:, None], z, z_prev)
+                dr = np.where(active, dr, dr_prev)
+                # TEST AFTER THE STEP, NOT BEFORE -- the canonical Mandelbox order, and the difference is not
+                # cosmetic. Testing first lets a point that starts beyond `bailout` exit with z=P and dr=1, so
+                # the estimate reads |P| -- the distance to the ORIGIN, which the body contains, i.e. an
+                # OVER-estimate. A sphere tracer given an over-estimate steps straight through the surface.
+                # Measured with the check first: d(5,0,0) came back as exactly 5.00000. After: 3.75.
+                active &= np.sum(z * z, axis=1) <= bail2
+        d = np.linalg.norm(z, axis=1) / np.abs(dr)              # distance estimate = |z| / |dz/dp|
+        if active is not None and solid:
+            # A point that never escaped in `iters` steps is INSIDE the body. Signing it negative turns an
+            # unsigned set-proximity field into a SOLID with an interior -- which is what makes the fractal
+            # meshable at level 0 (the docs recorded "all-positive, marching finds no crossing" as a fact of
+            # life) and refractable as glass. Unsigned + unbailed stays the default; this is opt-in.
+            d = np.where(active, -d, d)
+        return d
     if k == "mandelbulb":      # White-Nylander polar power fractal: z -> z^power + c in spherical coords, analytic DE
         power, iters, bailout = float(p[0]), int(p[1]), float(p[2])
         c = P.copy()
@@ -1344,6 +1425,60 @@ def _selftest():
         "fold_fractal must have real spatial structure (a spread of distances), not a constant field"
     assert np.array_equal(ffr.eval(_grid), ffr.eval(_grid)), "fold_fractal must be deterministic"
     assert ffr.cost()["iterative"] is True, "the fold fractal is an iterative SDF (budget carefully for realtime)"
+
+    # (10b) THE REGRESSION TRAP THE ABOVE COULD NOT BE. The two assertions on either side of this comment both
+    # PASSED for years on a distance estimate that was collapsing geometrically: a Lipschitz bound is an UPPER
+    # bound, which a field that is ~0 everywhere satisfies trivially, and the "spread of distances" check is
+    # carried by the far field. A metric that cannot go bad when the thing goes bad is not a test.
+    # What actually pins it: a distance ESTIMATE must CONVERGE as iterations grow, not shrink toward zero.
+    # Stated over a GRID and as a median, not at a hand-picked point -- the collapse is point-dependent (a
+    # point that escapes on the first iteration never accumulates the runaway derivative, so single probes at
+    # radius 1.5 look fine while radius 1.0 falls off a cliff). The first draft of this assertion picked such
+    # a point and failed; the honest form is the distribution.
+    _cg = np.linspace(-3, 3, 24)
+    _CX, _CY, _CZ = np.meshgrid(_cg, _cg, _cg, indexing="ij")
+    _CQ = np.column_stack([_CX.ravel(), _CY.ravel(), _CZ.ravel()])
+
+    def _conv_ratio(bail):
+        _a = np.asarray(fold_fractal(iterations=4, bailout=bail).eval(_CQ), float)
+        _b = np.asarray(fold_fractal(iterations=12, bailout=bail).eval(_CQ), float)
+        _ok = _a > 1e-9
+        return _b[_ok] / _a[_ok]
+
+    _r_old, _r_new = _conv_ratio(None), _conv_ratio(4.0)
+    assert np.median(_r_old) < 0.05 and (_r_old < 0.5).mean() > 0.95, \
+        ("the historical no-bailout field MUST still collapse (median d12/d4 %.4f, %.1f%% below half) -- this "
+         "pins the OLD behaviour that bailout=None promises to reproduce byte-identically"
+         % (np.median(_r_old), 100 * (_r_old < 0.5).mean()))
+    assert np.median(_r_new) > 0.95 and (_r_new < 0.5).mean() < 0.30, \
+        ("with a bailout the estimate must CONVERGE with iterations (median d12/d4 %.4f, %.1f%% below half). "
+         "Some shrinkage is CORRECT -- more iterations resolve finer structure, so genuine distances fall -- "
+         "which is why this is a distribution bound and not an every-point one."
+         % (np.median(_r_new), 100 * (_r_new < 0.5).mean()))
+
+    # (10c) solid=True gives the fractal an INTERIOR, which is what makes it glass-renderable and meshable at
+    # level 0. The docs previously recorded "all-positive, so marching finds no crossing" as a limitation.
+    _sg = np.linspace(-3, 3, 32)
+    _SX, _SY, _SZ = np.meshgrid(_sg, _sg, _sg, indexing="ij")
+    _SQ = np.column_stack([_SX.ravel(), _SY.ravel(), _SZ.ravel()])
+    _solid = np.asarray(fold_fractal(iterations=8, bailout=4.0, solid=True).eval(_SQ), float)
+    _unsigned = np.asarray(fold_fractal(iterations=8, bailout=4.0).eval(_SQ), float)
+    assert (_unsigned >= 0).all(), "the unsigned form must stay all-positive (that IS the old contract)"
+    assert 0.01 < (_solid < 0).mean() < 0.40, \
+        ("solid must find a PLAUSIBLE interior, not everything and not nothing: %.4f. A large bailout breaks "
+         "this -- escape defines 'outside', so at bailout=64 nothing escapes and 99%% reads as interior."
+         % (_solid < 0).mean())
+    assert np.array_equal(np.abs(_solid), _unsigned), "solid must change only the SIGN, never the magnitude"
+
+    # (10d) BACKWARD COMPATIBILITY, byte-identical: the extra params are optional and default to the old field.
+    assert np.array_equal(fold_fractal(iterations=9).eval(_SQ),
+                          fold_fractal(iterations=9, bailout=None, solid=False).eval(_SQ)), \
+        "bailout=None/solid=False must be BIT-IDENTICAL to not passing them at all"
+    assert len(fold_fractal(iterations=9).params) == 6 and ARITY["fold_fractal"][0] == 4, \
+        "ARITY stays 4 so the DSL grammar and every saved 4-param node are untouched; the extras are optional"
+    _dsl4 = SDF("fold_fractal", (9, 2.0, 0.5, 1.0))               # a 4-param node, as the DSL parser builds it
+    assert np.array_equal(_dsl4.eval(_SQ), fold_fractal(iterations=9).eval(_SQ)), \
+        "a 4-param node must evaluate exactly like the 6-param default"
 
     # (11) MANDELBULB (escape-time z^n+c in 3D): analytic DE, real inside/outside structure.
     mbulb = mandelbulb(power=8.0, iterations=8, bailout=2.0)

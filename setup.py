@@ -73,6 +73,20 @@ setup(
     },
     python_requires=">=3.9",
     install_requires=["numpy"],          # the core needs ONLY NumPy -- nothing else is ever required
+    # PLUGINS AND EXTRAS ARE ONE THING UNDER TWO NAMES. Each optional-dependency capability
+    # lives in holographic/plugins/<name>.py (jit, symbolic, zig, wgsl, gpu, lean4) and binds
+    # to a mind at construction; the extra of the same name installs what that plugin needs.
+    # So `pip install leos-core[zig]` is "give me the zig plugin's dependency", and
+    # `UnifiedMind(plugins=("zig",))` is "give me only that plugin's verbs". Without the extra
+    # the plugin STILL loads and its verbs still bind -- each already fails honestly -- and
+    # mind.plugin_list() reports available=False with the install command.
+    #
+    # THIRD-PARTY PLUGINS declare an entry point in this group and are discovered at
+    # construction with no configuration:
+    #     [project.entry-points."lecore.plugins"]
+    #     voice = "lecore_plugin_voice"          # a module with PLUGIN + register(mind, config)
+    # Per-app plugin FOLDERS are discovered via LECORE_PLUGIN_PATH (os.pathsep-separated).
+    # See holographic/plugins/__init__.py for the load order and the security boundary.
     extras_require={                      # opt-in extras -- the core runs, and passes every test, without them.
         # Install one with:  pip install .[jit]     (from the cloned folder -- note the dot)
         # or several:        pip install .[ui,jit]

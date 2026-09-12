@@ -211,7 +211,11 @@ def sky_model(hour=12.0, clouds=(), stars_seed=None, star_density=0.9985, moon=N
         cos_s = d @ sdir
         sun = np.clip(cos_s, 0.0, 1.0)
         disk = (cos_s > 0.9997).astype(float) * sun_intensity
-        glow = sun ** 220 * 1.6 + sun ** 12 * 0.22
+        # leStudio's exhaustive parameter sweep found sun_intensity "byte-identical from 0 to 40" on a 200x120
+        # sample grid: the dial scaled ONLY the 1.4-degree disk, which such a grid rarely hits, so a UI slider
+        # did nothing visible. The glow now scales with it too -- relative to the default (18.0) so every
+        # existing render at the default is unchanged to the bit -- and a brighter sun visibly floods the sky.
+        glow = (sun ** 220 * 1.6 + sun ** 12 * 0.22) * (float(sun_intensity) / 18.0)
         sun_rgb = np.array([1.0, 0.88, 0.72])
         # low sun is redder: tilt the sun colour toward the horizon palette as elevation drops
         warm = float(np.clip(1.0 - sdir[1] * 2.2, 0.0, 1.0))

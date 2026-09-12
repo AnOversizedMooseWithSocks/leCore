@@ -58,7 +58,7 @@ Measured speed tiers: memory bypass **97×**; exit-L7 **3.0×**.
     m.explain("drift sentinel")          # docs-derived card
     m.tool_find("scan a signal")         # 2,200+ faculty docstrings are the index
 
-## The agent substrate (sweeps 93-122)
+## The agent substrate (sweeps 93-129)
     m.orient(topic="forecast a series")            # live compass: workflow + top-3 doors
     m.serve("what is the capital of x")            # memory -> tool reflex -> honest escalate
     m.tool_reflex_teach("convert 25 celsius to fahrenheit", "convertd", "c_to_f",
@@ -73,8 +73,23 @@ Measured speed tiers: memory bypass **97×**; exit-L7 **3.0×**.
     m.learning_save(root, audit="regen")           # ~195x smaller for pure-taught minds
     m.partition_report(root)                       # where the bytes went
     m.table_analyze(rows, "price", tasks=("regimes", "forecast"))   # a column IS a series
+    m.bounded_preview(big_array, max_bytes=512)    # true size + head/tail, not a million JSON numbers
+    m.value_cost(value)                            # what this reply would really cost a context window
+    m.result_contract(value, {"require": ["evidence"]})   # the EXIT gate: every violation, not the first
+    m.validated_call(step, contract=c, retries=1)  # hand the executor its own violation and ask again
+    m.merge_census(base, new)                      # AFTER a merge: what was lost, what changed shape
 Everything above is pinned in tests/test_mcp_server.py (one test per sweep) and, as
 runnable examples, in FEATURE_GUIDE §10 -- `tests/test_guide_examples.py` runs them.
+(The last five doors are pinned by their own suites and by the §10 blocks; the per-sweep
+MCP test has not caught up with them yet.)
+
+## Meshes, end to end (the family guide)
+    m.mesh_report(mesh)                            # one call: counts, manifold/closed, boundary, bbox
+    m.mesh_repair(mesh)                            # weld + fill + make-manifold + orient, with a log
+    m.mesh_decimate_to(mesh, target_fraction=0.25) # an explicit budget, and mesh_surface_deviation() to check it
+    m.mesh_uv_unwrap(mesh, method="lscm")          # then mesh_uv_report() -- never ship a chart unmeasured
+    m.mesh_to_sdf(mesh, points)                    # the field bridge: CSG, skeletons and collision follow
+    # FEATURE_GUIDE §11 groups all 92 mesh verbs (38 of them catalog doors) with six CI-run pipelines.
 
 ## Housekeeping you can feel
     lecore-mcp --selftest                          # the MCP server is on PATH after pip install

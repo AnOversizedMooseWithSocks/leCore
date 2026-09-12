@@ -176,6 +176,26 @@ class Catalog:
         self._by_name[name] = cap
         return cap
 
+    def unregister(self, name):
+        """Remove a capability by name; returns True if one was removed, False if absent.
+
+        ADDED FOR PLUGIN UNLOAD: a plugin that is unloaded must not leave a card behind
+        pointing at a verb that no longer resolves -- that is a catalog entry which
+        routes an agent to an AttributeError, which is worse than never having existed.
+        Absent-is-False rather than raising, so an unload that runs twice (or after a
+        partial load) is idempotent instead of a second failure to handle.
+
+        The bake flag is cleared because the fc vocabulary and the memo path are computed
+        from the whole catalog: leaving them would keep scoring against a vocabulary
+        containing tokens only the removed entry contributed."""
+        if name not in self._by_name:
+            return False
+        del self._by_name[name]
+        for attr in ("_fc_baked", "_fc_vocab", "_fc_hash", "_fc_memo", "_fc_memo_path"):
+            if hasattr(self, attr):
+                delattr(self, attr)
+        return True
+
     def get(self, name):
         return self._by_name.get(name)
 
@@ -745,7 +765,14 @@ def seed_from_mind(catalog, mind):
                 existing.consumes = validate_kinds(cons, where="_IO_SHAPES of %r" % name)
                 existing.produces = validate_kinds(prod, where="_IO_SHAPES of %r" % name)
             continue
+        # THE CLASS, THEN THE INSTANCE. This walked dir(mind) -- which includes instance
+        # attributes -- but read only type(mind), so a PLUGIN verb (bound to the instance,
+        # never to the class) was skipped and arrived in no catalog at all. Same blind spot
+        # as skills.mind_methods(); measured here as the lean4 bundled plugin's verbs binding
+        # correctly, answering invoke() correctly, and being invisible to find_capability.
         attr = getattr(type(mind), name, None)
+        if attr is None:
+            attr = getattr(mind, name, None)
         if not callable(attr):
             continue
         doc = (inspect.getdoc(attr) or "").strip().split("\n")[0][:160]

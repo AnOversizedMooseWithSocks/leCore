@@ -87,13 +87,13 @@
 - `cylinder(h=1.0, r=0.5)` -- A capped cylinder of half-height `h` and radius `r`, axis along Y, centred at the origin.
 - `plane(h=0.0)` -- An infinite ground plane at height y = `h` (points above are outside).
 - `menger(iterations=3, size=1.0)` -- The Menger sponge: the classic recursive fractal cube, carved `iterations` deep at the given `size`.
-- `fold_fractal(iterations=12, scale=2.0, min_radius=0.5, fold_limit=1.0)` -- The KALEIDOSCOPIC-IFS / MANDELBOX distance-estimator SDF -- the general 'fold engine' behind the fractal-forums 3D fractals and the Yohei-Nishitsuji tweet-shader look.
+- `fold_fractal(iterations=12, scale=2.0, min_radius=0.5, fold_limit=1.0, bailout=None, solid=False)` -- The KALEIDOSCOPIC-IFS / MANDELBOX distance-estimator SDF -- the general 'fold engine' behind the fractal-forums 3D fractals and the Yohei-Nishitsuji tweet-shader look.
 - `mandelbulb(power=8.0, iterations=8, bailout=2.0)` -- The MANDELBULB distance-estimator SDF (White & Nylander's polar-power fractal, the 3D Mandelbrot analogue).
 - `capsule(h=1.0, r=0.3)` -- A capsule (a cylinder with hemispherical caps) along Y: segment from -h to +h on the Y axis, radius `r`.
 - `cone(h=1.0, r=0.5)` -- A capped cone along Y: height `h` (apex at +h/2, base at -h/2), base radius `r`.
 - `ellipsoid(ax=1.0, ay=0.7, az=0.5)` -- An ellipsoid with semi-axes (`ax`,`ay`,`az`).
 - `octahedron(s=1.0)` -- A regular octahedron of 'radius' `s` (vertex distance along each axis).
-- `escape_time(width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=100, power=2.0, julia_c=None, bounds_ratio=None)` -- The 2D ESCAPE-TIME fractal FIELD -- Mandelbrot (`julia_c=None`) or Julia (`julia_c=(re,im)`), the classic z -> z^power + c iteration in the complex plane.
+- `escape_time(width=256, height=256, center=(-0.5, 0.0), span=3.0, max_iter=100, power=2.0, julia_c=None, bounds_ratio=None, fast_square=False)` -- The 2D ESCAPE-TIME fractal FIELD -- Mandelbrot (`julia_c=None`) or Julia (`julia_c=(re,im)`), the classic z -> z^power + c iteration in the complex plane.
 - `to_callable(node)` -- Wrap an SDF tree as a plain `sdf(P)->dist` callable for mesh_from_sdf / marching.
 - `make_sdf_shape(kind='sphere', position=None, scale=None, rotate=None, **kw)` -- Build an SDF primitive by NAME, optionally placed -- the one door to the shapes above.
 - `dsl_grammar()` -- The SDF DSL, described well enough to WRITE one -- node kinds, parameter meanings, and an example.
@@ -178,6 +178,7 @@
 - `png_decode(data)` -- Decode PNG *bytes* to (array, info) -- the read side of `png_bytes`, pure stdlib (zlib + struct).
 - `load_png(path, mode='rgb01')` -- Read a PNG file back into an array -- the exact inverse of `save_png`, so a render survives a round trip.
 - `save_image(path, rgb01, level=6, filters=True)` -- Save an (H,W,3) [0,1] image, routed by extension: .png uses the stdlib encoder (deterministic, zero-dependency, always available); anything else (.jpg, .webp, .bmp, ...) uses Pillow when installed and otherwise refuses with the install command -- the same opt-in contract as every accelerator (`pip install pillow`, or the `images` extra).
+- `load_exr(path, exposure=1.0, channels='RGB')` -- Read an OpenEXR image -> (H,W,3) float32 LINEAR radiance, UNBOUNDED -- the same contract as load_hdr, so it feeds sky_dome / DomeLight / the glass bake's HdriEnv unchanged.
 - `load_hdr(path, exposure=1.0)` -- Read a Radiance .hdr / .pic (RGBE) file -> (H,W,3) float32 of LINEAR radiance, UNBOUNDED.
 - `save_gif(path, frames, fps=12.0, loop=0, palette='fixed', dither=False)` -- 
 - `save_png(path, rgb01, level=6, filters=True)` -- Write an (H,W,3) image in [0,1] to a PNG file.

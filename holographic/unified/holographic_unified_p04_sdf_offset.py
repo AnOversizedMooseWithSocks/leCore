@@ -309,8 +309,15 @@ class _UnifiedPart04:
         faculties are not part of the contract, and a client that discovers one has found a footgun, not a
         feature."""
         if names is None:
-            return {n: True for n in sorted(dir(self))
-                    if not n.startswith("_") and callable(getattr(type(self), n, None))}
+            # getattr(type(self), ...) reads the CLASS, which is right for faculties and WRONG
+            # for plugin verbs -- those bind to the INSTANCE. Reading the class alone made
+            # features() answer False for a verb features(["name"]) answered True for, on the
+            # same mind, in the same breath. The plugin door is the second source of truth.
+            out = {n: True for n in sorted(dir(self))
+                   if not n.startswith("_") and callable(getattr(type(self), n, None))}
+            for rec in self.plugin_manifest():
+                out[rec["name"]] = True
+            return dict(sorted(out.items()))
         if isinstance(names, str):
             names = [names]
         return {n: (not str(n).startswith("_")) and callable(getattr(self, n, None)) for n in names}
@@ -379,7 +386,7 @@ class _UnifiedPart04:
         from holographic.misc.holographic_resonator import available_levels
         return [int(d) for d in available_levels(self.chunk_codebook(codebook), np.asarray(vocab, float))]
 
-    def recursive_factor(self, composite, codebook, vocab, arity=2, restarts=10, iters=300):
+    def recursive_factor(self, composite, codebook, vocab, arity=2, restarts=10, iters=300, tol=1e-06):
         """Factor a DEEP composite by solving a SHALLOW problem over composed chunks, then expanding by lookup.
         Tries each chunk level deepest-first, verifies each candidate by RE-COMPOSITION, and falls back one level
         on failure -- so the answer is verified correct or reported unsolved, never a silent guess.
@@ -392,7 +399,7 @@ class _UnifiedPart04:
         mind.learn_chunks: R3's one codebook family, second consumer. See holographic_resonator.recursive_factor."""
         from holographic.misc.holographic_resonator import recursive_factor as _rf
         return _rf(np.asarray(composite, float), self.chunk_codebook(codebook), np.asarray(vocab, float),
-                   arity=int(arity), restarts=int(restarts), iters=int(iters))
+                   arity=int(arity), restarts=int(restarts), iters=int(iters), tol=tol)
 
     def reduce_involution(self, leaves):
         """Reduce a leaf multiset modulo MAP's self-inverse binding: a leaf appearing twice CANCELS. Measured --
@@ -546,6 +553,177 @@ class _UnifiedPart04:
         between apps. See holographic_container.save_container."""
         from holographic.io_and_interop.holographic_container import save_container
         return save_container(sections, meta=meta, compress=compress)
+
+    def lews_open(self, root, app="app", app_version="", lock_timeout=30.0):
+        """Open (or create) a LIVE shared workspace directory that several leCore apps edit together
+        (holographic_lews.Workspace): `<root>/workspace.lews` is always a complete container, every put/delete is
+        locked + atomic + journalled with a revision, and any app catches up with `changes_since(rev)`. The .lews
+        STANDARD: LEWS_SPEC meta on the file, `meta["schema"]` per section, canonical kinds lecore.mesh / material /
+        sdf / camera / scene (bindings by section id) alongside lecore.image, migrations per kind, newer-than-known
+        sections carried read-only. Returns the Workspace (put / get / sections / describe / changes_since /
+        wait_for_change / export_bytes)."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, app=app, app_version=app_version, lock_timeout=lock_timeout)
+
+    def lews_describe(self, root):
+        """What a shared workspace holds without opening anything: {app, rev, lews, sections:[{id, kind, schema,
+        known, rev}]} -- a UI lists foreign kinds by name instead of hiding them. JSON-safe (agent-callable)."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).describe()
+
+    def lews_changes(self, root, since_rev=0):
+        """Journal entries after `since_rev`: [{rev, op, id, kind, app, sha, t}] -- how an app (or an agent) learns
+        what other apps changed in the workspace. JSON-safe."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).changes_since(since_rev)
+
+    def lews_wait(self, root, since_rev=0, timeout=5.0, exclude=None):
+        """Block up to `timeout` seconds until the workspace moves past `since_rev`, then return the new journal
+        entries (section writes AND notes), minus `exclude`'s own echo. The long-poll an agent or a second app uses
+        instead of spinning on lews_changes; an SSE endpoint is one loop around it. JSON-safe."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        ws = Workspace(root, create=False)
+        ws.wait_for_change(since_rev, timeout=timeout)
+        return ws.since(since_rev, exclude=exclude)
+
+    def lews_note(self, root, src, kind="note", meta=None):
+        """Announce a non-section change ("selection moved", "render done") to everyone holding the workspace: one
+        journal line, no container rewrite, returns the new rev. LiveSession.bump realised on the directory."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).bump(src, kind, meta)
+
+    def lews_touch(self, root, who, activity=None, name=None, app="app"):
+        """Heart-beat a participant (a PERSON or agent id, never a connection) with an optional activity dict
+        ({tool, section}) and display name, so peers in OTHER apps see them in lews_presence. Call every few seconds
+        while alive; silence past the ttl removes them. Returns the current rev."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False, app=app).touch(who, activity=activity, name=name, app=app)
+
+    def lews_presence(self, root, ttl=30.0):
+        """Who is in the workspace right now, across every app: [{who, name, app, activity, joined, age, host}],
+        oldest-joined first; `host` is the earliest-joined participant still alive. Heartbeats older than `ttl`
+        seconds are gone (and reaped). JSON-safe."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).roster(ttl=ttl)
+
+    def lews_leave(self, root, who):
+        """Remove a participant immediately (a clean exit) and return who remains."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).drop(who)
+
+    def lews_import(self, lews_file, root, app="app", app_version=""):
+        """Open a single-file .lews saved by any app (leStudio's download, Poly Studio's save) as a live workspace
+        directory at `root`, every section carried verbatim, one 'import' journal line. Returns lews_describe(root)."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace.from_file(lews_file, root, app=app, app_version=app_version).describe()
+
+    def lews_put_asset(self, root, data, name="", app="app"):
+        """Store a blob in the workspace ONCE, content-addressed (lecore.asset), and return its sha256 key; an
+        identical array already present costs no write and no rev. Journal ops reference assets by this key."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False, app=app).put_asset(data, name)
+
+    def lews_get_asset(self, root, key):
+        """The array behind an asset key (or None). See lews_put_asset."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False).get_asset(key)
+
+    def lews_journal_section(self, target, ops, sid="", name="journal"):
+        """A lecore.journal section: JSON ops (explicit 'seed's, 'asset' keys, never inline arrays -- refused) that
+        render `target` deterministically. The journal-first document doctrine, portable between apps."""
+        from holographic.io_and_interop.holographic_lews import journal_section
+        return journal_section(target, ops, sid=sid, name=name)
+
+    def lews_gc_assets(self, root, dry_run=False, app="app"):
+        """Remove every lecore.asset no journal or section references any more; returns the keys removed (or, with
+        dry_run, the keys that would be). The natural GC on save."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False, app=app).gc_assets(dry_run=dry_run)
+
+    def agent_surface(self, flask_app, base="/api", app_name="app", workspace_root=None, image_routes=(),
+                      stream_routes=(), mind_allow=None, hints=None, mount=True):
+        """Mount the STANDARD agent surface on an app's Flask object: GET base/agent/tools (manifest from the live
+        url_map, this mount only), POST base/agent/invoke (JSON, or base64 PNG for image_routes), POST base/mind
+        (allow-listed engine faculties; a rejected name returns the allowlist with signatures), GET base/engine,
+        GET base/events (SSE with heartbeat pings) and GET base/presence -- plus an after_request hook that notes
+        every mutating request on the .lews workspace at `workspace_root` (or an in-process LiveSession) and
+        heart-beats X-User. Returns the AgentSurface. See holographic_appserver."""
+        from holographic.io_and_interop.holographic_appserver import AgentSurface, DEFAULT_MIND_ALLOW
+        s = AgentSurface(flask_app, base=base, app_name=app_name, mind=self, workspace_root=workspace_root,
+                         mind_allow=tuple(mind_allow) if mind_allow else DEFAULT_MIND_ALLOW,
+                         image_routes=image_routes, stream_routes=stream_routes, hints=hints)
+        return s.mount() if mount else s
+
+    def engine_status(self):
+        """One preflight dict for an app's 'Engine status' panel and feature gating: engine version, capabilities
+        schema, faculty count, optional extras present (numba/sympy/cupy/wgpu/flask), the GPU report, the
+        determinism policy (bit_exact and what would break it) and the CPU budget. JSON-safe. See
+        holographic_appserver.engine_status."""
+        from holographic.io_and_interop.holographic_appserver import engine_status
+        return engine_status(self)
+
+    def lews_mint(self, root, prefix="S", app="app"):
+        """A fresh, never-reissued id '<prefix><n>' for this workspace: one persisted counter per prefix, advanced
+        under the workspace lock and journalled, so ids are deterministic on replay and collision-free across apps
+        and processes (leStudio's per-document-counter lesson; Poly Studio's ids-reassigned-on-load negative)."""
+        from holographic.io_and_interop.holographic_lews import Workspace
+        return Workspace(root, create=False, app=app).mint(prefix)
+
+    def lews_preset_section(self, name, target, params, sid="", tags=(), author=""):
+        """A lecore.preset section: a named JSON parameter set for a target kind (a brush, a material, a render
+        setup, a shader) any app can list and apply. Arrays are refused -- a preset is a recipe, a texture is an asset."""
+        from holographic.io_and_interop.holographic_lews import preset_section
+        return preset_section(name, target, params, sid=sid, tags=tags, author=author)
+
+    def app_lint(self, root, include_tests=False, suggest=True):
+        """Lint an app tree built on leCore for the patterns the foundation replaces (hash() seeds, class-level id
+        counters, own container format, own tool manifest / SSE / undo / jobs / quality gate, wall clock in render
+        paths) and the foundations it should be on (capability gating, X-User identity, the .lews workspace, a /mind
+        door), plus hand-rolled helpers with the engine's nearest faculty. Returns the report dict (tools/app_lint.py
+        prints it). Hits are places to look, not verdicts."""
+        import os as _os, sys as _sys
+        _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))))
+        from tools.app_lint import lint_tree
+        return lint_tree(root, mind=self if suggest else None, include_tests=include_tests, suggest=suggest)
+
+    def lews_section(self, kind, sid="", meta=None, arrays=None):
+        """A section stamped with its kind's schema version (holographic_lews.make_section); canonical builders:
+        lews_mesh_section / lews_material_section / lews_sdf_section / lews_camera_section / lews_scene_section."""
+        from holographic.io_and_interop.holographic_lews import make_section
+        return make_section(kind, sid, meta, arrays)
+
+    def lews_mesh_section(self, verts, faces, sid="", name="mesh", uv=None, normals=None):
+        """Canonical lecore.mesh section (verts (N,3) f32, faces (M,3) i32, optional uv/normals)."""
+        from holographic.io_and_interop.holographic_lews import mesh_section
+        return mesh_section(verts, faces, sid=sid, name=name, uv=uv, normals=normals)
+
+    def lews_material_section(self, name, sid="", library=None, overrides=None):
+        """Canonical lecore.material: a PHYSICAL material-library name (glass_optics / matlib vocabulary) plus channel
+        overrides, so a painter and a modeller mean the same thing by 'amethyst'."""
+        from holographic.io_and_interop.holographic_lews import material_section
+        return material_section(name, sid=sid, library=library, overrides=overrides)
+
+    def lews_sdf_section(self, dsl, sid="", name="sdf"):
+        """Canonical lecore.sdf: the engine's SDF dialect text, re-evaluable by any app."""
+        from holographic.io_and_interop.holographic_lews import sdf_section
+        return sdf_section(dsl, sid=sid, name=name)
+
+    def lews_camera_section(self, eye, target, fov_deg=40.0, aspect=1.0, sid=""):
+        """Build a canonical lecore.camera section (eye, target, fov, aspect) for lews_open().put. See holographic_lews.camera_section."""
+        from holographic.io_and_interop.holographic_lews import camera_section
+        return camera_section(eye, target, fov_deg=fov_deg, aspect=aspect, sid=sid)
+
+    def lews_scene_section(self, objects, sid="scene", name="scene"):
+        """Canonical lecore.scene: objects = [{id, mesh, material, texture, transform}] binding sections BY ID --
+        'the painter's texture is on the modeller's mesh' is one of these records."""
+        from holographic.io_and_interop.holographic_lews import scene_section
+        return scene_section(objects, sid=sid, name=name)
+
+    def lews_register_kind(self, kind, version=1, describe=""):
+        """Declare an app's own section kind and the schema version this build reads/writes (migrations are
+        registered in code via holographic_lews.register_kind_schema). Unknown kinds are always carried verbatim."""
+        from holographic.io_and_interop.holographic_lews import register_kind_schema
+        return register_kind_schema(kind, version=version, describe=describe)
 
     def load_container(self, data):
         """Inverse of save_container: container bytes -> {"meta", "sections": [{kind, id, meta, arrays}, ...]}
@@ -899,7 +1077,7 @@ class _UnifiedPart04:
         return _se(matvec, n, c, seed=seed, dtype=dtype, on_matvec=on_matvec)
 
     def bisect_to_budget(self, probe, target, lo, hi, midpoint="arith", max_iters=20, tol=None,
-                         cmp=None, key=None, bracket=False, on_probe=None):
+                         cmp=None, key=None, bracket=False, on_probe=None, bracket_cap=4096):
         """Bisect a MONOTONE probe(knob) to hit a target budget -- the shared engine behind decimate_to (grid
         -> face count) and ratedistortion (scale -> cosine). midpoint "arith" ((lo+hi)//2) or "geom"
         (sqrt(lo*hi)); tol=None does a fixed max_iters sweep returning the final knob, a float best-tracks the
@@ -907,7 +1085,7 @@ class _UnifiedPart04:
         count via on_probe. See holographic_numerics.bisect_to_budget."""
         from holographic.misc.holographic_numerics import bisect_to_budget as _b2b
         return _b2b(probe, target, lo, hi, midpoint=midpoint, max_iters=max_iters, tol=tol, cmp=cmp,
-                    key=key, bracket=bracket, on_probe=on_probe)
+                    key=key, bracket=bracket, on_probe=on_probe, bracket_cap=bracket_cap)
 
     def mesh_closest_point(self, mesh, points, cell_scale=1.0):
         """Closest point on `mesh` to each of `points` -- the shared correspondence machine behind uv/attribute
@@ -953,14 +1131,14 @@ class _UnifiedPart04:
         import numpy as _np
         return _ms(_np.asarray(labels), report, _np.asarray(vertices, float), axis=axis, tol=tol)
 
-    def fpe_lattice_resonator(self, bound, bases, ranges, iters=80):
+    def fpe_lattice_resonator(self, bound, bases, ranges, iters=80, dim=None):
         """R6 (gated): factor a BOUND PRODUCT of fractional-power-encoded integer coordinates back into its
         integers via a Fourier-HRR resonator network -- for the HOLISTIC-ONLY regime where the coordinates are
         never observed directly, only the single bound product (VERIFIED 200/200 at 0.6 rad phase noise, where
         rounding is undefined). KEPT NEGATIVE: for direct noisy coords np.round dominates -- do not use this
         there. Returns (coords, report). See holographic_fpe.fpe_lattice_resonator."""
         from holographic.sampling_and_signal.holographic_fpe import fpe_lattice_resonator as _r
-        return _r(bound, bases, ranges, iters=iters)
+        return _r(bound, bases, ranges, iters=iters, dim=dim)
 
     def low_eigenvectors(self, matvec, n, c, k=8, seed=0, dtype=float, **kw):
         """The k lowest eigenvectors of a Hermitian PSD operator from its matvec alone, no scipy -- the band a
@@ -999,13 +1177,13 @@ class _UnifiedPart04:
         from holographic.mesh_and_geometry.holographic_meshseq import seq_decode as _sd
         return _sd(H, length, dim=dim, seed=seed, vocab_size=vocab_size, chunk=chunk)
 
-    def worst_view(self, metric, mode="direct", maximize=True, max_evals=4000, eps=1e-4, lipschitz=None):
+    def worst_view(self, metric, mode="direct", maximize=True, max_evals=4000, eps=1e-4, lipschitz=None, start_level=1):
         """M16: find the GLOBAL worst view over S^2 without a dense sweep. mode="direct" (default) is
         Lipschitz-constant-free (safe when the metric jumps at occlusion); mode="certified" is Piyavskii
         branch-and-bound returning an optimality certificate (needs a Lipschitz bound). `metric` is a pure
         fn of a unit direction. Returns (best_dir, best_value, report). See holographic_worstview.worst_view."""
         from holographic.mesh_and_geometry.holographic_worstview import worst_view as _wv
-        return _wv(metric, mode=mode, maximize=maximize, max_evals=max_evals, eps=eps, lipschitz=lipschitz)
+        return _wv(metric, mode=mode, maximize=maximize, max_evals=max_evals, eps=eps, lipschitz=lipschitz, start_level=start_level)
 
     def stripe_pattern(self, mesh, direction_field, frequency=20.0):
         """Knoppel-Crane STRIPE PATTERNS: evenly-spaced stripes that follow a per-vertex tangent direction
@@ -1112,7 +1290,7 @@ class _UnifiedPart04:
 
     def surface_retopo(self, mesh, density=1.0, edge_length=None, guide_dirs=None, guide_weight=5.0,
                        iterations=20, boundary="natural", silhouette=0.95, max_density=4.0, topology=True,
-                       guard_iterations=None, fast=False, snap_singular=False, feature_sized=False):
+                       guard_iterations=None, fast=False, snap_singular=False, feature_sized=False, solver='auto', shrink=True):
         """SURFACE-ROUTE RETOPO: field-aligned quad-dominant topology whose vertices NEVER LEAVE the source
         surface, so the silhouette survives by construction. Use this for SCANS and dense meshes; auto_retopo
         voxelises and is for BLOCK-OUTS (measured: voxel_remesh alone fails the 0.95 gate at every affordable
@@ -1145,7 +1323,7 @@ class _UnifiedPart04:
             trial_it = int(guard_iterations) if guard_iterations is not None else int(iterations)
             out, rep = _sr(src, density=d, edge_length=edge_length, guide_dirs=guide_dirs,
                            guide_weight=guide_weight, iterations=trial_it, boundary=boundary, fast=fast,
-                           snap_singular=snap_singular, feature_sized=feature_sized)
+                           snap_singular=snap_singular, feature_sized=feature_sized, solver=solver, shrink=shrink)
             state[id(out)] = rep
             state.setdefault("_density_of", {})[id(out)] = d
             return out
@@ -1164,7 +1342,7 @@ class _UnifiedPart04:
             if chosen_d is not None:
                 out_full, rep_full = _sr(src, density=chosen_d, edge_length=edge_length, guide_dirs=guide_dirs,
                                          guide_weight=guide_weight, iterations=int(iterations), boundary=boundary, fast=fast,
-                                         snap_singular=snap_singular, feature_sized=feature_sized)
+                                         snap_singular=snap_singular, feature_sized=feature_sized, solver=solver, shrink=shrink)
                 state[id(out_full)] = rep_full
                 out = out_full
         rep = dict(state.get(id(out), {}))
@@ -1346,42 +1524,6 @@ class _UnifiedPart04:
         if isinstance(fn, str):
             return emit_source(fn, dialect=str(dialect))     # the kernel is text; a string is a valid kernel
         return emit(fn, dialect=str(dialect))
-
-    def validate_kernel(self, fn, calls, dialect="c_f64"):
-        """Compile the emitted C with `cc`, RUN it on `calls`, and compare to the Python original: {dialect, n,
-        max_abs_diff, max_rel_diff, bit_identical}. `c_f64` comes out BIT-IDENTICAL. `c_f32` cannot -- and its
-        error (2.9e-07 on an SDF) IS the tolerance a WGSL port must be judged against, because WGSL is f32 and
-        NumPy is f64. That is why `c_f32` exists: so the tolerance is MEASURED, not chosen.
-        Zig dialects (`zig_f64` / `zig_f32`) route to validate_zig -- compiled `-O ReleaseSafe` with the OPT-IN
-        `ziglang` wheel (exactly numba's contract: everything passes without it, absence reported loudly).
-        Measured: zig_f64 BIT-IDENTICAL on builtin-intrinsic kernels; std.math.pow is a declared 1-ulp negative.
-        See holographic_emit.validate_c / validate_zig."""
-        from holographic.io_and_interop.holographic_emit import validate_c, validate_zig
-        calls = [tuple(float(x) for x in c) for c in calls]
-        if str(dialect).startswith("zig"):
-            return validate_zig(fn, calls, dialect=str(dialect))
-        return validate_c(fn, calls, dialect=str(dialect))
-
-    def zig_batch_eval(self, kernel, arrays, dtype="f64", simd=0, opt="safe"):
-        """Compile a scalar kernel to a native shared library (content-hash cached, `ziglang` wheel, OPT-IN like
-        numba) and batch-evaluate it over P same-length arrays. `opt='safe'` is deterministic (f64 scalar measured
-        BIT-IDENTICAL to the NumPy evaluation); `simd=8` with dtype='f32' is the measured throughput sweet spot.
-        Returns the results as a list. First call pays ~1-2 s of compiler, then ~0 -- a one-shot small-n call is a
-        LOSS and this method does not pretend otherwise. See holographic_zigrun.ZigKernel."""
-        from holographic.io_and_interop.holographic_zigrun import ZigKernel
-        import numpy as _np
-        cols = [_np.asarray(a, dtype=float) for a in arrays]
-        return [float(x) for x in ZigKernel(kernel, dtype=str(dtype), simd=int(simd), opt=str(opt))(*cols)]
-
-    def zig_regime_map(self, kernel, sizes=(1000, 100000, 1000000), repeats=5, seed=0, simd_width=8):
-        """Z3's honest measurement: race numpy / zig scalar f64 / zig simd f32 across sizes. Every row carries the
-        baseline, the spread, and a correctness max-abs-err -- a fast wrong answer is not a result. MEASURED verdict
-        on the round-box SDF: a modest real 2-5x, peaking near n=1e5, compressing to ~2x at n=1e6 where everything
-        goes memory-bandwidth bound. No order-of-magnitude win exists and none is claimed.
-        See holographic_zigrun.regime_map."""
-        from holographic.io_and_interop.holographic_zigrun import regime_map
-        return regime_map(kernel, sizes=tuple(int(s) for s in sizes), repeats=int(repeats),
-                          seed=int(seed), simd_width=int(simd_width))
 
     def kernel_from_description(self, text, name="scene", dialect="python"):
         """Generate a geometry KERNEL from a controlled-vocabulary description (C3): registered parametric SDF
