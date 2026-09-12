@@ -35,6 +35,12 @@ _NEGATIVE_MARKERS = ("KEPT NEGATIVE", "KEPT NO-OP")
 # Modules with no engine callers ON PURPOSE. Each needs a reason -- "nothing imports it" is not one.
 EXEMPT = {
     "holographic_unified": "the top-level facade: it imports everything, nothing imports it",
+    # sweep 170: the two PRIVATE files in holographic/plugins/. Discovery skips a leading underscore on
+    # purpose, so neither is bound to any mind by construction; both are loaded EXPLICITLY -- by their own
+    # selftests, tests/test_plugin.py and docs/PLUGINS.md's executed snippets. A template that loaded itself
+    # would be a plugin, not a template.
+    "_template": "the copy-and-edit plugin template; private so discovery never loads it",
+    "_example_tags": "the worked example of a plugin built on the HRR algebra; private, loaded explicitly",
     "holographic_catalog": "the discoverability registry itself",
     # sweep 124: the bare-name ALIAS MAP moved out of holographic_catalog.py as a DATA module when the
     # table pushed the file over the giant budget; imported by exactly one engine file (the registry),
@@ -133,6 +139,22 @@ def analyse(root="."):
         for target in _imports(path):
             if target in importers and target != base:
                 importers[target].add(base)
+
+    # BUNDLED PLUGINS ARE WIRED BY DISCOVERY, NOT BY IMPORT (sweep 170). UnifiedMind.__init__ ->
+    # holographic.plugins.discover() -> _plugin_load("holographic.plugins.<name>") binds every public
+    # file in that folder to every default mind -- through a string the AST walk above cannot see, so
+    # six modules that are callable on every mind reported ZERO references and failed this gate. Ask
+    # discovery rather than hard-coding names: a plugin dropped into the folder is wired by construction,
+    # and this report must agree with the mind about that. The recorded caller is the door itself.
+    try:
+        import sys
+        sys.path.insert(0, root)
+        from holographic.plugins import bundled as _bundled
+        for name in _bundled():
+            if name in importers:
+                importers[name].add("holographic_unified")
+    except Exception as exc:                                  # a broken plugins package is ITS OWN gate's job
+        PARSE_FAILURES.append(("holographic/plugins", "discovery failed: %s" % exc))
 
     dark, catalog_only, kept_negative = [], [], []
     for base in sorted(modules):

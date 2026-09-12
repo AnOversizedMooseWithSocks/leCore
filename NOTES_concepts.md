@@ -2087,3 +2087,23 @@ or nowhere. Incidental `== "act"` in a scenario test is the silly kind. Two more
 test_integration ("distributed coordinator farm" -> choose, "describe a scene and build it" -> act); the
 second is ALREADY a proper pin in test_routing_pins (0.667), so the incidental copy is redundant and the
 first has no recorded margin. Left for a routing sweep with a held-out query set, per sweep 168's density note.
+
+## Sweep 170 -- the wiring gate: the SEVENTH class-only blind spot
+
+CI "Gate -- no new dark modules" failed: tools/wiring_report.py reported the six bundled plugins (and
+_template) as DARK, zero engine references. The report counts static imports by AST walk; a bundled plugin
+is bound to every default mind through UnifiedMind.__init__ -> discover() -> _plugin_load("holographic."
+"plugins.<name>") -- a STRING, invisible to the walk. Sixth callable-but-invisible sighting, seventh tool
+(skills.mind_methods/manifest/complete, features(), catalog.seed_from_mind, service /tools, swarm_audit,
+skill_lint, reachability_audit, and now wiring_report).
+FIX: the report asks holographic.plugins.bundled() and records the door (holographic_unified) as the caller
+for each, so a plugin dropped into the folder is wired by construction and the gate agrees with the mind.
+Hard-coding the six names would have failed on the seventh. _template and _example_tags are EXEMPT with the
+reason (private; discovery skips them on purpose; loaded explicitly by their selftests, tests, and the
+executed doc snippets). A template that loaded itself would be a plugin, not a template.
+Every CI gate then run locally: wiring_report --check, audit_imports, structure_audit, tag_lint,
+usage_audit, semantic/lint_scripts, shard_tests --selfcheck, servicedoc, apiquickref, regen_docs --check,
+skill_lint, catalog_gaps, swarm_audit --gate. All green.
+RULE, for the next tool that reads "the class": the plugin door is part of the faculty surface. Any audit
+that enumerates what a mind can do must include plugin_manifest() / bundled(); any audit that reads static
+imports must treat discovery as a caller.
