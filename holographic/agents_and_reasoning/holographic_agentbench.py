@@ -103,20 +103,33 @@ def run_benchmark(mind, n_has=60, n_no=20, seed=0, z_min=0.8):
             resolved += 1
             rungs[res.rung.index] = rungs.get(res.rung.index, 0) + 1
 
-    false_actions, refused = 0, 0
+    false_actions, refused, menus = 0, 0, 0
     for task, name in no_tool:
         reduced = catalog_without([name])
-        verdict = reduced.route_or_abstain(task, z_min=z_min, seed=seed)
-        if verdict.get("abstain"):
-            refused += 1
+        if z_min <= 0.5 and hasattr(reduced, "route_tiered"):
+            # The TIERED gate (sweep 176) is what the tool loop runs by default: an ANSWER on a no-tool task is
+            # the false action; a MENU is a `choose` the loop does not act on (counted separately, honestly);
+            # refuse is refuse. Above 0.5 the old binary gate is scored exactly as before.
+            tr = reduced.route_tiered(task, z_answer=z_min, z_refuse=min(-0.5, z_min), seed=seed)
+            if tr["tier"] == "refuse":
+                refused += 1
+            elif tr["tier"] == "answer":
+                false_actions += 1
+            else:
+                menus += 1
         else:
-            false_actions += 1
+            verdict = reduced.route_or_abstain(task, z_min=z_min, seed=seed)
+            if verdict.get("abstain"):
+                refused += 1
+            else:
+                false_actions += 1
 
     return {
         "n_has": len(has_tool), "n_no": len(no_tool),
         "resolved": resolved, "resolution_rate": resolved / len(has_tool) if has_tool else 0.0,
         "false_actions": false_actions,
         "false_action_rate": false_actions / len(no_tool) if no_tool else 0.0,
+        "menus": menus,                    # no-tool tasks offered a menu instead of an action (tiered gate only)
         "refused": refused, "rung_distribution": rungs,
         "model_calls": 0,                 # the deterministic arm reaches no model at all, by construction
     }

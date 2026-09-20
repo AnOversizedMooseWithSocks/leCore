@@ -382,7 +382,7 @@ class _UnifiedPart03:
             raise RuntimeError("no LLM attached -- call mind.attach_llm(callable) first, or pass llm=")
         return expand_query(self, query, fn, min_faithfulness=min_faithfulness, z_min=z_min, seed=seed)
 
-    def tool_loop(self, task, llm=None, max_steps=6, z_min=0.8, k_tools=6, seed=0):
+    def tool_loop(self, task, llm=None, max_steps=6, z_min=0.1, k_tools=6, seed=0):
         # RENAMED from agent_loop() in sweep 63: p20's cp28 gather/act/reflect
         # agent_loop had silently shadowed this in-process tool-use loop
         # (LOOP-1). Live name stays with the live body; this one returns as
@@ -409,7 +409,7 @@ class _UnifiedPart03:
             raise RuntimeError("no LLM attached -- call mind.attach_llm(callable) first, or pass llm=")
         return AgentLoop(self, fn, max_steps=max_steps, z_min=z_min, k_tools=k_tools, seed=seed).run(task)
 
-    def delegate(self, task, llm=None, model=None, url=None, max_steps=8, z_min=0.8,
+    def delegate(self, task, llm=None, model=None, url=None, max_steps=8, z_min=0.1,
                  k_tools=6, seed=0, require_answer=True):
         """THE BOSS VERB (agent architecture v2, first door): delegate a task THROUGH the
         substrate to a back-side agent and get an END RESULT back -- the orchestrator
@@ -453,6 +453,12 @@ class _UnifiedPart03:
             agent = "remote:%s" % (model or "env-default")
         out = dict(self.tool_loop(task, llm=fn, max_steps=max_steps, z_min=z_min,
                                   k_tools=k_tools, seed=seed))
+        if out.get("decision") == "choose":
+            # delegate is the AUTONOMOUS door: nobody is here to pick from a menu, so a menu is a refusal
+            # (the model is still never consulted -- the test contract), with the options attached for the
+            # caller that can ask. mind.route() and tool_loop keep the menu as a `choose`.
+            out["refused"] = True
+            out["why"] = "ambiguous -- no clear capability; options attached, none acted on: %s" % [n for n, _ in out.get("options", [])][:5]
         if require_answer and out.get("done") and out.get("answer") in (None, ""):
             out["done"] = False
             out["why"] = ("the agent finished without a final answer -- the end-result "

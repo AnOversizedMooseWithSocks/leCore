@@ -560,6 +560,31 @@ class _UnifiedPart27:
         self.decision_ledger().add(rec)
         return {"merge_ready": merge_ready, "files": files, "tests": tests_needed, "id": rec.id}
 
+    def typed(self, state, options, examples=None, question="answer", labeled=None, scorer=None, margin=None,
+              conformal_alpha=None, reflex=False, escalate=None):
+        """THE PLAIN FRONT DOOR for a typed decision (sweep 176): `mind.typed("courier lost the package",
+        ["billing", "shipping"])`. Builds the schema for you -- a `choice` over `options`, with `examples` per
+        option when given (a dict option -> [text]) and the option names themselves otherwise -- runs
+        systemone_lint on it and on the state, picks the scorer from the measured regime table when you do not
+        (prototype under ~10 examples per option, transformed NB from ~20), decides, and returns the ONE answer
+        dict (value, ranked, margin_gap, p, set, via, id) with `lint` attached (its findings; heed the warns:
+        the tool experiments' failures were all there). Report the outcome with decision_outcome(id, truth)."""
+        from holographic.agents_and_reasoning.holographic_systemone import schema_lint
+        opts = list(options)
+        ex = {o: list(examples[o]) for o in opts if examples and examples.get(o)} if examples else {}
+        for o in opts:
+            ex.setdefault(o, [o.replace("_", " ")])
+        q = {question: {"type": "choice", "options": opts, "examples": ex}}
+        lint = schema_lint(q, states=[state], scorer=scorer)
+        if scorer is None:
+            scorer = lint["recommended_scorer"]
+        out = self.systemone_decide(state, q, labeled=labeled, margin=margin, encoder="ngram", scorer=scorer,
+                                    conformal_alpha=conformal_alpha, reflex=reflex, escalate=escalate)
+        a = dict(out[question])
+        a["lint"] = [f for f in lint["findings"] if f["level"] != "note" or "clause" in f["what"] or "contrastive" in f["what"]]
+        a["scorer"] = scorer
+        return a
+
     def systemone_batch_fdr(self, states, questions, question, alpha=0.10, n_null=200, encoder="perceive",
                             scorer="prototype", nb_bigrams=False, margin=None):
         """BATCH FALSE-DISCOVERY CONTROL over a stream of typed decisions (sweep 176, H2): shuffle-null p per state

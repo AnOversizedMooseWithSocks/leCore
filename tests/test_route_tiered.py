@@ -303,3 +303,47 @@ def test_review_finds_the_constitutions_hazards_and_plan_change_reads_the_tier(t
     assert m2.plan_change("smooth a bumpy mesh", reflex=False)["action"] == "reuse"
     assert m2.plan_change("a quantum weather oracle nobody built", reflex=False)["action"] == "build"
     assert m2.plan_change("add a naive bayes scorer to the typed decision", reflex=False)["action"] == "extend"
+
+
+# ---------------- the natural path: route() tiered, learning in the semantic doors, typed() ----------------
+
+def test_route_is_tiered_by_default_and_the_old_node_is_kept():
+    import lecore
+    m = lecore.UnifiedMind(dim=256, seed=0)
+    r = m.route("smooth a bumpy mesh")
+    assert r["decision"] == "act" and r["tier"] == "answer" and r["skill"]["name"].startswith("Smooth a bumpy mesh") and "id" in r
+    g = m.route("asdf qwer zxcv")
+    assert g["decision"] == "abstain" and g["tier"] == "refuse" and g["confidence"] == 0.0
+    assert m.route("asdf qwer zxcv", tiered=False)["decision"] in ("act", "choose", "unknown")   # the old node, untouched
+
+
+def test_semantic_doors_learn_from_a_reported_outcome():
+    import lecore
+    m = lecore.UnifiedMind(dim=256, seed=0)
+    before = m.find_capability("smooth a bumpy mesh")[0].name
+    r = m.route_tiered("smooth a bumpy mesh"); m.decision_outcome(r["id"], "Voxelization")   # what was actually used
+    assert m.find_capability("smooth a bumpy mesh")[0].name == "Voxelization" and before != "Voxelization"
+    assert m.suggest("smooth a bumpy mesh", k=3)[0]["via"] == "reflex"
+    assert m.serve("smooth a bumpy mesh")["via"] == "reflex"
+    assert m.route("smooth a bumpy mesh")["via"] == "reflex"
+
+
+def test_typed_front_door_lints_and_decides():
+    import lecore
+    m = lecore.UnifiedMind(dim=256, seed=0)
+    a = m.typed("courier lost the package", ["billing", "shipping"],
+                examples={"billing": ["card charged twice", "refund my invoice fee", "charge on my statement"],
+                          "shipping": ["parcel lost in transit", "courier delivery late", "package never arrived"]})
+    assert a["value"] == "shipping" and a["lint"] == [] and a["scorer"] == "prototype" and len(a["id"]) == 16
+    b = m.typed("my card was charged twice. also where is my parcel but not the refund", ["billing", "shipping"])
+    assert any("clauses" in f["what"] for f in b["lint"]) and any("contrastive" in f["what"] for f in b["lint"])
+
+
+def test_tool_loop_returns_a_menu_instead_of_acting_on_it():
+    import lecore
+    m = lecore.UnifiedMind(dim=256, seed=0)
+    stub = lambda prompt: "DONE: finished"
+    r = m.tool_loop("asdf qwer zxcv", llm=stub)
+    assert r["refused"] and r["gate"]["tier"] == "refuse"
+    b = m.agent_benchmark(n_has=20, n_no=10, seed=0)
+    assert b["resolution_rate"] >= 0.9 and "menus" in b        # 19/20 on this smaller fixture at the old default

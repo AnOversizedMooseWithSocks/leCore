@@ -1154,6 +1154,22 @@ def register_p08_digest(c):
                  "find undocumented public functions", "git diff review"),
         module="holographic_codeflow", method="review", native=True,
     )
+    c.register_capability(
+        "typed",
+        "THE PLAIN FRONT DOOR FOR A TYPED DECISION (sweep 176): mind.typed(state, [options], examples=...) builds "
+        "the schema, lints it and the state (imbalanced budgets, thin examples, multi-clause or contrastive states), "
+        "picks the scorer from the measured regime table, decides, and returns ONE answer -- value, ranked, margin, "
+        "p, set, id -- with the lint attached. decision_outcome(id, truth) teaches the table, the reflex and the "
+        "calibration. The same discipline runs inside route() (act / choose / abstain), find_capability, suggest "
+        "and serve, where a reported outcome promotes what was used.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "a=m.typed('courier lost the package', ['billing','shipping'], examples={'billing':['card charged twice','refund my invoice fee','charge on my statement'],"
+        "'shipping':['parcel lost in transit','courier delivery late','package never arrived']}); print(a['value'], a['lint'], a['id'][:6])",
+        aliases=("decide between options", "simplest typed decision", "pick one of these options for this text",
+                 "classify this into one of a few categories", "which option fits", "make a decision with a few examples",
+                 "one line typed decision"),
+        module="holographic_systemone", method="typed", native=True,
+    )
 
 _PART = "holographic_catalog_p08"
 

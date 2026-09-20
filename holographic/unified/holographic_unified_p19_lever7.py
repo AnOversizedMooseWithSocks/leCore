@@ -220,6 +220,17 @@ class _UnifiedPart19:
         if r.get("tier") == "T0" and str(r.get("answer") or "").strip():
             return {"served": True, "via": "memory", "tier": "T0",
                     "answer": r.get("answer")}
+        # THE REFLEX BRIDGE (sweep 176): after a memory miss, a request whose ROUTE outcome was reported before
+        # is served from experience -- the capability that was actually used -- before the tool reflexes.
+        try:
+            if getattr(self, "_reflex_labels", None) and getattr(self, "_reflex_seen", None):
+                rf = self.reflex_decide(str(query), key="fingerprint")
+                if rf.get("value"):
+                    return {"served": True, "via": "reflex", "tier": "T1", "capability": rf["value"],
+                            "confidence": rf.get("confidence"), "p": (None if rf.get("error_prob") is None else 1.0 - rf["error_prob"]),
+                            "id": rf.get("id")}
+        except Exception:
+            pass
         if not getattr(self, "_tool_reflexes", None):
             # lazy rebuild from the durable rows (survives restarts on every rail)
             import json as _json

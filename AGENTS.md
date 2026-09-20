@@ -51,13 +51,15 @@ Fastest accurate path:
    question instead of asking your model to guess: no text, a schema, a ranked answer with a margin,
    a calibrated p, an honest abstention, and an id you report the outcome against.
 
+       a = mind.typed(state, ["billing", "shipping"])       # one line: schema built, linted, scored, recorded
+       mind.decision_outcome(a["id"], truth)               # the ONLY outcome path -- the table, the reflex
+                                                           # and the calibration all learn from it
        q = {"cat": {"type": "choice", "options": ["billing", "shipping"],
                     "examples": {"billing": ["card charged twice"], "shipping": ["parcel lost"]}}}
-       mind.systemone_lint(q, states=[state])              # lint the question BEFORE asking it
+       mind.systemone_lint(q, states=[state])              # the full form: lint the question BEFORE asking it
        a = mind.systemone_decide(state, q, scorer="nb")    # {"cat": {"value", "ranked", "p", "id", ...}}
-       mind.decision_outcome(a["cat"]["id"], truth)        # the ONLY outcome path: the table, the reflex
-                                                           # and the calibration all learn from it
-       r = mind.route_tiered("smooth a bumpy mesh")        # answer / menu / refuse -- never a bare no
+       r = mind.route("smooth a bumpy mesh")               # act / choose / abstain -- tiered by default, and it
+                                                           # LEARNS: a reported outcome comes first next time
        mind.verify_decision(state, answer)                 # is the served answer valid for this input?
        mind.swarm_step(state, tool, done_when=..., evidence=..., verify={"verb": ..., "args": {...}})
 

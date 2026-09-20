@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.json",
+  "name": "io.github.AnOversizedMooseWithSocks/lecore",
+  "description": "leCore: 2,400+ deterministic NumPy faculties behind one engine -- tiered capability search that refuses honestly, typed decisions that learn from reported outcomes, persistent memory, studied trees with citations, 3-D scenes and images as image blocks, and gated studio control (leStudio / leStudio3d).",
+  "version": "0.2.11",
+  "repository": {"url": "https://github.com/AnOversizedMooseWithSocks/leCore", "source": "github"},
+  "packages": [
+    {"registry_type": "pypi", "identifier": "leos-core", "version": "0.2.11",
+     "transport": {"type": "stdio"}, "runtime_hint": "uvx",
+     "environment_variables": [
+       {"name": "LECORE_PARTITION", "description": "the memory partition directory (defaults to ./lecore_memory)", "is_required": false},
+       {"name": "LECORE_MCP_PROFILE", "description": "minimal | standard | full -- how many tools to expose (8 / 30 / 47)", "is_required": false},
+       {"name": "LESTUDIO3D_URL", "description": "the 3-D studio's URL; its tools appear only when reachable", "is_required": false},
+       {"name": "LESTUDIO_URL", "description": "the 2-D studio's URL; its tools appear only when reachable", "is_required": false}
+     ]}
+  ],
+  "remotes": [
+    {"transport_type": "streamable-http", "url": "http://127.0.0.1:8765/mcp",
+     "headers": [{"name": "Authorization", "description": "Bearer <token> when the server was started with --token", "is_required": false}]}
+  ]
+}

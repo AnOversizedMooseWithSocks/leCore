@@ -19602,6 +19602,26 @@
     },
     {
       "aliases": [
+        "decide between options",
+        "simplest typed decision",
+        "pick one of these options for this text",
+        "classify this into one of a few categories",
+        "which option fits",
+        "make a decision with a few examples",
+        "one line typed decision"
+      ],
+      "consumes": [],
+      "does": "THE PLAIN FRONT DOOR FOR A TYPED DECISION (sweep 176): mind.typed(state, [options], examples=...) builds the schema, lints it and the state (imbalanced budgets, thin examples, multi-clause or contrastive states), picks the scorer from the measured regime table, decides, and returns ONE answer -- value, ranked, margin, p, set, id -- with the lint attached. decision_outcome(id, truth) teaches the table, the reflex and the calibration. The same discipline runs inside route() (act / choose / abstain), find_capability, suggest and serve, where a reported outcome promotes what was used.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); a=m.typed('courier lost the package', ['billing','shipping'], examples={'billing':['card charged twice','refund my invoice fee','charge on my statement'],'shipping':['parcel lost in transit','courier delivery late','package never arrived']}); print(a['value'], a['lint'], a['id'][:6])",
+      "method": "typed",
+      "name": "typed",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "verify the answer matches the input",
         "is this result valid for this prompt",
         "bidirectional lookup check",
@@ -19783,7 +19803,7 @@
       "theme": "More capabilities"
     }
   ],
-  "count": 874,
+  "count": 875,
   "schema_version": "1.1",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

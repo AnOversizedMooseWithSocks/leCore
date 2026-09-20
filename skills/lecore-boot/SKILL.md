@@ -96,6 +96,20 @@ carries `_meta.lecore.receipt` (input/output sha256 — determinism is the proof
 and `_meta.lecore.cost`. Errors come back in `content` with `isError: true` and a `hint`
 naming the real parameters. Both doors, and the Python API, are the same faculties.
 
+
+## Step 3b — the MCP door (sweep 176)
+
+`lecore-mcp` (stdio) or `lecore-mcp --http 8765 --token T` (Streamable HTTP) is the same engine for an MCP
+host; `LECORE_MCP_PROFILE=minimal|standard|full` sizes the tool list (8 / 30 / 47). The host's natural
+path: `lecore_find` (tiered — never a guess; an `id` to report against) → `lecore_describe` → a curated tool
+or `lecore_invoke`; `lecore_decide` for a choice among options (add `escalate: true` and, if the host
+declared sampling, a weak answer goes to the host's own model once, then the reflex answers the repeat);
+`lecore_outcome(id, truth)` closes the loop. Prompts `/decide /review /plan /route` render the four-part
+shape; resources `lecore://map`, `lecore://capabilities`, `lecore://decisions/recent`, `lecore://memory/
+taught`. With leStudio3d up, `studio3d_*` tools appear and `studio3d_ops` runs a verified sequence (each op
+a swarm step; a failing brightness check stops it). Gate: `python3 tools/mcp_lint.py` (47/47 annotated,
+0/15 off-catalog probes answered, prompts and resources all render).
+
 ## Step 4 — connect end one: memory in front, then roll the generation
 
     inv '{"name":"boot","args":{"partition":"'"$LECORE_PARTITION"'","doctrine":true}}'

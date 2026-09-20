@@ -182,6 +182,17 @@ Plugins can also build ON the framework: `holographic/plugins/_example_tags.py` 
 pip install leos-core              # installs the engine (+ NumPy)
 python -c "import lecore; print(lecore.UnifiedMind)"
 lecore-mcp --selftest              # the MCP server lands on your PATH with the base install
+lecore-mcp --http 8765 --token T   # the same server over Streamable HTTP (POST /mcp, Bearer token)
+LECORE_MCP_PROFILE=minimal lecore-mcp   # 8 tools / 5 KB instead of 30 / 21 KB (standard) or 47 (full)
+
+# Claude Desktop / Cursor / VS Code -- one entry, no glue:
+#   {"mcpServers": {"lecore": {"command": "uvx", "args": ["lecore-mcp"],
+#                              "env": {"LECORE_PARTITION": "/path/to/lecore_memory", "LECORE_MCP_PROFILE": "standard"}}}}
+# The natural path a host's model follows: lecore_find (tiered: answer / menu / refuse) -> lecore_describe ->
+# the curated tool or lecore_invoke; lecore_decide for a choice among options; lecore_outcome(id, truth) so the
+# engine learns. Prompts /decide /review /plan /route; resources lecore://map, lecore://decisions/recent, ...
+# With leStudio3d running, studio3d_* tools appear (a render comes back as an image block; studio3d_ops runs a
+# verified sequence). docs/research/BACKLOG_mcp.md has the comparison with Blender MCP and every number.
 ```
 
 **Or work from a clone** (what you want if you're hacking on the engine or running the tour/UI):
@@ -522,7 +533,7 @@ and forget to document or register it, CI tells you which one.
 
 ## Status
 
-Active research engine, and a large one — 808 `holographic_*` modules plus 6 bundled plugins, ~2,410 mind verbs behind 890 catalog capabilities, and 7,000+ collected tests (7,287), all green in CI (the full suite runs sharded, with a per-test budget that skips anything slow unless it is marked critical). It's real and it runs, but it's a research project under steady development, not a finished product. Expect sharp edges, expect it to keep growing, and expect every surprising result to come with the measurement that earned it.
+Active research engine, and a large one — 808 `holographic_*` modules plus 6 bundled plugins, ~2,410 mind verbs behind 891 catalog capabilities, and 7,000+ collected tests (7,291), all green in CI (the full suite runs sharded, with a per-test budget that skips anything slow unless it is marked critical). It's real and it runs, but it's a research project under steady development, not a finished product. Expect sharp edges, expect it to keep growing, and expect every surprising result to come with the measurement that earned it.
 
 ## License
 

@@ -2,7 +2,7 @@
 
 ## Resident swarm (per organ group)
 
-- agents_and_reasoning         108 modules, 108 import, 92 with selftests
+- agents_and_reasoning         112 modules, 112 import, 96 with selftests
 - caching_and_storage          59 modules, 59 import, 57 with selftests
 - io_and_interop               97 modules, 97 import, 94 with selftests
 - materials_and_texture        18 modules, 18 import, 18 with selftests
@@ -14,7 +14,7 @@
 - scene_and_pipeline           32 modules, 32 import, 30 with selftests
 - semantic_router              9 modules, 9 import, 9 with selftests
 - simulation_and_physics       53 modules, 53 import, 47 with selftests
-- unified                      30 modules, 30 import, 30 with selftests
+- unified                      31 modules, 31 import, 31 with selftests
 
 ## Above/below matrix (L0 engine, L1 facade, L2 hosted, L3 chat, L4 pinned)
 
@@ -66,18 +66,18 @@ The hand-written matrix above covers 21 capabilities and has since cp67. This on
 
 | measure | count |
 |---|---|
-| catalog cards carrying a `method=` | 763 |
-| distinct doors behind them | 687 |
-| L0 engine floor | 662 |
-| L1 reachable on the facade class | 662 |
-| L2 reachable (in the /tools manifest, so `lecore_invoke` can call it) | 662 |
-| L2 PROMOTED to a dedicated MCP tool | 15 |
+| catalog cards carrying a `method=` | 783 |
+| distinct doors behind them | 707 |
+| L0 engine floor | 682 |
+| L1 reachable on the facade class | 682 |
+| L2 reachable (in the /tools manifest, so `lecore_invoke` can call it) | 682 |
+| L2 PROMOTED to a dedicated MCP tool | 24 |
 | L3 PROMOTED to a chat verb | 3 |
-| L4 named under tests/ | 529 |
+| L4 named under tests/ | 545 |
 | **genuine gaps** | **12** |
 | not meaningful to ask (object methods) | 13 |
 
-PROMOTION IS A CENSUS, NEVER A GAP. `holographic_mcp` hosts `lecore_invoke(name, args)`, which runs any public faculty, so L2 reachability is universal by construction and a dedicated tool is a curation decision. Scoring 672 unpromoted doors as defects would be the bar nobody clears.
+PROMOTION IS A CENSUS, NEVER A GAP. `holographic_mcp` hosts `lecore_invoke(name, args)`, which runs any public faculty, so L2 reachability is universal by construction and a dedicated tool is a curation decision. Scoring 683 unpromoted doors as defects would be the bar nobody clears.
 
 ### Genuine gaps
 
