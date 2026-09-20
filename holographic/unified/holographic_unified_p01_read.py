@@ -764,6 +764,47 @@ class _UnifiedPart01:
         at z=0.36) -- undetectable before `refused` existed. See Catalog.route_or_abstain."""
         return self._capability_catalog().route_or_abstain(problem, k=k, n_null=n_null, z_min=z_min, seed=seed)
 
+    def catalog_families(self, decide=False, margin=0.10):
+        """{capability: (family, source)} for every catalog card (sweep 176, backlog B1): 'module' when the
+        module folder resolves it, 'decided' when a typed decision over the card's text is confident
+        (measured 0.625 forced vs 0.280 majority, so only above `margin`), else (None, None) -- reported,
+        not guessed; catalog_gaps flags those. See holographic_catalog.Catalog.families."""
+        return self._capability_catalog().families(decide=decide, margin=margin)
+
+    def route_tiered(self, problem, k=5, z_answer=-0.1, z_refuse=-0.5, n_null=64, seed=0, clarify=False,
+                     reflex=False, verify=False):
+        """ROUTE WITHOUT A BARE REJECTION (sweep 176, backlog A1): answer / menu / clarify / refuse, with an
+        `id` to report the outcome against. MEASURED on held-out aliases ablated from the index (3 seeds x
+        150): the old gate rejected 94.7%; tiered answers 24.9% at 0.833 accuracy, puts 29.8% in a menu that
+        holds the answer 83.1% of the time (k=5), sends 11.3% to clarify (answer present 85.3%), refuses
+        34.0%; of 7 gibberish probes 0 answered, 1 menu, 6 refused. Thresholds are parameters set from that
+        split (doc 02 s3). See holographic_catalog.Catalog.route_tiered."""
+        if reflex:
+            # THE ROUTER LEARNS FROM USE (sweep 176, the reflex bridge): the router has no learner of its own, so
+            # a reported outcome (which capability the caller actually used) teaches the experience trace, and
+            # a similar request later is answered from it -- tier 'answer', via 'reflex' -- when its gates pass.
+            rf = self.reflex_decide(problem)
+            if rf.get("value") is not None:
+                return {"tier": "answer", "answer": rf["value"], "via": "reflex", "z": None, "score": None, "ties": 1,
+                        "families": [], "options": [{"name": rf["value"], "score": None, "family": None}],
+                        "p": (None if rf.get("error_prob") is None else 1.0 - rf["error_prob"]),
+                        "confidence": rf["confidence"], "id": rf["id"], "question": None,
+                        "reason": "answered from experience (reflex confidence %.2f)" % rf["confidence"]}
+        r = self._capability_catalog().route_tiered(problem, k=k, z_answer=z_answer, z_refuse=z_refuse,
+                                                    n_null=n_null, seed=seed, clarify=clarify)
+        # G1 (sweep 176): the route is a DecisionRecord too; its ledger id replaces the catalog's local id so
+        # one id space covers every door, and decision_outcome(id, chosen_capability) records what was used.
+        from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord
+        rec = DecisionRecord(problem, "route", [o["name"] for o in r["options"]], r["answer"], "route",
+                             margin=r.get("z"), p=r.get("p"), meta={"tier": r["tier"]})
+        self.decision_ledger().add(rec)
+        r["id"] = rec.id
+        if verify and r.get("answer"):
+            # VERIFY (sweep 176): is this answer a valid response to this input, against experience -- forward and
+            # backward lookup, displacement profile, seen gate, drift. A verdict, not a confidence.
+            r["verify"] = self.verify_decision(problem, r["answer"], key="fingerprint")
+        return r
+
 
     def wave_state_encoder(self, dim=512, window=32, grid=16, seed=0):
         """ONE window of OHLC bars as ONE state vector (I3): carrier shape (close-based, unit-RMS), BOTH

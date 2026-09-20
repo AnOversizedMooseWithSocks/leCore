@@ -4,6 +4,16 @@ Testers told us the recent changes were hard to grasp from the changelog. This p
 is the other direction: each feature, what it's for, and one copy-paste example.
 Everything below is deterministic and runs offline.
 
+## Sweep 176 (September 2026) -- the decision surface, closed and measured
+
+- **Typed decisions** (`systemone_*`): choice / noul / score questions answered without a model; the transformed count table (`scorer="nb"`) is the default from ~20 examples per option; calibrated `p`; **conformal answer sets** with a coverage guarantee that holds (0.960 at nominal 0.95); **batch FDR** over a stream (0.03 at nominal 0.05); guarded semi-supervised EM; `systemone_lint` to check the question before asking it.
+- **Tiered routing** (`route_tiered`): answer / menu / refuse -- the old null gate rejected 95% of honest paraphrases; 0 of 30 off-catalog probes answered.
+- **One decision record, outcomes by id** (`decision_outcome`): the table, the **reflex arc** (now learning from use: repeats 99.3% at 0.982) and the calibration all learn from a reported outcome; `verify_decision` catches a served answer that contradicts experience (forward/backward lookup AUROC 1.000).
+- **The swarm contract** (`swarm_step` / `swarm_evaluate`): NOOA's validated termination -- a step's verification runs before it is accepted.
+- **Code tools**: `file_symbol`, `file_insert_after_symbol`, `file_selftest`; **scene -> GLSL** (`sdf_scene_shader`, IoU 0.985 vs the engine's own trace).
+- Docs: `docs/TYPED_DECISIONS.md` (syntax with live examples), `docs/research/` (series, backlog, benchmarks incl. SWE-bench Verified file localisation), `docs/COMPETITIVE_NOOA.md` section 9; `FEATURE_GUIDE.md` section 12. Part 27 holds the decision faculties.
+
+
 ## One-call boot (external memory automatic, opt-out)
     import lecore
     m = lecore.autoboot()                      # partition or shipped bundle + model rung if present

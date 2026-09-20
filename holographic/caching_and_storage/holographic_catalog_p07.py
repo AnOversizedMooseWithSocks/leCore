@@ -273,7 +273,7 @@ def register_p07(c):
         "loop detection. teach_check() turns redshift into an IMPLICIT-CONFLICT "
         "candidate with the nearest established answers attached.",
         example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.teach_check(\'where does the deployment run\', \'it was decommissioned\')",
-        aliases=("drift detection", "echo detection", "conflict candidate",
+        aliases=("drift detection displacement response", "echo detection", "conflict candidate",
                  "stale memory", "loop detection"),
         module="holographic_drift")
     c.register_capability(

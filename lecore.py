@@ -136,16 +136,20 @@ def _read_version():
     package metadata AT BUILD TIME from the same VERSION file -- so read metadata first (the installed truth),
     then fall back to the VERSION file (running from a clone), then a sentinel. This means __version__ can never
     drift from setup.py the way a hardcoded literal did (it was stuck at 0.1.0 while setup.py said 0.2.0)."""
-    try:
-        from importlib.metadata import version as _v          # installed case: the wheel's recorded version
-        return _v("leos-core")
-    except Exception:
-        pass
+    # THE CLONE WINS WHEN IT IS THE CODE RUNNING (sweep 176): a VERSION file next to this module means the
+    # source tree is what was imported, and its VERSION is the truth for THIS code. Metadata answered first
+    # before -- and a PyPI leos-core installed by a studio app made the clone report 0.2.24 while running 0.2.21
+    # (the sandbox's only full-suite failure). The installed-wheel case still reads metadata: no VERSION ships.
     try:
         import os
         here = os.path.dirname(os.path.abspath(__file__))
-        with open(os.path.join(here, "VERSION"), encoding="utf-8") as fh:   # clone case: read the source of truth
+        with open(os.path.join(here, "VERSION"), encoding="utf-8") as fh:   # clone case: the source of truth
             return fh.read().strip()
+    except Exception:
+        pass
+    try:
+        from importlib.metadata import version as _v          # installed case: the wheel's recorded version
+        return _v("leos-core")
     except Exception:
         return "0.0.0"
 

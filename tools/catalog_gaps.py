@@ -68,6 +68,19 @@ def report(probe_sets=None):
                 gaps += 1
             print("  %-34s -> %s%s" % (q, top, mark))
     print("\n%d gap(s) found." % gaps)
+    # FAMILY RESOLUTION (sweep 176, backlog B1): a card whose module maps to no holographic/<family>/
+    # folder cannot take part in family-first routing or the tiered router's 'clarify' tier. Reported as a
+    # NOTE with the count, never guessed: 497 resolve from the module folder today, a typed decision
+    # over the card's text adds only the confident ones (17 at margin 0.10), the rest are named here so
+    # an author can set module= or name the module in the does text.
+    fams = default_catalog().families()
+    unresolved = sorted(n for n, (f, _) in fams.items() if f is None)
+    print("FAMILY (note): %d of %d cards resolve to a holographic/<family>/ folder; %d unresolved"
+          % (len(fams) - len(unresolved), len(fams), len(unresolved)))
+    for n in unresolved[:12]:
+        print("   unresolved family:", n[:70])
+    if len(unresolved) > 12:
+        print("   ... %d more (mind.catalog_families() lists them all)" % (len(unresolved) - 12))
     return gaps
 
 

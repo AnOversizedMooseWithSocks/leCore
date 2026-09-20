@@ -19,13 +19,13 @@ def register_p01(c):
         "Index (search)", "nearest-neighbour / recall over a pile of vectors with ONE interface (Index.nearest(q,k)): "
         "exact cosine scan for small sets, sub-linear RP-forest for large, plus a calibrated abstain",
         example="from holographic.caching_and_storage.holographic_index import Index; Index(vectors, labels=names).nearest(query, k=5)",
-        native=True, aliases=("knn", "nearest", "lookup", "recall", "retrieve", "similarity", "search", "index"))
+        native=True, aliases=("knn", "nearest", "lookup pile interface", "recall", "retrieve", "similarity", "search", "index"))
     c.register_capability("holographic_spatial.knn", "EUCLIDEAN k-nearest over a POINT cloud (a spatial grid) -- a "
                           "different metric than the cosine Index; use for geometry, not vectors",
                           example="SpatialGrid(points).knn(query, k)", native=True, aliases=("spatial", "euclidean", "points", "knn"), module="tree", consumes=('points',), produces=('selection',))
     c.register_capability("holographic_rayindex", "which pixels/objects a RAY touches (ray<->object index) -- not a "
                           "nearest(query,k); a distinct spatial ray structure", example="build_ray_index(ctx, camera, w, h)",
-                          native=True, aliases=("ray", "pixels", "reshade", "spatial", "bvh"))
+                          native=True, aliases=("ray", "pixels touches distinct", "reshade", "spatial", "bvh"))
     c.register_capability("Recall-budgeted vector index (the forest carries a measured honesty label)",
         "Index(fast=True): TWO-STAGE f32 engine -- f32 scan, f64 rescore of an over-fetched shortlist, "
         "margin ARBITER falling back to full f64 whenever f32 could flip the boundary (counted). "
@@ -53,32 +53,32 @@ def register_p01(c):
     c.register_capability("holographic_pivot", "recursive pivot-tree index for nearest-neighbour search",
                           example="from holographic.misc.holographic_pivot import ...", native=True, aliases=("pivot", "index"))
     c.register_capability("holographic_archive", "content-addressable image memory (WHT plates), damage-tolerant",
-                          example="from holographic.misc.holographic_archive import ...", native=True, aliases=("image", "store", "recall"), module="archive", consumes=('image',), produces=('image',))
+                          example="from holographic.misc.holographic_archive import ...", native=True, aliases=("image", "store", "recall addressable plates"), module="archive", consumes=('image',), produces=('image',))
 
     # --- caching / baking: the CACHES (audit named ~9) = bake_and_query ---
     c.register_capability(
         "Cache (bake-and-query)", "bake a slow evaluator over what VARIES (position/view/time/constant) then look it "
         "up cheaply -- one shared grid-sample core over the scattered bakes (matbake, sdfbake, viewlut, anim)",
         example="from holographic.caching_and_storage.holographic_cachehome import Cache; Cache.bake(fn, vary='position', lo=lo, hi=hi, res=24)",
-        native=True, aliases=("bake", "precompute", "lookup", "cache", "memoise", "irradiance", "lut", "grid"))
+        native=True, aliases=("bake", "precompute", "lookup", "cache", "memoise", "irradiance", "lut cheaply matbake", "grid"))
     c.register_capability("holographic_domecache", "cached DOME / sky-ambient light: bake PRT at coarse anchors, "
                           "smooth interpolate, recompute edges (three-tier)", example="render_scene_document(..., dome_cache=True)",
-                          native=True, aliases=("dome", "ambient", "ao", "sky"))
+                          native=True, aliases=("dome interpolate recompute", "ambient", "ao", "sky"))
     c.register_capability("holographic_lightcache", "cached SOFT AREA lights + one-bounce INDIRECT / global "
                           "illumination, baked noise-free at anchors (the shared cached_screen_shade engine)",
                           example="render_scene_document(..., soft_light_cache=True, indirect_cache=True)",
-                          native=True, aliases=("gi", "indirect", "bounce", "area", "penumbra", "shadow", "speckle",
+                          native=True, aliases=("gi", "indirect", "bounce", "area indirect illumination", "penumbra indirect illumination", "shadow", "speckle",
                                                 "placed light speckle noise", "noisy soft shadows", "speckle in the penumbra",
                                                 "noise-free area light", "cache the indirect light", "bake one bounce"))
     c.register_capability("holographic_modulate", "modulate/demodulate primitive (= bind/unbind): split radiance into "
                           "albedo x irradiance to denoise or upscale the smooth part cleanly",
                           example="from holographic.misc.holographic_modulate import demodulate, remodulate", native=True,
-                          aliases=("albedo", "irradiance", "denoise", "upscale", "demodulate"))
+                          aliases=("albedo upscale cleanly", "irradiance upscale cleanly", "denoise", "upscale", "demodulate upscale cleanly"))
     c.register_capability("holographic_matbake", "bake POSITION-dependent material channels to a grid, trilinear "
                           "lookup", example="from holographic.materials_and_texture.holographic_matbake import ...", native=True, aliases=("material", "bake"), consumes=(), produces=('field',))
     c.register_capability("holographic_prt", "precomputed radiance transfer: bake light transport, relight by a dot "
                           "product", example="from holographic.misc.holographic_prt import precompute_transfer, shade_prt", native=True,
-                          aliases=("relight", "sh", "transfer", "light"))
+                          aliases=("relight", "sh", "transfer", "light precomputed transport"))
 
     # --- 2D image editing & generation, text generation, language learning, utilities (curated families) ---
     c.register_capability("2D image editing & generation", "the engine's 2D IMAGE toolkit: edit (recolor_image / "
@@ -242,7 +242,7 @@ def register_p01(c):
                           example="import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "f=m.warped_noise(scale=2.0,seed=0,warp=0.5); print(f(np.zeros((1,3))).round(3))",
                           native=True, aliases=("domain warped fbm", "warped noise", "turbulence noise", "flow noise",
-                                                "swirling noise", "marble texture", "smoke noise", "dfbm",
+                                                "swirling noise", "marble texture flowing marbled", "smoke noise", "dfbm",
                                                 "fbm domain warp", "flowing procedural texture"))
     c.register_capability("ladder_forecast_calibrated", "forecast a numeric series with the ladder predictor "
                           "wrapped in a CALIBRATED prediction interval (holographic_ladder) -- an uncalibrated "
@@ -432,7 +432,7 @@ def register_p01(c):
                           "w=m.skin_bind_weights([[0,0,0],[5,0,0.0]],[[0,0,0],[5,0,0.0]],max_influences=2); "
                           "print(np.round(w.sum(axis=1),3).tolist())",
                           native=True, aliases=("bind mesh to skeleton", "compute skin weights from bones",
-                                                "automatic skin weights", "rig bind weights",
+                                                "automatic skin weights meshskin anchor", "rig bind weights",
                                                 "distance based skin binding", "skin binding"),
                           semantic="animate/skin",
                           consumes=("mesh", "skeleton"), produces=("scalar",))
@@ -525,7 +525,7 @@ def register_p01(c):
                           example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "b=m.body_params(); b['fat']=0.5; print(sorted(b.keys()))",
                           native=True, aliases=("character editor sliders", "body morph controls",
-                                                "muscle and fat sliders", "body customization parameters",
+                                                "muscle and fat sliders character slider", "body customization parameters",
                                                 "humanoid body sliders", "weight muscle fat controls"),
                           semantic="create/emit", consumes=(), produces=("scalar",))
     c.register_capability("fit_pose", "Fit a HUMANOID rig to KEYPOINTS -- the honest 'approximate a pose' "

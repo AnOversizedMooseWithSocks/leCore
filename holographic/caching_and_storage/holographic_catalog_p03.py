@@ -991,8 +991,8 @@ def register_p03(c):
                                                 # and pushed it out. Additive fix: strengthen the target, never
                                                 # weaken the honest neighbour. (Ported here when the catalog
                                                 # was split into parts; the pin lives in test_routing_pins.)
-                                                "tamper", "erasure code", "reliability",
-                                                "delta chain", "version history", "rollback", "compress", "determinism",
+                                                "tamper addressing hashing", "erasure code", "reliability",
+                                                "delta chain", "version history addressing hashing", "rollback", "compress addressing hashing", "determinism",
                                                 "plumbing", "reliability code"))
     # --- describe a scene in words, build it, adjust named objects, render or simulate ---
     # rev. 9 discoverability audit: the pinned route probe "describe a scene and build it" shipped RED. Mechanics,
@@ -1089,9 +1089,9 @@ def register_p03(c):
                           "as the local pool, just cross-machine. SAFE by design: workers run BY NAME (a node only runs "
                           "workers it registered), so no code crosses the wire, only data. stdlib sockets/JSON.",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.scene_and_pipeline.holographic_coordinator import serve_worker; serve_worker(port=9000, workers={'sum': fn})  # then: mind.farm(['host:9000'], token).run(buckets, 'sum', None, reduce_sum)",
-                          native=True, aliases=("farm", "distributed compute", "cluster", "network farm", "worker node",
-                                                "serve_worker", "render farm", "compute across machines", "scale out",
-                                                "map reduce", "parallel across nodes", "grid"))
+                          native=True, aliases=("farm", "distributed compute", "cluster machines reduce", "network farm", "worker node",
+                                                "serve_worker", "render farm", "compute across machines", "scale out machines farm",
+                                                "map reduce", "parallel across nodes", "grid machines reduce"))
     c.register_capability("Who's online (presence registry)", "mind.registry tracks live actors: announce(principal) is "
                           "a heartbeat, registry.list(kind=, workspace=) discovers who's here, is_online() checks one, "
                           "and an actor that stops heart-beating for `ttl` seconds drops out on its own. Rides the "
@@ -1129,7 +1129,7 @@ def register_p03(c):
                           "Because a world is a seed + deltas, forking to single-player and merging back is cheap. "
                           "Returns {merged, conflicts}.",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); res = mind.merge_forks([mine, theirs], policy='select'); apply(res['merged']); resolve(res['conflicts'])",
-                          native=True, aliases=("merge", "merge forks", "fork and merge", "reconcile", "combine worlds",
+                          native=True, aliases=("merge", "merge forks", "fork and merge", "reconcile forks conflicts", "combine worlds",
                                                 "resolve conflicts", "multiplayer merge", "branch and merge", "diff merge",
                                                 "three-way merge", "collaborative edit", "sync changes"))
     c.register_capability("Scoped identity for any actor (Principal)", "mind.principal(id, workspace, kind) gives an "
@@ -1142,7 +1142,7 @@ def register_p03(c):
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); alice = mind.principal('alice', workspace='lab', kind='user'); alice.send(mind.bus(), to='bob', payload={...}); alice.poll(mind.bus())",
                           native=True, aliases=("principal", "identity", "scoped identity", "per-agent state",
                                                 "per-user namespace", "multiplayer", "multi-user", "swarm", "agent isolation",
-                                                "inbox", "directed message", "provenance", "source role", "who sent this",
+                                                "inbox peer isolation", "directed message", "provenance", "source role", "who sent this",
                                                 "guest", "peer node", "federation", "workspace member"))
     c.register_capability("Serve leCore as a tool (/tools + /invoke)", "run the HTTP service (holographic_service.serve) "
                           "and any harness, LLM, or another leCore drives this node over two endpoints: GET /tools "
@@ -1161,9 +1161,9 @@ def register_p03(c):
                           "remote nodes so a planner can chain local faculties, remote tools, LLMs, and commands "
                           "uniformly.",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); for t in remote_tools('http://host:8080', token='x'): mind.orchestrator.register(t)  # + mind.attach_llm(llm); mind.orchestrator.register_command('ffmpeg', ['ffmpeg','-i','{}'])",
-                          native=True, aliases=("call a tool", "remote tools", "use an llm", "attach llm", "orchestrator",
+                          native=True, aliases=("call a tool serves calls", "remote tools", "use an llm", "attach llm", "orchestrator",
                                                 "register a tool", "run a command", "shell command tool", "call another node",
-                                                "chain tools", "planner", "toolclient", "peer node", "federation"))
+                                                "chain tools", "planner", "toolclient", "peer node serves calls", "federation serves calls"))
     c.register_capability("Agreement across estimates (opponent)", "given TWO estimates of the SAME thing (two models, "
                           "two solvers, two forked worlds, two farm nodes), mind.opponent_channels(a, b) decomposes "
                           "their disagreement (opponent-processing, ported from leOS) into: agreement (what both see), "
@@ -1359,7 +1359,7 @@ def register_p03(c):
                                   "print(mind.sdf_dialect(tree.to_dsl(), 'wgsl').splitlines()[0]); "
                                   "print(mind.sdf_validate_c(tree, np.random.default_rng(0).uniform(-2, 2, (50, 3)), 'c_f64'))",
                           native=True, aliases=("emit the scene's sdf", "sdf to wgsl", "sdf shader",
-                                                "brain muscle contract", "one source of truth two runtimes",
+                                                "brain muscle contract", "one source of truth two runtimes shaders brain",
                                                 "compute shader from the scene", "sdf dialect", "map function",
                                                 "no drift", "webgpu sdf"))
     c.register_capability("Realtime session (draft frames, refine pass, multi-format payload)", "a viewport wants a "

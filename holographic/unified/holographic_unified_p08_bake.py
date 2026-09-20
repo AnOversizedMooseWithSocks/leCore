@@ -195,6 +195,196 @@ class _UnifiedPart08:
         from holographic.misc.holographic_relations import decide_or_abstain
         return decide_or_abstain(ranked, margin=margin, min_score=min_score)
 
+    def systemone(self, questions, margin=None, encoder="perceive", min_support=None,
+                  scorer="prototype", nb_bigrams=False, nb_transform=True):
+        """Fit the TYPED-DECISION contract (native System One): validate {name: {type: choice|score|
+        noul, ...}} strictly, precompute option prototypes / score anchors, and return a fitted
+        object with .decide(state), .decide_map(states), .calibrate(labeled) and
+        .calibration_report(labeled). The fit-once door for volume work; scoring delegates to
+        build_prototypes/match cosine + decide_or_abstain, probabilities appear only after
+        calibration. encoder: 'perceive' (default, the mind's text encoder), 'ngram' (hashed
+        char 3-5 gram bundle -- measured better on open-text routing, see
+        holographic_systemone.hashed_ngram_encode), or any text->vector callable. margin=None
+        resolves per encoder (0.1 perceive, 0.02 ngram -- gaps live at different scales).
+        scorer (sweep 174): 'prototype' (default, unchanged) or 'nb' -- multinomial naive Bayes
+        over word counts of the same examples, a count table fit like a prototype (no gradient,
+        stdlib+numpy, deterministic). MEASURED vs the prototype path on identical examples, 3
+        seeds, nb_transform=True (sweep 175, the default: log(1+tf) * IDF, length-normalised):
+        AG News k=128 0.803 vs 0.700, k=300 0.843 vs 0.716; SST-2 k=600 0.709 vs 0.673 (0.725 with
+        nb_bigrams=True, untransformed); Banking77 (77 support intents) k=20 0.736 vs 0.722, k=35
+        0.798 vs 0.753. Calibrated on Banking77 k=20, answer iff p>=0.9: 40% of tickets at 0.959
+        (prototype 34% at 0.966). CAVEAT, measured: nb posteriors are sharp, so calibrate with >=150
+        labeled outcomes or p is overstated (SST-2 ECE 0.147 at 16 rows, 0.047 at 150); the
+        rolling recalibration in observe() accumulates exactly those. min_support is a cosine
+        floor and does not apply to nb. See holographic_systemone.SystemOne."""
+        from holographic.agents_and_reasoning.holographic_systemone import (SystemOne,
+                                                                            hashed_ngram_encode)
+        if callable(encoder):
+            enc = encoder
+        elif encoder == "ngram":
+            enc = hashed_ngram_encode(dim=2048)
+        else:
+            enc = lambda t: self.perceive(t, "text")
+        if margin is None:
+            margin = 0.02 if encoder == "ngram" else 0.1
+        # min_support (sweep 172): off-manifold floor for choice/noul, the same abstention
+        # score questions always had; None keeps sweep-171 behaviour (default-off).
+        so = SystemOne(enc, margin=margin, min_support=min_support, scorer=scorer,
+                       nb_bigrams=nb_bigrams, nb_transform=nb_transform)
+        so.fit(questions)
+        return so
+
+    def _systemone_cached(self, questions, labeled, margin, encoder, min_support, scorer, nb_bigrams,
+                          conformal_alpha=None):
+        """G2 (sweep 176): the fitted SystemOne KEPT per schema, so an outcome reported by id lands in the
+        table the next call decides from. Same inputs -> same fit -> same decisions; only a reported outcome
+        changes it. Keyed on everything that shapes the fit."""
+        import json as _json
+        key = _json.dumps({"q": questions, "m": margin, "e": encoder, "s": min_support, "sc": scorer, "b": nb_bigrams,
+                           "l": labeled, "ca": conformal_alpha}, sort_keys=True, default=str)
+        cache = getattr(self, "_systemone_cache", None)
+        if cache is None:
+            cache = self._systemone_cache = {}
+        so = cache.get(key)
+        if so is None:
+            so = self.systemone(questions, margin=margin, encoder=encoder, min_support=min_support,
+                                scorer=scorer, nb_bigrams=nb_bigrams)
+            if labeled:
+                so.calibrate(labeled)
+                if conformal_alpha is not None:
+                    # H1 (sweep 176): the same labeled rows also calibrate the conformal answer SET.
+                    so.calibrate_conformal(labeled, alpha=conformal_alpha)
+            cache[key] = so
+        return so
+
+    def _systemone_record(self, so, state, questions, out):
+        """G1 (sweep 176): every question's answer becomes a DecisionRecord whose outcome, reported by id,
+        forwards to THIS fitted SystemOne's observe() -- the loop closes without a teach() call."""
+        from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord
+        L = self.decision_ledger()
+        for q, a in out.items():
+            if not isinstance(a, dict) or a.get("type") not in ("choice", "noul", "score"):
+                continue
+            opts = [n for n, _ in a.get("ranked", [])] if a.get("ranked") else list(questions[q].get("options", []))
+            rec = DecisionRecord(state, q, opts, a.get("value"), "typed",
+                                 margin=a.get("margin_gap"), p=a.get("p"), meta={"basis": a.get("basis")})
+            L.add(rec, hook=(lambda outcome, _so=so, _s=state, _q=q: _so.observe(_s, {_q: outcome}).get(_q)))
+            a["id"] = rec.id
+        return out
+
+    def systemone_decide(self, state, questions, labeled=None, margin=None, encoder="perceive",
+                         min_support=None, scorer="prototype", nb_bigrams=False, conformal_alpha=None,
+                         reflex=False, escalate=None, p_floor=0.5, verify=False):
+        """ONE-SHOT typed decisions over a state: convenience over systemone() -- fit, optionally
+        calibrate from labeled [(state, {q: truth})], decide once. Returns {qname: {value, p,
+        ranked, confident, ...}} where value is schema-typed or None (abstained; refusal is a
+        result). p stays None until labeled outcomes calibrate it -- an uncalibrated probability
+        is not returned dressed up. scorer='nb' is the measured stronger few-shot scorer (see
+        systemone). See holographic_systemone."""
+        if reflex:
+            # THE REFLEX FIRST (sweep 176): answer from accumulated experience when its gates pass; the typed
+            # question's options are the only labels the reflex may name. Default-off.
+            rf = self.reflex_decide(state, key="ngram")
+            if rf.get("value") is not None:
+                q = next(iter(questions))
+                if rf["value"] in (questions[q].get("options") or []):
+                    return {q: {"type": questions[q]["type"], "value": rf["value"], "via": "reflex",
+                                "confident": True, "abstained": False, "p": rf.get("error_prob") is not None and (1.0 - rf["error_prob"]) or None,
+                                "confidence": rf["confidence"], "ranked": [(rf["value"], rf["confidence"])], "id": rf["id"]}}
+        so = self._systemone_cached(questions, labeled, margin, encoder, min_support, scorer, nb_bigrams,
+                                    conformal_alpha=conformal_alpha)
+        if escalate is not None:
+            # leOS's SELF-EXTENDING INSTRUCTION (sweep 176): when the substrate abstains, the model end answers
+            # under the schema (decide_or_escalate: validate, retry once, else refuse) and the answer is a
+            # DecisionRecord via 'model_end' -- report its outcome by id and the reflex learns the task, so the
+            # next similar request never reaches the model. The escalation carries the generated four-part prompt.
+            r = so.decide_or_escalate(state, escalate=escalate, p_floor=p_floor)
+            out = r["answers"]
+            from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord
+            L = self.decision_ledger()
+            for q, a in out.items():
+                via = "model_end" if a.get("via") == "escalated" else "typed"
+                opts = [n for n, _ in a.get("ranked", [])] if a.get("ranked") else list(questions[q].get("options", []))
+                rec = DecisionRecord(state, q, opts, a.get("value"), via, margin=a.get("margin_gap"), p=a.get("p"),
+                                     meta={"basis": a.get("basis"), "escalated": a.get("via") == "escalated"})
+                L.add(rec, hook=(lambda outcome, _so=so, _s=state, _q=q: _so.observe(_s, {_q: outcome}).get(_q)))
+                a["id"] = rec.id
+            out["_summary"] = r["summary"]
+            return out
+        out = self._systemone_record(so, state, questions, so.decide(state))
+        if verify:
+            for qn, a in out.items():
+                if isinstance(a, dict) and a.get("value") is not None:
+                    a["verify"] = self.verify_decision(state, a["value"], key="ngram")
+        return out
+
+
+    def systemone_map(self, states, questions, labeled=None, margin=None, encoder="perceive",
+                      min_support=None, scorer="prototype", nb_bigrams=False, conformal_alpha=None):
+        """BATCH typed decisions: one schema over many states (map a decision over rows). Row i is
+        identical to systemone_decide(states[i], ...) -- pinned, so the batch path can never fork
+        from the single path. For big volumes fit once via systemone() and reuse. See
+        holographic_systemone."""
+        so = self._systemone_cached(questions, labeled, margin, encoder, min_support, scorer, nb_bigrams,
+                                    conformal_alpha=conformal_alpha)
+        return [self._systemone_record(so, s, questions, a) for s, a in zip(states, so.decide_map(states))]
+
+    def systemone_stream(self, stream, questions, lr=1.0, margin=None, encoder="perceive",
+                         min_support=None, scorer="prototype", nb_bigrams=False):
+        """CLOSE THE DECISION LOOP over a labeled stream (sweep 172): fit the typed schema, then
+        run PREQUENTIAL test-then-train -- each row is decided FIRST (that decision is the honest
+        test) and only then learned from (observe's AdaptHD miss-update; lr=0 is the frozen
+        baseline that measures what learning adds). Returns per-question prequential accuracy,
+        whether rolling calibration engaged, and the two-channel drift report (label-free
+        support + label-lagged correctness, delegated to the regime machinery).
+        stream = [(state, {question: truth}), ...]. With scorer='nb' the update is a count
+        increment on the true option (lr weights the counts). See holographic_systemone."""
+        so = self.systemone(questions, margin=margin, encoder=encoder, min_support=min_support,
+                            scorer=scorer, nb_bigrams=nb_bigrams)
+        hits = {}
+        for state, truths in stream:
+            for name, r in so.observe(state, truths, lr=lr).items():
+                hits.setdefault(name, []).append(1.0 if r["was_correct"] else 0.0)
+        import numpy as _np
+        return {"n": len(stream),
+                "prequential_accuracy": {k: float(_np.mean(v)) for k, v in hits.items()},
+                "drift": so.drift_report(),
+                "calibrated": {k: (k in so._calib) for k in hits}}
+
+    def systemone_lint(self, questions, states=None, scorer=None):
+        """LINT A TYPED-DECISION SCHEMA BEFORE ASKING (sweep 176, backlog D1-D3): example budgets imbalanced
+        > 2x (the shortest option owns the smoothing floor), options with < 3 examples, the scorer the measured
+        regime table recommends from k (never leave-one-out), states with more than one clause (split them --
+        the clauses are returned), and contrastive / negated states (escalate to the model end). Catches every
+        failure the blueprint and 3-D tool experiments hit; reports, never rewrites. See
+        holographic_systemone.schema_lint / clauses / is_contrastive."""
+        from holographic.agents_and_reasoning.holographic_systemone import schema_lint
+        return schema_lint(questions, states=states, scorer=scorer)
+
+
+
+    def decision_memory(self, dim=1024, seed=0, k=8):
+        """The OUTCOME store for decision trees (sweep 173): remember that a given input, run
+        through a given tree, produced a given result -- then ask which inputs reach the SAME
+        result, and get an alarm when near-identical inputs reach DIFFERENT ones ('brittle').
+
+        This is an AUDIT LOG with an equivalence test, NOT a router and NOT a predictor. Inputs
+        are encoded by HOW THEY ROUTE (routing_fingerprint over this mind's catalog); measured,
+        that similarity tells "same result" pairs from "different result" pairs at AUROC 0.874
+        (bag encoder 0.777, raw word overlap 0.695) -- the one job it does better than every
+        baseline. Used as a router it LOST: its closed-world 0.720 vs 0.540 was matched by a
+        one-line "only capabilities already seen" filter (0.718), and in the open world the
+        plain router wins (0.549 vs 0.304). Full table in routing_fingerprint's docstring.
+
+        Keyed on bind(input, tree), never the tree alone. Recall abstains rather than handing
+        back its nearest row. See holographic_decisiontree.OutcomeMemory."""
+        from holographic.agents_and_reasoning.holographic_decisiontree import (
+            OutcomeMemory, routing_fingerprint)
+        if getattr(self, "_decision_memory", None) is None:
+            enc = routing_fingerprint(self._capability_catalog(), dim=dim, seed=seed, k=k)
+            self._decision_memory = OutcomeMemory(dim=dim, seed=seed, encoder=enc)
+        return self._decision_memory
+
     def pipeline_map(self):
         """The WHOLE workflow graph as data: every typed edge (consume_kind -> produce_kind -> capability)
         derived from the live catalog's consumes/produces tags, plus per-kind producers/consumers, coverage,

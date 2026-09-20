@@ -542,6 +542,74 @@ class Editor:
         self._atomic_write(self._resolve(relpath), "".join(lines))
         return {"path": relpath, "replaced": removed, "new_lines": block.count("\n")}
 
+    # ---- structure-aware edits (sweep 176) -----------------------------------------------------
+    # WHY: replace() needs a unique text anchor and insert() needs a line number. Adding a method to a
+    # class -- the commonest edit in the build loop -- has neither: the class's last line is not unique
+    # text and its number moves with every edit above it. Resolving a SYMBOL by name through `ast` gives
+    # the edit a stable target that survives other edits, and makes "show me this function" one call.
+    def symbol(self, relpath, name):
+        """Locate a def / class (or `Class.method`) by NAME with `ast`. Returns {path, name, kind, start, end,
+        text} with 1-based inclusive lines. Raises EditError naming near misses when the symbol is absent, so a
+        typo is a loud failure instead of an edit that silently lands somewhere else."""
+        import ast as _ast
+        src = self.read(relpath, max_bytes=None)
+        tree = _ast.parse(src)
+        want = name.split(".")
+        found = []
+
+        def walk(node, prefix):
+            for child in _ast.iter_child_nodes(node):
+                if isinstance(child, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)):
+                    full = prefix + [child.name]
+                    found.append((full, child))
+                    walk(child, full)
+        walk(tree, [])
+        hits = [(f, n) for f, n in found if f[-len(want):] == want]
+        if not hits:
+            near = sorted({".".join(f) for f, _ in found if want[-1].lower() in f[-1].lower()})[:8]
+            raise EditError("no symbol %r in %r%s" % (name, relpath, ("; near: %s" % ", ".join(near)) if near else ""))
+        if len(hits) > 1:
+            raise EditError("symbol %r is ambiguous in %r: %s -- qualify it (Class.method)"
+                            % (name, relpath, ", ".join(".".join(f) for f, _ in hits)))
+        full, node = hits[0]
+        start = min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])])
+        end = node.end_lineno
+        lines = src.splitlines()
+        return {"path": relpath, "name": ".".join(full), "kind": type(node).__name__, "start": start, "end": end,
+                "text": "\n".join(lines[start - 1:end])}
+
+    def insert_after_symbol(self, relpath, name, text, blank_lines=1):
+        """Insert `text` AFTER the body of the named def/class/`Class.method` -- the stable way to add a method
+        to a class or a function after another. Indentation is NOT adjusted: pass the text at the indentation
+        the target's siblings use (the symbol's own `col_offset` is returned so a caller can check). Returns
+        {path, inserted_at, after}."""
+        import ast as _ast
+        s = self.symbol(relpath, name)
+        src = self.read(relpath, max_bytes=None)
+        node = next(n for n in _ast.walk(_ast.parse(src))
+                    if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef))
+                    and n.end_lineno == s["end"] and n.name == s["name"].split(".")[-1])
+        block = ("\n" * int(blank_lines)) + (text if text.endswith("\n") else text + "\n")
+        r = self.insert(relpath, s["end"], block)
+        return {"path": relpath, "inserted_at": r["inserted_at"], "after": s["name"], "col_offset": node.col_offset}
+
+    def run_selftest(self, module, timeout=600):
+        """Run `python3 -m <module>` in a subprocess (the build loop's step 5b) and return {module, ok, seconds,
+        tail}. `ok` is the exit code; the last lines of output are returned so `{'ok': True, 'pinned': N}` is
+        readable without a shell. Never imports the module in-process: a selftest that mutates globals or
+        hangs must not take the mind with it."""
+        import subprocess, sys as _sys, time as _time
+        t0 = _time.time()
+        env = dict(__import__("os").environ, PYTHONHASHSEED="0")
+        try:
+            r = subprocess.run([_sys.executable, "-m", module], cwd=str(self.root), capture_output=True,
+                               text=True, timeout=timeout, env=env)
+            out = (r.stdout + r.stderr).strip().splitlines()
+            return {"module": module, "ok": r.returncode == 0, "seconds": round(_time.time() - t0, 2),
+                    "tail": [l for l in out if "Warning" not in l][-6:]}
+        except subprocess.TimeoutExpired:
+            return {"module": module, "ok": False, "seconds": timeout, "tail": ["timeout"]}
+
     def delete_lines(self, relpath, start, end):
         """Delete lines [start, end] (1-based, inclusive). Returns {path, deleted}."""
         # Uncapped: a WRITE (see replace). The cap guards context, not correctness.
@@ -894,6 +962,25 @@ def _selftest():
     except EditError:
         pass
     assert ed.read("big.py", max_bytes=None).count("\n") == 200_000
+
+    # structure-aware edits (sweep 176): symbol resolves by name, refuses typos loudly, is unambiguous, and
+    # insert_after_symbol lands a method after a class body without a text anchor or a line number.
+    ed.write("sym.py", "class A:\n    def f(self):\n        return 1\n\n    def g(self):\n        return 2\n\n\ndef f():\n    return 3\n")
+    s = ed.symbol("sym.py", "A.g")
+    assert (s["start"], s["end"], s["kind"]) == (5, 6, "FunctionDef"), s
+    try:
+        ed.symbol("sym.py", "f"); raise AssertionError("ambiguous symbol accepted")
+    except EditError as e:
+        assert "ambiguous" in str(e)
+    try:
+        ed.symbol("sym.py", "nope"); raise AssertionError("missing symbol accepted")
+    except EditError as e:
+        assert "no symbol" in str(e)
+    r = ed.insert_after_symbol("sym.py", "A.g", "    def h(self):\n        return 4\n")
+    assert r["inserted_at"] == 7 and r["col_offset"] == 4, r
+    assert ed.symbol("sym.py", "A.h")["end"] == 9 and ed.symbol("sym.py", "A")["end"] == 9
+    assert ed.python_check("sym.py")["ok"] if hasattr(ed, "python_check") else True
+    print("OK: symbol / insert_after_symbol resolve by name, refuse ambiguity and typos, and land inside the class")
 
     print("OK: holographic_codeedit self-test passed (root sandbox blocks escapes; unique/all replace; insert/"
           "delete_lines/read_lines; grep+list; archive reversible + delete final; move) -- root=%s" % root)

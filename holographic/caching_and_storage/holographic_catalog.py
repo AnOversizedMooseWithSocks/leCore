@@ -139,8 +139,42 @@ class Capability:
             return None
         return _collections.Counter(refs).most_common(1)[0][0]
 
+    def family(self):
+        """The holographic/<family>/ folder this capability's module lives in, resolved DETERMINISTICALLY
+        from resolved_module() by walking the package once (sweep 176, backlog B1). None when the module
+        stem maps to no folder -- and None is reported, never guessed: catalog_gaps flags it. WHY a
+        family: routing to one of 12 families first and then within it lifted held-out capability top-1
+        from 0.42 to 0.71 on the cards that resolved (indicative, doc 02 s5); a family is also what the
+        tiered router's 'clarify' tier asks about when the top candidates disagree."""
+        stem = self.resolved_module()
+        if not stem:
+            return None
+        stem = str(stem).split(".")[0]
+        stem = stem[len("holographic_"):] if stem.startswith("holographic_") else stem
+        return _stem_to_family().get(stem)
+
     def __repr__(self):
         return "Capability(%r, %s)" % (self.name, "native" if self.native else "python")
+
+
+
+def _stem_to_family():
+    """module stem -> family folder, built once by walking the holographic package (deterministic:
+    pkgutil order is filesystem order, and the map is a pure function of the tree)."""
+    global _STEM2FAM
+    if _STEM2FAM is None:
+        import pkgutil
+        import holographic as _h
+        out = {}
+        for p in pkgutil.walk_packages(_h.__path__, "holographic."):
+            parts = p.name.split(".")
+            if len(parts) == 3 and parts[2].startswith("holographic_"):
+                out[parts[2][len("holographic_"):]] = parts[1]
+        _STEM2FAM = out
+    return _STEM2FAM
+
+
+_STEM2FAM = None
 
 
 def _alias_tokens(aliases):
@@ -408,6 +442,88 @@ class Catalog:
         return {"abstain": False, "z": float(z), "score": float(top), "null_mean": mu, "null_std": sd,
                 "p": p,
                 "hits": real, "reason": "top score clears the noise floor (z=%.1f)" % z}
+
+    def families(self, decide=False, margin=0.10):
+        """{capability name: (family, source)} for every card (sweep 176, backlog B1). source is
+        'module' when resolved deterministically from the module folder, 'decided' when a typed
+        decision over the card's own text chose it CONFIDENTLY (examples = the deterministic cards,
+        scorer nb; measured held-out forced accuracy 0.625 vs 0.280 majority, so decisions are taken
+        only above `margin` and marked as such), or None with family None -- unresolved, reported,
+        never guessed. decide=False (default) is deterministic only and needs no encoder."""
+        out = {}
+        for c in self.all():
+            f = c.family()
+            out[c.name] = (f, "module" if f else None)
+        if not decide:
+            return out
+        from holographic.agents_and_reasoning.holographic_systemone import SystemOne, hashed_ngram_encode
+        known = [c for c in self.all() if out[c.name][0]]
+        fams = sorted({out[c.name][0] for c in known})
+        ex = {f: [(c.name + ". " + c.does)[:400] for c in known if out[c.name][0] == f] for f in fams}
+        ex = {f: v for f, v in ex.items() if len(v) >= 3}
+        so = SystemOne(hashed_ngram_encode(dim=2048), margin=margin, scorer="nb")
+        so.fit({"family": {"type": "choice", "options": list(ex), "examples": ex}})
+        todo = [c for c in self.all() if not out[c.name][0]]
+        for c, a in zip(todo, so.decide_map([(c.name + ". " + c.does)[:400] for c in todo])):
+            v = a["family"]["value"]
+            if v is not None:
+                out[c.name] = (v, "decided")
+        return out
+
+    def route_tiered(self, problem, k=5, z_answer=-0.1, z_refuse=-0.5, n_null=64, seed=0, clarify=False):
+        """TIERED ROUTING (sweep 176, backlog A1): answer / menu / clarify / refuse -- a rejection is never
+        bare. MEASURED WHY: on 200 held-out aliases ablated from the index, route_or_abstain at z_min=0.8
+        rejected 98.5% of honest paraphrases although the right card was top-1 for 42-54% and in the top 8
+        for ~80%; the z-score itself separates (correct top-1 median z +0.12, wrong -0.54, gibberish -0.2 to
+        -2.2). So the tiers are set from that separation, not from principle:
+          answer  -- z >= z_answer AND the top score stands strictly alone (no exact tie). The default
+                     z_answer=-0.1 was RE-MEASURED (sweep 176, the double-check): on the ablated split it
+                     answers 35.8% of paraphrases at 0.762 accuracy (0.1 answered only 22.9%; the tie rule
+                     blocks just 2.7% of queries -- the z floor was the blocker), and on 30 off-catalog
+                     probes the highest z is -0.41, so nothing off-catalog is answered at -0.1 (0/30).
+          clarify -- above z_refuse but the top candidates' FAMILIES disagree (holographic/<family>/, B1):
+                     one typed question over the families is cheaper than a wrong pick.
+          menu    -- everything else above z_refuse: the top-k as options with score and z; the exact tie
+                     count is reported (an exact-count ambiguity, retrieval_verdict's shape, not a predicted
+                     confidence). Measured menu recall on the same split: 0.696 at k=3, 0.793 at k=8.
+          refuse  -- below z_refuse only: the gibberish band.
+        Every result carries an `id` (sha256 of the canonical fields) so an outcome can be reported against
+        it -- the record every door should return (doc 05). Reuses route_or_abstain's null and z, find_scored's
+        ranking, and families(); default-off everywhere it is not called."""
+        import hashlib as _hl
+        base = self.route_or_abstain(problem, k=max(k, 8), n_null=n_null, z_min=-1e9, seed=seed)
+        z = float(base["z"])
+        ranked = self.find_scored(problem, k=max(k, 8))
+        fams = self.families()
+        options = [{"name": c.name, "score": float(s), "family": fams.get(c.name, (None, None))[0],
+                    "method": c.method} for c, s in ranked[:k]]
+        top = options[0]["score"] if options else 0.0
+        ties = sum(1 for o in options if o["score"] == top) if options else 0
+        top_fams = {o["family"] for o in options[:3] if o["family"]}
+        if not options or z < z_refuse:
+            tier, answer = "refuse", None
+        elif z >= z_answer and ties == 1:
+            tier, answer = "answer", options[0]["name"]
+        elif clarify and len(top_fams) >= 2:
+            # B3 MEASURED (sweep 176, tranche 4): a family question is WORSE than the menu. On the cases where
+            # it fired (13.6% of held-out paraphrases) the true family was offered 80% of the time and, once
+            # the user picked it, top-1 was right 72% -- while the plain k=5 menu already held the right card
+            # 93% of those cases. One tap on a menu beats one tap on a family question, so clarify is OFF by
+            # default and the families ride along as an annotation on the menu.
+            tier, answer = "clarify", None
+        else:
+            tier, answer = "menu", None
+        canon = "%s\x00%s\x00%s" % (problem.strip().lower(), tier, ",".join(o["name"] for o in options))
+        rec = {"tier": tier, "answer": answer, "z": z, "score": float(top), "ties": ties,
+               "families": sorted(top_fams), "options": options, "p": base.get("p"),
+               "id": _hl.sha256(canon.encode("utf-8")).hexdigest()[:16],
+               "question": ("which of these families did you mean: %s?" % ", ".join(sorted(top_fams)))
+                           if tier == "clarify" else None,
+               "reason": {"answer": "z=%.2f clears %.2f and the top score stands alone" % (z, z_answer),
+                          "menu": "z=%.2f is above the refuse floor but not a clear answer; %d option(s), %d exact tie(s)" % (z, len(options), ties),
+                          "clarify": "top candidates span %d families" % len(top_fams),
+                          "refuse": "z=%.2f is in the gibberish band (< %.2f)" % (z, z_refuse)}[tier]}
+        return rec
 
 
     def _score_all(self, problem, q, accepts=None, produces=None):

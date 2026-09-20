@@ -114,7 +114,7 @@ run the same partition-and-reduce work across a FARM of machines. Each node runs
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.scene_and_pipeline.holographic_coordinator import serve_worker; serve_worker(port=9000, workers={'sum': fn})  # then: mind.farm(['host:9000'], token).run(buckets, 'sum', None, reduce_sum)
 ```
-*Find it by:* farm, distributed compute, cluster, network farm, worker node, serve_worker, render farm, compute across machines
+*Find it by:* farm, distributed compute, cluster machines reduce, network farm, worker node, serve_worker, render farm, compute across machines
 
 ### Encoders (number to vector)
 turn raw values into hypervectors: scalar & fractional-power encoding (taper='kaiser:beta' shapes similarity SIDELOBES by aperture-taper design -- measured -13 -> -37.5 dB, weak-item margin 1.5x -> 18.2x beyond the mainlobe, price 2.7x mainlobe width -- redistribution not creation), N-D coordinate fields (fpefield), complex-phasor FHRR (fhrr), sparse block codes (sbc), geometric-algebra Clifford (clifford), and exact integer arithmetic over phasors (rns). How data ENTERS the substrate.
@@ -122,7 +122,7 @@ turn raw values into hypervectors: scalar & fractional-power encoding (taper='ka
 ```python
 from holographic.io_and_interop.holographic_encoders import ScalarEncoder; from holographic.sampling_and_signal.holographic_fpe import ...
 ```
-*Find it by:* encode, encoder, number to vector, scalar encoding, fractional power encoding, fpe, encode coordinates, phasor
+*Find it by:* encode, encoder, number to vector, scalar encoding, fractional power encoding, fpe, encode coordinates, phasor taper beta
 
 ### Frame-to-frame motion by one unbind (reprojection velocity)
 recover the translation between two frames with ONE unbind: cross-correlation in the Fourier domain is conj(F(a))*F(b), and its peak is the shift. This is TAA's analytic reprojection velocity, and it is the engine's core operator applied to images. mind.est_dx(a, b) returns (dy, dx) to sub-pixel precision; mind.reproject(a, b, tile=None) warps a forward to predict b; mind.reproject_report(a, b) carries every baseline. MEASURED on a REAL rendered frame warped by a known amount: 0.0705 px mean error, 0.1087 px worst; integer shifts exact. FOUR KEPT NEGATIVES, all measured: (1) `normalize=True` -- textbook PHASE correlation -- is 2.3x WORSE at sub-pixel, because it sharpens the peak toward a delta and a parabola needs curvature -- and WHITE NOISE is the worst case for the same reason, its autocorrelation being a delta; (2) a Hann window, the textbook wrap-bias fix, is worse still (2.05 px, 1.17 px even after mean removal); (3) the residual is THE SCENE, not estimator error -- warping lifts a lateral pan from 23.23 dB to 36.84 dB but plateaus. With the camera FIXED and the scene moving (the only non-vacuous control -- a far-away camera makes the two frames IDENTICAL, and warping nothing perfectly proves nothing), two spheres at the SAME depth gain 11.65 dB from a warp while the same slide at DIFFERENT depths gains 6.06 dB: parallax halves what one translation can explain, and a depth slide (a scale change) gains only 5.48 dB; (4) TILING LOSES ON UNIFORM MOTION (pan: 40.46 dB global vs 36.67-40.67 tiled) and wins only on a non-uniform field (dolly: 34.82 vs 37.43 at tile 48) -- and the per-tile shift SPREAD does NOT tell you which regime you are in (a pure translation has the largest spread and global still wins by 22 dB). So the backlog's 'one unbind per tile INSTEAD of motion vectors from geometry' does not hold: the unbind is an excellent ESTIMATOR, not a substitute for knowing how the camera moved..
@@ -194,7 +194,7 @@ how optical elements TRANSFORM polarized light, as real 4x4 Mueller matrices (ho
 ```python
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.stokes_report(m.apply_mueller(m.mueller_matrix('quarter_wave', angle=np.pi/4), m.stokes_linear(1.0, 0.0)))['docp'])
 ```
-*Find it by:* mueller matrix, polarizer, wave plate, quarter wave plate, half wave plate, retarder, optical rotator, faraday rotation
+*Find it by:* mueller matrix, polarizer, wave plate, quarter wave plate, half wave plate, retarder, optical rotator, faraday rotation mueller retarder
 
 ### Run a kernel on ANY GPU via WGSL (vendor-neutral)
 emit_kernel already projects an annotated Python kernel into WGSL; this DISPATCHES it -- @compute entry point, storage bindings, bounds guard -- on Vulkan / Metal / DX12 / WebGPU, where use_gpu's CuPy backend is CUDA/NVIDIA ONLY. The shader is a PROJECTION of the authoritative Python, so verify_wgsl_kernel can DIFFERENTIALLY TEST the two on real data (CuPy cannot: no shared source). Works on software adapters, so correctness is CI-testable with no GPU. SCOPE: elementwise f32 maps; a cross-invocation reduction is not solved.
@@ -260,7 +260,7 @@ keep the engine's transforms -- patterns, shifts, rotations -- in a prebuilt map
 ```python
 import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); b = mind.transform_bank(512); [b.add_random_unitary('t%d' % i) for i in range(4)]; b.add_rotation('rot7', 7); v = np.random.default_rng(0).normal(size=512); print(np.abs(b.apply('rot7', v) - np.roll(v, 7)).max()); print(b.stats(), round(mind.scale_is_not_a_bind(), 3))
 ```
-*Find it by:* transform bank, prebuilt map of transforms, cache a transform operator, precomputed rotation vectors, reuse a bind operator, compose a chain of transforms, spectrum cache, group representation
+*Find it by:* transform bank, prebuilt map of transforms, cache a transform operator, precomputed rotation vectors, reuse a bind operator, compose a chain of transforms, spectrum cache rotations shifts, group representation
 
 ### View transform (linear render -> a display image)
 a path tracer emits LINEAR radiance with no upper bound; saving that straight to a PNG is a wrong answer, not a missing polish step. MEASURED on a dome + area-light still life: 15.5% of pixels left the tracer above 1.0 and clipped flat. view='display' meters the frame then ACES+gamma (0.0000 clipped, 0.0000 crushed); view='graded' adds bloom/vignette/grain but its FIXED stop crushes 1.97% to black. DEFAULT OFF: a caller measuring radiance or diffing renders needs the linear buffer. KEPT NEG: auto-exposure hides a brightness difference, so hold ev fixed to A/B two light rigs.
@@ -324,7 +324,7 @@ the five primitives: bind (attach/transform), unbind (query), bundle (superpose/
 ```python
 from holographic.agents_and_reasoning.holographic_ai import bind, bundle; from holographic.agents_and_reasoning.holographic_ai import Vocabulary  # Vocabulary(...).cleanup(x)
 ```
-*Find it by:* bind, unbind, bundle, cleanup, permute, superpose, blend
+*Find it by:* bind primitive, unbind, bundle primitive, cleanup primitive, permute superpose recognise, superpose recognise five, blend
 
 ### phasor_monotone_cost
 the group-vs-monoid price of clockwise-only rotation where it actually lives: a TRUE complex / I-Q rotation (holographic_analytic). A complex series carries a genuine rotation DIRECTION in its two channels and can truly reverse; clamping it one-way loses the reversal at a large well-defined cost. The quadrature encoder with both channels present -- drop to one direction and you pay.
@@ -356,7 +356,7 @@ AUTO-SKIN BINDING (holographic_meshskin) -- compute per-vertex bone weights from
 ```python
 import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,seed=0); w=m.skin_bind_weights([[0,0,0],[5,0,0.0]],[[0,0,0],[5,0,0.0]],max_influences=2); print(np.round(w.sum(axis=1),3).tolist())
 ```
-*Find it by:* bind mesh to skeleton, compute skin weights from bones, automatic skin weights, rig bind weights, distance based skin binding, skin binding
+*Find it by:* bind mesh to skeleton, compute skin weights from bones, automatic skin weights meshskin anchor, rig bind weights, distance based skin binding, skin binding
 
 ### snap_transform_delta
 snap a TRANSFORM DELTA so the dragged point lands on a target (holographic_snap) -- target 'grid'/'vertex'/'edge'; returns {delta (corrected), snapped_to}. The form the gizmo uses: it has a raw delta and the point being dragged, and wants the delta adjusted so that point snaps. Keeps transform and snap layers separate.
@@ -388,7 +388,7 @@ DOMAIN-WARPED fBm (W11, iq's warped noise / dFBM) -- fbm sampled at a point disp
 ```python
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); f=m.warped_noise(scale=2.0,seed=0,warp=0.5); print(f(np.zeros((1,3))).round(3))
 ```
-*Find it by:* domain warped fbm, warped noise, turbulence noise, flow noise, swirling noise, marble texture, smoke noise, dfbm
+*Find it by:* domain warped fbm, warped noise, turbulence noise, flow noise, swirling noise, marble texture flowing marbled, smoke noise, dfbm
 
 ## Discover & drive it (for agents)
 
@@ -498,6 +498,14 @@ import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); vid=np.
 ```
 *Find it by:* axis role, index vs payload, carrier vs content, which axis is the carrier, which axis is boring, index or bind, should time be a feature, schema discovery
 
+### decision_tree
+GROW THE SUGGESTION NODE INTO A TREE (holographic_decisiontree, sweep 173). route() builds one decision node on the fly; decision_tree(context, depth, fanout) recurses it: each node ranks the live catalog, takes decide_or_abstain, and branches on what that choice RESULTS in, plus an abstain branch. The child context is the request PLUS what just happened -- measured, that edge kept 4/5 children on topic vs 0/5 for produces/consumes chaining. Returns a PlanNode; encode=True adds it as one hypervector. A 3-option node holds the right answer 0.696 vs 0.540 for top-1..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); t=m.decision_tree('turn a point cloud into a mesh', depth=2); print(t['root'].action, list(t['root'].branches), t['coverage'])
+```
+*Find it by:* decision tree from context, build a decision tree on the fly, a decision tree that learns which option I picked, walk the tree again and remember my choice, walk a tree of choices to pick an action, expand a suggestion into next steps, what can I do after this step, did you mean one of these, then what
+
 ### explore_series
 AUTO-EXPLORE an unlabeled multi-axis series (holographic_scaffold): try every axis as the candidate scaffold (score = continuity * (1 - marginal info), table returned); rectify the winner's wobbling coordinates; decompose each channel along the carrier into its generating law (MDL-gated); recompose and account variance -- each channel returns its explained fraction AND its residual (the hand-off to the next level). Verdict structured / weakly structured / no structure found, decided by measurement; noise is never dressed as law. Raw cube in; schema, laws, leftovers out.
 
@@ -505,6 +513,14 @@ AUTO-EXPLORE an unlabeled multi-axis series (holographic_scaffold): try every ax
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); u=np.linspace(0,1,200); s=np.stack([np.sin(4*np.pi*u), 0.8*u],axis=1); m.explore_series(s)['verdict']
 ```
 *Find it by:* explore unlabeled data, find the primary axis automatically, auto decompose a data series, discover structure without labels, what is the schema of this data, automatic data exploration, find patterns and signals automatically, unsupervised exploration
+
+### plan_from_request
+A COLD PLAN WITH NO MODEL (sweep 176): split a compound request into single-observation clauses, route each through the tiered router, and chain the steps into a PlanNode contingency plan encoded as one hypervector. Measured on compound requests of two exact aliases (3 seeds x 100): both steps recovered 0.860 vs 0.540 for the whole request's menu. The first measurement (0.527) was a splitter defect found by re-testing against a single alias's routing (0.990); ', next ' is now a connective..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); p=m.plan_from_request('smooth a bumpy mesh and then grow crystals on a surface'); print([(s['tier'], s['tool'][:24] if s['tool'] else None) for s in p['steps']], p['root'].action[:24])
+```
+*Find it by:* break a request into steps, plan a sequence of tool calls without a model, cold plan from a request, decompose a compound request, route each clause of a request, multi-step plan from text
 
 ### regime_gate
 build a REGIME GATE (holographic_regimegate) -- route to a superior-but-NICHE method only when a cheap detector says you are in its regime, and to a safe fallback everywhere else. The honest way to RE-ENABLE a shelved 'only good in a niche' method (a kept negative): the fallback stays the safe default, so a gate misfire costs at most the default, never worse than the shelved method. Returns a gate; .apply(x) gives (result, info) recording the score/threshold/path. The adaptive-dispatch pattern as a reusable object.
@@ -538,6 +554,14 @@ import lecore; m=lecore.UnifiedMind(dim=1024,seed=0); print(m.route_structured('
 ```
 *Find it by:* route by structure not keywords, match a request by roles and fillers, holographic role router, route by action object quality, structured routing by binding, which module by request structure
 
+### route_tiered
+ROUTE WITHOUT A BARE REJECTION (sweep 176): answer / menu / clarify / refuse instead of yes-or-no. Reuses route_or_abstain's null-referenced z and find_scored's ranking; 'answer' needs z above a floor and no exact tie, 'clarify' fires when the top candidates span two families, 'menu' returns the top-k with scores, 'refuse' only in the gibberish band. Every result carries an id to report an outcome against. Measured on held-out paraphrases (ablated, 3 seeds): the old gate rejected 94.7%; tiered answers 24.9% at 0.833, menus 29.8% holding the answer 83%, refuses 34%; 0 of 7 gibberish answered..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.route_tiered('smooth a bumpy mesh'); print(r['tier'], r['answer'], r['id'], [o['name'] for o in r['options'][:3]])
+```
+*Find it by:* route without rejecting, did you mean one of these, answer or offer a menu, tiered routing, never a bare no, which capability did I mean, clarify which family I mean, route with options instead of abstain
+
 ### suggest_pipeline
 propose a PIPELINE from one datatype to another (holographic_catalog + holographic_iokinds) by chaining capabilities whose produces feeds the next's consumes. Returns the shortest chain of {name, consumes, produces} steps, or None. The render-graph idea over the whole catalog: the engine proposes a ROUTE from what you have to what you want, not just one capability.
 
@@ -545,6 +569,14 @@ propose a PIPELINE from one datatype to another (holographic_catalog + holograph
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.suggest_pipeline('transform','selection'))
 ```
 *Find it by:* how do I get from points to a mesh, chain capabilities, build a pipeline, route between datatypes, what steps turn X into Y
+
+### systemone_decide
+TYPED decisions with honest probabilities (holographic_systemone, the native System One door -- what Jev sells as an API): answer typed questions -- choice, score, noul (yes/no) -- about one state in ONE pass. Schema validated up front so an untyped output is impossible; ties ABSTAIN (value None, why named); p appears only after labeled outcomes calibrate it. Every choice carries ranked evidence and its basis. scorer='nb' (sweeps 174-175): transformed naive Bayes over the same examples, measured 0.843 vs 0.716 on AG News k=300 and 0.798 vs 0.753 on Banking77 (77 intents) k=35..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=512,seed=0); print(m.systemone_decide('card charged twice on my invoice', {'cat': {'type': 'choice', 'options': ['billing','shipping'], 'examples': {'billing': ['invoice charge refund', 'card charged a fee'], 'shipping': ['package tracking courier', 'parcel lost']}}}, scorer='nb', margin=0.05))
+```
+*Find it by:* jev, system one model, typed decision with confidence, encode text with character ngrams, route a ticket and abstain when unsure, yes no probability, classify with calibrated probability, structured output guaranteed
 
 ## Memory, search & recall
 
@@ -614,7 +646,7 @@ bake a slow evaluator over what VARIES (position/view/time/constant) then look i
 ```python
 from holographic.caching_and_storage.holographic_cachehome import Cache; Cache.bake(fn, vary='position', lo=lo, hi=hi, res=24)
 ```
-*Find it by:* bake, precompute, lookup, cache, memoise, irradiance, lut, grid
+*Find it by:* bake, precompute, lookup, cache, memoise, irradiance, lut cheaply matbake, grid
 
 ### Cache key cost (identity vs content addressing)
 the price of a cache KEY, measured rather than assumed. SpectrumCache shipped keying on a sha256 of the whole atom -- and hashing D floats costs MORE than transforming them (D=1024: 21.5us hash vs 13.0us rfft), so the cache measured 0.40x-0.82x scalar and 0.50x-0.70x inside fusion: SLOWER than no cache, while its docstring claimed 1.4x. key='identity' keys on the array object (O(1), pinned so the id cannot be recycled): 2.4x-2.6x scalar, 3.7x-4.3x in fuse_record, bit-identical. Content keying stays the default and is required when byte-identical arrays arrive as distinct objects.
@@ -665,7 +697,7 @@ import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); idx, scores = mind.clea
 *Find it by:* clean up many cues at once, batch cleanup, recall many vectors at once, nearest atom for a stack of queries, batched nearest neighbour, batch cleanup of noisy cues, denoise a whole stack of vectors
 
 ### Code / file editing (agentic)
-read, view (line-numbered), write, exact-string replace, replace-lines, insert/delete lines, grep, find-definition, list, tree, archive, move, and UNDO -- structured source-file editing for an agent working the codebase, scoped to a project ROOT so a path can never escape it. Atomic writes; replace requires a unique match; every mutation is reversible with file_undo; replace_across renames a string across many files (with a dry-run preview); python_check (syntax) and import_check (real import in a subprocess) catch a broken edit immediately. Exposed as mind.file_* methods, so callable over the HTTP tool protocol (GET /tools, POST /invoke) like any faculty.
+read, view (line-numbered), write, exact-string replace, replace-lines, insert/delete lines, grep, find-definition, list, tree, archive, move, and UNDO -- structured source-file editing for an agent working the codebase, scoped to a project ROOT so a path can never escape it. Atomic writes; replace requires a unique match; every mutation is reversible with file_undo; replace_across renames a string across many files (with a dry-run preview); python_check (syntax) and import_check (real import in a subprocess) catch a broken edit immediately. Sweep 176: file_symbol locates a def/class/Class.method by NAME (ast), file_insert_after_symbol adds a method after a class body without an anchor or a line number, file_selftest runs python -m <module> in a subprocess. Exposed as mind.file_* methods, so callable over the HTTP tool protocol (GET /tools, POST /invoke) like any faculty.
 
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.set_file_root('.'); mind.file_find_definition('make_cloud'); mind.file_replace('a.py', 'old()', 'new()'); mind.file_import_check('a.py'); mind.file_undo()
@@ -840,7 +872,7 @@ hold far more items in one vector than the flat capacity law allows, by cleaning
 ```python
 import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.agents_and_reasoning.holographic_ai import unitary_vector; from holographic.misc.holographic_superposed import pack; r = np.random.default_rng(0); at = lambda n: np.stack([unitary_vector(512, r) for _ in range(n)]); lk, gk, items = at(4), at(8), at(16); chunks = np.stack([pack(lk, items[p*4:(p+1)*4]) for p in range(4)]); S = mind.hierarchical_pack(gk, chunks[[0,1,2,3,0,1,2,3]]); r = mind.hierarchical_recall(S, gk[3], lk[2], chunks, items, min_chunk_similarity=0.15); print(r['item_index'], r['abstained'])
 ```
-*Find it by:* hierarchical superposition, chunked memory, mid-level cleanup, cleanup between levels, store many items in one vector and recall them, how many items can i bundle before recall fails, capacity, chunked memory with a shared codebook
+*Find it by:* hierarchical superposition, chunked memory, mid-level cleanup, cleanup between levels, store many items in one vector and recall them, how many items can i bundle before recall fails, capacity allows items, chunked memory with a shared codebook
 
 ### How many slots can I drop under memory pressure
 device memory is a hard ceiling with no swap, so pressure means failure rather than slowdown -- a distributed representation can DEGRADE instead. Dropping slots reduces the EFFECTIVE DIMENSION, so the budget is the load-ratio law: recall holds while n_items/(keep*dim) stays under the safe ratio. NO NEW THEORY -- verified across 5 configs. CORRECTION KEPT LOUD: the 100%-at-40%-destroyed figure is about DAMAGE (zeroed slots, no memory saved); TRUNCATING to 40% at the same load gives 85%, not 100%. Different quantities.
@@ -856,7 +888,7 @@ nearest-neighbour / recall over a pile of vectors with ONE interface (Index.near
 ```python
 from holographic.caching_and_storage.holographic_index import Index; Index(vectors, labels=names).nearest(query, k=5)
 ```
-*Find it by:* knn, nearest, lookup, recall, retrieve, similarity, search, index
+*Find it by:* knn, nearest, lookup pile interface, recall, retrieve, similarity, search, index
 
 ### Learned navigator (adaptive search budget)
 the creature, repurposed to search the data tree. mind.train_navigator(items) trains an agent that reads a region, senses how confident the answer looks, and decides arrive-or-keep-moving; mind.navigator_find(cue) searches, fronted by a ReflexCache that recognises FAMILIAR queries instantly -- it gets faster at whatever you ask for most. WHY: a fixed beam spends the same effort on every query, so it must be wide enough for the hard minority and overpays on the easy majority. MEASURED against the tree's own fixed-beam curve (the strongest baseline, not a strawman): the navigator reaches 98.0% recall at 173 comparisons; the cheapest fixed beam matching that recall is beam 12 at 450 (2.6x more), and at the navigator's own budget the best fixed beam reaches only 81.6%. mind.navigator_benchmark() reproduces both readings..
@@ -882,7 +914,7 @@ keep the hot working set where the CPU can reach it fast: FFT spectrum residency
 ```python
 from holographic.simulation_and_physics.holographic_memoryhome import Memory; Memory.bind_cached(a, b, cache)
 ```
-*Find it by:* memory, cache, residency, resident, spectrum cache, batch, bind_batch, backend
+*Find it by:* memory, cache, residency, resident, spectrum cache, batch, bind_batch, backend recomputing backends
 
 ### Memory curation, decay and reflection (what to keep hot, what to archive, never delete)
 mind.memory_curate() -> a curator over the TAUGHT partition: ACT-R activation per fact (reuses holographic_actr), a bounded hot set, and re-taught questions consolidated so the newest answer is current. NO DELETE PATH -- unicron_turn_memory found that 'eviction is a loss', so it DEMOTES to a restorable archive, journals every reason, and plan() mutates nothing. Time is logical, never wall-clock. SELF-MEASURED (no public benchmark scores forgetting): vs a recency window +0.040 [0.032,0.048] at drift 0.5, and LOSES -0.031 [-0.041,-0.02] under a full topic switch. Robust middle, not dominant..
@@ -1225,13 +1257,21 @@ import lecore; m=lecore.UnifiedMind(); print(m.bm25_rank('smooth bumpy surface',
 ```
 *Find it by:* keyword search over text, bm25 lexical ranking, rank documents by term overlap, exact word match retrieval, tf-idf style document ranking, which text matches these keywords
 
+### decision_outcome
+REPORT AN OUTCOME BY ID -- the one outcome path (sweep 176, backlog G1/G2). Every route_tiered and systemone_decide result carries an id; decision_outcome(id, truth) records what happened and, for a typed decision, forwards to the fitted SystemOne's observe() -- no teach() anywhere; the model is kept per schema so the next call decides from what it learned. Measured: a prequential stream through the doors equals systemone_stream (0.700 = 0.700, 120 AG News rows). Records are HRR-encoded; decision_records() lists them; similar() finds a like decision by cosine..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); a=m.systemone_decide('parcel lost', {'cat':{'type':'choice','options':['billing','shipping'],'examples':{'billing':['card charged twice','refund the invoice'],'shipping':['courier late','package never came']}}}, scorer='nb', margin=0.0)['cat']; print(m.decision_outcome(a['id'], 'shipping')['was_correct'], m.decision_records()['stats'])
+```
+*Find it by:* report the outcome of a decision, tell the system what actually happened, close the loop on a decision by id, decision ledger, list my past decisions, was that decision right, record what was used, outcome feedback by id
+
 ### drift_sentinel
 leOS's displacement-drift detector on lever 7's floor: classify every task->response displacement against the neighborhood of similar past tasks. Verdicts: normal, void (honestly unexplored), echo (a non-answer restating the task), redshift (off established behaviour), blueshift (too little work), plus loop detection. teach_check() turns redshift into an IMPLICIT-CONFLICT candidate with the nearest established answers attached..
 
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.teach_check('where does the deployment run', 'it was decommissioned')
 ```
-*Find it by:* drift detection, echo detection, conflict candidate, stale memory, loop detection
+*Find it by:* drift detection displacement response, echo detection, conflict candidate, stale memory, loop detection
 
 ### find_capability_uris
 like find_capability but each result carries its disambiguating capability URI(s) (holographic_catalog + holographic_capuri) so a caller NEVER gets a bare ambiguous name. Returns [{name, does, example, uris}] -- one path for a unique name, several for a colliding one. The collision fix at the discovery layer.
@@ -1288,6 +1328,14 @@ REPAIR a nearly-boring carrier axis into a clean uniform index (holographic_axis
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); t=np.cumsum(np.random.default_rng(0).exponential(1.0,200)); m.rectify_carrier(t, np.sin(0.1*t))['marginal_info_after']
 ```
 *Find it by:* fix an irregular time axis, resample to uniform spacing, interpolate to constant delta, normalize a carrier axis, make an axis monotone, arc length reparametrization, axis sometimes goes negative, repair the index axis
+
+### reflex_retile
+RE-TILE THE EXPERIENCE TRACE AT THE MEASURED CLIFF (sweep 176): rebuild the lever-7 trace from every tile's bit-identical audit log with a new capacity advisory. Measured: one 2048-d tile reads an exact repeat back at 1.000 up to 50 writes, 0.93 at 100, ~0.6 at 150, while the old default split at 205 -- after the cliff -- so a trace loaded by boot (953 writes on 6 tiles) answered a just-taught repeat below the confidence floor; re-tiled to 14 tiles the same repeat fired via reflex. Run it after boot on a trace persisted before sweep 176; new traces tile at the cliff by default..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.route_tiered('smooth a bumpy mesh', reflex=True); m.decision_outcome(r['id'], r['answer']); print(m.reflex_retile(advisory_load=0.03), m.route_tiered('smooth a bumpy mesh', reflex=True)['via'])
+```
+*Find it by:* retile the reflex trace, rebuild the experience trace after boot, reflex trace past capacity, the reflex stopped firing after loading memory, split the experience trace into more tiles
 
 ### repo_map
 Map a MIXED-LANGUAGE codebase (python/javascript/c): symbols per file, the file dependency graph from def/ref matching, deterministic PageRank ranking of which files matter, and a budgeted text skeleton (aider-style) -- large trees summarized without dumping them. focus= biases the rank toward files being worked on (personalized PageRank, the 50x aider convention). Truncation is always announced, never silent..
@@ -1387,7 +1435,7 @@ run the slow fBm noise bake behind a cloud render as a monitorable background JO
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); jid = mind.bake_cloud_job(radius=1.0, seed=0, background=True); mind.job_status(jid); mind.job_pause(jid); mind.job_resume(jid); grid = mind.job_result(jid)
 ```
-*Find it by:* bake cloud, background render, resumable render, monitor render, pause render, long render, render job, noise bake
+*Find it by:* bake cloud, background render, resumable render, monitor render, pause render, long render, render job baking slow, noise bake
 
 ### Bake a displacement (height) map (high to low, same projection as the normal bake)
 m.bake_normal_map(low, low_uv, high, displacement=True, max_distance=D) also bakes a DISPLACEMENT (height) map alongside the normal map, from the SAME closest-point projection -- one cast, two channels read out (the holographic 'add a dimension to one pass, project out what you need' move). Signed: positive=bump, negative=dent, along the low-poly normal. CLAMPED to max_distance -- the cage a displacement map REQUIRES because a stray far hit moves GEOMETRY, not just shading (unlike a normal map). Makes a low-poly render as true high-poly detail (silhouette-changing), not just shaded detail..
@@ -1455,7 +1503,7 @@ ten light classes shipped and NINE were reachable by nothing -- and mind.light()
 ```python
 import lecore; m=lecore.UnifiedMind(); print(type(m.scene_light('softbox', position=(2,3,2), target=(0,0,0), intensity=60.0)).__name__)
 ```
-*Find it by:* add a softbox light to my scene, area light with soft shadows, environment lighting from a sky dome, hdri lighting, make a spotlight, key light and fill light, sun lamp, point light in my render
+*Find it by:* add a softbox light to my scene, area light with soft shadows, environment lighting from a sky dome, hdri lighting nine classes, make a spotlight, key light and fill light, sun lamp, point light in my render
 
 ### CAD export: STL + DXF
 write geometry OUT in the two open exchange formats a modeler needs (K7): mesh_to_stl (ASCII STL for 3-D meshes, tris/quads/ngons, per-facet normals) and polylines_to_dxf (minimal DXF R12 for 2-D drawings, POLYLINE/VERTEX, closed loops flagged -- the format Rhino/AutoCAD read). Pure strings; the caller writes the file. See holographic_cadexport..
@@ -1519,7 +1567,7 @@ perceptual similarity in [0,1] between two images given as FILE PATHS (e.g. two 
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.compare_image_files('render_a.png', 'render_b.png')  # -> {similarity, distance, ...}
 ```
-*Find it by:* compare images, image diff, render diff, compare renders, image comparison, did the render change, image similarity
+*Find it by:* compare images, image diff, render diff, compare renders, image comparison, did the render change, image similarity paths between
 
 ### Compile a filter graph to one pass (shader pipeline)
 chain blurs, translations, gains and unsharp blends -- every stage is linear and shift-invariant, so the WHOLE GRAPH collapses into ONE transfer function before any data is touched. mind.shader_pipeline(shape).blur(k, 8).translate(3).unsharp(kw, 0.6).apply(img) costs one FFT, one multiply, one inverse FFT no matter how many stages it has. Measured exact to 6.7e-16 against running the stages, and 6.0x faster per application. Fractional passes and sub-sample (fractional) translations are exact -- neither has a GPU analogue..
@@ -1743,7 +1791,7 @@ sample a scalar/vector field at points with ONE interface (field.sample(points))
 ```python
 from holographic.misc.holographic_fieldhome import Field; Field.grid(arr, lo, hi).sample(pts)
 ```
-*Find it by:* field, grid, volume, density, sdf, sample, voxel, represent a density volume over space
+*Find it by:* field, grid interface scalar, volume, density, sdf, sample, voxel, represent a density volume over space
 
 ### Fill the gaps in a field (inpaint / impute)
 fill the unknown cells of a field, dispatched on TYPE. mind.inpaint(field, known) sends a float array to a harmonic (Laplace) solve -- each hole relaxes to the mean of its four neighbours, known cells pinned -- and an integer array to a majority neighbour vote, because a discrete field has no mean and averaging it is a category error. mind.fill_report scores ON THE HOLES ONLY. MEASURED (48x48, 59% erased, 8 seeds): harmonic MAE 0.0015 mean (range 0.0012-0.0018); majority accuracy 0.9653 mean (0.9553-0.9749), and 0.9990 in region INTERIORS -- nearly all the error is boundary error, so the overall number is a property of the FIELD while the interior number is a property of the ALGORITHM. THE BOUNDARY CONDITION IS THE GATE: periodic=False (edge-clamped) is the default, because wrapping a non-periodic field with np.roll solves a different problem and costs 5.4x (MAE 0.00666 vs 0.00123). DECLARED NEGATIVES, measured, do not rebuild them: a VSA record (one vector per cell, roles bound per channel) LOSES to both of these on both channels -- temperature MAE 0.0248 vs harmonic 0.0077, material accuracy 94.2% vs majority 96.0%; per-step cleanup in a multi-role NCA DOUBLES the continuous error (0.0248 -> 0.0485) for zero categorical benefit, because cleanup is per-role but the bundle is shared; and merely encoding a scalar into a 2-role record and reading it back costs MAE 0.0160, more than twice what a harmonic solve achieves while actually reconstructing missing values..
@@ -1775,7 +1823,7 @@ mind.template_wrap deforms ONE template mesh onto any target field KEEPING ITS F
 ```python
 import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); sph=lambda P: np.linalg.norm(P,axis=1)-1.0; t=mind.mesh_from_sdf(sph,((-1.4,)*3,(1.4,)*3),res=24,vectorized=True); ax=np.array([1.3,0.8,1.0]); ell=lambda P:(np.linalg.norm(P/ax,axis=1)-1.0)*ax.min(); V=mind.template_wrap(t.vertices,t.faces,ell,rounds=4); print(round(mind.template_wrap_quality(V,t.faces,ell)['surface_error'],4))
 ```
-*Find it by:* template wrap, shrink wrap a mesh, fixed topology, vertex correspondence, retopology, same mesh new body, morph between creatures
+*Find it by:* template wrap, shrink wrap a mesh, fixed topology, vertex correspondence, retopology precondition morphing, same mesh new body, morph between creatures
 
 ### Frequency-lifted (Gabor) splats
 mind.splat_field(img, k, basis='gabor') gives each splat a FREQUENCY, ORIENTATION and PHASE -- a Gabor atom, seven numbers instead of four. A Gabor atom is a BANDPASS primitive, so it buys you exactly the band it is tuned to. Measured at equal PARAMETER budget against a jointly-refit Gaussian fit: +7.0 dB on a narrowband oriented grating, +0.2 dB on a sharp broadband edge, +0.1 dB on noise-like texture -- and it costs 89x the fitting time (a 196-atom dictionary per placement against 4). The extra dimensions are a levy paid up front, so the win grows with budget (+0.6 dB at 224 numbers, +7.5 dB at 1,344). KEPT NEGATIVE, against the prediction that motivated it: this does NOT dissolve the splatsharpen negative, which was recorded on a sharp edge -- an edge is not a band, it is every band at once. And the Gaussian basis it was supposed to beat was never saturated: that flat-in-K curve was greedy matching pursuit's overlap double-counting, which splat_refit already fixed (12.9 -> 20.9 dB across K). Use mind.spectral_detail to check whether a fit STORED the sharpness, since PSNR will not tell you..
@@ -1960,7 +2008,7 @@ image-based lighting needed one missing piece and this is it: a Radiance .hdr/.p
 import lecore; m=lecore.UnifiedMind(); # env=m.load_hdr('sky.hdr'); L=m.scene_light('dome', color=lambda d: m.sky_dome(d, env=env))
 print(m.sky_dome([[0,1,0]]).shape)
 ```
-*Find it by:* load an hdri environment map, image based lighting, light my scene with a real sky photo, read a radiance hdr file, load a high dynamic range image, use a panorama to light the scene, equirectangular environment map, rgbe encoded image
+*Find it by:* load an hdri environment map, image based lighting piece needed, light my scene with a real sky photo, read a radiance hdr file, load a high dynamic range image, use a panorama to light the scene, equirectangular environment map, rgbe encoded image
 
 ### Make a 3-D primitive by name (placed, one door)
 every SDF primitive shipped reachable only by import: asked for a sphere this mind returned a Lipschitz worst-view bound, asked for a cube the sky-observation capability. Ten phrasings, ten unrelated fallbacks. kind is a word you'd type -- cube/ball/floor/donut/cone/capsule/ellipsoid/torus/cylinder/octahedron plus the fractals -- and position/rotate/scale are applied in the ONE order that cannot go wrong (scale, rotate, THEN translate: rotating after translating orbits the world origin instead of spinning in place). Feed the result to scene.add(geometry=...) or render_sdf.
@@ -2016,7 +2064,7 @@ the engine's material LIBRARIES, discoverable in one place: ~141 RENDER presets 
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.material_info('gold'); mind.find_materials('clear liquid'); mind.materials()
 ```
-*Find it by:* material library, materials, physical material, material properties, density, refractive index, render material, pbr preset
+*Find it by:* material library, materials, physical material, material properties, density metals gases, refractive index, render material, pbr preset
 
 ### Mesh Laplacian eigenmaps (cotan spectrum for spectral analysis)
 R6 foundation -- the low SPECTRUM of a mesh's cotan Laplace-Beltrami operator (m.mesh_laplacian_eigenmaps): the eigenfunctions a spectral analysis builds on (spectral segmentation, quadrangulation layout, shape descriptors). Cotan weights (Pinkall-Polthier) + lumped mass, solved as the symmetrised generalised eigenproblem via eigh (exact, fine to a few thousand verts). VALIDATED on a sphere: eigenvalues cluster at l(l+1)=0,2,6,12 and the first eigenspace recovers x,y,z at R2=1.000. SCALAR vertex operator, distinct from the crossfield CONNECTION Laplacian. Returns (eigenvalues, eigenfunctions)..
@@ -2040,7 +2088,7 @@ modeling/DCC edits on a Mesh: extrude/inset faces (meshpoly; extrude/inset quad_
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.deform(mesh, ...); mind.mesh_to_sdf(mesh); from holographic.mesh_and_geometry.holographic_meshverbs import extrude_face
 ```
-*Find it by:* edit a mesh, extrude, bevel, inset, subdivide, smooth a mesh, decimate, reduce polygons
+*Find it by:* edit a mesh, extrude, bevel, inset, subdivide extrude clark, smooth a mesh, decimate, reduce polygons
 
 ### Mesh part segmentation (limbs and body via surface Reeb graph)
 M9 -- segment a mesh into LIMBS AND BODY (m.mesh_parts) via the Reeb graph of geodesic distance on the SURFACE, so thin limbs survive (the voxel skeleton found only 45 points on a mantis's legs; this found 12 parts in 0.2s, each one connected blob, aspect splitting limbs 7.5-13.4 from core 1.2). Dijkstra from an extremity -> distance bands -> connected components per band = Reeb nodes -> branch decomposition -> per-vertex labels; twigs absorbed. Weld scans first. m.match_symmetric_parts pairs left/right limbs. Returns (labels, report)..
@@ -2160,7 +2208,7 @@ run the coordinator's monoid workers on OTHER machines: a worker daemon per node
 ```python
 from holographic.misc.holographic_farm import WorkerDaemon, NetworkFarm; Coordinator(NetworkFarm([addr])).run(buckets, 'worker_name', cache, reduce)
 ```
-*Find it by:* render farm, distributed, network, seti, worker daemon, remote, cluster, node
+*Find it by:* render farm, distributed, network, seti, worker daemon, remote, cluster dispatched reduced, node
 
 ### Node-graph editor backend
 the unifying NODE-GRAPH a 3-D node editor binds to: one heterogeneous graph of TYPED nodes (scalar/color/field/sdf/mesh/material/texture), 40-node palette (SDF CSG/transforms, bake, fields, textures, geometry modifiers, sdf_to_mesh, PBR/material sockets, audio drivers). ANY param is DRIVABLE; type/cycle-checked; memoized eval; dirty-propagating; JSON-serializable. DRILL-DOWN: list_nodes() overviews, describe(id) shows a node's exact knobs+values+socket types+wiring, describe_type(name) a kind's schema, set_param(id, knob=value) sets an EXACT value..
@@ -2248,7 +2296,7 @@ mind.tissue_pbr gives base colour, roughness, metallic, SSS weight and a PER-CHA
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); v = mind.tissue_pbr('skin'); print([round(x,2) for x in v['sss_radius']], v['sss_weight'])
 ```
-*Find it by:* tissue material, subsurface scattering, organ material, skin shader, bone material, realistic flesh, SSS
+*Find it by:* tissue material, subsurface scattering, organ material chitin deeper, skin shader, bone material chitin deeper, realistic flesh, SSS
 
 ### Pipeline (render/sim)
 compose a render or sim run as ordered stages that declare what they need/produce; dispatch among render strategies (pathtrace/raymarch/prt/radiance) and catch a missing input before running.
@@ -2440,7 +2488,7 @@ trace -> G-buffer -> SVGF denoise -> firefly clamp -> SEARCHED exposure, compose
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); img, rep = mind.render_specimen(sdf, (1.3,0.7,1.5), (0,0,0), mat, mind.sky_model(hour=10.0), width=48, height=40); print(rep['sample_saving'])
 ```
-*Find it by:* render a crystal, render until converged, one call render, denoised render, adaptive sampling render, how do I render a gem, trace denoise and tone map
+*Find it by:* render a crystal, render until converged, one call render, denoised render, adaptive sampling render searched svgf, how do I render a gem, trace denoise and tone map
 
 ### Render graph (bake vs live)
 the PIPELINE composing the texture/material/scene graphs: mind.render_graph() registers texture graphs (static or dynamic) + a CMP4 instanced scene, then plan() shows what it will do and WHY and prepare() runs it. The adaptive decision it adds is BAKE a static texture graph to a grid (O(1) bilinear lookup, mind.bake_texture) vs SAMPLE it live -- baking amortises a deep graph over many hits, live avoids re-baking a changing map every frame. Trade: memory + interpolation error. CMP5.
@@ -2480,7 +2528,7 @@ render a scene to an image: path_trace (Monte-Carlo global illumination), a came
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.path_trace(scene); mind.camera(); from holographic.rendering.holographic_raymarch import sphere_trace
 ```
-*Find it by:* render a scene, path trace, ray tracing, global illumination, render with global illumination, render a scene with bounced light, full lighting simulation, monte carlo render
+*Find it by:* render a scene illumination controller, path trace, ray tracing, global illumination, render with global illumination, render a scene with bounced light, full lighting simulation, monte carlo render
 
 ### Reproject a uv map onto changed topology (seam-aware)
 m.mesh_reproject_uv(source, source_uv, target) puts a uv map back on a mesh whose FACE COUNT CHANGED (decimate, remesh, retopo) so the texture lines up. Per-CORNER and cut-aware: a retopo WELDS both sides of a seam into ONE vertex, which cannot carry a seam's two uvs, so per-vertex transfer smears the faces there. Side is a per-corner CONSTRAINT (majority-vote home, ambiguous samples abstain). Measured: cylinder 3.36% pixels smeared -> 0.00%; sphere incl. poles -> 0 defects. Returns (mesh, uv, report). keep_uv='auto' calls it. Fragmented scan atlas -> raises, names mesh_rebake_texture..
@@ -2592,7 +2640,7 @@ the shade model: cook_torrance (full specular+diffuse per light), lambert (diffu
 ```python
 from holographic.rendering.holographic_brdf import cook_torrance, lambert
 ```
-*Find it by:* shade, brdf, cook_torrance, lambert, fresnel, ggx, specular, diffuse
+*Find it by:* shade, brdf, cook_torrance, lambert, fresnel, ggx importance deriving, specular, diffuse
 
 ### Shadow / visibility (domain)
 test whether light or the environment reaches a point: SDF soft shadow (Quilez penumbra), ambient occlusion, hard shadow-ray (NEE), and PRT baked visibility -- one home of strategies render paths call.
@@ -2600,7 +2648,7 @@ test whether light or the environment reaches a point: SDF soft shadow (Quilez p
 ```python
 from holographic.rendering.holographic_shadowhome import Shadow; Shadow.soft(sdf, P, Ldir)
 ```
-*Find it by:* shadow, visibility, occlusion, ambient occlusion, penumbra, shadow ray, soft shadow, unoccluded
+*Find it by:* shadow, visibility, occlusion, ambient occlusion visibility strategies, penumbra, shadow ray, soft shadow, unoccluded
 
 ### Shrinkwrap (snap a mesh onto a surface)
 SHRINKWRAP: move each vertex onto its CLOSEST POINT on a target surface (Blender shrinkwrap / retopo-snap): m.shrinkwrap(mesh, target, factor=1.0) -> (new_mesh, residual). factor 1.0 lands on the surface, 0.5 halfway, 0.0 no-op; topology preserved; residual = distance each vertex closed. THE retopo finisher: a box model / remesh has clean TOPOLOGY but approximate POSITIONS -- one pass snaps positions onto the reference (fixed our box-model residual 0.0158 -> ~0). KEPT NEG: closest-POINT not normal-raycast; a thin target can pull to the wrong side (small factor, repeat)..
@@ -2768,7 +2816,7 @@ texture a Scene object BY NAME ('wood','marble','checker',... or an (H,W,3) imag
 ```python
 import lecore; m=lecore.UnifiedMind(); s=m.new_scene(); h=s.add(name='b', geometry=m.shape('sphere')); m.scene_set_texture(s, h, 'wood', scale=3.0, colors=((0.35,0.2,0.08),(0.75,0.55,0.3)))
 ```
-*Find it by:* put an image on the cube, wood grain texture on my object, apply an image texture to an object, texture an object in my scene, procedural texture on a scene object, make the ball checkered, marble texture, paint a texture onto a shape
+*Find it by:* put an image on the cube, wood grain texture on my object, apply an image texture to an object, texture an object in my scene, procedural texture on a scene object, make the ball checkered, marble texture carves mapping, paint a texture onto a shape
 
 ### Texture graph (composable maps)
 build a texture as a TREE of maps: an op (mix/multiply/over/scale/remap/...) over TYPED inputs -- map | color | field | number -- each of which may be another map, so graphs nest to any depth. Sampling walks the tree; the input types are checked at COMPOSE time so a bad graph (a colour used as a weight, a missing input) is refused up front, not rendered wrong. Encode a graph to a hypervector to cache/search it. CMP1.
@@ -2832,7 +2880,7 @@ the backlog's brain/muscle claim is 'the compute shaders the demos hand-write be
 ```python
 from holographic.mesh_and_geometry import holographic_sdf as S; import numpy as np; tree = S.sphere(0.7).translate((0.4, 0, -0.2)).smooth_union(S.box(0.5, 0.3, 0.6), 0.25); print(mind.sdf_dialect(tree.to_dsl(), 'wgsl').splitlines()[0]); print(mind.sdf_validate_c(tree, np.random.default_rng(0).uniform(-2, 2, (50, 3)), 'c_f64'))
 ```
-*Find it by:* emit the scene's sdf, sdf to wgsl, sdf shader, brain muscle contract, one source of truth two runtimes, compute shader from the scene, sdf dialect, map function
+*Find it by:* emit the scene's sdf, sdf to wgsl, sdf shader, brain muscle contract, one source of truth two runtimes shaders brain, compute shader from the scene, sdf dialect, map function
 
 ### Topology gate (reject remeshes that punch holes or shatter components)
 Topology invariant gate (R1): m.topology_report(mesh) gives PER-COMPONENT V/E/F, euler chi, boundary-loop count + fingerprints, and genus; m.topology_gate(before, after) ACCEPTS a remesh only if components, genus, and boundary loops are preserved -- an INTENDED hole is a loop present in the input, a NEW loop / new component / genus change is destruction, rejected with the violation NAMED. Replaces silent keep_largest amputation (measured: 11% of a scanned mantis dropped) with a loud, retryable verdict; process_scan reports it per shard_cleanup stage as topology_ok / dropped_fraction..
@@ -2864,7 +2912,7 @@ stop fast bodies passing through thin walls. mind.time_of_impact(X, V, dt, sdf) 
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); hit, toi, contact = mind.time_of_impact([[-3,0,0]], [[120,0,0]], 1/60., '(sphere 1.0)')
 ```
-*Find it by:* ccd, continuous collision detection, tunnelling, tunneling, stop a fast bullet going through a thin wall, my object passes through the floor, swept collision, time of impact
+*Find it by:* ccd, continuous collision detection, tunnelling, tunneling passing bodies, stop a fast bullet going through a thin wall, my object passes through the floor, swept collision, time of impact
 
 ### Turnaround + silhouette-IoU critic
 TURNAROUND: render a mesh from the standard views (top/front/side/3q) in ONE call and, given a ref_mesh, score how well the silhouettes MATCH per view (faculty m.turnaround). Returns {sheet, views, iou {view:IoU}, mean_iou}. IoU = intersection-over-union of the two foreground masks under the same camera; 1.0 = identical outline. THE critic loop that caught the mantis slurped legs -- now a NUMBER an agent can OPTIMISE (fix the lowest view). MEASURED: mesh vs itself 1.0 every view; half-size copy 0.22. KEPT NEG: silhouette only, blind to interior topology; pair with mesh_report..
@@ -3258,6 +3306,14 @@ import numpy as np; import lecore, numpy as np; m=lecore.UnifiedMind(dim=256,see
 ```
 *Find it by:* sdf scene, compose sdf parts, scene of sdf primitives, build a scene from signed distance functions, sdf scene with materials, combine sdf shapes into a scene
 
+### sdf_scene_shader
+ONE EXACT SCENE, ONE FRAGMENT SHADER (sweep 176): a multi-part SDF scene as a WebGL2 raymarcher -- each part's map() from the engine's own emitter, combined by min, writing the nearest-part id per pixel, rays from the SAME basis Camera.ray_dirs uses, so the preview is the render's geometry. Measured on the 15-part speaker scene: silhouette IoU 0.9852 vs the engine's sphere-trace, part-id agreement 0.9924, every disagreement on an edge; 2 s per frame in a browser vs minutes for the path trace..
+
+```python
+import lecore; from holographic.mesh_and_geometry.holographic_sdf import sphere, box; from holographic.rendering.holographic_render import Camera; m=lecore.UnifiedMind(dim=256,seed=0); sc=m.sdf_scene_shader([('ball', sphere(0.3)), ('slab', box(1,0.05,1).translate((0,-0.4,0)))], camera=Camera(eye=(0,1,3),target=(0,0,0),fov_deg=30,aspect=1.6)); print(sc['names'], 'mapAll' in sc['fragment'], sc['uniforms']['uAspect'])
+```
+*Find it by:* compile a whole scene to a shader, webgl preview of the exact scene, scene to glsl with part ids, raymarch the scene in the browser, make the viewport match the render, shader for a multi-part sdf scene
+
 ### sdf_to_mesh
 FRACTAL / SDF -> MESH, the one-liner (holographic bridge) -- march an SDF object (fold_fractal/mandelbulb/menger/any .eval field) to a watertight Mesh ready for mesh_to_softbody and the whole mesh+simulation pipeline. Fixes the two traps: an SDF isn't a bare callable (wraps .eval), and an all-positive distance ESTIMATOR returns 0 faces at level 0 (auto-offsets the iso). bounds auto-probed.
 
@@ -3500,7 +3556,7 @@ mind.shared_workspace() returns the swarm's shared workspace: named slots that r
 ```python
 import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(type(m.shared_workspace()).__name__)
 ```
-*Find it by:* swarm workspace, shared slots between roles, what did the roles exchange, blackboard for the swarm, shared scene state, role handoff workspace
+*Find it by:* swarm workspace, shared slots between roles, what did the roles exchange, blackboard for the swarm modeller inspect, shared scene state, role handoff workspace
 
 ### workspace_manager
 a WORKSPACE MANAGER (holographic_workspace) -- durable user data coexisting with transient 3D/sim SCENES, each in its own namespace. SAVE/LOAD a scene: new_workspace, switch_workspace, export_workspace(name) -> a blob, import_workspace(blob) rebuilds it BYTE-IDENTICALLY, combine_workspaces, reset_to_default. Also named CHECKPOINTS: checkpoint(name,label) drops a save-point, restore_checkpoint rolls back to it byte-identically, list_checkpoints. The persistence + save-point layer for a scene.
@@ -3544,7 +3600,7 @@ scale a game to a MASSIVE world (holographic_gameshard.ShardWorld): a lazy grid 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.run_game_world([{'op':'spawn','id':1,'pos':(3.5,1,1),'vel':(2,0,0)}], 5, cell=4.0, dt=0.1); print(r['migrated'])
 ```
-*Find it by:* massive game world, massively multiplayer world, shard entities across regions, entity migration between shards, cross shard snapshot, world scale simulation, distribute a game world across machines, open world game backend
+*Find it by:* massive game world, massively multiplayer world occupied migrate, shard entities across regions, entity migration between shards, cross shard snapshot, world scale simulation, distribute a game world across machines, open world game backend
 
 ### Modal jump solver (skip the substeps)
 advance a LINEAR physics island in closed form instead of substepping it: within a contact mode a soft-constraint system is the affine recurrence s <- A s + b, so N substeps are ONE eigendecomposition and t=10s costs the same as t=1s. mind.affine_jump(state, A, b, k) is the stateless jump; mind.modal_solver(...) keeps a per-mode factorization and re-diagonalizes only at contact-mode SWITCHES; mind.should_jump(dim, k) is the measured gate (jump pays at k >= 20*dim); mind.escalation_plan(dim, k, energy=...) is THE ESCALATION LADDER (X11) that picks {sleep | jump | substep} per island per frame -- Catto's '4 substeps' dial and our closed form are two ends of one axis, and the descriptor chooses the rung. mind.soft_chain_bank + mind.advance_bank are the TUNING BANK (X8): M stiffness/damping variants advanced in ONE batched eigendecomposition (M=32 x 1,920 substeps: 4.3x over substepping the batch, exact to 1.9e-12). KEPT NEGATIVE: that is NOT a superposition -- a trajectory is linear in the FORCING (blend exactly, mind.blend_forcings, 1.1e-16) and nonlinear in the OPERATOR (blending stiffness gives 2.9e-01 of error), so variants batch as arrays and there is no capacity budget to spend; the backlog's 'M <= D/256' came from the retracted sqrt(M/D) law. MEASURED: a 12-body chain (hertz=15, zeta=0.7) matches 3,840 substeps to 2.5e-12 at 8x the speed. HONEST SCOPE: the win is where contact topology is STABLE (machinery, ragdolls at rest, suspensions); where contacts churn, substepping is still the right tool and the gate says so -- it degrades to stepping, never worse. Kept negative: a free-body island is a Jordan block with no eigenbasis; it is REFUSED and stepped, not silently jumped..
@@ -3576,7 +3632,7 @@ physical/chemical PROPERTIES and their evolution: the matter model (Mixture/matt
 ```python
 from holographic.misc.holographic_mixture import Mixture, matter_step
 ```
-*Find it by:* physics, chemistry, matter, mixture, diffusion, material properties, iridescence, oxidation
+*Find it by:* physics, chemistry, matter, mixture, diffusion, material properties equilibrium film, iridescence equilibrium oxidation, oxidation
 
 ### Physics event codec (a trace as base + interruptions)
 record a simulation as its BASE state plus its EVENTS -- the impulses and contacts where the deterministic flow was interrupted -- and regenerate everything else. Between events physics is a deterministic function of the state, so the states were never data. mind.record_physics_trace(...) gives (trace, EventTrace); mind.replay_physics_trace(ev) reconstructs it BIT-IDENTICALLY; mind.physics_compression_report(trace, ev) reports the codec's size beside every baseline it claims to beat, so the comparison travels with the capability. MEASURED (600 frames x 16 bodies, 663 events): raw 460,800 bytes; zlib(raw) 308,090; zlib(frame deltas) 87,057; EVENT CODEC 6,360 -- 13.7x over the bar, and lossless. KEPT NEGATIVE 1: the win is event SPARSITY (663 events replace 9,600 state rows), NOT a codebook -- a quantized impulse codebook adds only ~2x and it is LOSSY, and the loss amplifies because events decide which events happen next (at q=0.1 the replay leaves a box of half-extent 2.0 by 4.47). KEPT NEGATIVE 2: DeltaChain is the wrong tool here -- it skips unchanged rows, but a sim moves every body every frame, so it takes 614,144 bytes, MORE than the raw 460,800. Dense mutation with sparse causes is a different structure from sparse mutation..
@@ -3930,7 +3986,7 @@ the bandwidth probe is an FFT, and an FFT treats its samples as PERIODIC. Any fu
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); b = mind.bake_field(xs, ys, detrend=True); y = mind.fetch_field(b, 0.37, normalize=True)
 ```
-*Find it by:* detrend, bake a lookup table, bake sqrt, non-periodic bake, endpoint jump, spectral leakage, lut, near singular function
+*Find it by:* detrend, bake a lookup table, bake sqrt, non-periodic bake, endpoint jump, spectral leakage, lut treats periodic, near singular function
 
 ### Directional & scale surrogates (pick the null that destroys YOUR claim)
 mind.sign_flip / iid_shuffle / block_shuffle / surrogate_ensemble: the null is a CHOICE -- destroy exactly what you claim, preserve everything else. sign_flip randomises DIRECTION keeping every magnitude exactly (a plain shuffle would over-credit magnitude structure). block_shuffle keeps structure shorter than `block`, destroys longer (the SCALE dial). iid_shuffle destroys all order. surrogate_ensemble streams n of any kind, memory-light. KEPT NEGATIVES: sign_flip is degenerate for magnitude-only statistics; block joins are fake jumps; block=1 IS iid_shuffle..
@@ -4058,7 +4114,7 @@ make something bigger than one box / one pass can hold: partition a job, run the
 ```python
 from holographic.misc.holographic_scalehome import Scale; Scale.map_reduce(buckets, worker, reduce='sum')
 ```
-*Find it by:* scale, distribute, partition, map reduce, tile, brick, parallel, shard
+*Find it by:* scale, distribute, partition, map reduce sparsefield pieces, tile, brick, parallel sparsefield pieces, shard
 
 ### Scale advisor (consult every capacity law BEFORE hitting the wall)
 mind.advise_scale(n_pairs=..., vocab=..., dim=..., bundle_k=..., factors=..., depth=...) applies every measured law in one checkpoint -- pair capacity via allocate (alpha-exact dim), the PIC decoder transition, the bundle linear-readout ceiling k*~0.13*D (sparse decoders hold ~8.7x more), the factorization hard wall F=4 (split factor groups beyond it) -- and returns margins, the BINDING constraint, and a concrete prescription; fix=True returns the corrected spec. Empirical knobs (depth) route to mind.auto_scale by name, which doubles the responsive knob and diagnoses genuine walls..
@@ -4074,7 +4130,7 @@ import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); print(mind.advise_scale
 ```python
 from holographic.sampling_and_signal.holographic_spectral import ...; from holographic.sampling_and_signal.holographic_dedoppler import ...
 ```
-*Find it by:* signal processing, fft, spectral, spectrum, detect a signal, faint signal, narrowband, doppler
+*Find it by:* signal processing, fft flatness doppler, spectral, spectrum, detect a signal, faint signal, narrowband, doppler
 
 ### Smallest eigenpair of a sparse operator (matvec-only, no scipy)
 Smallest eigenpair of a Hermitian PSD operator from ONLY its matvec -- no matrix materialised, no scipy. The two-phase solver behind cross_field's sparse path, promoted (M7): phase 1 a safe fixed shift that favours the bottom of the spectrum from any start, phase 2 a Rayleigh shift for a superlinear gap-independent endgame; CG inner solves on the shifted matvec; exits on the eigen-residual (successive-iterate agreement false-converges, measured). Caller supplies the Gershgorin bound c and may keep its own matvec count via on_matvec. Returns (u, lambda_min, matvecs)..
@@ -4310,7 +4366,7 @@ temporal image sequences: video compression with keyframe/delta coding (video), 
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.io_and_interop.holographic_video import ...; mind.blend_images(a, b)
 ```
-*Find it by:* video, compress a video, temporal compression, frames, motion, interpolate frames, keyframe, sequence of images
+*Find it by:* video, compress a video, temporal compression, frames, motion, interpolate frames, keyframe temporal sequences, sequence of images
 
 ### Video drift (train on short clips, generate coherent motion)
 mind.train_video_drift turns each short clip into a keyframe-PAIR point [start splats, end-minus-start delta]: motion is the JOINT structure between keyframes -- the quantity the H1.4 verdict proved drift preserves and independent marginals scramble -- with end splats re-matched by nearest centre so the delta is motion, not relabelling. mind.generate_video drifts a pair, interpolates splat params across n_frames, renders every frame, and reports per-clip max frame-to-frame RMS in the audit: the smoothness claim carries its own number. Single-frame clips refuse.
@@ -4326,7 +4382,7 @@ mind.tensor_structure(X) answers, before you pay to find out, whether a tensor f
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); v = mind.tensor_structure(field); v['verdict']  # 'area-law' or 'volume-law'
 ```
-*Find it by:* will compression help, area law, volume law, schmidt rank, bond rank, is this compressible, should i compress this, entanglement entropy
+*Find it by:* will compression help, area law, volume law, schmidt rank, bond rank, is this compressible, should i compress this help compares, entanglement entropy
 
 ## Honesty & measurement
 
@@ -4406,7 +4462,7 @@ reachability over a table's edges -- neighbors, descendants, reachable, shortest
 ```python
 from holographic.agents_and_reasoning.holographic_querygraph import EdgeGraph; EdgeGraph(t,'src','dst').path(a,b)
 ```
-*Find it by:* graph, reachable, descendants, shortest path, traversal, adjacency, recursive cte, edges
+*Find it by:* graph, reachable, descendants, shortest path, traversal, adjacency neighbors reachability, recursive cte, edges
 
 ### Native holographic micro-model (baked; the model IS the program)
 mind.native_model(dim, seed, program): a from-scratch model, no pretrained host -- layers are the certified parameterizations (circulant/permutation/dense), registers are recurrent state, forward() = the compiled program (pinned == VM). BAKED: save() writes a ~250-byte RULE file; load() re-bakes bit-identical weights. unitary=True bakes norm-preserving atoms for DEEP programs (depth-256 error 7.8e82 -> 6e-15 measured; the conditioning warning names this switch). to_dense(op) exports the literal host matrix..
@@ -4422,7 +4478,7 @@ find a way through a space or structure: A*/shortest-path route planning (plan),
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.scene_and_pipeline.holographic_plan import ...; mind.solve_maze(world); from holographic.misc.holographic_flow import ...
 ```
-*Find it by:* navigation, plan a route, pathfinding, shortest path, maze, slime mould, flow network, route
+*Find it by:* navigation, plan a route, pathfinding, shortest path networks navigator, maze, slime mould, flow network, route
 
 ### Program & machine (VM)
 the VSA computer: a stored-program holographic machine (machine/HoloMachine) that runs vector programs, recipes with holes / hygienic templates (template), a content-addressed compile cache (compile), tool-orchestration planning (orchestrator/voidsynth), and reversible computation. Programs as data. PERF: atoms are memoised (pure derivations -- bit-identical, always on), and HoloMachine(fast_cleanup=True) or mind.vm_fast_cleanup=True opts decode into one cached-codebook matmul per cleanup instead of a Python cosine loop -- measured 2x end-to-end, result-identical, opt-in.
@@ -4446,7 +4502,7 @@ mind.run_command(name, args) runs an external program that an OPERATOR put on th
 ```python
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); info = mind.run_command('probe', {'path': 'clip.mp4'})  # 'probe' registered in process
 ```
-*Find it by:* run a command, external program, shell out, run ffmpeg, call an external tool, run a script, job runner, wrap a program as a tool
+*Find it by:* run a command, external program, shell out, run ffmpeg, call an external tool, run a script, job runner registration injection, wrap a program as a tool
 
 ### Spin up local worker processes (parallel execution)
 a PERSISTENT process pool -- each worker its own interpreter with its own GIL, so GIL-bound work actually runs in parallel on ONE machine, and a big read-only cache is published ONCE into shared_memory (zero-copy) instead of pickled per bucket. This is the one that CREATES workers; `farm` is the cross-machine sibling and only CONSUMES hosts you already started. Pass it as distribute_compute(backend=...). VERIFIED bit-identical to in-process. Workers must be TOP-LEVEL picklable functions. Default stays single-process -- measure on your own hardware first.
@@ -4514,7 +4570,7 @@ fault tolerance + verification for untrusted farm nodes: retry-with-backoff (a r
 ```python
 from holographic.misc.holographic_hardening import HardenedCoordinator; HardenedCoordinator(farm, redundancy=3).run(buckets, worker, cache, reduce, canaries=[...])
 ```
-*Find it by:* voting, redundant compute, retry, fault tolerance, canary, untrusted node, quorum, straggler
+*Find it by:* voting untrusted reassigns, redundant compute, retry, fault tolerance, canary, untrusted node, quorum, straggler
 
 ### Easy model: train it, ask it, save it (three verbs, any kind)
 m = mind.easy_model(data, labels=...) trains the right model (pair memory / sequence classifier / generator) behind ONE handle; m.ask(query) answers regardless of kind; NOTE its scope honestly: exact or fuzzy (edit-distance, correction reported) lookup over YOUR stored keys and labels, NOT natural-language prompting -- semantic queries belong to find_capability, comprehension to DECLARE (key ids -> values, sequences -> labels, a count -> that many forecast steps); m.save(path) and mind.load_easy_model(path) round-trip it as a small npz. All train_model honesty guards apply: ...generator ....
@@ -4594,7 +4650,7 @@ sum contributions so the result is BIT-IDENTICAL no matter how the work is split
 ```python
 import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); d = np.random.default_rng(0).normal(size=(64,3)); total, info = mind.distribute_exact(np.array_split(d, 7), lambda b, c: np.asarray(b, float)); print(info['scale'], total)
 ```
-*Find it by:* partition invariant, bit exact sum, reproducible sum, prefix sum of an array, prefix sum, scan, scan an array, running total
+*Find it by:* partition invariant, bit exact sum matter item, reproducible sum matter item, prefix sum of an array, prefix sum, scan, scan an array, running total
 
 ### Query / database (domain)
 treat VSA stores as a database: SQL over tables, similarity/time-travel/diff, durable + concurrent + graph + history query layers.
@@ -4690,7 +4746,7 @@ installable, runnable 'stored procedures' that are hypervectors the machine exec
 ```python
 from holographic.agents_and_reasoning.holographic_queryprog import ProgramCatalog; cat.install(...); cat.find('cluster a series')
 ```
-*Find it by:* stored procedure, install program, execute program, udf, pg_proc, find program, run program, vsa program
+*Find it by:* stored procedure, install program, execute program, udf, pg_proc, find program, run program whitelisted procedures, vsa program
 
 ### Who is in the workspace (cross-app presence, host, notes, long-poll, open an app's .lews file)
 The .lews workspace as a LIVE SESSION shared by every app (holographic_lews.Workspace = the LiveSession contract on a directory): lews_touch(root, who, activity, name) heart-beats a PERSON or agent, never a connection (leStudio's ghost-editor lesson); lews_presence(root, ttl) -> who is here across apps, with activity and host = earliest-joined still alive; lews_note announces a non-section change as one journal line (no container rewrite); lews_wait long-polls the feed minus your own echo; lews_import(file, root) opens any app's single-file .lews as a live directory (leStudio goldens pinned)..
@@ -6097,6 +6153,13 @@ BOOT THE SUBSTRATE LIKE FIRMWARE (cp34): POST -- measured self-checks with pass/
 import lecore; m=lecore.UnifiedMind(dim=256, seed=0); print(type(m.boot()))
 ```
 
+### catalog_families
+WHICH FAMILY IS EACH CAPABILITY IN (sweep 176): {name: (holographic/<family>/, source)} for every card. 'module' when the module folder resolves it deterministically (497 of 876), 'decided' when a typed decision over the card's own text is confident (measured 0.625 forced vs 0.280 majority, so only above the margin; +17), else None -- reported by catalog_gaps, never guessed. The family is what the tiered router's clarify tier asks about..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); f=m.catalog_families(); print(sum(1 for v in f.values() if v[0]), 'resolved of', len(f))
+```
+
 ### central_mass_from_orbit
 weigh a CENTRAL BODY from a bound orbit (holographic_sysid): Kepler's third law M = 4*pi^2*a^3/(G*T^2); semi-major axis from radius extremes, period from the unwrapped bearing (the monotone-rotation winding picture). 2-D or inclined 3-D orbits (best-fit plane). REFUSES on under one full observed orbit rather than extrapolating. How astronomy weighs stars and black holes with no force sensor -- the known force law + its constant break the mass gauge.
 
@@ -6174,6 +6237,13 @@ the shared DECISION step for any classify/match (holographic_relations): given r
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.decide_or_abstain([('a',0.9),('b',0.4)], margin=0.1))
 ```
 
+### decision_memory
+OUTCOME AUDIT LOG with an equivalence test (holographic_decisiontree, sweep 173): record that an input, through a tree, produced a result; ask which inputs reached the SAME result; compare() gives four quadrants -- consistent / equivalent / brittle (alike inputs, DIFFERENT results: the alarm) / distinct. Inputs encode by HOW THEY ROUTE (routing_fingerprint): same vs different result pairs at AUROC 0.874 vs 0.777 (bag) and 0.695 (word overlap). NOT a router or predictor -- as either it lost to a proper baseline. recall() abstains; one class needs a stated floor..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); om=m.decision_memory(); om.record('turn a point cloud into a mesh','points_to_mesh',None,label='a'); om.record('build a surface from these points','points_to_mesh',None,label='b'); print(om.classes(), om.compare('turn a point cloud into a mesh','build a surface from these points')['quadrant'])
+```
+
 ### delegation_drift
 Which faculties have LOST a parameter their module function still accepts? mind.delegation_drift() audits the seam every other audit misses: a parameter added to a module and never plumbed through its wrapper leaves the capability reachable but crippled -- /tools lists it, /invoke calls it, part of it cannot be reached. Reports each faculty, its delegate, the lost parameters and the overlap, plus SUPPLIED: what a wrapper binds itself (mind=self, seed=self.seed), with its binding, because that is decided, not lost. KEPT NEG: names, not semantics. Needs a source checkout (logic is in tools/)..
 
@@ -6207,6 +6277,13 @@ Break a large text document into an ORGANIZED document with a table of contents:
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256, seed=0); print(m.document_outline('# A' + chr(10) + 'x' + chr(10) + chr(10) + '# B' + chr(10) + 'y')['toc'])
+```
+
+### edit_verified
+ONE EDIT UNDER VALIDATED TERMINATION (sweep 176, NOOA): file_replace, then the checks -- syntax always, import and the module selftest when asked; ANY failure undoes the edit and refuses with the failing check attached, so a broken file never survives the call; an accepted edit is a swarm step in the ledger. Measured on 200 synthetic edits: 100 of 100 broken edits refused and restored byte-identical, 100 of 100 good edits accepted..
+
+```python
+import lecore, tempfile, os; d=tempfile.mkdtemp(); open(os.path.join(d,'m.py'),'w').write('def f(): return 1'); m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root(d); r=m.edit_verified('m.py', 'return 1', 'return ('); print(r['ok'], open(os.path.join(d,'m.py')).read()=='def f(): return 1')
 ```
 
 ### element_flame_color
@@ -6447,6 +6524,13 @@ Seat the expert panel in the swarm realm: each member a named resident with its 
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.panel_seat(); mind.panel_deliberate(q, {'widrow': 'a', 'bau': 'b'})
 ```
 
+### plan_change
+PLAN A CODE CHANGE -- Rule 0 as a typed decision with the evidence attached (sweep 176): what the catalog says (route_tiered tier and z), what the source says (code_search), the family, then reuse / extend / build -- the measured tier decides where it is decisive, modification intent ('add a parameter to X') turns an answer-tier hit into extend, the typed decision breaks the menu tie and learns from decision_outcome(id, what was done). Returns the build loop as steps with a done_when each. Measured on 12 historical requests: 11 of 12 against today's truth (majority 0.33)..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root('.'); p=m.plan_change('add a naive bayes scorer to the typed decision'); print(p['action'], p['evidence']['catalog_tier'], [s['step'] for s in p['steps']][:3])
+```
+
 ### predictive_filter
 a SURPRISE filter (holographic_extras) -- observe(vec) returns (is_novel, surprise); slow drift is absorbed by a moving prediction while an abrupt change fires once. Pass only surprising observations downstream, stay quiet on predictable ones -- an event gate for a stream.
 
@@ -6494,6 +6578,13 @@ Resolve a natural REFERENCE ('that one', 'the red mesh') against recent query re
 
 ```python
 db.resolve_reference(dest_row)  # Database method: anaphora over recent results
+```
+
+### review
+REVIEW A CHANGE WITH EVIDENCE (sweep 176): per file -- syntax, import in a subprocess, determinism hazards from the AST with line and reason (hash(), unseeded random, wall clock, unsorted listdir or glob, set iteration: the constitution's rules), undocumented public defs, functions over 120 lines, modules over the 2,000-line part cap, a missing selftest, possible duplicates by code_similar, impure functions by function_purity, and the tests the change needs by affected_tests. merge_ready is a stated rule (no errors), never a score; the review is a record -- report merged or reverted by id..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root('.'); r=m.review('holographic/agents_and_reasoning/holographic_codeflow.py'); print(r['merge_ready'], list(r['files'].values())[0]['counts'])
 ```
 
 ### route_question
@@ -6615,6 +6706,13 @@ sphere-trace rays AND return each ray's ORBIT TRAP -- the closest approach of it
 import numpy as np; import lecore; m=lecore.UnifiedMind(dim=256,seed=0); from holographic.mesh_and_geometry.holographic_sdf import sphere; h,t,p,tv=m.sphere_trace_trapped(sphere(0.5), np.array([[0,0,3.]]), np.array([[0,0,-1.]]), trap_kind='origin'); print(round(float(tv[0]),2))
 ```
 
+### swarm_step
+THE SWARM STEP CONTRACT (sweep 176): one shape for every message a worker sends -- state, tool, args, done_when, evidence, worker, outcome -- REFUSED without done_when and evidence, because the orchestrator failure the literature names (misclassification that compounds) starts with steps nobody can verify. Each step is a DecisionRecord in the ledger (outcome by id, compare by cosine) and is published on the mind's MessageBus. swarm_evaluate runs the audit suite (reachability_audit, catalog_gaps, skill_lint) as subprocesses and returns all_ok -- the evaluator role and the hard exit..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); s=m.swarm_step('resolve families', 'catalog_families', {'decide': False}, done_when='at least 500 resolve', evidence={'resolved': 501}, worker='w1'); print(s['id'], s['via'], len(m.bus().history('swarm')))
+```
+
 ### sweep_directions
 the UP/DOWN/SIDEWAYS completeness sweep (holographic_ladder) -- does a corpus's structure hold in all three directions, or only one? DOWN: survives DECOMPOSITION (are the parts analyzable)? UP: survives EMBEDDING in a larger corpus? SIDEWAYS: which lens COSTUMES (sequence/structure) does it wear? Returns per-direction ok + gaps + complete. Null-aware: irreducible data flags all three, never fabricating structure. A capability that works in only one direction is an INCOMPLETE faculty.
 
@@ -6622,11 +6720,53 @@ the UP/DOWN/SIDEWAYS completeness sweep (holographic_ladder) -- does a corpus's 
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus; print(m.sweep_directions(_make_planted_corpus())['complete'])
 ```
 
+### systemone_absorb
+LEARN FROM UNLABELED TRAFFIC, GUARDED (sweep 176): semi-supervised EM over unlabeled states for the nb scorer -- E-step posteriors, M-step recount, no gradient -- on the same cached model the next decision uses. Two measured guards: refused above 10 options (EM collapsed to 0.093 on 77 intents) and kept only if held-out accuracy did not fall. Measured: plain nb on AG News, 32 examples per class plus 600 unlabeled rows, 0.697 -> 0.752, beating the transformed default's 0.713; under the transform the gain vanishes, so this door defaults to nb_transform=False..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); q={'cat':{'type':'choice','options':['billing','shipping'],'examples':{'billing':['card charged twice','refund my invoice fee','charge on my statement','double charge'],'shipping':['parcel lost in transit','courier late','package never arrived','no tracking movement']}}}; print(m.systemone_absorb(['my invoice was charged twice','the courier lost the parcel'], q, 'cat', encoder='ngram', margin=0.0))
+```
+
+### systemone_batch_fdr
+FALSE-DISCOVERY CONTROL OVER A BATCH OF DECISIONS (sweep 176): one calibrated p per decision cannot bound the error of a thousand-row batch (the Cranmer seat, sweep 172). Each state gets a shuffle-null p-value of its margin against in-vocabulary word salad at matched length, then Benjamini-Hochberg across the batch. Measured on 150 real + 150 noise rows x 3 seeds: BH holds FDR 0.033 at q=0.05 and 0.028 at q=0.10 (real rows accepted 13-20%); the uncorrected gate lets noise through at 0.14 / 0.22; Benjamini-Yekutieli accepts nothing..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); q={'cat':{'type':'choice','options':['billing','shipping'],'examples':{'billing':['card charged twice','refund the invoice','charge on my statement'],'shipping':['parcel lost','courier late','package never came']}}}; print(m.systemone_batch_fdr(['my card was charged twice','courier lost it'], q, 'cat', alpha=0.1, n_null=32, encoder='ngram', scorer='nb'))
+```
+
+### systemone_lint
+LINT THE QUESTION BEFORE ASKING IT (sweep 176): checks a typed-decision schema and its states -- example token budgets imbalanced more than 2x (the shortest option owns the smoothing floor: measured 1-3 of 8 tool decisions until balanced, then 8 of 8), options with fewer than 3 examples, the scorer the measured regime table recommends from k, states carrying more than one clause (returned split), and contrastive or negated states to escalate. Every failure the blueprint and 3-D experiments hit is a finding here. Reports; never rewrites..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.systemone_lint({'cat':{'type':'choice','options':['a','b'],'examples':{'a':['x y z']*3,'b':['q']*3}}}, states=['first thing. and then a second thing but not a third'])['findings'])
+```
+
+### systemone_map
+BATCH typed decisions (holographic_systemone): mind.systemone_map(states, questions, labeled=None) maps one decision schema over many states -- score every row of a table, triage a whole queue -- with row i pinned identical to the single-state call (the batch path can never fork). Fit-once for volume: so = mind.systemone(questions); so.decide_map(...); so.calibrate(labeled) adds honest probabilities; so.calibration_report(held_out) gives accuracy, Brier and ECE -- the reliability numbers a vendor claim needs before trust..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=512,seed=0); print(m.systemone_map(['refund my invoice','parcel is lost'], {'cat': {'type': 'choice', 'options': ['billing','shipping'], 'examples': {'billing': ['invoice charge refund'], 'shipping': ['package tracking courier']}}})[1]['cat']['value'])
+```
+
+### systemone_stream
+CLOSE THE DECISION LOOP (holographic_systemone, sweep 172 -- what a frozen hosted decision model cannot do): systemone_stream(stream, questions, lr) runs prequential test-then-train over [(state,{q:truth}),...] -- decide FIRST (the honest test), then learn via the AdaptHD miss-update; lr=0 is the frozen baseline. Returns prequential accuracy plus a two-channel drift report (label-free support + label-lagged correctness) delegated to the regime machinery. The fitted object also gains decide_or_escalate: a schema-enforced model-end seam..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=512,seed=0); print(m.systemone_stream([('invoice charge',{'cat':'billing'}),('parcel lost',{'cat':'shipping'}),('refund me',{'cat':'billing'})], {'cat': {'type':'choice','options':['billing','shipping'], 'examples': {'billing':['card charged fee'],'shipping':['package courier delivery']}}})['prequential_accuracy'])
+```
+
 ### timeline
 a keyframe TIMELINE (holographic_anim) -- key(channel, t, value, interp) then sample(channel, t) for the interpolated value at time t (vectorised over t). EASING per key: 'linear' (default), 'step' (hold), 'smooth' (ease in-out), 'ease_in', 'ease_out'. Key blendshape weights, deform params, or transforms and drive an animation from it.
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); tl=m.timeline(); tl.key('x',0,0.0); tl.key('x',1,1.0,interp='ease_in'); print(round(float(tl.sample('x',0.5)),2))
+```
+
+### verify_decision
+IS THIS ANSWER A VALID RESPONSE TO THIS INPUT? (sweep 176) leOS step 4 done holographically: read the experience trace with the STATE and check it cleans up to the answer (forward); read it with the ANSWER atom and check it points back at the state (backward -- the bidirectional lookup); the displacement profile of correct pairs; the seen gate; support against the recent stream (drift). Measured: a seen state served the recorded truth vs a wrong label -- forward and backward AUROC 1.000, verdict valid 0.99 vs 0.00. A verdict against experience, not a confidence; the margin ranks..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.route_tiered('smooth a bumpy mesh'); m.decision_outcome(r['id'], r['answer']); print(m.verify_decision('smooth a bumpy mesh', r['answer'], key='fingerprint')['valid'], m.verify_decision('smooth a bumpy mesh', 'Voxelization', key='fingerprint')['valid'])
 ```
 
 ### vertex_move_command
@@ -6673,4 +6813,4 @@ from holographic.caching_and_storage.holographic_substrate import write_multicha
 
 ---
 
-*855 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*874 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

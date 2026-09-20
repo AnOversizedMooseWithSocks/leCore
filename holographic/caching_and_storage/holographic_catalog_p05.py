@@ -62,7 +62,7 @@ def register_p05(c):
                           "(video), temporal compression, motion/phase morph between frames (phasemorph), and frame "
                           "interpolation. Moving pictures on the substrate", example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.io_and_interop.holographic_video import ...; mind.blend_images(a, b)",
                           native=True, aliases=("video", "compress a video", "temporal compression", "frames", "motion",
-                                                "interpolate frames", "keyframe", "sequence of images", "movie"))
+                                                "interpolate frames", "keyframe temporal sequences", "sequence of images", "movie"))
     c.register_capability("Honesty & measurement", "measure claims honestly: error bars + significance (measure), "
                           "ablation studies (ablate), proof-of-structure against a null (structure), calibrated "
                           "detection with false-discovery control, benchmark + variance harness, and stress tests. The "
@@ -132,7 +132,7 @@ def register_p05(c):
                           "Users can add their own to either library",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.material_info('gold'); mind.find_materials('clear liquid'); mind.materials()",
                           native=True, aliases=("material library", "materials", "physical material", "material properties",
-                                                "density", "refractive index", "render material", "pbr preset", "gold",
+                                                "density metals gases", "refractive index", "render material", "pbr preset", "gold",
                                                 "copper", "diamond", "material data", "material list", "scientist material"))
     # --- material + shading (consolidation R3) ---
     c.register_capability("Material (channels)", "the material as a record of named channels (albedo/metallic/"
@@ -143,7 +143,7 @@ def register_p05(c):
                           example="import lecore; m=lecore.UnifiedMind(); m.iridescent_tint(thickness_nm=320.0, cos_theta=1.0)",
                           native=True, aliases=("iridescent material", "iridescence", "soap bubble colour", "soap bubble color",
                                                 "oil slick sheen", "thin film interference", "pearlescent", "nacre", "rainbow sheen",
-                                                "make it iridescent", "peacock colour", "beetle shell"))
+                                                "make it iridescent", "peacock colour", "beetle shell film iridescence"))
     c.register_capability("Multi-material (mask-blended)", "combine N materials by per-point MASKS -- generalises the "
                           "2-way Material.blend to a weighted mix where each material's weight is a mask (a texture "
                           "graph, a field, or a constant) that varies over the surface: paint rust into metal, moss "
@@ -167,7 +167,7 @@ def register_p05(c):
     c.register_capability("Shading (BRDF)", "the shade model: cook_torrance (full specular+diffuse per light), "
                           "lambert (diffuse term), sample_brdf (importance-sampled bounce) -- call these instead of "
                           "re-deriving Fresnel/GGX/diffuse", example="from holographic.rendering.holographic_brdf import cook_torrance, lambert",
-                          native=True, aliases=("shade", "brdf", "cook_torrance", "lambert", "fresnel", "ggx", "specular", "diffuse"))
+                          native=True, aliases=("shade", "brdf", "cook_torrance", "lambert", "fresnel", "ggx importance deriving", "specular", "diffuse"))
     c.register_capability("Standalone API service", "run the engine as a standalone DATABASE server on any OS and "
                           "talk to it over HTTP/JSON: full SQL (CREATE/INSERT/SELECT/UPDATE/DELETE/JOIN/DROP), a "
                           "GraphQL front door for nested documents, disk PERSISTENCE (data survives a restart), "
@@ -175,7 +175,7 @@ def register_p05(c):
                           "drop-in DB replacement for other apps. Launched by serve.sh (Linux/macOS) / serve.bat (Windows)",
                           example="./serve.sh --persist mydb.json   # then: curl -X POST .../sql -d '{\"sql\":\"SELECT ...\"}'",
                           native=True, aliases=("api", "server", "service", "standalone", "http", "rest", "daemon",
-                                                "database", "sql", "graphql", "persistence", "drop-in database",
+                                                "database", "sql insert update", "graphql", "persistence", "drop-in database",
                                                 "run as server", "endpoint", "launch", "serve"))
     # rev. 9: the skills selftest's own route probe ("start pause resume cancel a render job") shipped RED at
     # confidence 0.565 -- the cloud-bake entry, a CLIENT of this skill, legitimately shares its vocabulary and
@@ -195,14 +195,18 @@ def register_p05(c):
                           "ROOT so a path can never escape it. Atomic writes; replace requires a unique match; every "
                           "mutation is reversible with file_undo; replace_across renames a string across many files "
                           "(with a dry-run preview); python_check (syntax) and import_check (real import in a subprocess) "
-                          "catch a broken edit immediately. Exposed as mind.file_* methods, so callable over the HTTP "
-                          "tool protocol (GET /tools, POST /invoke) like any faculty",
+                          "catch a broken edit immediately. Sweep 176: file_symbol locates a def/class/Class.method by "
+                          "NAME (ast), file_insert_after_symbol adds a method after a class body without an anchor or a "
+                          "line number, file_selftest runs python -m <module> in a subprocess. Exposed as mind.file_* "
+                          "methods, so callable over the HTTP tool protocol (GET /tools, POST /invoke) like any faculty",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.set_file_root('.'); mind.file_find_definition('make_cloud'); mind.file_replace('a.py', 'old()', 'new()'); mind.file_import_check('a.py'); mind.file_undo()",
                           native=True, aliases=("edit file", "edit code", "modify file", "modify code", "write file",
                                                 "read file", "replace in file", "patch", "insert lines", "delete file",
                                                 "archive file", "move file", "rename file", "grep", "search code",
                                                 "list files", "create file", "file editing", "source editing",
                                                 "undo edit", "undo my last edit", "find definition", "jump to definition",
+                                                "view a function by name", "append a method to a class",
+                                                "insert code after a function definition", "run a module selftest",
                                                 "rename symbol", "rename everywhere", "replace across files", "directory tree",
                                                 "check imports", "did my edit break", "view file", "see the file"))
     c.register_capability("Affected-test selection (which tests does my change need)",
@@ -225,21 +229,21 @@ def register_p05(c):
                           "handle a render that takes minutes: kick it off, poll progress, do other work",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); jid = mind.bake_cloud_job(radius=1.0, seed=0, background=True); mind.job_status(jid); mind.job_pause(jid); mind.job_resume(jid); grid = mind.job_result(jid)",
                           native=True, aliases=("bake cloud", "background render", "resumable render", "monitor render",
-                                                "pause render", "long render", "render job", "noise bake"))
+                                                "pause render", "long render", "render job baking slow", "noise bake"))
     c.register_capability("Compare rendered images (files)", "perceptual similarity in [0,1] between two images given "
                           "as FILE PATHS (e.g. two rendered PNGs) -- SSIM + colour + edge, shift/lighting-tolerant, the "
                           "on-disk companion to compare_images. The call an agent makes to check 'did my render change "
                           "or match the target?' when the images are files",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.compare_image_files('render_a.png', 'render_b.png')  # -> {similarity, distance, ...}",
                           native=True, aliases=("compare images", "image diff", "render diff", "compare renders",
-                                                "image comparison", "did the render change", "image similarity"))
+                                                "image comparison", "did the render change", "image similarity paths between"))
     c.register_capability("Distributed hardening (R5)", "fault tolerance + verification for untrusted farm nodes: "
                           "retry-with-backoff (a reissue reassigns a dead node\'s work), redundant computation + "
                           "majority VOTING (accept only what independent nodes agree on -- a node can\'t force a "
                           "result), canary buckets (known answers reject an untrusted node), and speculative straggler "
                           "backups. The BOINC/SETI@home discipline, mandatory before public contributors",
                           example="from holographic.misc.holographic_hardening import HardenedCoordinator; HardenedCoordinator(farm, redundancy=3).run(buckets, worker, cache, reduce, canaries=[...])",
-                          native=True, aliases=("voting", "redundant compute", "retry", "fault tolerance", "canary",
+                          native=True, aliases=("voting untrusted reassigns", "redundant compute", "retry", "fault tolerance", "canary",
                                                 "untrusted node", "quorum", "straggler", "backup execution", "verify result"))
     c.register_capability("Network render farm", "run the coordinator\'s monoid workers on OTHER machines: a worker "
                           "daemon per node (stdlib http/json), the read-only cache shipped ONCE by content hash and "
@@ -247,7 +251,7 @@ def register_p05(c):
                           "pool. Buckets are data, workers are registered code; a node runs only its registered workers",
                           example="from holographic.misc.holographic_farm import WorkerDaemon, NetworkFarm; Coordinator(NetworkFarm([addr])).run(buckets, 'worker_name', cache, reduce)",
                           native=True, aliases=("render farm", "distributed", "network", "seti", "worker daemon",
-                                                "remote", "cluster", "node", "another machine", "farm"))
+                                                "remote", "cluster dispatched reduced", "node", "another machine", "farm"))
     c.register_capability("Command runner (external tools)", "run any registered ALLOWLISTED program/script as a "
                           "task (subprocess, no shell, time-boxed) and wire it as an orchestrator Tool the Planner "
                           "can chain, with a CircuitBreaker on a flaky one -- the door to external tools and services. "
@@ -286,7 +290,7 @@ def register_p05(c):
                           # NB: no bare "diffusion" alias -- it collides with the reaction-diffusion automaton home
                           # and displaced it for the probe "reaction diffusion cellular automaton". One token, two
                           # unrelated meanings; the specific phrase keeps this findable without stealing that query.
-                          native=True, aliases=("regime shift", "change point", "drift detection", "has the data changed",
+                          native=True, aliases=("regime shift", "change point", "drift detection ocean slow", "has the data changed",
                                                 "double-diffusive", "layer detection", "concept drift",
                                                 "has the regime changed"))
     c.register_capability("holographic_automaton", "Turing patterns in hypervector space: a vector-valued "
@@ -299,8 +303,8 @@ def register_p05(c):
                           # two entries landed. A curated entry with the module's own vocabulary is the fix the
                           # regime-shift note above already prescribed for this exact probe.
                           example="from holographic.misc.holographic_automaton import HyperCA; ca = HyperCA(64, dim=32, seed=0); ca.step()",
-                          native=True, aliases=("cellular automaton", "reaction-diffusion", "reaction diffusion",
-                                                "turing patterns", "activator inhibitor", "spots and stripes"))
+                          native=True, aliases=("cellular automaton", "reaction-diffusion", "reaction diffusion valued cellular",
+                                                "turing patterns", "activator inhibitor", "spots and stripes reaction automaton"))
     c.register_capability("Grid-free PDE solve on an SDF (Walk on Stars)", "solve Laplace or Poisson inside an SDF "
                           "domain with NO MESH, no grid and no global linear system: mind.solve_laplace(sdf, points, "
                           "boundary_value) walks from each point to the boundary and averages what it finds there. "
@@ -361,7 +365,7 @@ def register_p05(c):
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); code = mind.compress_tensor(field, energy=0.999); X = mind.decompress_tensor(code)",
                           native=True, aliases=("tensor compression", "tucker", "hosvd", "tensor train", "low rank tensor",
                                                 "compress a volume", "compress a frame stack", "multiway svd",
-                                                "rank gate", "should i compress this"))
+                                                "rank gate several compress", "should i compress this"))
     c.register_capability("Denoise multi-way data (low-rank tensor prior)", "clean a noisy field over several axes "
                           "-- (x,y,t), a frame stack, a volume -- by projecting onto the low-rank manifold the noise "
                           "level implies. mind.denoise_tensor(X) estimates sigma itself and keeps only singular "
@@ -398,7 +402,7 @@ def register_p05(c):
                           "(TT: 4,394 B vs int8 24,576); white noise scores 1.00 (TT: 104,782 B).",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); v = mind.tensor_structure(field); v['verdict']  # 'area-law' or 'volume-law'",
                           native=True, aliases=("will compression help", "area law", "volume law", "schmidt rank",
-                                                "bond rank", "is this compressible", "should i compress this",
+                                                "bond rank", "is this compressible", "should i compress this help compares",
                                                 "entanglement entropy", "structure diagnostic"))
     c.register_capability("Rate-distortion report (bits per vector at a fidelity)", "mind.rate_distortion_report("
                           "arrays, target_cos): the cheapest bit budget that stores vectors while keeping their "
@@ -430,7 +434,7 @@ def register_p05(c):
                           native=True, aliases=("permutation test", "shuffled null", "score against a null",
                                                 "p value from a null distribution", "is my result better than chance",
                                                 "significance test", "monte carlo p value", "prove it isn't noise",
-                                                "false alarm probability", "null hypothesis test"),
+                                                "false alarm probability resample scoring", "null hypothesis test"),
                           semantic="analyze/measure", consumes=(), produces=())
     c.register_capability("Documentation map (which doc answers which question)", "SIX doc generators exist -- "
                           "docgen.py (REFERENCE.md, every module), capdoc.py (CAPABILITIES.md, job-oriented), "
@@ -561,7 +565,7 @@ def register_p05(c):
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); soft = mind.filter_passes(img, blur, 64); half = mind.filter_passes(img, blur, 0.5); steady = mind.filter_limit(img, blur)",
                           native=True, aliases=("many blur passes", "iterated filter", "blur n times", "fractional blur",
                                                 "half a pass", "steady state filter", "filter to convergence",
-                                                "shader algebra", "operator power"))
+                                                "shader algebra", "operator power applying raised"))
     c.register_capability("Bake a function into one vector (texture unit)", "mind.bake_field(xs, ys) stores a sampled "
                           "function as a SINGLE hypervector; mind.fetch_field(bake, x) reads it back at ANY x with one "
                           "dot product -- interpolation is built into the algebra, no grid, no lookup table. THE "
@@ -589,7 +593,7 @@ def register_p05(c):
                           "the singularity) and the weaker fix (warping buys 1.9x where detrending buys 8-16x).",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); b = mind.bake_field(xs, ys, detrend=True); y = mind.fetch_field(b, 0.37, normalize=True)",
                           native=True, aliases=("detrend", "bake a lookup table", "bake sqrt", "non-periodic bake",
-                                                "endpoint jump", "spectral leakage", "lut", "near singular function"))
+                                                "endpoint jump", "spectral leakage", "lut treats periodic", "near singular function"))
     c.register_capability("Bake an N-D function into one vector (n-D texture unit)", "mind.bake_field_nd(grids, "
                           "values) stores a gridded function of several variables as a SINGLE hypervector, read back "
                           "at any point with mind.fetch_field_nd. The per-axis bandwidths are probed FROM THE DATA, "
@@ -743,7 +747,7 @@ def register_p05(c):
                           "a plain deterministic graph (tombstone-aware, directed or undirected)",
                           example="from holographic.agents_and_reasoning.holographic_querygraph import EdgeGraph; EdgeGraph(t,'src','dst').path(a,b)",
                           native=True, aliases=("graph", "reachable", "descendants", "shortest path", "traversal",
-                                                "adjacency", "recursive cte", "edges", "network"))
+                                                "adjacency neighbors reachability", "recursive cte", "edges", "network"))
     c.register_capability("Single-writer concurrency", "B8 concurrency: one writer at a time (serialised by an "
                           "exclusive lock; a second writer waits or fails fast) plus lock-free reader SNAPSHOTS (a "
                           "consistent point-in-time view immune to later writes). MVCC deferred, stated honestly",
@@ -764,7 +768,7 @@ def register_p05(c):
                           "carrying a calibrated confidence. Safer than a SQL stored procedure",
                           example="from holographic.agents_and_reasoning.holographic_queryprog import ProgramCatalog; cat.install(...); cat.find('cluster a series')",
                           native=True, aliases=("stored procedure", "install program", "execute program", "udf",
-                                                "pg_proc", "find program", "run program", "vsa program", "program catalog"))
+                                                "pg_proc", "find program", "run program whitelisted procedures", "vsa program", "program catalog"))
     c.register_capability("Query time-travel & audit", "git-for-data on a query table: SELECT as-of a past version "
                           "(time travel), blame a row across versions, diff two versions (added/removed/changed with "
                           "field detail), revert, branch/compare/discard, and prove/locate-tampering (Merkle root + "
@@ -787,7 +791,7 @@ def register_p05(c):
                           "consistent point by loading the snapshot and replaying the journal. The snapshot+WAL "
                           "discipline, on top of the plain save/load the service already exposes",
                           example="from holographic.agents_and_reasoning.holographic_query_durable import save_snapshot, Journal, recover; recover(snap_path, journal_path)",
-                          native=True, aliases=("durability", "crash recovery", "journal", "write ahead log", "wal",
+                          native=True, aliases=("durability", "crash recovery", "journal survive store", "write ahead log", "wal survive store",
                                                 "snapshot recover", "point in time recovery", "replay journal", "recover"))
     c.register_capability("Splat aniso-refine (re-enable)", "full-3DGS anisotropic refinement composed coarse-first: "
                           "fit cheap isotropic splats, then gradient-refine the RESIDUAL (what iso missed -- sharp / "
@@ -862,7 +866,7 @@ def register_p05(c):
                           "in one token out with NO shell, so an injection attempt in a value is a literal value.",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); info = mind.run_command('probe', {'path': 'clip.mp4'})  # 'probe' registered in process",
                           native=True, aliases=("run a command", "external program", "shell out", "run ffmpeg",
-                                                "call an external tool", "run a script", "job runner",
+                                                "call an external tool", "run a script", "job runner registration injection",
                                                 "wrap a program as a tool"))
     c.register_capability("Coarse-first refine (re-enable)", "run the cheap method everywhere, measure a per-cell "
                           "residual/uncertainty, and escalate to the expensive method ONLY where it's high. "
@@ -893,7 +897,7 @@ def register_p05(c):
                           "at low roughness). Detector is the exact material roughness",
                           example="from holographic.rendering.holographic_brdf import brdf_gated, cook_torrance_ms; brdf_gated(N,V,L,color,metallic,roughness)",
                           native=True, aliases=("multi-scatter", "multiscatter", "kulla-conty", "energy conservation",
-                                                "brdf", "ggx", "rough metal", "white furnace", "roughness"))
+                                                "brdf", "ggx", "rough metal", "white furnace", "roughness conserving rough"))
     c.register_capability("Adaptive record (load-gated)", "a role->filler memory that picks its representation by "
                           "LOAD and FIDELITY need -- cheap real-HRR at low load, FHRR phasors past the capacity knee, "
                           "or tensor-product binding for EXACT recall (perfect to M~dim, at dim*dim storage). Uniform "
@@ -913,11 +917,11 @@ def register_p05(c):
                           "constructors; the raw array stays one attribute away (.array / np.asarray(hv))",
                           example="from holographic.sampling_and_signal.holographic_hypervector import Hypervector; Hypervector.encode(encoder, value).bind(other)",
                           native=True, aliases=("hypervector", "datatype", "vector", "vsa", "hdvector", "symbol",
-                                                "bind", "bundle", "permute", "cleanup", "encode"))
+                                                "bind", "bundle", "permute", "cleanup", "encode five permute"))
     c.register_capability("Sampling", "Monte-Carlo sampling: low-discrepancy / blue-noise patterns, cosine-hemisphere "
                           "directions, MIS weighting, firefly-clamped accumulation -- one home over the shipped samplers",
                           example="from holographic.sampling_and_signal.holographic_samplinghome import Sampling; Sampling.cosine_hemisphere(N, n, seed)",
-                          native=True, aliases=("sample", "sampling", "blue_noise", "poisson", "quasi", "halton",
+                          native=True, aliases=("sample discrepancy weighting", "sampling", "blue_noise", "poisson", "quasi", "halton",
                                                 "hemisphere", "mis", "jitter", "firefly", "accumulate"))
 
     # --- fields (audit named ~8) ---
@@ -925,7 +929,7 @@ def register_p05(c):
         "Field", "sample a scalar/vector field at points with ONE interface (field.sample(points)); the backend is "
         "chosen by cost: callable/oracle, dense grid, narrow-band sparse (spectral/FPE/region/dirty are backends too)",
         example="from holographic.misc.holographic_fieldhome import Field; Field.grid(arr, lo, hi).sample(pts)", native=True,
-        aliases=("field", "grid", "volume", "density", "sdf", "sample", "voxel",
+        aliases=("field", "grid interface scalar", "volume", "density", "sdf", "sample", "voxel",
                 # the catalog SELFTEST's own probe, re-ranked out of the top-3 when two merges added
                 # ~57 capabilities. Single words lose to descriptively-titled siblings as the catalog
                 # grows; the PHRASE a person types is what has to be pinned.
@@ -934,19 +938,19 @@ def register_p05(c):
                           "not volume", example="from holographic.misc.holographic_sparsefield import ...", native=True,
                           aliases=("narrow", "band", "sparse", "field"), consumes=(), produces=('field',))
     c.register_capability("holographic_fpefield", "fractional-power-encoded N-D field (surface as one hypervector)",
-                          example="from holographic.sampling_and_signal.holographic_fpefield import ...", native=True, aliases=("fpe", "field", "continuous"), consumes=(), produces=('field',))
+                          example="from holographic.sampling_and_signal.holographic_fpefield import ...", native=True, aliases=("fpe encoded hypervector", "field", "continuous"), consumes=(), produces=('field',))
 
     # --- scale / compute / the kernel verbs ---
     c.register_capability("holographic_distribute", "scale out a commutative-monoid computation: partition into "
                           "buckets, run independently, reduce (sum/min/max/bundle)", example="from holographic.scene_and_pipeline.holographic_distribute import partition, reduce_sum, reduce_min, reduce_bundle",
-                          native=True, aliases=("scale", "parallel", "partition", "mapreduce", "distribute", "raid"))
+                          native=True, aliases=("scale", "parallel independently commutative", "partition computation buckets", "mapreduce", "distribute", "raid"))
     c.register_capability("holographic_fuse", "fuse a bind chain into ~2 FFTs with no Python between ops (stay "
                           "VSA-native)", example="from holographic.misc.holographic_fuse import fuse", native=True,
-                          aliases=("fuse", "native", "fft", "chain", "compute"))
+                          aliases=("fuse", "native", "fft between", "chain between", "compute"))
     c.register_capability("kernel verbs", "the five primitives: bind (attach/transform), unbind (query), bundle "
                           "(superpose/blend), permute (order), cleanup (recognise/denoise)",
                           example="from holographic.agents_and_reasoning.holographic_ai import bind, bundle; from holographic.agents_and_reasoning.holographic_ai import Vocabulary  # Vocabulary(...).cleanup(x)", native=True,
-                          aliases=("bind", "unbind", "bundle", "cleanup", "permute", "superpose", "blend"))
+                          aliases=("bind primitive", "unbind", "bundle primitive", "cleanup primitive", "permute superpose recognise", "superpose recognise five", "blend"))
 
     c.register_capability(
         "Shader-native atom families (a vocabulary that is a FUNCTION, not a table)",

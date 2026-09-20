@@ -134,6 +134,8 @@ leCore has grown large, so here's the **generalized** view — the families of c
 
 - **Read code and data, with citations.** `study(root)` digests a whole tree into a persistent handle and answers with the source file and symbol, or refuses off-corpus; repo maps, grep/view/replace with a syntax check, `merge_trees` with a sha census; and the analyst doors — regimes, forecasts, formulas, drift, fact checking — so a column of numbers is a series and a claim is checkable.
 
+- **Decide without a model, and know when not to.** Ask a *typed* question -- options with a few examples each -- and get a ranked answer with a margin, a calibrated probability, a conformal answer set with a coverage guarantee, and an honest abstention when the state does not support any option; route a request to a capability with an answer / menu / refuse tier instead of a bare no; report the outcome by id and the count table, the reflex arc and the calibration all learn from it (a repeated request is answered from experience 99% of the time; a served answer that contradicts what was learned is caught). Every door has its measurement in `docs/research/`; the syntax, with live-generated examples, is `docs/TYPED_DECISIONS.md`.
+
 You don't have to use all of it. Each capability works on its own; the point is that they *share one space*, so they compose.
 
 **You don't have to memorize any of it, either.** The engine keeps a searchable catalog of what it can do, so a plain-English description of your problem finds the right tool — `mind.find_capability("search a big pile of vectors")`, or `mind.suggest("edit an image")` for ranked options with the call to make, or `mind.route("render a scene")` which either hands you the call (when it's sure) or a short list of choices (when it isn't). The full plain-language menu — every capability, what it does, and the one line that gets you started — lives in **[`CAPABILITIES.md`](CAPABILITIES.md)**, and it's generated from that same catalog by CI so it never goes stale.
@@ -520,7 +522,7 @@ and forget to document or register it, CI tells you which one.
 
 ## Status
 
-Active research engine, and a large one — 805 `holographic_*` modules plus 6 bundled plugins, ~2,410 mind verbs behind 867 catalog capabilities, and 7,000+ collected tests (7,181), all green in CI (the full suite runs sharded, with a per-test budget that skips anything slow unless it is marked critical). It's real and it runs, but it's a research project under steady development, not a finished product. Expect sharp edges, expect it to keep growing, and expect every surprising result to come with the measurement that earned it.
+Active research engine, and a large one — 808 `holographic_*` modules plus 6 bundled plugins, ~2,410 mind verbs behind 890 catalog capabilities, and 7,000+ collected tests (7,287), all green in CI (the full suite runs sharded, with a per-test budget that skips anything slow unless it is marked critical). It's real and it runs, but it's a research project under steady development, not a finished product. Expect sharp edges, expect it to keep growing, and expect every surprising result to come with the measurement that earned it.
 
 ## License
 

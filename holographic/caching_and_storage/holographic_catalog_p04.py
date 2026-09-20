@@ -399,7 +399,7 @@ def register_p04(c):
                           native=True, aliases=("transform bank", "prebuilt map of transforms",
                                                 "cache a transform operator", "precomputed rotation vectors",
                                                 "reuse a bind operator", "compose a chain of transforms",
-                                                "spectrum cache", "group representation", "rotation as a bind",
+                                                "spectrum cache rotations shifts", "group representation", "rotation as a bind",
                                                 "why scale is not a bind"))
     c.register_capability("Dependency-keyed cache (key on what the operator reads)", "Part C's compute model: every "
                           "triangle is THE canonical triangle plus a recognised chain of deltas; a computation runs "
@@ -440,7 +440,7 @@ def register_p04(c):
                                                 "dependency keyed memoization", "cache a computation by its dependencies",
                                                 "read set of a computation", "skip work whose inputs did not change",
                                                 "per triangle cache", "canonical plus delta caching",
-                                                "instancing generalized", "deferred shading", "delta id",
+                                                "instancing generalized transformed quantity", "deferred shading", "delta id",
                                                 "is my evaluator deterministic", "coordinate keyed sampling"))
     c.register_capability("Canonical affine recovery (Fourier-Mellin + refine)", "recover the canonical (S, T) of "
                           "an arbitrary translate/scale edit history: after(x) = before((x - T) / S). Translate and "
@@ -868,7 +868,7 @@ def register_p04(c):
                                   "print(r['item_index'], r['abstained'])",
                           native=True, aliases=("hierarchical superposition", "chunked memory", "mid-level cleanup",
                                                 "cleanup between levels", "store many items in one vector and recall them",
-                                                "how many items can i bundle before recall fails", "capacity",
+                                                "how many items can i bundle before recall fails", "capacity allows items",
                                                 "chunked memory with a shared codebook", "bundle of bundles",
                                                 "nested superposition", "crosstalk reset", "recall capacity",
                                                 "two level memory", "group and leaf"))
@@ -1001,13 +1001,13 @@ def register_p04(c):
                           example="import numpy as np; import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); d = np.random.default_rng(0).normal(size=(64,3)); "
                                   "total, info = mind.distribute_exact(np.array_split(d, 7), lambda b, c: np.asarray(b, float)); "
                                   "print(info['scale'], total)",
-                          native=True, aliases=("partition invariant", "bit exact sum", "reproducible sum",
+                          native=True, aliases=("partition invariant", "bit exact sum matter item", "reproducible sum matter item",
                                                 # G3: the prefix sum, same monoid
                                                 "prefix sum of an array", "prefix sum", "scan", "scan an array",
                                                 "running total", "cumulative sum bit exact", "blocked scan",
                                                 "parallel scan", "cumsum reproducible",
                                                 "same answer no matter how many machines i use", "reduce_sum_exact",
-                                                "my sim gives different results on different nodes", "float associativity",
+                                                "my sim gives different results on different nodes", "float associativity matter item",
                                                 "deterministic reduction", "exact accumulation", "order independent sum",
                                                 "bit identical across nodes", "farm determinism", "rns"))
     c.register_capability("Name a contact type (bounce/slide/rest/jam)", "NAME what KIND of contact happened (holographic_collide.classify_contact) from {overlap, velocity, restitution}: bins the scalars to categories, then match_record against the contact-type records (bounce/slide/rest_contact/penetration/jam) + decide_or_abstain. m.classify_contact(overlap, velocity, restitution) -> {type, confident, record}. A LABEL/DISPATCH layer over the numeric resolvers (advance_ccd computes the RESPONSE; this names the SITUATION for per-type dispatch + a logged reason). KEPT NEG: a label, not a replacement; bins collapse magnitude.", example="import lecore; m=lecore.UnifiedMind(); print(m.classify_contact(0.02, 2.0, 0.8)['type'])", native=True, module="collide", aliases=("classify a collision type", "what kind of contact is this", "name the contact bounce or rest", "categorize a physics collision", "contact type from overlap and velocity", "is this a bounce or a jam"), semantic="analyze/match", consumes=("scalar",), produces=("selection",))
@@ -1030,7 +1030,7 @@ def register_p04(c):
                           "softbody.step(continuous=True) is the wired door: nodes the sweep does not catch come back "
                           "bit-identical, so it is a strict addition.",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); hit, toi, contact = mind.time_of_impact([[-3,0,0]], [[120,0,0]], 1/60., '(sphere 1.0)')",
-                          native=True, aliases=("ccd", "continuous collision detection", "tunnelling", "tunneling",
+                          native=True, aliases=("ccd", "continuous collision detection", "tunnelling", "tunneling passing bodies",
                                                 "stop a fast bullet going through a thin wall",
                                                 "my object passes through the floor", "swept collision",
                                                 "time of impact", "toi", "when will my object hit the ground",
@@ -1070,8 +1070,8 @@ def register_p04(c):
                                                 "is it worth diagonalizing this system", "contact mode",
                                                 "mode switch", "jump ahead in time", "soft constraint chain",
                                                 "escalation ladder", "choose how many substeps to use",
-                                                "tuning bank", "variant bank", "evaluate many parameter variants in one pass",
-                                                "sweep friction and stiffness settings at once", "parameter sweep",
+                                                "tuning bank", "variant bank substepping substeps", "evaluate many parameter variants in one pass",
+                                                "sweep friction and stiffness settings at once", "parameter sweep substepping substeps",
                                                 "blend forcings", "many variants at once",
                                                 "pick the right solver for this island", "how many substeps",
                                                 "damped oscillator system", "Catto soft step", "propagate ahead"))
@@ -1096,7 +1096,7 @@ def register_p04(c):
                                                 "island decomposition", "wake and sleep", "at rest", "settled",
                                                 "jump a settled system to its final state", "fixed point of a system",
                                                 "sleep threshold", "hysteresis", "awake islands", "skip idle work",
-                                                "steady state", "settle", "quiescent", "energy probe",
+                                                "steady state pile settled", "settle", "quiescent", "energy probe",
                                                 # C1/C2: the two wired clients
                                                 "softbody sleep", "skip sleeping cloth", "solve only moving nodes",
                                                 "coordinator waves", "lock free coordinator", "wave schedule"))
@@ -1143,10 +1143,10 @@ def register_p04(c):
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); lm = mind.load_obj('chair.obj'); glb = mind.load_glb('robot.glb'); mat = mind.load_texture_set('exports/brick'); vol, b = mind.load_volume('smoke.npy')",
                           native=True, aliases=("import", "load obj", "load gltf", "load glb", "mtl", "wavefront",
                                                 "substance painter", "adobe painter", "texture set", "pbr material import",
-                                                "load model", "import mesh", "volumetric", "load volume", "vdb", "voxel",
+                                                "load model", "import mesh", "volumetric", "load volume", "vdb", "voxel files import",
                                                 "density grid", "import material", "3d file", "asset import",
                                                 "animation", "skin", "rigged", "keyframe", "skeleton", "uv", "channels",
-                                                "deform", "skinning", "linear blend skinning", "morph", "blend shape",
+                                                "deform", "skinning", "linear blend skinning", "morph files import", "blend shape",
                                                 "pose a rig", "animate a model"))
     c.register_capability("Cold storage (compress inactive data)", "shrink INACTIVE data to save memory and disk, and "
                           "inflate it back on demand: store = mind.cold_store(keep_warm=8) keeps only the K most-recently-"
@@ -1229,7 +1229,7 @@ def register_p04(c):
                           "illumination), a camera controller, indirect-light gather + irradiance cache "
                           "(globalillum), precomputed radiance transfer (prt), volumetric integration, and lens/DOF + "
                           "post-FX. The analysis-by-synthesis render path", example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.path_trace(scene); mind.camera(); from holographic.rendering.holographic_raymarch import sphere_trace",
-                          native=True, aliases=("render a scene", "path trace", "ray tracing", "global illumination",
+                          native=True, aliases=("render a scene illumination controller", "path trace", "ray tracing", "global illumination",
                                                 "render with global illumination", "render a scene with bounced light",
                                                 "full lighting simulation", "monte carlo render",
                                                 "camera", "depth of field", "lens", "volumetric render", "radiance transfer",
@@ -1253,15 +1253,15 @@ def register_p04(c):
                           "subdivide + smooth (meshsubdiv, Catmull-Clark), deform/warp (deform), rig-skin-pose a "
                           "skeleton (blendpose), UV unwrap (chart), decimate/QEM, booleans, and mesh<->SDF. "
                           "Blender-parity polygon editing", example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.deform(mesh, ...); mind.mesh_to_sdf(mesh); from holographic.mesh_and_geometry.holographic_meshverbs import extrude_face",
-                          native=True, aliases=("edit a mesh", "extrude", "bevel", "inset", "subdivide", "smooth a mesh",
-                                                "decimate", "reduce polygons", "uv unwrap", "unwrap uv", "rig", "skin",
-                                                "pose a skeleton", "skeleton", "deform", "boolean", "remesh", "dcc", "modeling"), consumes=('mesh',), produces=('mesh',))
+                          native=True, aliases=("edit a mesh", "extrude", "bevel", "inset", "subdivide extrude clark", "smooth a mesh",
+                                                "decimate", "reduce polygons", "uv unwrap", "unwrap uv", "rig", "skin extrude clark",
+                                                "pose a skeleton", "skeleton extrude clark", "deform extrude clark", "boolean", "remesh", "dcc", "modeling"), consumes=('mesh',), produces=('mesh',))
     c.register_capability("SDF & procedural geometry", "implicit + procedural geometry: signed distance fields (sdf), "
                           "sphere-trace raymarching with ambient occlusion (raymarch), sculpting, procedural terrain "
                           "(procgen), spatial tiling + octree, and voxelization. Native-first shape building",
                           example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.rendering.holographic_raymarch import sphere_trace; mind.terrain(...); from holographic.mesh_and_geometry.holographic_sdf import ...",
                           native=True, aliases=("sdf", "signed distance field", "raymarch", "sphere trace", "sculpt",
-                                                "procedural terrain", "procedural geometry", "voxelize", "voxel", "octree",
+                                                "procedural terrain", "procedural geometry", "voxelize", "voxel voxelization sculpting", "octree",
                                                 "tile in space", "implicit surface", "marching"))
     c.register_capability("Domain operators & cosine palette (demoscene)", "infinite procedural worlds from a tiny "
                           "kernel (holographic_domain, Quilez/Shadertoy style): domain WARPS that pre-transform "
@@ -1297,7 +1297,7 @@ def register_p04(c):
     c.register_capability("Navigation & planning", "find a way through a space or structure: A*/shortest-path route "
                           "planning (plan), slime-mould flow networks (flow), tree/graph navigation (navigator), and "
                           "maze solving. Pathfinding on the VSA substrate", example="import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); from holographic.scene_and_pipeline.holographic_plan import ...; mind.solve_maze(world); from holographic.misc.holographic_flow import ...",
-                          native=True, aliases=("navigation", "plan a route", "pathfinding", "shortest path", "maze",
+                          native=True, aliases=("navigation", "plan a route", "pathfinding", "shortest path networks navigator", "maze",
                                                 "slime mould", "flow network", "route", "navigate", "wayfinding", "traverse",
                                                 "slime mold maze solver", "pheromone pathfinding", "solve a maze"))
     c.register_capability("Learning & agents", "gradient-free learning on the substrate: an RL agent with a value head "
@@ -1313,7 +1313,7 @@ def register_p04(c):
                           "point-cloud structure (cosmic), and time-series / market analysis", example="from holographic.misc.holographic_transport import wasserstein; from holographic.misc.holographic_graphsignal import laplacian_filter",
                           native=True, aliases=("data analysis", "cluster", "optimal transport", "wasserstein", "graph laplacian",
                                                 "spectral", "dimensionality reduction", "embedding", "topology", "persistent homology",
-                                                "kernel density", "point cloud", "time series", "statistics", "analytics"))
+                                                "kernel density", "point cloud graphsignal nystrom", "time series", "statistics", "analytics"))
     c.register_capability("Symbolic reasoning", "recover structure symbolically: symbolic regression to find a formula "
                           "(symbolic), resonator networks that FACTOR a bound vector into its parts (sbc/resonator), "
                           "is_a taxonomy climbing, and relational reasoning over records. Turning data and vectors back "
@@ -1325,9 +1325,9 @@ def register_p04(c):
                           "faint-signal detection in noise with a calibrated false-discovery rate (signal_structure), "
                           "drifting-narrowband / de-Doppler search (dedoppler), spectral flatness, and bandwidth. The "
                           "radio-SETI-style detection stack", example="from holographic.sampling_and_signal.holographic_spectral import ...; from holographic.sampling_and_signal.holographic_dedoppler import ...",
-                          native=True, aliases=("signal processing", "fft", "spectral", "spectrum", "detect a signal",
+                          native=True, aliases=("signal processing", "fft flatness doppler", "spectral", "spectrum", "detect a signal",
                                                 "faint signal", "narrowband", "doppler", "dedoppler", "drift", "flatness",
-                                                "bandwidth", "frequency", "audio"))
+                                                "bandwidth flatness doppler", "frequency", "audio"))
     c.register_capability("analyze_axes", "which axis of a multi-dimensional dataset is the INDEX (carrier -- the "
                           "boring, regular axis like time or scanline order) and which is the PAYLOAD (content -- "
                           "the axis whose value defines what each item means). Per axis, measures marginal "

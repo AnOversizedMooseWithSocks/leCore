@@ -36,5 +36,6 @@ Pick your seat; read two documents, not fifty.
 ## "I want the history and the proofs"
 - **CHANGELOG_lever7.md** — 80 checkpoint entries, every number with its command.
 - **docs/LEVER7.md** — the arc in one page. **docs/BENCHMARKS.md** — the tables.
+- **docs/TYPED_DECISIONS.md** — typed decisions, tiered routing, outcomes by id, the reflex arc learning from use, `verify_decision`, the swarm contract, the NOOA discipline: syntax with live-generated examples (sweeps 171–176). **docs/research/** — the series, the backlog, and the benchmarks behind it.
 - **docs/RELEASE_CHECKLIST.md** — what's verified, what awaits a real box, and every
   known limitation stated in print.

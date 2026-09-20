@@ -47,6 +47,32 @@ Fastest accurate path:
    them so `mind.stale_facts()` tells you when the code moved underneath it.
        mind.suggest("compress a float series")
 
+   DECIDE, DON'T PROMPT (sweeps 171-176). For a question with a fixed set of answers, ask a TYPED
+   question instead of asking your model to guess: no text, a schema, a ranked answer with a margin,
+   a calibrated p, an honest abstention, and an id you report the outcome against.
+
+       q = {"cat": {"type": "choice", "options": ["billing", "shipping"],
+                    "examples": {"billing": ["card charged twice"], "shipping": ["parcel lost"]}}}
+       mind.systemone_lint(q, states=[state])              # lint the question BEFORE asking it
+       a = mind.systemone_decide(state, q, scorer="nb")    # {"cat": {"value", "ranked", "p", "id", ...}}
+       mind.decision_outcome(a["cat"]["id"], truth)        # the ONLY outcome path: the table, the reflex
+                                                           # and the calibration all learn from it
+       r = mind.route_tiered("smooth a bumpy mesh")        # answer / menu / refuse -- never a bare no
+       mind.verify_decision(state, answer)                 # is the served answer valid for this input?
+       mind.swarm_step(state, tool, done_when=..., evidence=..., verify={"verb": ..., "args": {...}})
+
+   WRITE CODE THROUGH THE SAME LOOP. `mind.plan_change(request)` decides reuse / extend / build with the
+   catalog and the source as evidence (11 of 12 on history) and hands you the build loop with a done_when
+   per step; `mind.edit_verified(path, old, new, selftest_module=...)` is one edit that cannot leave the
+   file broken (a failed check undoes it: 200 of 200 measured); `mind.review(paths)` finds determinism
+   hazards with line numbers, undocumented public defs, duplicates and the tests to run, and returns a
+   merge_ready verdict you report against. docs/TYPED_DECISIONS.md section 8b.
+
+   The syntax reference with live-generated JSON for every door is docs/TYPED_DECISIONS.md; the
+   measurements (with baselines and seed spreads) are docs/research/. Over HTTP every one of these
+   is a POST /invoke with {"name", "args"}; restart the service after editing code or a new verb
+   "does not exist".
+
 ## Docs
 
 - [CAPABILITIES.md](CAPABILITIES.md): the capability menu — read this first
@@ -56,6 +82,9 @@ Fastest accurate path:
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md): the engineering contracts
 - [docs/PLUGINS.md](docs/PLUGINS.md): extending a mind without growing the core — bundled / folder / pip-installed plugins, the contract, what the loader refuses
 - [docs/INSTALLED.md](docs/INSTALLED.md): manifest schema for model cards + what installs into weights (and what cannot)
+- [docs/TYPED_DECISIONS.md](docs/TYPED_DECISIONS.md): typed decisions, the swarm contract, the NOOA discipline -- syntax with live examples
+- [docs/COMPETITIVE_NOOA.md](docs/COMPETITIVE_NOOA.md): what leCore borrowed from NVIDIA's OO Agents, what it honours, what is still open
+- [docs/research/RESEARCH_00_INDEX.md](docs/research/RESEARCH_00_INDEX.md): the research series, backlog, and benchmarks behind the decision surface
 - [docs/NOTES_concepts.md](docs/NOTES_concepts.md): the honest lab notebook (wins AND kept negatives)
 - [REFERENCE.md](REFERENCE.md): full generated module reference
 
@@ -64,7 +93,10 @@ Fastest accurate path:
 - Pure NumPy + Flask + stdlib + hashlib. No torch, no GPU, no learned weights in core.
 - Deterministic: bit-reproducible under any PYTHONHASHSEED; one stated tie rule everywhere.
 - Every claim ships with its measurement; refuted ideas are kept on record as negatives.
-- ~800 modules, one UnifiedMind facade, ~2,400 faculties, 7,100+ tests, audits at 0/0/0.
+- ~817 modules, one UnifiedMind facade (27 parts, none over 2,000 lines), ~2,440 faculties, 887 catalog
+  capabilities, 7,280+ tests, audits at 0/0/0.
+- Typed decisions refuse honestly (calibrated abstention, conformal answer sets, batch FDR), learn from
+  outcomes reported by id, and a reflex answers repeats from experience; every claim in docs/research/.
 - Optional dependencies are plugins (`holographic/plugins/`): they bind at construction, can be left out
   with `plugins=()`, and `mind.plugin_list()` is the honest preflight (available / missing / install).
   Loading is operator-only (`_plugin_load` is private); `plugin_list` / `plugin_manifest` are public.
