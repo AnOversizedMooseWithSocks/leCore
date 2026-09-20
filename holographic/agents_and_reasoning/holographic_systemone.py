@@ -160,6 +160,7 @@ class IsotonicCalibrator:
         self.n = int(len(self.xs))
 
     def predict(self, score):
+        """The calibrated probability for a raw score: piecewise-linear interpolation of the isotonic fit."""
         return float(np.interp(float(score), self.xs, self.ys))
 
 

@@ -16558,6 +16558,24 @@
     },
     {
       "aliases": [
+        "edit a file and verify the edit",
+        "replace text and check it still compiles",
+        "safe edit with undo on failure",
+        "edit with validated termination",
+        "an edit that cannot leave the file broken"
+      ],
+      "consumes": [],
+      "does": "ONE EDIT UNDER VALIDATED TERMINATION (sweep 176, NOOA): file_replace, then the checks -- syntax always, import and the module selftest when asked; ANY failure undoes the edit and refuses with the failing check attached, so a broken file never survives the call; an accepted edit is a swarm step in the ledger. Measured on 200 synthetic edits: 100 of 100 broken edits refused and restored byte-identical, 100 of 100 good edits accepted.",
+      "example": "import lecore, tempfile, os; d=tempfile.mkdtemp(); open(os.path.join(d,'m.py'),'w').write('def f(): return 1'); m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root(d); r=m.edit_verified('m.py', 'return 1', 'return ('); print(r['ok'], open(os.path.join(d,'m.py')).read()=='def f(): return 1')",
+      "method": "edit_verified",
+      "name": "edit_verified",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "what color does this element burn",
         "flame test color"
       ],
@@ -18068,6 +18086,25 @@
     },
     {
       "aliases": [
+        "plan a code change",
+        "should I reuse extend or build",
+        "rule zero as a decision",
+        "where does this feature go",
+        "which module should a new feature go in",
+        "build loop steps with done when"
+      ],
+      "consumes": [],
+      "does": "PLAN A CODE CHANGE -- Rule 0 as a typed decision with the evidence attached (sweep 176): what the catalog says (route_tiered tier and z), what the source says (code_search), the family, then reuse / extend / build -- the measured tier decides where it is decisive, modification intent ('add a parameter to X') turns an answer-tier hit into extend, the typed decision breaks the menu tie and learns from decision_outcome(id, what was done). Returns the build loop as steps with a done_when each. Measured on 12 historical requests: 11 of 12 against today's truth (majority 0.33).",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root('.'); p=m.plan_change('add a naive bayes scorer to the typed decision'); print(p['action'], p['evidence']['catalog_tier'], [s['step'] for s in p['steps']][:3])",
+      "method": "plan_change",
+      "name": "plan_change",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "break a request into steps",
         "plan a sequence of tool calls without a model",
         "cold plan from a request",
@@ -18466,6 +18503,27 @@
       "produces": [],
       "semantic": "analyze/route",
       "theme": "Discover & drive it (for agents)"
+    },
+    {
+      "aliases": [
+        "review a code change before merging",
+        "code review checklist",
+        "check determinism of code hash time random",
+        "is this change merge ready",
+        "does this new function duplicate an existing one",
+        "which tests does my change need",
+        "find undocumented public functions",
+        "git diff review"
+      ],
+      "consumes": [],
+      "does": "REVIEW A CHANGE WITH EVIDENCE (sweep 176): per file -- syntax, import in a subprocess, determinism hazards from the AST with line and reason (hash(), unseeded random, wall clock, unsorted listdir or glob, set iteration: the constitution's rules), undocumented public defs, functions over 120 lines, modules over the 2,000-line part cap, a missing selftest, possible duplicates by code_similar, impure functions by function_purity, and the tests the change needs by affected_tests. merge_ready is a stated rule (no errors), never a score; the review is a record -- report merged or reverted by id.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root('.'); r=m.review('holographic/agents_and_reasoning/holographic_codeflow.py'); print(r['merge_ready'], list(r['files'].values())[0]['counts'])",
+      "method": "review",
+      "name": "review",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -19279,7 +19337,10 @@
         "orchestrate workers with verifiable steps",
         "validated termination",
         "verify a step before accepting it",
-        "NOOA style typed result with evidence and a verification command"
+        "NOOA style typed result with evidence and a verification command",
+        "run the reachability audit",
+        "run catalog gaps and skill lint",
+        "run the wiring audits after a change"
       ],
       "consumes": [],
       "does": "THE SWARM STEP CONTRACT (sweep 176): one shape for every message a worker sends -- state, tool, args, done_when, evidence, worker, outcome -- REFUSED without done_when and evidence, because the orchestrator failure the literature names (misclassification that compounds) starts with steps nobody can verify. Each step is a DecisionRecord in the ledger (outcome by id, compare by cosine) and is published on the mind's MessageBus. swarm_evaluate runs the audit suite (reachability_audit, catalog_gaps, skill_lint) as subprocesses and returns all_ok -- the evaluator role and the hard exit.",
@@ -19369,7 +19430,10 @@
         "classify text into categories from examples",
         "prediction set with coverage guarantee",
         "conformal answer set",
-        "which options could it be with 95 percent coverage"
+        "which options could it be with 95 percent coverage",
+        "drift report on a stream of decisions",
+        "minimum segment length for the drift alarm",
+        "has the input distribution shifted"
       ],
       "consumes": [],
       "does": "TYPED decisions with honest probabilities (holographic_systemone, the native System One door -- what Jev sells as an API): answer typed questions -- choice, score, noul (yes/no) -- about one state in ONE pass. Schema validated up front so an untyped output is impossible; ties ABSTAIN (value None, why named); p appears only after labeled outcomes calibrate it. Every choice carries ranked evidence and its basis. scorer='nb' (sweeps 174-175): transformed naive Bayes over the same examples, measured 0.843 vs 0.716 on AG News k=300 and 0.798 vs 0.753 on Banking77 (77 intents) k=35.",
@@ -19719,7 +19783,7 @@
       "theme": "More capabilities"
     }
   ],
-  "count": 871,
+  "count": 874,
   "schema_version": "1.1",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

@@ -854,7 +854,9 @@ def register_p08_digest(c):
                  "few-shot text classification with examples", "naive bayes text classifier",
                  "calibrated probability for a classifier", "risk coverage curve accuracy on answered",
                  "classify text into categories from examples", "prediction set with coverage guarantee",
-                 "conformal answer set", "which options could it be with 95 percent coverage"),
+                 "conformal answer set", "which options could it be with 95 percent coverage",
+                 "drift report on a stream of decisions", "minimum segment length for the drift alarm",
+                 "has the input distribution shifted"),
         module="holographic_systemone", method="systemone_decide", native=True,
     )
     c.register_capability(
@@ -1043,7 +1045,8 @@ def register_p08_digest(c):
         aliases=("publish a swarm step with done_when and evidence", "swarm step contract", "worker step message",
                  "run the audits as the evaluator", "hard exit for a swarm run", "step record on the bus",
                  "orchestrate workers with verifiable steps", "validated termination", "verify a step before accepting it",
-                 "NOOA style typed result with evidence and a verification command"),
+                 "NOOA style typed result with evidence and a verification command",
+                 "run the reachability audit", "run catalog gaps and skill lint", "run the wiring audits after a change"),
         module="holographic_decisionrecord", method="swarm_step", native=True,
     )
     c.register_capability(
@@ -1107,6 +1110,49 @@ def register_p08_digest(c):
                  "catch an answer that contradicts what we learned", "validate a served result",
                  "check a decision against drift"),
         module="holographic_decisionrecord", method="verify_decision", native=True,
+    )
+    c.register_capability(
+        "plan_change",
+        "PLAN A CODE CHANGE -- Rule 0 as a typed decision with the evidence attached (sweep 176): what the catalog "
+        "says (route_tiered tier and z), what the source says (code_search), the family, then reuse / extend / "
+        "build -- the measured tier decides where it is decisive, modification intent ('add a parameter to X') "
+        "turns an answer-tier hit into extend, the typed decision breaks the menu tie and learns from "
+        "decision_outcome(id, what was done). Returns the build loop as steps with a done_when each. Measured on "
+        "12 historical requests: 11 of 12 against today's truth (majority 0.33).",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root('.'); "
+        "p=m.plan_change('add a naive bayes scorer to the typed decision'); print(p['action'], p['evidence']['catalog_tier'], [s['step'] for s in p['steps']][:3])",
+        aliases=("plan a code change", "should I reuse extend or build", "rule zero as a decision",
+                 "where does this feature go", "which module should a new feature go in", "build loop steps with done when"),
+        module="holographic_codeflow", method="plan_change", native=True,
+    )
+    c.register_capability(
+        "edit_verified",
+        "ONE EDIT UNDER VALIDATED TERMINATION (sweep 176, NOOA): file_replace, then the checks -- syntax always, "
+        "import and the module selftest when asked; ANY failure undoes the edit and refuses with the failing check "
+        "attached, so a broken file never survives the call; an accepted edit is a swarm step in the ledger. "
+        "Measured on 200 synthetic edits: 100 of 100 broken edits refused and restored byte-identical, 100 of 100 "
+        "good edits accepted.",
+        example="import lecore, tempfile, os; d=tempfile.mkdtemp(); open(os.path.join(d,'m.py'),'w').write('def f(): return 1'); "
+        "m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root(d); r=m.edit_verified('m.py', 'return 1', 'return ('); "
+        "print(r['ok'], open(os.path.join(d,'m.py')).read()=='def f(): return 1')",
+        aliases=("edit a file and verify the edit", "replace text and check it still compiles", "safe edit with undo on failure",
+                 "edit with validated termination", "an edit that cannot leave the file broken"),
+        module="holographic_codeflow", method="edit_verified", native=True,
+    )
+    c.register_capability(
+        "review",
+        "REVIEW A CHANGE WITH EVIDENCE (sweep 176): per file -- syntax, import in a subprocess, determinism hazards "
+        "from the AST with line and reason (hash(), unseeded random, wall clock, unsorted listdir or glob, set "
+        "iteration: the constitution's rules), undocumented public defs, functions over 120 lines, modules over the "
+        "2,000-line part cap, a missing selftest, possible duplicates by code_similar, impure functions by "
+        "function_purity, and the tests the change needs by affected_tests. merge_ready is a stated rule (no "
+        "errors), never a score; the review is a record -- report merged or reverted by id.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root('.'); "
+        "r=m.review('holographic/agents_and_reasoning/holographic_codeflow.py'); print(r['merge_ready'], list(r['files'].values())[0]['counts'])",
+        aliases=("review a code change before merging", "code review checklist", "check determinism of code hash time random",
+                 "is this change merge ready", "does this new function duplicate an existing one", "which tests does my change need",
+                 "find undocumented public functions", "git diff review"),
+        module="holographic_codeflow", method="review", native=True,
     )
 
 _PART = "holographic_catalog_p08"

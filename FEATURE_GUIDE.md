@@ -1163,6 +1163,61 @@ their fidelity is the resolution you pass — a thin feature below the cell size
 and raising `res` costs cubically. `mesh_uv_unwrap()` expects disk topology: cut seams first for
 anything else, or use `mesh_pack_uv()`, which does the per-component unwrap for you.
 
+## 12. Typed decisions that learn: decide, route, verify, and let the reflex remember (sweeps 171-176)
+
+The doors below answer typed questions without a model, refuse honestly, learn from reported outcomes, and
+verify that a served answer matches its input. Every number here has a baseline and a seed spread in
+`docs/research/` (start at `RESEARCH_00_INDEX.md`; the benchmark tables are in `BENCHMARK_sweep176.md`).
+
+**Ask a typed question.** `systemone(questions)` fits a schema -- options with a few examples each, or a bounded
+score -- and `systemone_decide(state, questions, scorer="nb")` answers with a ranked list, a margin, and a calibrated
+`p` once labeled rows are given. `systemone_map(states, questions)` does a batch; `systemone_stream(rows, questions)`
+runs prequentially, observing every labeled row so the count table learns as it goes (AG News 0.699 -> 0.764 with
+zero model calls). Pass `conformal_alpha=0.05` and every answer also carries `set`, the options guaranteed to hold
+the truth with probability 0.95 (measured 0.960 on Banking77). Run `systemone_lint(questions, states)` BEFORE asking:
+it flags imbalanced example budgets, too few examples, the scorer the measured regime table recommends, states with
+more than one clause, and contrastive states that belong with the model end -- every failure the two tool
+experiments hit is a finding there. `systemone_batch_fdr(states, questions, question)` bounds the false discoveries
+across a batch (BH over shuffle-null p-values: FDR 0.03 at nominal 0.05). `systemone_absorb(states, questions,
+question)` learns from unlabeled traffic behind two measured guards (refuses above ten options, keeps the table only
+if held-out accuracy did not fall).
+
+**Route without a bare rejection.** `route_tiered(problem)` returns answer / menu / refuse with an `id`: the old
+gate accepted 4.7% of honest paraphrases; tiered routing answers 32% at 0.76, offers a menu holding the right card
+83% of the time, and refuses only the gibberish band (0 of 30 off-catalog probes answered). `catalog_families()`
+maps every card to its `holographic/<family>/` folder (501 of 887 resolve; the rest are reported, never guessed).
+`decision_tree(context, depth=2)` grows a contingency tree from the live catalog, and `decision_memory()` is the
+audit log with an equivalence test (routing fingerprint AUROC 0.874). `plan_from_request("do A and then B")`
+splits a compound request into clauses, routes each, and chains the steps into one plan vector (both steps
+recovered 0.860 vs 0.540 for the whole request).
+
+**Close the loop by id.** Every decision is a `DecisionRecord`; `decision_outcome(id, truth)` is the only outcome
+path -- it forwards typed decisions to the fitted model's `observe`, writes the experience to the lever-7 trace,
+and feeds `calibrate_reflex`. `decision_records()` lists the ledger; `decision_ledger()` is the store;
+`decision_ledger_to_memory()` teaches every reported record into the partition so `ask` recalls it at T0.
+
+**Let the reflex remember.** `route_tiered(problem, reflex=True)` and `decision_tree(context, reflex=True)` answer
+from experience first, gated by the ledger's SEEN check (a reported key within cosine 0.8 -- trace confidence alone
+could not separate a repeat from a wrong fire): a repeated request whose outcome was reported is answered by the
+reflex 99.3% of the time at 0.982; a new paraphrase 20.9% at 0.81. `reflex_learn(id)` is what the outcome path
+calls; `reflex_decide(state)` is the read; `reflex_retile()` rebuilds the trace at the measured capacity cliff (it
+also runs itself on the first read after `boot`). For typed decisions the count table stays the learner -- the
+reflex measured worse there -- so `reflex` is off by default.
+
+**Verify the answer against experience.** `verify_decision(state, answer)` reads the trace forward (state ->
+answer) and backward (answer -> state), checks the displacement profile of correct pairs, the seen gate, and the
+support against the recent stream: a seen state served the recorded truth verifies valid 0.97-0.99, a wrong label
+0.00 (forward and backward AUROC 1.000). It is a verdict, not a confidence -- the calibrated margin ranks.
+`route_tiered(problem, verify=True)` attaches it.
+
+**Swarm steps and code tools.** `swarm_step(state, tool, done_when=..., evidence=..., verify=...)` is refused
+without done_when and evidence, runs `verify` before accepting the step (NOOA's validated termination), and publishes
+the record on the bus; `swarm_evaluate()` runs the audit suite as the exit. `file_symbol(path, "Class.method")`
+locates a definition by name, `file_insert_after_symbol(path, name, text)` adds a method after a class body
+without a text anchor, `file_selftest(module)` runs a module's selftest in a subprocess. `sdf_scene_shader(parts,
+camera)` compiles a whole exact SDF scene to one WebGL2 fragment shader (silhouette IoU 0.985 against the engine's
+own trace).
+
 ## Where to look next
 
 - `docs/WHY_A_HOLOGRAPHIC_VM.md` -- why run one; swarm memory topologies; group learning;

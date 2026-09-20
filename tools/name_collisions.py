@@ -57,6 +57,21 @@ KNOWN_COLLISIONS = {
     # inspect.signature. Neither can delegate to the other: one has no object, the other has no
     # source. Same verb, opposite side of the import boundary, both public on purpose.
     "signature_of": frozenset({"codestructure", "shapeprobe"}),
+    # sweep-176, both bodies read: tree3d.grow_tree grows a BRANCHING SKELETON into attractor points by space
+    # colonization (a 3-D geometry op, returns nodes and parents); decisiontree.grow_tree grows a CONTINGENCY
+    # tree of capability choices from a context (returns a PlanNode with branches). Same verb, one grows
+    # geometry and the other grows decisions; neither can delegate to the other. Both public on purpose.
+    "grow_tree": frozenset({"decisiontree", "tree3d"}),
+    # sweep-176, both bodies read: typed.encode_tree is the KERNEL holographic encoding of an expression
+    # tree (a leaf is a symbol, an internal node binds operator and children); decisiontree.encode_tree
+    # encodes a GROWN PlanNode tree by delegating to encode_plan and returns (vector, shape, vocab) so it
+    # can be read back. The second is a schema-carrying wrapper over plan encoding, not a second kernel.
+    "encode_tree": frozenset({"decisiontree", "typed"}),
+    # sweep-176, both bodies read: codestructure.read_tree reads every TEXT FILE under a directory into
+    # {path: source} (a filesystem walk, binaries skipped); decisiontree.read_tree reads a tree VECTOR back
+    # to a PlanNode (the schema-guided unbind walk, decode_plan). Same verb, one reads a directory tree and
+    # the other reads a hypervector; nothing to unify.
+    "read_tree": frozenset({"codestructure", "decisiontree"}),
     # sweep-97 merge, bodies read: mathcheck.check/evaluate are arithmetic verifiers;
     # proglib.check and navigator.evaluate are program/route scorers -- same verb,
     # different domains, both public on purpose.

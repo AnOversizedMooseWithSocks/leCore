@@ -6279,6 +6279,13 @@ Break a large text document into an ORGANIZED document with a table of contents:
 import lecore; m=lecore.UnifiedMind(dim=256, seed=0); print(m.document_outline('# A' + chr(10) + 'x' + chr(10) + chr(10) + '# B' + chr(10) + 'y')['toc'])
 ```
 
+### edit_verified
+ONE EDIT UNDER VALIDATED TERMINATION (sweep 176, NOOA): file_replace, then the checks -- syntax always, import and the module selftest when asked; ANY failure undoes the edit and refuses with the failing check attached, so a broken file never survives the call; an accepted edit is a swarm step in the ledger. Measured on 200 synthetic edits: 100 of 100 broken edits refused and restored byte-identical, 100 of 100 good edits accepted..
+
+```python
+import lecore, tempfile, os; d=tempfile.mkdtemp(); open(os.path.join(d,'m.py'),'w').write('def f(): return 1'); m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root(d); r=m.edit_verified('m.py', 'return 1', 'return ('); print(r['ok'], open(os.path.join(d,'m.py')).read()=='def f(): return 1')
+```
+
 ### element_flame_color
 The FLAME COLOR an element burns with (emission spectrum -> RGB) -- the flame-test palette the combustion renderer colors its fire from..
 
@@ -6517,6 +6524,13 @@ Seat the expert panel in the swarm realm: each member a named resident with its 
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.panel_seat(); mind.panel_deliberate(q, {'widrow': 'a', 'bau': 'b'})
 ```
 
+### plan_change
+PLAN A CODE CHANGE -- Rule 0 as a typed decision with the evidence attached (sweep 176): what the catalog says (route_tiered tier and z), what the source says (code_search), the family, then reuse / extend / build -- the measured tier decides where it is decisive, modification intent ('add a parameter to X') turns an answer-tier hit into extend, the typed decision breaks the menu tie and learns from decision_outcome(id, what was done). Returns the build loop as steps with a done_when each. Measured on 12 historical requests: 11 of 12 against today's truth (majority 0.33)..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root('.'); p=m.plan_change('add a naive bayes scorer to the typed decision'); print(p['action'], p['evidence']['catalog_tier'], [s['step'] for s in p['steps']][:3])
+```
+
 ### predictive_filter
 a SURPRISE filter (holographic_extras) -- observe(vec) returns (is_novel, surprise); slow drift is absorbed by a moving prediction while an abrupt change fires once. Pass only surprising observations downstream, stay quiet on predictable ones -- an event gate for a stream.
 
@@ -6564,6 +6578,13 @@ Resolve a natural REFERENCE ('that one', 'the red mesh') against recent query re
 
 ```python
 db.resolve_reference(dest_row)  # Database method: anaphora over recent results
+```
+
+### review
+REVIEW A CHANGE WITH EVIDENCE (sweep 176): per file -- syntax, import in a subprocess, determinism hazards from the AST with line and reason (hash(), unseeded random, wall clock, unsorted listdir or glob, set iteration: the constitution's rules), undocumented public defs, functions over 120 lines, modules over the 2,000-line part cap, a missing selftest, possible duplicates by code_similar, impure functions by function_purity, and the tests the change needs by affected_tests. merge_ready is a stated rule (no errors), never a score; the review is a record -- report merged or reverted by id..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.set_file_root('.'); r=m.review('holographic/agents_and_reasoning/holographic_codeflow.py'); print(r['merge_ready'], list(r['files'].values())[0]['counts'])
 ```
 
 ### route_question
@@ -6792,4 +6813,4 @@ from holographic.caching_and_storage.holographic_substrate import write_multicha
 
 ---
 
-*871 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*874 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

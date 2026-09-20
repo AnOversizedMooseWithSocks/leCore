@@ -272,3 +272,34 @@ def test_verify_decision_catches_a_contradiction_and_is_a_verdict_not_a_confiden
     assert ok["checks"]["forward"] > bad["checks"]["forward"] and ok["checks"]["backward"] > bad["checks"]["backward"]
     r2 = m.route_tiered("smooth a bumpy mesh", verify=True)
     assert r2["verify"]["valid"] is True and "why" in r2["verify"]
+
+
+# ---------------- the code workflow: plan, edit under validated termination, review ----------------
+
+def test_codeflow_module_selftest():
+    from holographic.agents_and_reasoning import holographic_codeflow as C
+    assert C._selftest() == {"ok": True, "pinned": 9}
+
+
+def test_edit_verified_never_leaves_a_broken_file(tmp_path):
+    import lecore
+    p = tmp_path / "m.py"; src = "def f():\n    \"\"\"d\"\"\"\n    return 1\n"; p.write_text(src)
+    m = lecore.UnifiedMind(dim=256, seed=0); m.set_file_root(str(tmp_path))
+    bad = m.edit_verified("m.py", "    return 1\n", "    return (\n")
+    assert bad["ok"] is False and "python_check" in bad["why"] and p.read_text() == src
+    good = m.edit_verified("m.py", "    return 1\n", "    return 2\n")
+    assert good["ok"] is True and p.read_text().endswith("return 2\n") and m.decision_ledger().get(good["id"]).via == "swarm"
+
+
+def test_review_finds_the_constitutions_hazards_and_plan_change_reads_the_tier(tmp_path):
+    import lecore
+    p = tmp_path / "bad.py"; p.write_text("import os, time\ndef f(x):\n    return hash(x)\ndef g():\n    \"\"\"d\"\"\"\n    return time.time(), os.listdir('.')\n")
+    m = lecore.UnifiedMind(dim=256, seed=0); m.set_file_root(str(tmp_path))
+    r = m.review("bad.py", duplicates=False, purity=False, tests=False)
+    f = r["files"]["bad.py"]; kinds = {x["kind"] for x in f["findings"]}
+    assert r["merge_ready"] is False and {"determinism:hash", "determinism:wall_clock", "determinism:unsorted_fs", "undocumented"} <= kinds
+    assert all("line" in x for x in f["findings"]) and m.decision_ledger().get(r["id"]).question == "review"
+    m2 = lecore.UnifiedMind(dim=256, seed=0); m2.set_file_root(".")
+    assert m2.plan_change("smooth a bumpy mesh", reflex=False)["action"] == "reuse"
+    assert m2.plan_change("a quantum weather oracle nobody built", reflex=False)["action"] == "build"
+    assert m2.plan_change("add a naive bayes scorer to the typed decision", reflex=False)["action"] == "extend"
