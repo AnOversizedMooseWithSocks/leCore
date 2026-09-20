@@ -270,7 +270,6 @@ def autoboot(partition=None, session=None, llm="auto", memory=True):
         if os.path.isdir(_shipped):
             root = _shipped
     m = UnifiedMind()
-    
     # CREATE AN EXPLICITLY-REQUESTED PARTITION INSTEAD OF SILENTLY DROPPING IT.
     # `partition=root if isdir(root) else None` meant that asking for a NEW
     # directory -- the normal way to start your own memory -- fell through to
