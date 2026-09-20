@@ -25,34 +25,22 @@ import sys
 from holographic_service import Service
 
 _PROTOCOL = "2024-11-05"
+_PROTOCOLS = ("2024-11-05", "2025-03-26", "2025-06-18")      # newest last; negotiated at initialize (M7)
 
 # The anti-hand-roll charter: MCP hosts inject `instructions` into the model's context at
 # connect time -- this is the ONE piece of text the zoo's LLM is guaranteed to read, so it
 # carries Rule-0 translated for LLMs. Kept short on purpose: a wall of text gets skimmed.
-_INSTRUCTIONS = """leCore is a 1,900+ faculty computational engine (vector search, compression,
-3D geometry, image ops, physics simulation, forecasting, statistics, text retrieval, agents,
-program compilation). RULE ZERO, for you: BEFORE implementing any algorithm, data structure,
-math routine, or file format yourself, call lecore_map to see the territory, then lecore_find
-with your task in plain words. It almost always already exists -- tested, deterministic, and
-cheaper than your hand-rolled version (every call returns measured cost). Hand-roll only after
-lecore_find returns nothing relevant. You also HAVE PERSISTENT MEMORY: memory_write stores
-facts/decisions to your external partition; memory_search finds them across sessions --
-check it before saying you don't remember. WRITE AS YOU GO, NOT AT THE END: after any
-measurement, any bug you locate, any decision you settle, any approach you RULE OUT, and any
-answer that cost more than one tool call. One memory_write is far cheaper than rediscovering
-it next session, and a REFUTED approach is worth as much as a working one -- it stops the
-next agent repeating it. Phrase the question the way a stranger would ask it, not the way you
-already know the answer; recall matches wording closely, so one phrasing reaches only whoever
-guesses yours. Before starting a task, memory_search it: the work may already be done. Results are exact JSON; bytes come as
-{'__bytes_b64__': ...}. NEWER DOORS (sweeps 93-109): study(root) digests a whole
-directory server-side into a persistent handle -- your virtually limitless context; study_ask
-answers WITH CITATIONS and refuses off-corpus honestly, so point it at trees instead of
-reading files one by one. wisdom_record/wisdom_ask: lessons that outlive you, with your name
-on them -- inherit before you rediscover, bequeath what cost you real effort. Tool reflexes:
-once the substrate is taught how a tool answers a question shape, plain asks get served from
-the tool directly with no model call -- teach patterns for anything you find yourself doing
-twice. The division of labor in one line: the substrate remembers, retrieves, computes, and
-calls tools; you reason over what it serves."""
+_INSTRUCTIONS = """leCore: 2,400+ tested, deterministic faculties (search, compression, 3-D, images, simulation,
+forecasting, statistics, retrieval, agents) behind one engine. THE NATURAL PATH: lecore_find (tiered --
+answer / menu / refuse; never a guess) -> lecore_describe -> the curated tool or lecore_invoke. A choice among
+options you name is lecore_decide (typed, linted, recorded), not your own reasoning. EVERY find and decide returns
+an id: report lecore_outcome(id, what was actually right) and the engine learns -- the next similar request is
+answered from experience. RULE ZERO: before implementing any algorithm, data structure or file format, lecore_find
+it; hand-roll only when the tier is refuse. MEMORY: memory_search before starting (the work may be done);
+memory_write as you go -- measurements, bugs located, decisions, and approaches you RULED OUT (a refuted approach
+is worth as much as a working one). Phrase questions the way a stranger would. Results are exact JSON (bytes as
+{'__bytes_b64__': ...}); renders arrive as image blocks; long trees go through study / study_ask (citations,
+honest refusal). Prompts /decide, /review, /plan, /route render the four-part shape leCore uses itself."""
 
 # The territory map the model gets in ONE call. CURATED, but un-rottable: the selftest runs
 # every ask_for phrase through the live catalog and FAILS if any stops resolving -- the map
@@ -476,6 +464,60 @@ _TOOLS = [
          "objective": {"type": "string"}, "plan": {"type": "array"},
          "rounds": {"type": "integer"}, "budget_steps": {"type": "integer"}},
          "required": ["objective"]}},
+    {"name": "lecore_decide",
+     "description": "DECIDE, DON'T GUESS: a typed decision over a fixed set of options -- the schema is built, "
+                    "linted (imbalanced examples, a state carrying two observations or a contrastive clause: the "
+                    "findings come back with the answer), scored without a model, and recorded. Returns value "
+                    "(null = honest abstention), ranked, margin, p when calibrated, lint, and an id. Use this "
+                    "instead of reasoning out a choice yourself when the options are known; use lecore_find "
+                    "when the question is WHICH FACULTY. Then report lecore_outcome(id, truth).",
+     "inputSchema": {"type": "object", "properties": {
+         "state": {"type": "string", "description": "the text to decide about -- ONE observation"},
+         "options": {"type": "array", "items": {"type": "string"}},
+         "examples": {"type": "object", "description": "optional: option -> [example texts]; 3+ per option, balanced"},
+         "escalate": {"type": "boolean", "description": "when the engine abstains, ask YOUR model through sampling (if you declared it) under the four-part prompt; the answer is recorded and learned"}},
+         "required": ["state", "options"]},
+     "annotations": {"readOnlyHint": True, "idempotentHint": True}},
+    {"name": "lecore_outcome",
+     "description": "REPORT WHAT ACTUALLY HAPPENED for a decision by its id (from lecore_decide or lecore_find): "
+                    "the count table, the reflex arc and the calibration all learn from it, and the next similar "
+                    "request is answered from experience. Pass the option or capability that was right; pass "
+                    "\"failed\" when nothing worked. One call closes the loop; nothing else does.",
+     "inputSchema": {"type": "object", "properties": {
+         "id": {"type": "string"}, "outcome": {"type": "string"}}, "required": ["id", "outcome"]},
+     "annotations": {"readOnlyHint": False, "idempotentHint": True}},
+    {"name": "lecore_plan",
+     "description": "PLAN A CODE CHANGE before writing it: reuse / extend / build with the catalog tier, the nearest "
+                    "source and the family as evidence (11 of 12 on history), and the build loop as steps with a "
+                    "done_when each. Report lecore_outcome(id, what you did).",
+     "inputSchema": {"type": "object", "properties": {"request": {"type": "string"}}, "required": ["request"]}},
+    {"name": "lecore_edit",
+     "description": "ONE EDIT THAT CANNOT LEAVE THE FILE BROKEN: replace text, then check syntax (and the module "
+                    "selftest when selftest_module is given); any failure undoes the edit and refuses with the "
+                    "check attached (200 of 200 measured). Paths are relative to the file root.",
+     "inputSchema": {"type": "object", "properties": {
+         "path": {"type": "string"}, "old": {"type": "string"}, "new": {"type": "string"},
+         "count": {"type": "integer"}, "selftest_module": {"type": "string"}},
+         "required": ["path", "old", "new"]}},
+    {"name": "lecore_review",
+     "description": "REVIEW A CHANGE WITH EVIDENCE: syntax, import, determinism hazards with line numbers (hash(), "
+                    "unseeded random, wall clock, unsorted listdir), undocumented public defs, oversized functions, "
+                    "duplicates, impure functions, and the tests to run. merge_ready is a rule (no errors), never a score.",
+     "inputSchema": {"type": "object", "properties": {"paths": {"type": "array", "items": {"type": "string"}},
+         "duplicates": {"type": "boolean"}, "purity": {"type": "boolean"}, "tests": {"type": "boolean"}},
+                     "required": ["paths"]}},
+    {"name": "lecore_verify",
+     "description": "IS THIS ANSWER VALID FOR THIS INPUT? Reads the experience trace forward and backward, checks "
+                    "the displacement profile and the seen gate: a seen state served the truth verifies 0.97-0.99, "
+                    "a wrong label 0.00. A verdict, not a confidence; null means no experience to check against.",
+     "inputSchema": {"type": "object", "properties": {"state": {"type": "string"}, "answer": {"type": "string"},
+                                                     "key": {"type": "string", "enum": ["ngram", "fingerprint"]}},
+                     "required": ["state", "answer"]}},
+    {"name": "lecore_analyze",
+     "description": "MEASURE REGIONS OF AN IMAGE you send (base64 PNG): mean brightness and dominant hue per box "
+                    "[x0,y0,x1,y1] in 0..1 -- the verify half of a render loop as a tool.",
+     "inputSchema": {"type": "object", "properties": {"image_b64": {"type": "string"},
+         "regions": {"type": "array", "items": {"type": "object"}}}, "required": ["image_b64", "regions"]}},
     {"name": "lecore_invoke",
      "description": "Run any public leCore faculty. args is a JSON object of keyword "
                     "arguments; results return as JSON (arrays as nested lists, bytes as "
@@ -485,6 +527,202 @@ _TOOLS = [
          "args": {"type": "object"}},
          "required": ["name"]}},
 ]
+
+
+# ---- M1 (sweep 176): ANNOTATIONS AND SIBLING GUIDANCE FOR EVERY TOOL --------------------------------------
+# Blender MCP's reviewers' complaint, measured here too (7/40 with guidance, 0/40 annotated): a host's model
+# cannot tell a read from a write, or which of two similar tools to prefer. Applied as DATA so tools/mcp_lint.py
+# can pin it: every tool gets {readOnlyHint, destructiveHint, idempotentHint, openWorldHint} and one sentence of
+# "use X instead when Y". The lint fails when a tool is missing either.
+_MUTATING = {"corpus_bind", "corpus_delta", "study", "wisdom_record", "scene_create", "scene_adjust", "zoo_teach",
+             "zoo_do", "zoo_assimilate", "zoo_feedback", "zoo_boot", "zoo_agent", "memory_write", "lecore_invoke",
+             "lecore_outcome", "lecore_edit", "lecore_plan"}
+_DESTRUCTIVE = {"lecore_invoke", "lecore_edit", "zoo_do"}          # can change files or state beyond the call
+_OPEN_WORLD = {"zoo_research", "zoo_ask", "zoo_agent", "study", "corpus_bind"}   # may read outside the engine
+_GUIDANCE = {
+    "lecore_map": "Use lecore_find instead when you already know what you want in words.",
+    "lecore_find": "Use lecore_map instead for the territory, lecore_describe for one contract, lecore_decide when the question is WHICH OPTION rather than which faculty.",
+    "lecore_describe": "Use lecore_find instead when you do not yet have a name.",
+    "corpus_bind": "Use study instead for a directory tree; corpus_bind is for a list of text chunks.",
+    "corpus_ask": "Use study_ask instead for a studied tree; corpus_ask needs a corpus handle.",
+    "corpus_delta": "Use corpus_ask instead when you have one corpus; corpus_delta compares two.",
+    "study": "Use corpus_bind instead for raw chunks; study digests a directory server-side.",
+    "study_ask": "Use memory_search instead for facts you stored; study_ask answers from a studied tree with citations.",
+    "wisdom_record": "Use memory_write instead for a plain fact; wisdom_record is a lesson with an author that travels.",
+    "wisdom_ask": "Use memory_search instead for facts; wisdom_ask returns lessons by author or topic.",
+    "series_analyze": "Use math_eval instead for a single expression; series_analyze reads a whole series.",
+    "dataset_decompose": "Use series_analyze instead for one series; dataset_decompose reads a table.",
+    "fact_check": "Use corpus_ask instead when you have a corpus to check against; fact_check uses the engine's own priors.",
+    "scene_create": "Use scene_adjust instead to change an existing scene; scene_export to get a file.",
+    "scene_adjust": "Use scene_create instead when there is no scene yet.",
+    "scene_export": "Use scene_adjust instead to change the scene before exporting.",
+    "image_tool": "Use chart_make instead for data; image_tool edits or analyzes an image you send.",
+    "math_eval": "Use series_analyze instead for series statistics; math_eval is one expression.",
+    "chart_make": "Use image_tool instead to edit an existing image; chart_make draws data.",
+    "void_explore": "Use corpus_ask instead for answers; void_explore maps what a corpus does NOT cover.",
+    "zoo_ask": "Use memory_search instead for your own stored facts; zoo_ask runs the zoo ladder with abstention.",
+    "zoo_panel": "Use zoo_ask instead for one question; zoo_panel convenes several roles.",
+    "zoo_tools": "Use lecore_find instead for engine faculties; zoo_tools lists the zoo's taught tool reflexes.",
+    "zoo_void": "Use void_explore instead for a corpus; zoo_void is the zoo's own gaps.",
+    "zoo_teach": "Use memory_write instead for a fact; zoo_teach makes a question answer at T0 next time.",
+    "zoo_do": "Use lecore_invoke instead for one faculty; zoo_do runs a taught procedure.",
+    "zoo_synthesize": "Use zoo_ask instead for a direct answer; zoo_synthesize combines sources.",
+    "zoo_query": "Use zoo_ask instead for natural language; zoo_query is structured.",
+    "zoo_report": "Use zoo_query instead for data; zoo_report is the ledger of what the ladder saved.",
+    "receipt_verify": "Use it only to re-verify a receipt another party gave you; results already carry receipts.",
+    "memory_write": "Use wisdom_record instead for a lesson with an author; zoo_teach for a question-answer pair.",
+    "memory_search": "Use study_ask instead for a studied tree; memory_search is your own partition.",
+    "zoo_model3d": "Use scene_create instead for a scene you can adjust; zoo_model3d generates one model.",
+    "zoo_research": "Use zoo_ask instead when the answer may be in memory; zoo_research goes out and back.",
+    "zoo_backtest": "Use series_analyze instead for description; zoo_backtest tests a strategy.",
+    "zoo_assimilate": "Use memory_write instead for one fact; zoo_assimilate ingests a body of material.",
+    "zoo_feedback": "Use lecore_outcome instead for a decision by id; zoo_feedback rates a zoo answer.",
+    "zoo_boot": "Use it only once per session; zoo_ask and friends assume it.",
+    "zoo_agent": "Use lecore_plan instead to plan a code change; zoo_agent runs a role on the bus.",
+    "lecore_decide": "Use lecore_find instead when the question is which faculty; lecore_decide picks among options you name.",
+    "lecore_outcome": "Use zoo_feedback instead to rate a zoo answer; lecore_outcome closes a decision by id.",
+    "lecore_invoke": "Use a curated tool instead when one exists; lecore_invoke runs any faculty and can change state.",
+    "lecore_plan": "Use lecore_find instead when you only want a faculty; lecore_plan decides reuse / extend / build with evidence.",
+    "lecore_edit": "Use lecore_review instead to check before editing; lecore_edit changes a file (undone if a check fails).",
+    "lecore_review": "Use lecore_edit instead to change the file; lecore_review only reports.",
+    "lecore_verify": "Use lecore_decide instead to make a decision; lecore_verify checks a served answer against experience.",
+    "lecore_analyze": "Use image_tool instead to edit; lecore_analyze measures regions of an image.",
+}
+
+
+def _annotate_tools(tools):
+    """Apply annotations and the guidance sentence to every tool entry, in place; idempotent."""
+    for t in tools:
+        n = t["name"]
+        t.setdefault("annotations", {})
+        t["annotations"].update({"readOnlyHint": n not in _MUTATING, "destructiveHint": n in _DESTRUCTIVE,
+                                 "idempotentHint": n not in _DESTRUCTIVE, "openWorldHint": n in _OPEN_WORLD})
+        g = _GUIDANCE.get(n)
+        if g and g not in t["description"]:
+            t["description"] = t["description"].rstrip() + " " + g
+    return tools
+
+
+# ---- M2 (sweep 176): TOOL PROFILES -- Blender MCP's minimal / standard / full, by LECORE_MCP_PROFILE ---------
+_PROFILE_MINIMAL = ["lecore_map", "lecore_find", "lecore_describe", "lecore_decide", "lecore_outcome",
+                    "memory_write", "memory_search", "lecore_invoke"]
+_PROFILE_STANDARD = _PROFILE_MINIMAL + ["study", "study_ask", "corpus_bind", "corpus_ask", "corpus_delta",
+                                        "wisdom_record", "wisdom_ask", "series_analyze", "dataset_decompose",
+                                        "fact_check", "scene_create", "scene_adjust", "scene_export", "image_tool",
+                                        "math_eval", "chart_make", "receipt_verify",
+                                        "lecore_plan", "lecore_edit", "lecore_review", "lecore_verify", "lecore_analyze"]
+
+
+def _profile_tools(profile=None):
+    """The tools/list for a profile: minimal (8: the natural path + memory + the escape hatch), standard
+    (+ study / corpus / wisdom / analysis / scene / image / the code and verify doors), full (+ the zoo).
+    Measured: full is 21 KB of schema on every session; minimal is under 5 KB."""
+    import os as _os
+    profile = (profile or _os.environ.get("LECORE_MCP_PROFILE", "standard")).strip().lower()
+    if profile == "full":
+        return _TOOLS
+    keep = _PROFILE_MINIMAL if profile == "minimal" else _PROFILE_STANDARD
+    return [t for t in _TOOLS if t["name"] in keep]
+
+
+# ---- M3 (sweep 176): PROMPTS -- "help agents make better prompts" as a protocol feature ------------------------
+# prompts/get renders the FOUR-PART shape (goal / return format / constraints / verification) from the engine's
+# own generators: the typed-decision escalation prompt (SystemOne.escalation_prompt), the code review's
+# findings, and the build loop with a done_when per step. A host lists them as slash commands.
+_PROMPTS = {
+    "decide": ("The four-part prompt for a typed decision over options -- what leCore hands its own model end",
+               [("state", True), ("options", True), ("question", False)]),
+    "review": ("A code-review prompt built from lecore_review's findings for the given paths",
+               [("paths", True)]),
+    "plan": ("The build loop for a code change as steps with a done_when each, from lecore_plan",
+             [("request", True)]),
+    "route": ("The menu prompt for an ambiguous request: exactly one of the offered capabilities, or null",
+              [("task", True)]),
+}
+
+
+# ---- M8 (sweep 176): THE STUDIO MCP -- leStudio3d and leStudio controllable the way Blender's add-on is -------
+# Blender MCP's whole value is an add-on socket inside the app. leStudio3d and leStudio already expose JSON
+# HTTP APIs (their agent contract) and mount the engine at /engine/; these tools are a thin bridge over them,
+# REGISTERED ONLY WHEN THE STUDIO IS REACHABLE at startup (LESTUDIO3D_URL, default http://127.0.0.1:5000;
+# LESTUDIO_URL, default http://127.0.0.1:5050) -- the same gating Blender uses for PolyHaven / Hyper3D.
+# No arbitrary code: studio3d_ops is a JSON list of ops, each verified by /api/analyze when a check is given.
+_STUDIO3D_TOOLS = [
+    {"name": "studio3d_scene", "description": "The 3-D studio's scene: objects with names, ids, counts and materials. Use studio3d_render instead to SEE it.",
+     "inputSchema": {"type": "object", "properties": {}}, "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "studio3d_new", "description": "Create an object: kind 'extrude' (preset rect|L|T|U|circle|ngon, w, h, height), 'compose' (an SDF DSL text such as 'sphere radius .3 intersect rounded box size .1 .3 .3'), or 'primitive' (icosphere|cube|plane). Returns the new object's id. Use studio3d_op instead to move or combine it.",
+     "inputSchema": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["extrude", "compose", "primitive"]}, "name": {"type": "string"}, "spec": {"type": "object"}}, "required": ["kind", "spec"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False}},
+    {"name": "studio3d_op", "description": "One op on an object: place {position}, translate {delta}, rotate {axis, degrees}, scale {factor}, rename {name}, boolean {other, kind union|subtract|intersect}, delete_object. Use studio3d_ops instead for a sequence with checks.",
+     "inputSchema": {"type": "object", "properties": {"op": {"type": "string"}, "object": {"type": "string"}, "args": {"type": "object"}}, "required": ["op", "object"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}},
+    {"name": "studio3d_assign", "description": "Assign a library material (141 names: plastic_black, canvas, steel_brushed, ...) to an object. Use lecore_decide instead to CHOOSE the material from a description (8 of 8 measured).",
+     "inputSchema": {"type": "object", "properties": {"object": {"type": "string"}, "material": {"type": "string"}}, "required": ["object", "material"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "studio3d_render", "description": "SEE the scene: the mesh rasteriser (0.4-0.7 s a frame, the iteration loop) as an image block; eye and target as 'x,y,z'. Use studio3d_export instead for a file; the app's photo route bakes meshes to a grid (244 s, thin parts lost) -- render analytic scenes exactly through the engine instead.",
+     "inputSchema": {"type": "object", "properties": {"eye": {"type": "string"}, "target": {"type": "string"}, "w": {"type": "integer"}, "h": {"type": "integer"}, "fov": {"type": "number"}}},
+     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "studio3d_analyze", "description": "Measure regions of the current render (brightness, dominant hue) -- the verify half of the loop. Use studio3d_render instead to look; this returns numbers a done_when can name.",
+     "inputSchema": {"type": "object", "properties": {"regions": {"type": "array", "items": {"type": "object"}}, "eye": {"type": "string"}, "target": {"type": "string"}}, "required": ["regions"]},
+     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "studio3d_export", "description": "Export: 'glb' for one object (as bytes), 'lews' for the whole shared workspace, 'scene' for the JSON document. Use studio3d_render instead to see it.",
+     "inputSchema": {"type": "object", "properties": {"what": {"type": "string", "enum": ["glb", "lews", "scene"]}, "object": {"type": "string"}}, "required": ["what"]},
+     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "studio3d_ops", "description": "A SEQUENCE of studio3d ops under validated termination: each item is {tool: studio3d_new|studio3d_op|studio3d_assign, args, check?} where check = {regions, min_brightness} runs studio3d_analyze after the op and STOPS the sequence when it fails -- every accepted item is a swarm step. Use studio3d_op instead for one op with no check.",
+     "inputSchema": {"type": "object", "properties": {"ops": {"type": "array", "items": {"type": "object"}}}, "required": ["ops"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False}},
+]
+_STUDIO2D_TOOLS = [
+    {"name": "studio2d_paint", "description": "Paint strokes on the 2-D studio's canvas: a list of {points [[x,y],...] (8+ per segment), color [r,g,b], radius, opacity, layer?}. Use studio2d_composite instead to see the result.",
+     "inputSchema": {"type": "object", "properties": {"strokes": {"type": "array", "items": {"type": "object"}}}, "required": ["strokes"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": False}},
+    {"name": "studio2d_analyze", "description": "Measure regions of the 2-D composite (brightness, dominant hue) in 0..1 boxes. Use studio2d_composite instead to look.",
+     "inputSchema": {"type": "object", "properties": {"regions": {"type": "array", "items": {"type": "object"}}}, "required": ["regions"]},
+     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+    {"name": "studio2d_composite", "description": "The 2-D studio's composite as an image block. Use studio2d_analyze instead for numbers.",
+     "inputSchema": {"type": "object", "properties": {}}, "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}},
+]
+
+
+def _studio_reachable(url, path):
+    """One probe at startup. MEASURED: leStudio3d's /api/engine_status takes ~6 s cold (it introspects
+    2,400 faculties), so the probe waits up to 10 s; a studio that is down fails fast on the socket."""
+    import urllib.request as _u
+    try:
+        _u.urlopen(url.rstrip("/") + path, timeout=10).read(200)
+        return True
+    except Exception:
+        return False
+
+
+# ---- M16 (sweep 176): EXTERNAL ASSET DOORS, gated the way Blender gates PolyHaven --------------------------
+# Registered only when the asset API answers at startup. The engine's own 141-name material library needs no
+# network; these fetch an HDRI or a texture set from Poly Haven (CC0) into the studio's material store. In a
+# sandbox whose egress does not allow api.polyhaven.com the tools are simply absent -- never a broken tool.
+_ASSET_TOOLS = [
+    {"name": "asset_search", "description": "Search Poly Haven (CC0) HDRIs / textures / models by category words. Use studio3d_assign instead for the built-in 141-name material library, which needs no network.",
+     "inputSchema": {"type": "object", "properties": {"asset_type": {"type": "string", "enum": ["hdris", "textures", "models"]}, "query": {"type": "string"}}, "required": ["asset_type"]},
+     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True}},
+    {"name": "asset_fetch", "description": "Download one Poly Haven asset (by id, resolution 1k|2k|4k) into the workspace assets folder and return the local path. Use asset_search instead to find the id.",
+     "inputSchema": {"type": "object", "properties": {"asset_id": {"type": "string"}, "resolution": {"type": "string"}, "format": {"type": "string"}}, "required": ["asset_id"]},
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True}},
+]
+_POLYHAVEN = "https://api.polyhaven.com"
+
+
+_CODE_HASH = None
+
+
+def _server_code_hash():
+    """sha256 of this file's source (memoised): the memo cache's version salt. hashlib, never hash()."""
+    global _CODE_HASH
+    if _CODE_HASH is None:
+        try:
+            with open(__file__, "rb") as fh:
+                _CODE_HASH = hashlib.sha256(fh.read()).hexdigest()[:16]
+        except OSError:
+            _CODE_HASH = _PROTOCOL
+    return _CODE_HASH
 
 
 def _slot_observations(chunks, ns=3):
@@ -520,7 +758,9 @@ def _slot_observations(chunks, ns=3):
 # meta reports cache:'hit'|'miss' and compute_ms stays HONEST (near-zero on hits, payload
 # billed the same -- the wire still carries the bytes). LECORE_MCP_MEMO=0 kills it.
 _MEMO_PURE_TOOLS = ("series_analyze", "dataset_decompose", "math_eval", "chart_make",
-                    "lecore_find", "lecore_describe")
+                    "lecore_describe")
+# lecore_find is NOT in the memo (sweep 176): it LEARNS -- a reported outcome changes the next answer for the
+# same input (via='reflex'); a content-addressed cache would freeze it at the first reply (found by mcp_lint).
 # lecore_map LEFT OUT (sweep 166): it now reports which plugins THIS mind carries and whether
 # each dependency is installed, so it is a function of the served mind, not of its arguments.
 # Memoised by (tool, args) it kept answering with the first mind's plugin list for every
@@ -1529,9 +1769,25 @@ class MCPServer:
 
     # -- the three tools, each a thin delegation --
     def _find(self, query):
-        hits = self.service.mind.find_capability(query)[:8]
-        return [{"name": h.name, "does": (h.does or "")[:200],
-                 "method": getattr(h, "method", None)} for h in hits]
+        """TIERED (sweep 176): the hits ride with the router's verdict. Before this, the MCP front door ran the
+        un-tiered search and "purple monkey dishwasher" came back as a confident-looking hit; now `tier` is
+        answer / menu / refuse (0 of 30 off-catalog probes answered), `z` is the null-referenced score, and
+        `id` is the decision record -- lecore_outcome(id, name) reports what was actually used and the next
+        lecore_find for a request like it returns that first (via='reflex')."""
+        mind = self.service.mind
+        hits = mind.find_capability(query)[:8]
+        out = {"hits": [{"name": h.name, "does": (h.does or "")[:200],
+                         "method": getattr(h, "method", None)} for h in hits]}
+        try:
+            r = mind.route_tiered(query, k=5, reflex=True)
+            out.update({"tier": r["tier"], "z": r.get("z"), "id": r.get("id"), "via": r.get("via", "catalog"),
+                        "answer": r.get("answer"), "why": r.get("reason")})
+            if r["tier"] == "refuse":
+                out["hits"] = []
+                out["why"] = "no capability matches this request (%s); the hits were withheld rather than guessed" % r.get("reason")
+        except Exception as e:                      # the verdict is additive; a search still returns its hits
+            out["tier_error"] = str(e)[:120]
+        return out
 
     def _describe(self, name):
         hits = self.service.mind.find_capability(name)[:1]
@@ -1544,32 +1800,380 @@ class MCPServer:
     def _invoke(self, name, args):
         return self.service.dispatch("POST", "/invoke", {"name": name, "args": args or {}})
 
+    def _analyze(self, image_b64, regions):
+        """M10: region measurements on a PNG the host sends -- mean brightness and dominant hue per box in
+        normalised coordinates. stdlib + numpy (PIL only if present); the numbers a render loop verifies with."""
+        import base64 as _b64, io as _io
+        import numpy as _np
+        raw = _b64.b64decode(image_b64.split(",")[-1])
+        try:
+            from PIL import Image as _Im
+            arr = _np.asarray(_Im.open(_io.BytesIO(raw)).convert("RGB"), dtype=float) / 255.0
+        except ImportError:
+            return {"error": "PIL is not installed; send raw pixels through image_tool instead"}
+        H, W = arr.shape[:2]
+        out = []
+        for r in regions:
+            x0, y0, x1, y1 = r.get("box", [0, 0, 1, 1])
+            sub = arr[int(y0 * H):max(int(y1 * H), int(y0 * H) + 1), int(x0 * W):max(int(x1 * W), int(x0 * W) + 1)]
+            rgb = sub.reshape(-1, 3)
+            mx, mn = rgb.max(1), rgb.min(1)
+            hue = _np.zeros(len(rgb))
+            d = mx - mn
+            sat = d > 0.08
+            rr, gg, bb = rgb[:, 0], rgb[:, 1], rgb[:, 2]
+            hue = _np.where(mx == rr, (gg - bb) / (d + 1e-12), _np.where(mx == gg, 2 + (bb - rr) / (d + 1e-12), 4 + (rr - gg) / (d + 1e-12)))
+            hue = (hue * 60.0) % 360.0
+            dom = float(_np.median(hue[sat])) if sat.any() else None
+            out.append({"name": r.get("name"), "brightness": float(rgb.mean()), "dominant_hue": dom, "saturated_fraction": float(sat.mean())})
+        return {"regions": out, "size": [W, H]}
+
+    # ---- M3 / M4 (sweep 176): prompts and resources ---------------------------------------------------------
+    def _prompt_text(self, name, args):
+        mind = self.service.mind
+        if name == "decide":
+            from holographic.agents_and_reasoning.holographic_systemone import SystemOne, hashed_ngram_encode
+            opts = args["options"] if isinstance(args.get("options"), list) else [o.strip() for o in str(args.get("options", "")).split(",") if o.strip()]
+            q = str(args.get("question") or "answer")
+            so = SystemOne(hashed_ngram_encode(dim=512), scorer="prototype", margin=0.0)
+            so.fit({q: {"type": "choice", "options": opts, "examples": {o: [o.replace("_", " ")] for o in opts}}})
+            return so.escalation_prompt(q, str(args["state"]))
+        if name == "review":
+            paths = args["paths"] if isinstance(args.get("paths"), list) else [s.strip() for s in str(args.get("paths", "")).split(",") if s.strip()]
+            r = mind.review(paths)
+            lines = ["GOAL: review the change in %s and decide merge / revert." % ", ".join(paths),
+                     "RETURN FORMAT: exactly one of [\"merged\", \"reverted\"] as a JSON string, then one line per finding you disagree with.",
+                     "CONSTRAINTS: the findings below are measured (lines and reasons); do not invent others; merge_ready=%s is a rule, not a score." % r["merge_ready"],
+                     "FINDINGS:"]
+            for pth, f in r["files"].items():
+                for x in f["findings"]:
+                    lines.append("  %s %s:%s %s" % (x["level"], pth, x.get("line", 0), x["what"]))
+            lines.append("VERIFICATION: report lecore_outcome(%r, <your verdict>)." % r["id"])
+            return "\n".join(lines)
+        if name == "plan":
+            pl = mind.plan_change(str(args["request"]))
+            lines = ["GOAL: %s" % args["request"], "DECISION: %s (evidence: %s)" % (pl["action"], json.dumps(pl["evidence"], default=str)),
+                     "RETURN FORMAT: for each step below, the artefact and the number that shows its done_when."]
+            for s in pl["steps"]:
+                lines.append("  step %s: %s -- done when: %s" % (s["step"], s["do"], s["done_when"]))
+            lines.append("VERIFICATION: lecore_review on the changed paths, then lecore_outcome(%r, <reuse|extend|build>)." % pl["id"])
+            return "\n".join(lines)
+        if name == "route":
+            r = mind.route(str(args["task"]))
+            if r["decision"] == "choose":
+                return r["prompt"]
+            return "GOAL: %s\nDECISION: %s (%s)\nRETURN FORMAT: null -- there is nothing to choose." % (args["task"], r["decision"], r.get("why") or r.get("skill", {}).get("name"))
+        raise KeyError("no prompt %r" % name)
+
+    def _resources_list(self):
+        """M4: what a host can READ without calling a tool -- the map, the capability menu, the decision ledger,
+        the taught rows of this partition, and any scene / lews handle the session made."""
+        res = [{"uri": "lecore://map", "name": "family map", "mimeType": "application/json", "description": "the territory in one read (the lecore_map result)"},
+               {"uri": "lecore://capabilities", "name": "CAPABILITIES.md", "mimeType": "text/markdown", "description": "the generated capability menu with examples and aliases"},
+               {"uri": "lecore://decisions/recent", "name": "decision ledger", "mimeType": "application/json", "description": "the last decisions with ids, outcomes and stats"},
+               {"uri": "lecore://memory/taught", "name": "taught rows", "mimeType": "application/json", "description": "the questions this partition answers at T0"}]
+        for h in sorted(getattr(self, "_scenes", {}) or {}):
+            res.append({"uri": "lecore://scene/%s" % h, "name": "scene %s" % h, "mimeType": "application/json", "description": "the scene document behind this handle"})
+        return res
+
+    def _resource_read(self, uri):
+        mind = self.service.mind
+        if uri == "lecore://map":
+            return {"uri": uri, "mimeType": "application/json", "text": json.dumps(_FAMILY_MAP, indent=1)}
+        if uri == "lecore://capabilities":
+            import os as _os
+            path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "CAPABILITIES.md")
+            with open(path, encoding="utf-8") as fh:
+                return {"uri": uri, "mimeType": "text/markdown", "text": fh.read()}
+        if uri == "lecore://decisions/recent":
+            return {"uri": uri, "mimeType": "application/json", "text": json.dumps(mind.decision_records(k=50), default=str)}
+        if uri == "lecore://memory/taught":
+            rows = getattr(mind.zoo["ladder"], "taught_log", []) if hasattr(mind, "zoo") else []
+            return {"uri": uri, "mimeType": "application/json", "text": json.dumps([[str(r[0]), str(r[1])[:200]] for r in rows][-200:], default=str)}
+        if uri.startswith("lecore://scene/"):
+            h = uri[len("lecore://scene/"):]
+            sc = (getattr(self, "_scenes", {}) or {}).get(h)
+            if sc is None:
+                raise KeyError(uri)
+            return {"uri": uri, "mimeType": "application/json", "text": json.dumps(sc, default=str)[:200000]}
+        raise KeyError(uri)
+
+    # ---- M8: the studio bridge -----------------------------------------------------------------------------
+    def _studio_urls(self):
+        import os as _os
+        if not hasattr(self, "_studio"):
+            u3 = _os.environ.get("LESTUDIO3D_URL", "http://127.0.0.1:5000")
+            u2 = _os.environ.get("LESTUDIO_URL", "http://127.0.0.1:5050")
+            self._studio = {"3d": u3 if _studio_reachable(u3, "/api/engine_status") else None,
+                            "2d": u2 if _studio_reachable(u2, "/api/health") else None}
+        return self._studio
+
+    def _studio_tools(self):
+        st = self._studio_urls()
+        if not hasattr(self, "_assets_ok"):
+            self._assets_ok = _studio_reachable(_POLYHAVEN, "/types")          # M16: gated on reachability
+        return (_STUDIO3D_TOOLS if st["3d"] else []) + (_STUDIO2D_TOOLS if st["2d"] else []) + (_ASSET_TOOLS if self._assets_ok else [])
+
+    def _assets(self, tool, a):
+        import urllib.request as _u, os as _os
+        if tool == "asset_search":
+            url = "%s/assets?t=%s" % (_POLYHAVEN, a["asset_type"])
+            data = json.loads(_u.urlopen(url, timeout=30).read())
+            q = (a.get("query") or "").lower().split()
+            hits = [{"id": k, "name": v.get("name"), "categories": v.get("categories")} for k, v in data.items()
+                    if not q or all(w in (k + " " + str(v.get("name", "")) + " " + " ".join(v.get("categories", []))).lower() for w in q)]
+            return {"count": len(hits), "hits": hits[:40]}
+        if tool == "asset_fetch":
+            files = json.loads(_u.urlopen("%s/files/%s" % (_POLYHAVEN, a["asset_id"]), timeout=30).read())
+            res = a.get("resolution", "1k"); fmt = a.get("format")
+            picked = None
+            for kind in ("hdri", "Diffuse", "blend"):
+                node = files.get(kind, {})
+                r = node.get(res) or (list(node.values())[0] if node else {})
+                for f, spec in (r.items() if isinstance(r, dict) else []):
+                    if (fmt is None or f == fmt) and isinstance(spec, dict) and "url" in spec:
+                        picked = (kind, f, spec["url"]); break
+                if picked: break
+            if not picked:
+                return {"error": "no downloadable file for %s at %s" % (a["asset_id"], res)}
+            root = _os.path.join(self._memory_root or ".", "assets"); _os.makedirs(root, exist_ok=True)
+            path = _os.path.join(root, "%s_%s.%s" % (a["asset_id"], res, picked[1]))
+            with open(path, "wb") as fh:
+                fh.write(_u.urlopen(picked[2], timeout=300).read())
+            return {"path": path, "kind": picked[0], "format": picked[1], "bytes": _os.path.getsize(path)}
+        raise KeyError(tool)
+
+    def _studio_call(self, which, method, path, body=None, raw=False):
+        import urllib.request as _u
+        base = self._studio_urls()[which]
+        if not base:
+            raise RuntimeError("the %s studio is not reachable (set LESTUDIO%s_URL and start it)" % (which, "3D" if which == "3d" else ""))
+        hdr = {"Content-Type": "application/json", "X-Client": "lecore-mcp", "X-User": "mcp-agent"}
+        req = _u.Request(base.rstrip("/") + path, data=(json.dumps(body).encode() if body is not None else None), headers=hdr, method=method)
+        data = _u.urlopen(req, timeout=600).read()
+        return data if raw else json.loads(data)
+
+    def _studio3d_newest_id(self):
+        sc = self._studio_call("3d", "GET", "/api/scene?view=summary")
+        return sc["objects"][-1]["id"]
+
+    def _studio3d(self, tool, a):
+        import base64 as _b64
+        if tool == "studio3d_scene":
+            return self._studio_call("3d", "GET", "/api/scene?view=summary")
+        if tool == "studio3d_new":
+            kind, spec = a["kind"], dict(a.get("spec") or {})
+            if kind == "extrude":
+                self._studio_call("3d", "POST", "/api/extrude_profile", spec)
+            elif kind == "compose":
+                self._studio_call("3d", "POST", "/api/compose", {"text": spec.get("text", "")})
+            else:
+                self._studio_call("3d", "POST", "/api/new", {"kind": spec.get("kind", "cube"), **{k: v for k, v in spec.items() if k != "kind"}})
+            oid = self._studio3d_newest_id()
+            if a.get("name"):
+                self._studio_call("3d", "POST", "/api/op", {"op": "rename", "object": oid, "name": a["name"]})
+            return {"id": oid, "name": a.get("name")}
+        if tool == "studio3d_op":
+            return self._studio_call("3d", "POST", "/api/op", {"op": a["op"], "object": a["object"], **(a.get("args") or {})})
+        if tool == "studio3d_assign":
+            return self._studio_call("3d", "POST", "/api/assign", {"material": a["material"], "object": a["object"], "all": True})
+        if tool == "studio3d_render":
+            q = "w=%d&h=%d&fov=%s" % (int(a.get("w", 640)), int(a.get("h", 400)), a.get("fov", 35))
+            if a.get("eye"):
+                q += "&eye=%s&target=%s" % (a["eye"], a.get("target", "0,0,0"))
+            png = self._studio_call("3d", "GET", "/api/render_engine?" + q, raw=True)
+            _PENDING_MEDIA.append({"type": "image", "mimeType": "image/png", "data": _b64.b64encode(png).decode("ascii")})
+            return {"_media": "image/png", "bytes": len(png), "note": "the frame is shipped as an MCP image block"}
+        if tool == "studio3d_analyze":
+            q = "w=640&h=400" + ("&eye=%s&target=%s" % (a["eye"], a.get("target", "0,0,0")) if a.get("eye") else "")
+            png = self._studio_call("3d", "GET", "/api/render_engine?" + q, raw=True)
+            return self._analyze(_b64.b64encode(png).decode("ascii"), a["regions"])
+        if tool == "studio3d_export":
+            w = a["what"]
+            if w == "scene":
+                return self._studio_call("3d", "GET", "/api/scene/save")
+            if w == "lews":
+                return {"__bytes_b64__": _b64.b64encode(self._studio_call("3d", "GET", "/api/workspace/export", raw=True)).decode("ascii"), "kind": "lews"}
+            return {"__bytes_b64__": _b64.b64encode(self._studio_call("3d", "GET", "/api/export_glb?object=%s" % a["object"], raw=True)).decode("ascii"), "kind": "glb"}
+        if tool == "studio3d_ops":
+            done = []
+            for i, item in enumerate(a["ops"]):
+                t, args = item.get("tool"), item.get("args") or {}
+                if t not in ("studio3d_new", "studio3d_op", "studio3d_assign"):
+                    return {"ok": False, "done": done, "why": "op %d: %r is not an allowed op" % (i, t)}
+                r = self._studio3d(t, args)
+                ev = {"result": r}
+                chk = item.get("check")
+                if chk:
+                    an = self._studio3d("studio3d_analyze", {"regions": chk.get("regions", [])})
+                    ev["analyze"] = an
+                    lo = float(chk.get("min_brightness", 0.0))
+                    if any((reg.get("brightness") or 0.0) < lo for reg in an.get("regions", [])):
+                        return {"ok": False, "done": done, "why": "op %d failed its check: a region is darker than %.2f" % (i, lo), "evidence": ev}
+                try:
+                    st = self.service.mind.swarm_step("studio3d op %d: %s" % (i, t), t, args, done_when=("check passed" if chk else "op returned"), evidence=ev, worker="mcp-agent", topic="studio")
+                    ev["step_id"] = st["id"]
+                except Exception:
+                    pass
+                done.append({"i": i, "tool": t, "evidence": ev})
+            return {"ok": True, "done": done}
+        raise KeyError(tool)
+
+    def _studio2d(self, tool, a):
+        import base64 as _b64
+        if tool == "studio2d_paint":
+            return self._studio_call("2d", "POST", "/api/paint_batch", {"strokes": a["strokes"]})
+        if tool == "studio2d_analyze":
+            return self._studio_call("2d", "POST", "/api/analyze", {"regions": a["regions"]})
+        if tool == "studio2d_composite":
+            png = self._studio_call("2d", "GET", "/api/composite.png", raw=True)
+            _PENDING_MEDIA.append({"type": "image", "mimeType": "image/png", "data": _b64.b64encode(png).decode("ascii")})
+            return {"_media": "image/png", "bytes": len(png)}
+        raise KeyError(tool)
+
+    # ---- M12 (sweep 176): SAMPLING -- the model end from inside the server ------------------------------------
+    def _client_can_sample(self):
+        return bool((getattr(self, "_client_caps", None) or {}).get("sampling") is not None)
+
+    def _sample(self, prompt, max_tokens=200):
+        """Ask the HOST's model one question through sampling/createMessage and return its text. Only possible
+        when the client declared the sampling capability at initialize and the transport can carry a server
+        request: stdio (written to stdout; the reply is read from stdin, other messages queued) or an in-process
+        `sampler` callable set by a test or an embedder. Raises RuntimeError otherwise -- never guesses."""
+        req = {"jsonrpc": "2.0", "id": "s%d" % (getattr(self, "_sample_n", 0) + 1), "method": "sampling/createMessage",
+               "params": {"messages": [{"role": "user", "content": {"type": "text", "text": prompt}}],
+                          "maxTokens": int(max_tokens), "systemPrompt": "Answer exactly in the RETURN FORMAT; null is a correct answer."}}
+        self._sample_n = getattr(self, "_sample_n", 0) + 1
+        if getattr(self, "_sampler", None) is not None:                 # in-process host (tests, embedders)
+            resp = self._sampler(req)
+        elif getattr(self, "_stdio_live", False):
+            sys.stdout.write(json.dumps(req) + "\n")
+            sys.stdout.flush()
+            resp = None
+            for line in sys.stdin:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                if msg.get("id") == req["id"] and ("result" in msg or "error" in msg):
+                    resp = msg
+                    break
+                self._queued.append(msg)                                # a request that arrived meanwhile
+        else:
+            raise RuntimeError("sampling needs a client that declared it and a transport that carries server requests")
+        if resp is None or "error" in resp:
+            raise RuntimeError("the host declined to sample: %s" % (resp or {}).get("error"))
+        c = (resp.get("result") or {}).get("content") or {}
+        return c.get("text") if isinstance(c, dict) else str(c)
+
+    def _decide_with_model_end(self, state, options, examples=None):
+        """lecore_decide with escalate=true: the substrate decides; if it abstains and the host can sample, the
+        four-part prompt goes to the host's model, the reply is validated against the options, recorded via
+        'model_end', and -- once its outcome is reported -- the reflex answers the next like request without
+        the model (leOS's self-extending instruction, measured: one call, then none)."""
+        mind = self.service.mind
+        a = mind.typed(state, options, examples=examples, reflex=True)
+        a.setdefault("via", "typed")
+        weak = a.get("value") is None or (a.get("margin_gap") is not None and float(a["margin_gap"]) < 0.10 and a.get("via") != "reflex")
+        if not weak or not self._client_can_sample():
+            a["escalated"] = False
+            return a
+        from holographic.agents_and_reasoning.holographic_systemone import SystemOne, hashed_ngram_encode
+        so = SystemOne(hashed_ngram_encode(dim=512), scorer="prototype", margin=0.0)
+        ex = {o: list((examples or {}).get(o) or [o.replace("_", " ")]) for o in options}
+        so.fit({"answer": {"type": "choice", "options": list(options), "examples": ex}})
+        text = self._sample(so.escalation_prompt("answer", state, a.get("ranked")))
+        val = None
+        try:
+            val = json.loads(text.strip())
+        except ValueError:
+            val = text.strip().strip('"')
+        if val not in options and val is not None:
+            a.update({"escalated": True, "value": None, "via": "model_end", "why": "the model end answered outside the options: %r" % str(val)[:60]})
+            return a
+        from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord
+        rec = DecisionRecord(state, "answer", list(options), val, "model_end", meta={"escalated": True})
+        mind.decision_ledger().add(rec)
+        a.update({"escalated": True, "value": val, "via": "model_end", "id": rec.id, "confident": val is not None})
+        return a
+
     def handle(self, req):
         rid = req.get("id")
         method = req.get("method", "")
         if method == "initialize":
+            # M7 (sweep 176): negotiate the protocol -- answer with the client's version when we know it,
+            # else our newest. structuredContent rides on every result for 2025-* clients; text always.
+            want = str((req.get("params") or {}).get("protocolVersion") or _PROTOCOL)
+            self._client_caps = (req.get("params") or {}).get("capabilities") or {}       # M12: can the host sample?
+            self._queued = []
+            self._proto = want if want in _PROTOCOLS else _PROTOCOLS[-1]
             return {"jsonrpc": "2.0", "id": rid, "result": {
-                "protocolVersion": _PROTOCOL,
-                "capabilities": {"tools": {}},
+                "protocolVersion": self._proto,
+                "capabilities": {"tools": {"listChanged": True}, "prompts": {}, "resources": {}, "logging": {}},
                 "serverInfo": {"name": "leCore", "version": "0.2.11"},
                 "instructions": _INSTRUCTIONS}}
         if method in ("notifications/initialized", "notifications/cancelled"):
             return None                                   # notifications get no response
         if method == "ping":
             return {"jsonrpc": "2.0", "id": rid, "result": {}}
+        if method == "logging/setLevel":
+            self._log_level = str((req.get("params") or {}).get("level", "info"))
+            return {"jsonrpc": "2.0", "id": rid, "result": {}}
         if method == "tools/list":
-            return {"jsonrpc": "2.0", "id": rid, "result": {"tools": _TOOLS}}
+            # M2: the profile decides the list (LECORE_MCP_PROFILE minimal | standard | full); M1: every entry
+            # carries annotations and its sibling guidance.
+            return {"jsonrpc": "2.0", "id": rid, "result": {"tools": _annotate_tools(list(_profile_tools(getattr(self, "_profile", None))) + self._studio_tools())}}
+        if method == "prompts/list":
+            return {"jsonrpc": "2.0", "id": rid, "result": {"prompts": [
+                {"name": n, "description": d, "arguments": [{"name": k, "required": r} for k, r in args]}
+                for n, (d, args) in _PROMPTS.items()]}}
+        if method == "prompts/get":
+            pp = req.get("params") or {}
+            try:
+                text = self._prompt_text(pp.get("name"), pp.get("arguments") or {})
+            except Exception as e:
+                return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": str(e)[:200]}}
+            return {"jsonrpc": "2.0", "id": rid, "result": {"description": _PROMPTS[pp.get("name")][0],
+                    "messages": [{"role": "user", "content": {"type": "text", "text": text}}]}}
+        if method == "resources/list":
+            return {"jsonrpc": "2.0", "id": rid, "result": {"resources": self._resources_list()}}
+        if method == "resources/read":
+            uri = str((req.get("params") or {}).get("uri", ""))
+            try:
+                return {"jsonrpc": "2.0", "id": rid, "result": {"contents": [self._resource_read(uri)]}}
+            except KeyError as e:
+                return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": "no resource %s" % e}}
         if method == "tools/call":
             p = req.get("params", {})
             tool = p.get("name")
             a = p.get("arguments", {}) or {}
+            # M11 (sweep 176): IMAGES IN -- a host may pass an MCP image content block as an argument value;
+            # normalise it to the base64 string every image door already takes.
+            for k, v in list(a.items()):
+                if isinstance(v, dict) and v.get("type") == "image" and "data" in v:
+                    a[k if k.endswith("_b64") else k] = v["data"]
+                    if not k.endswith("_b64") and k in ("image", "reference", "ref"):
+                        a[k + "_b64"] = a.pop(k)
             import time as _t
             _t0 = _t.perf_counter()
             import os as _os
             _memo_key = None
+            # M5 (sweep 176): progress notifications a host can render -- start and end for every call; the
+            # long doors (scene_create's render, study) report their own steps through self._notify.
+            _ptoken = (p.get("_meta") or {}).get("progressToken")
+            if _ptoken is not None:
+                self._notify("notifications/progress", {"progressToken": _ptoken, "progress": 0, "total": 1, "message": "%s started" % tool})
             if tool in _MEMO_PURE_TOOLS and _os.environ.get("LECORE_MCP_MEMO", "1") != "0":
                 import hashlib as _hl
-                _canon0 = json.dumps({"tool": tool, "arguments": a}, sort_keys=True,
+                # VERSION SALT (sweep 176): the memo is content-addressed on the INPUT, and it persists on disk
+                # across processes -- so after a code change a host was served the OLD result (found live:
+                # lecore_find kept returning the un-tiered list from the store after the tool was rewritten).
+                # The salt is the server's own source hash: an upgrade invalidates every stale entry, and
+                # nothing else changes -- identical inputs on identical code still hit.
+                _canon0 = json.dumps({"tool": tool, "arguments": a, "code": _server_code_hash()}, sort_keys=True,
                                      separators=(",", ":"), default=str)
                 _memo_key = (tool, _hl.sha256(_canon0.encode()).hexdigest())
                 if not hasattr(self, "_tool_memo"):
@@ -1837,6 +2441,31 @@ class MCPServer:
                     out = self._chart_make(**a)
                 elif tool == "lecore_find":
                     out = self._find(a["query"])
+                elif tool.startswith("studio3d_"):
+                    out = self._studio3d(tool, a)
+                elif tool.startswith("studio2d_"):
+                    out = self._studio2d(tool, a)
+                elif tool.startswith("asset_"):
+                    out = self._assets(tool, a)
+                elif tool == "lecore_plan":
+                    out = self.service.mind.plan_change(a["request"])
+                elif tool == "lecore_edit":
+                    out = self.service.mind.edit_verified(a["path"], a["old"], a["new"], count=int(a.get("count", 1)),
+                                                          selftest_module=a.get("selftest_module"))
+                elif tool == "lecore_review":
+                    out = self.service.mind.review(list(a["paths"]), duplicates=bool(a.get("duplicates", True)),
+                                                   purity=bool(a.get("purity", True)), tests=bool(a.get("tests", True)))
+                elif tool == "lecore_verify":
+                    out = self.service.mind.verify_decision(a["state"], a["answer"], key=a.get("key", "ngram"))
+                elif tool == "lecore_analyze":
+                    out = self._analyze(a["image_b64"], a["regions"])
+                elif tool == "lecore_decide":
+                    if a.get("escalate"):
+                        out = self._decide_with_model_end(a["state"], list(a["options"]), examples=a.get("examples"))
+                    else:
+                        out = self.service.mind.typed(a["state"], list(a["options"]), examples=a.get("examples"))
+                elif tool == "lecore_outcome":
+                    out = self.service.mind.decision_outcome(a["id"], a["outcome"])
                 elif tool == "lecore_describe":
                     out = self._describe(a["name"])
                 elif tool == "lecore_invoke":
@@ -1887,6 +2516,10 @@ class MCPServer:
                 meta["cache"] = "miss" if _memo_key is not None else "n/a"
                 result = {"content": content, "isError": False,
                           "_meta": {"lecore.cost": meta, "lecore.receipt": receipt}}
+                if getattr(self, "_proto", _PROTOCOL) != "2024-11-05" and isinstance(out, dict):
+                    # M7: structured output for 2025-* clients -- the host stops re-parsing JSON out of a
+                    # string. The text block stays for older clients and for humans reading a transcript.
+                    result["structuredContent"] = json.loads(text) if text.startswith("{") else {"result": out}
                 if _memo_key is not None and meta["payload_bytes"] <= _MEMO_ENTRY_CAP:
                     import copy as _copy
                     self._tool_memo[_memo_key] = _copy.deepcopy(result)
@@ -1914,6 +2547,8 @@ class MCPServer:
                         except Exception:
                             pass                       # persistence is best-effort;
                                                        # the answer already shipped
+                if _ptoken is not None:
+                    self._notify("notifications/progress", {"progressToken": _ptoken, "progress": 1, "total": 1, "message": "%s done" % tool})
                 return {"jsonrpc": "2.0", "id": rid, "result": result}
             except Exception as e:
                 # MCP convention: tool-level failures ride in content with isError, so the
@@ -1941,9 +2576,85 @@ class MCPServer:
         return {"jsonrpc": "2.0", "id": rid,
                 "error": {"code": -32601, "message": "method %r not found" % method}}
 
+    def serve_http(self, port=8765, host="127.0.0.1", token=None):
+        """M6 (sweep 176): STREAMABLE HTTP -- the same handle() behind POST /mcp (one JSON-RPC message per
+        request, the response as JSON; a notification returns 202 with no body) and GET /mcp/health. Auth is
+        the Service's own token gate: with a token, requests must carry `Authorization: Bearer <token>`. stdlib
+        only (http.server), threaded, so a slow render does not block a ping. Notifications the server emits
+        (progress, log) are queued per session and drained on the next response's `_meta.lecore.notifications`
+        -- a polling host gets them; SSE streaming is the next step, not this one."""
+        import http.server as _hs
+        import socketserver as _ss
+        srv = self
+        tok = token
+
+        class H(_hs.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                sys.stderr.write("mcp-http %s\n" % (a[0] % a[1:] if a[1:] else a[0]))
+
+            def _send(self, code, body):
+                data = json.dumps(body).encode("utf-8") if body is not None else b""
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                if data:
+                    self.wfile.write(data)
+
+            def do_GET(self):
+                if self.path.startswith("/mcp/health"):
+                    return self._send(200, {"ok": True, "protocol": _PROTOCOLS[-1], "tools": len(_profile_tools())})
+                return self._send(404, {"error": "GET /mcp/health or POST /mcp"})
+
+            def do_POST(self):
+                if not self.path.startswith("/mcp"):
+                    return self._send(404, {"error": "POST /mcp"})
+                if tok and self.headers.get("Authorization", "") != "Bearer %s" % tok:
+                    return self._send(401, {"error": "token required"})
+                n = int(self.headers.get("Content-Length", "0") or 0)
+                try:
+                    req = json.loads(self.rfile.read(n).decode("utf-8"))
+                except ValueError:
+                    return self._send(400, {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}})
+                resp = srv.handle(req)
+                if resp is None:
+                    return self._send(202, None)
+                pending = srv._drain_notifications()
+                if pending and isinstance(resp.get("result"), dict):
+                    resp["result"].setdefault("_meta", {}).setdefault("lecore.notifications", pending)
+                return self._send(200, resp)
+
+        class S(_ss.ThreadingMixIn, _hs.HTTPServer):
+            daemon_threads = True
+            allow_reuse_address = True
+
+        httpd = S((host, int(port)), H)
+        sys.stderr.write("lecore-mcp http on http://%s:%d/mcp\n" % (host, int(port)))
+        httpd.serve_forever()
+
+    def _notify(self, method, params):
+        """M5: queue a server notification (progress, log). stdio drains it to stdout immediately; HTTP drains it
+        into the next response's _meta. Never raises."""
+        q = getattr(self, "_notifications", None)
+        if q is None:
+            q = self._notifications = []
+        q.append({"jsonrpc": "2.0", "method": method, "params": params})
+        if getattr(self, "_stdio_live", False):
+            try:
+                sys.stdout.write(json.dumps(q.pop()) + "\n")
+                sys.stdout.flush()
+            except Exception:
+                pass
+
+    def _drain_notifications(self):
+        q = getattr(self, "_notifications", None) or []
+        self._notifications = []
+        return q
+
     def serve_stdio(self):
         """The loop an MCP host spawns: one JSON-RPC message per line on stdin, responses on
         stdout, everything else (logs) belongs on stderr by protocol."""
+        self._stdio_live = True
         for line in sys.stdin:
             line = line.strip()
             if not line:
@@ -1956,6 +2667,12 @@ class MCPServer:
             if resp is not None:
                 sys.stdout.write(json.dumps(resp) + "\n")
                 sys.stdout.flush()
+            for q in list(getattr(self, "_queued", []) or []):      # M12: requests that arrived mid-sample
+                self._queued.remove(q)
+                r2 = self.handle(q)
+                if r2 is not None:
+                    sys.stdout.write(json.dumps(r2) + "\n")
+                    sys.stdout.flush()
 
 
 def _selftest():
@@ -1964,7 +2681,17 @@ def _selftest():
     assert init["result"]["serverInfo"]["name"] == "leCore"
     assert srv.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
     tl = srv.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-    names = [t["name"] for t in tl["result"]["tools"]]
+    # M2/M8 (sweep 176): the served list is the PROFILE (default standard) plus environment-gated studio and
+    # asset tools; the pin is the whole table, so ask for the full profile and drop the gated ones.
+    import os as _os
+    _prev = _os.environ.get("LECORE_MCP_PROFILE")
+    _os.environ["LECORE_MCP_PROFILE"] = "full"
+    tl = srv.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    if _prev is None:
+        _os.environ.pop("LECORE_MCP_PROFILE", None)
+    else:
+        _os.environ["LECORE_MCP_PROFILE"] = _prev
+    names = [t["name"] for t in tl["result"]["tools"] if not t["name"].startswith(("studio", "asset_"))]
     # THE PIN IS THE POINT: every tool added must arrive HERE in the same commit. This
     # list sat at 10 tools while the server grew to 20 -- red from checkpoint 15 to 27,
     # invisible because the local regression constructed the server without running
@@ -1981,7 +2708,8 @@ def _selftest():
                      "zoo_synthesize", "zoo_query", "zoo_report", "receipt_verify",
                      "memory_write", "memory_search", "zoo_model3d", "zoo_research",
                      "zoo_backtest", "zoo_assimilate", "zoo_feedback", "zoo_boot",
-                     "zoo_agent", "lecore_invoke"]
+                     "zoo_agent", "lecore_decide", "lecore_outcome", "lecore_plan", "lecore_edit", "lecore_review",
+                     "lecore_verify", "lecore_analyze", "lecore_invoke"]
     # PROVENANCE + TAUGHT_ONLY PINS (cp49): on a PUBLIC server a cached model answer that
     # looks like an established fact is the worst failure mode there is -- one caller's
     # guess becomes everyone's permanent truth. These three asserts are the guard.
@@ -2151,6 +2879,12 @@ def main():
     MCP server any harness can point at. `lecore-mcp --selftest` runs the wire selftest."""
     if "--selftest" in sys.argv:
         _selftest()
+    elif "--http" in sys.argv:
+        # M6: `lecore-mcp --http 8765 [--token T]` -- the same server over Streamable HTTP
+        i = sys.argv.index("--http")
+        port = int(sys.argv[i + 1]) if i + 1 < len(sys.argv) and sys.argv[i + 1].isdigit() else 8765
+        tok = sys.argv[sys.argv.index("--token") + 1] if "--token" in sys.argv else None
+        MCPServer(token=tok).serve_http(port=port, token=tok)
     else:
         MCPServer().serve_stdio()
 

@@ -57,6 +57,26 @@ class _UnifiedPart08:
         S3 io-shape filter: `accepts='mesh'` keeps only capabilities that consume a mesh ('what can I run on this
         mesh?'); `produces='mesh'` keeps only those that yield one. Untagged capabilities are unspecified and always
         shown. See holographic_catalog."""
+        # LEARNING FROM USE IN THE SEMANTIC SYSTEM (sweep 176): when a reported outcome exists for a request like
+        # this one (the reflex's seen gate: a reported key within cosine 0.8), the learned pick is promoted to
+        # first. Nothing changes until an outcome has been reported, so every existing result is identical.
+        hits = self._find_capability_base(problem, k=k, accepts=accepts, produces=produces)
+        try:
+            book = getattr(self, "_reflex_labels", None)
+            if book and getattr(self, "_reflex_seen", None):
+                rf = self.reflex_decide(str(problem), key="fingerprint")
+                if rf.get("value"):
+                    cat = self._capability_catalog()
+                    learned = cat.get(rf["value"]) if hasattr(cat, "get") else None
+                    if learned is not None:
+                        hits = [learned] + [h for h in hits if h.name != rf["value"]]
+                        hits = hits[:k]
+        except Exception:
+            pass
+        return hits
+
+    def _find_capability_base(self, problem, k=3, accepts=None, produces=None):
+        """The catalog search itself (no learning) -- what find_capability was before sweep 176."""
         return self._capability_catalog().find_capability(problem, k=k, accepts=accepts, produces=produces)
 
     def find_capability_uris(self, problem, k=3):
@@ -707,14 +727,57 @@ class _UnifiedPart08:
         CONFIDENCE (0..1) and the concrete call to make. Like find_capability, but scored + call-ready so an agent (or
         a person) can decide what to invoke. See holographic_skills.suggest."""
         import holographic.misc.holographic_skills as _sk
-        return _sk.suggest(task, k=k)
+        out = _sk.suggest(task, k=k)
+        # LEARNING FROM USE (sweep 176): a reported outcome for a request like this one promotes the capability
+        # that was actually used to first, marked via='reflex'; unchanged until an outcome has been reported.
+        try:
+            if getattr(self, "_reflex_labels", None) and getattr(self, "_reflex_seen", None):
+                rf = self.reflex_decide(str(task), key="fingerprint")
+                if rf.get("value") and isinstance(out, list):
+                    cat = self._capability_catalog()
+                    c = cat.get(rf["value"]) if hasattr(cat, "get") else None
+                    if c is not None:
+                        learned = {"name": c.name, "does": c.does, "call": c.example, "confidence": round(float(rf.get("confidence", 0.0)), 3), "via": "reflex"}
+                        out = [learned] + [o for o in out if not (isinstance(o, dict) and o.get("name") == c.name)]
+                        out = out[:k]
+        except Exception:
+            pass
+        return out
 
-    def route(self, task):
-        """AGENT-FRIENDLY decision node: when one skill clearly wins, returns {'decision':'act', 'skill':..., 'call'}
-        so the agent just does it; when it's ambiguous, returns {'decision':'choose', 'options':[...]} so it asks
-        instead of guessing. 'Act when confident, ask when not', score-based. See holographic_skills.route."""
-        import holographic.misc.holographic_skills as _sk
-        return _sk.route(task)
+    def route(self, task, tiered=True, reflex=True):
+        """A CONFIDENT-ROUTING decision node for agents -- TIERED by default (sweep 176). Returns
+        {"decision": "act", "skill": {name, does, call}, "confidence", "tier", "z", "id"} when the task clears
+        the answer floor; {"decision": "choose", "options": [...], "prompt", ...} in the menu band -- the
+        prompt is the four-part shape a model can answer (goal / return format / constraints / verification);
+        {"decision": "abstain", "why", ...} only in the gibberish band. MEASURED WHY: the previous node scored
+        'act' at confidence 0.75 for "purple monkey dishwasher" (a card's text mentions it) -- no gate at all;
+        the tiered node answers 41% of held-out paraphrases at 0.82 and 0 of 30 off-catalog probes. reflex=True
+        answers a REPEAT from experience (99% at 0.98) when its outcome was reported by id. Report the outcome
+        against `id` and the record learns. tiered=False keeps the old node exactly."""
+        if not tiered:
+            import holographic.misc.holographic_skills as _sk
+            return _sk.route(task)
+        r = self.route_tiered(task, k=4, reflex=reflex)
+        cat = self._capability_catalog()
+
+        def skill(name):
+            c = cat.get(name) if hasattr(cat, "get") else None
+            return {"name": name, "does": (c.does if c else ""), "call": (c.example if c else "")}
+        base = {"tier": r["tier"], "z": r.get("z"), "id": r.get("id"), "via": r.get("via", "catalog"), "p": r.get("p")}
+        if r["tier"] == "answer":
+            conf = r.get("confidence") if r.get("via") == "reflex" else (1.0 / (1.0 + 2.718281828 ** (-(r.get("z") or 0.0))))
+            return dict(base, decision="act", confidence=round(float(conf), 3), skill=skill(r["answer"]))
+        if r["tier"] == "refuse":
+            return dict(base, decision="abstain", confidence=0.0, why=r.get("reason"),
+                        prompt="No capability matched %r (%s). Try different words, or mind.suggest()." % (task, r.get("reason")))
+        names = [o["name"] for o in r["options"]]
+        prompt = ("GOAL: choose the capability that does %r.\n" % task +
+                  "RETURN FORMAT: exactly one of %s as a JSON string, or null if none fits.\n" % names +
+                  "CONSTRAINTS: choose only from the options; do not invent one; null is a correct answer when nothing fits.\n" +
+                  "VERIFICATION: the reply is validated against the options; report the outcome with mind.decision_outcome(%r, <choice>)." % r.get("id"))
+        return dict(base, decision="choose", confidence=round(float(1.0 / (1.0 + 2.718281828 ** (-(r.get("z") or 0.0)))), 3),
+                    prompt=prompt, options=[skill(n) for n in names])
+
 
     def describe_skill(self, name):
         """A machine-readable SKILL CARD for a capability or a UnifiedMind method by name: what it does + how to CALL

@@ -91,7 +91,7 @@ class AgentLoop:
     """Runs a task by letting `llm` (any callable text->text) pick tools, with a null-referenced gate in
     front of every action and `invoke` as the only dispatch path."""
 
-    def __init__(self, mind, llm, max_steps=6, z_min=0.8, k_tools=6, seed=0):
+    def __init__(self, mind, llm, max_steps=6, z_min=0.1, k_tools=6, seed=0):
         if not callable(llm):
             raise TypeError("agent_loop needs a callable text->text, got %r" % type(llm))
         self.mind = mind
@@ -136,10 +136,36 @@ class AgentLoop:
         REFUSAL IS A RESULT, and it happens BEFORE the model is consulted: if the task does not clear the
         null floor, no step runs at all and `why` carries the router's reason. That is what holds the
         false-action rate down -- not the model's judgement about its own competence."""
-        gate = self.mind.route_or_abstain(task, z_min=self.z_min, seed=self.seed)
+        # OPERATING POINT (measured, the no-tool arm of agent_benchmark vs 150 ablated paraphrases):
+        #   z_answer  0.8 (old gate): false actions 0/20 (the arm was BUILT to be refused at 0.8) | paraphrases acted ~4%
+        #   z_answer  0.1 (this loop): false actions 3/20, menus 6, refused 11              | acted 17.3% at 0.846
+        #   z_answer -0.1 (route()):   false actions 5/20, menus 4, refused 11              | acted 41.3% at 0.823
+        # ACTING needs a higher bar than SUGGESTING: the loop acts at 0.1, returns the middle band as a menu,
+        # and refuses the gibberish band; mind.route() suggests at -0.1.
+        # THE GATE IS TIERED (sweep 176): route_or_abstain at z_min=0.8 rejected 98.5% of honest paraphrases
+        # (right card top-1 for 42-54%); route_tiered answers or offers a MENU and refuses only the gibberish
+        # band (0 of 30 off-catalog probes answered). The model sees the menu's options as its manifest -- a
+        # menu beats a guess (0.70 vs 0.54 measured). z_min is kept for callers that pass it: a value above
+        # 0.5 keeps the old gate exactly (tiered=False), so no existing decision flips unless asked.
+        if hasattr(self.mind, "route_tiered") and self.z_min <= 0.5:
+            tr = self.mind.route_tiered(task, k=max(3, self.k_tools), seed=self.seed,
+                                        z_answer=self.z_min, z_refuse=min(-0.5, self.z_min))
+            gate = {"abstain": tr["tier"] == "refuse", "z": tr.get("z"), "tier": tr["tier"], "id": tr.get("id"),
+                    "reason": tr.get("reason"), "hits": [(o["name"], o["score"]) for o in tr["options"]]}
+        else:
+            gate = self.mind.route_or_abstain(task, z_min=self.z_min, seed=self.seed)
         if gate.get("abstain"):
             return {"done": False, "refused": True, "answer": None, "steps": [], "gate": gate,
                     "why": "refused before acting: %s" % gate.get("reason", "below the null floor")}
+        if gate.get("tier") == "menu":
+            # A MENU IS NOT A LICENCE TO ACT (measured): letting the menu band reach a model that always claims
+            # completion raised the no-tool false-action rate from 0.00 to 0.25. So the loop does not act on a
+            # menu -- it returns the options as a `choose` decision for the caller (a person, or a model that
+            # can ask), with no model call and no step run. Answer-tier tasks act; the gibberish band refuses.
+            # `refused` means DID NOT ACT (the contract every test and caller pins) -- a menu did not act, so it
+            # is refused=True with decision='choose' and the options attached; the model is never consulted.
+            return {"done": False, "refused": True, "answer": None, "steps": [], "gate": gate, "decision": "choose",
+                    "options": gate.get("hits", []), "why": "ambiguous -- choose one of the options, then run the task again"}
 
         tools = self.manifest(task)
         if not tools:

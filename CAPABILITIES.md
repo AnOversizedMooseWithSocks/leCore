@@ -6762,6 +6762,13 @@ a keyframe TIMELINE (holographic_anim) -- key(channel, t, value, interp) then sa
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); tl=m.timeline(); tl.key('x',0,0.0); tl.key('x',1,1.0,interp='ease_in'); print(round(float(tl.sample('x',0.5)),2))
 ```
 
+### typed
+THE PLAIN FRONT DOOR FOR A TYPED DECISION (sweep 176): mind.typed(state, [options], examples=...) builds the schema, lints it and the state (imbalanced budgets, thin examples, multi-clause or contrastive states), picks the scorer from the measured regime table, decides, and returns ONE answer -- value, ranked, margin, p, set, id -- with the lint attached. decision_outcome(id, truth) teaches the table, the reflex and the calibration. The same discipline runs inside route() (act / choose / abstain), find_capability, suggest and serve, where a reported outcome promotes what was used..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); a=m.typed('courier lost the package', ['billing','shipping'], examples={'billing':['card charged twice','refund my invoice fee','charge on my statement'],'shipping':['parcel lost in transit','courier delivery late','package never arrived']}); print(a['value'], a['lint'], a['id'][:6])
+```
+
 ### verify_decision
 IS THIS ANSWER A VALID RESPONSE TO THIS INPUT? (sweep 176) leOS step 4 done holographically: read the experience trace with the STATE and check it cleans up to the answer (forward); read it with the ANSWER atom and check it points back at the state (backward -- the bidirectional lookup); the displacement profile of correct pairs; the seen gate; support against the recent stream (drift). Measured: a seen state served the recorded truth vs a wrong label -- forward and backward AUROC 1.000, verdict valid 0.99 vs 0.00. A verdict against experience, not a confidence; the margin ranks..
 
@@ -6813,4 +6820,4 @@ from holographic.caching_and_storage.holographic_substrate import write_multicha
 
 ---
 
-*874 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*875 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
