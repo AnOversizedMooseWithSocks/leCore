@@ -20,7 +20,11 @@ class _UnifiedPart19:
         lever 3). See holographic_lever7.DisplacementTrace / TiledDisplacementTrace."""
         if getattr(self, "_lever7_trace", None) is None:
             from holographic.agents_and_reasoning.holographic_lever7 import TiledDisplacementTrace
-            self._lever7_trace = TiledDisplacementTrace(dim=2048, seed=0)
+            # advisory_load 0.03 (sweep 176, the reflex bridge): MEASURED readback of an exact repeat vs load in
+            # one 2048-d tile -- 1.000 up to n=50, 0.93 at 100, ~0.6 at 150 -- while the default advisory of
+            # 0.10 only split at n=205, i.e. after the cliff. 0.03 (n=61) keeps every tile on the flat part,
+            # which is what the tiling docstring promised ("the measured cliff number becomes the tile size").
+            self._lever7_trace = TiledDisplacementTrace(dim=2048, seed=0, advisory_load=0.03)
         return self._lever7_trace
 
     def reflex_write(self, task_vec, response_vec):

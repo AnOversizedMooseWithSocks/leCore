@@ -230,3 +230,31 @@ available from an unpaired corpus and it is not the same statistic as a benchmar
 
 Item 3 remains open: the real 500-question set has still not been run, and 0.50 paired on an
 eight-question fixture is a mechanism result, not a score.
+
+---
+
+## 9. Sweep 176 — the NOOA properties carried onto the typed-decision (Jev) doors
+
+The Jev-related work of sweeps 171–176 built a second agent surface — typed decisions, the tiered router,
+decision records, the swarm step — and this section records which NOOA properties (§3) that surface now
+honours, each with the measurement that proves it, and which it still lacks.
+
+| NOOA property | on the Jev doors after sweep 176 |
+|---|---|
+| **Validated termination** — typed result carrying evidence and a verification command the harness checks before the call returns | **PRESENT.** `swarm_step` refuses a step without `done_when` and `evidence`; with `verify={"verb", "args"}` and `expect`, the harness RUNS the verification before the step is accepted and a failed verification never reaches the bus (pinned). `decide_or_escalate` already held escalated answers to the schema with one retry (sweep 172). |
+| **Docstrings as prompts, annotations as contracts** | **PRESENT.** `SystemOne.escalation_prompt` generates the four-part model-end prompt (goal / return format / constraints / verification, permission to abstain, ranked evidence) deterministically FROM the schema; the schema rides in the payload as the contract the reply is validated against. Pinned in order. |
+| **Pass-by-reference with bounded previews** | **PRESENT on records.** `DecisionRecord.to_dict` ships a state above 400 chars as {ref = sha256, true length, head/tail preview} via `holographic_boundedpreview`; the HRR encoding still uses the full text. |
+| **Long-term memory: ACT-R activation, decay, consolidation** | **PRESENT for decisions.** `decision_ledger_to_memory` teaches every reported record into the partition (idempotent; `ask` recalls it at T0 — reflex-exact), where `memory_curate`'s activation / decay / reflect apply to decisions as to facts. Asynchronous consolidation still absent. |
+| **Model-queryable event history** | **PRESENT.** `decision_records()` (the ledger with stats), the bus history, and `similar()` by cosine over HRR-encoded records. |
+| **Code as action** | **ABSENT, deliberately** (unchanged: collides with the no-`exec`-REPL decision). |
+| **Sandboxed execution** | **ABSENT** (unchanged; leCore never executes model-written code). |
+| **External benchmark result** | **STILL OPEN.** Banking77 / AG News / SST-2 numbers in doc 01 are public tasks under leCore's own protocol, not NOOA's benchmarks. |
+
+What leCore adds that NOOA does not report, measured on the same doors: calibrated abstention (entry
+gate), conformal answer sets with an empirical coverage guarantee (Banking77: nominal 0.95 → 0.960/0.961),
+batch false-discovery control (BH FDR 0.03 at nominal 0.05/0.10), a label-free drift alarm with measured
+latency, and a loop that compounds from reported outcomes with zero model calls (0.699 → 0.764).
+
+The honest position of §5 stands: NOOA maximises what a capable model can do through a clean interface;
+leCore maximises what can be decided without one, refuses measurably, and now carries NOOA's exit-gate
+discipline on its own steps.

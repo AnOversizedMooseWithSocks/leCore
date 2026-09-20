@@ -190,7 +190,7 @@ def register_p08(c):
         # NO "start" phrasings here (sweep 65): they displaced the shipped
         # autoboot alias "how do I start" from its own top-1 -- a new card's
         # battery must also prove it did not STEAL existing aliases.
-        aliases=("boot the substrate", "power on self test", "post checks",
+        aliases=("boot the substrate", "power on self test subsystem fail", "post checks",
                  "run startup self checks", "substrate self check",
                  "is the engine healthy on boot"),
         module="holographic_unified_p20_zoo")
@@ -828,8 +828,285 @@ def register_p08_digest(c):
         "Read to inspect what the roles have exchanged; empty until a swarm runs.",
         example="import lecore; m=lecore.UnifiedMind(dim=64,seed=0); print(type(m.shared_workspace()).__name__)",
         aliases=("swarm workspace", "shared slots between roles", "what did the roles exchange",
-                 "blackboard for the swarm", "shared scene state", "role handoff workspace"),
+                 "blackboard for the swarm modeller inspect", "shared scene state", "role handoff workspace"),
         module="holographic_innereye", method="shared_workspace", native=True,
+    )
+    c.register_capability(
+        "systemone_decide",
+        "TYPED decisions with honest probabilities (holographic_systemone, the native System One "
+        "door -- what Jev sells as an API): answer typed questions -- choice, score, noul (yes/no) "
+        "-- about one state in ONE pass. Schema validated up front so an untyped output is "
+        "impossible; ties ABSTAIN (value None, why named); p appears only after labeled outcomes "
+        "calibrate it. Every choice carries ranked evidence and its basis. scorer='nb' (sweeps "
+        "174-175): transformed naive Bayes over the same examples, measured 0.843 vs 0.716 on AG "
+        "News k=300 and 0.798 vs 0.753 on Banking77 (77 intents) k=35.",
+        example="import lecore; m=lecore.UnifiedMind(dim=512,seed=0); "
+        "print(m.systemone_decide('card charged twice on my invoice', {'cat': {'type': 'choice', "
+        "'options': ['billing','shipping'], 'examples': {'billing': ['invoice charge refund', "
+        "'card charged a fee'], 'shipping': ['package tracking courier', 'parcel lost']}}}, "
+        "scorer='nb', margin=0.05))",
+        aliases=("jev", "system one model", "typed decision with confidence",
+                 "encode text with character ngrams",
+                 "route a ticket and abstain when unsure", "yes no probability",
+                 "classify with calibrated probability", "structured output guaranteed",
+                 "abstain when the input matches no option", "off-manifold support floor",
+                 "decision api like jev", "sentiment classification from examples",
+                 "few-shot text classification with examples", "naive bayes text classifier",
+                 "calibrated probability for a classifier", "risk coverage curve accuracy on answered",
+                 "classify text into categories from examples", "prediction set with coverage guarantee",
+                 "conformal answer set", "which options could it be with 95 percent coverage"),
+        module="holographic_systemone", method="systemone_decide", native=True,
+    )
+    c.register_capability(
+        "systemone_map",
+        "BATCH typed decisions (holographic_systemone): mind.systemone_map(states, questions, "
+        "labeled=None) maps one decision schema over many states -- score every row of a table, "
+        "triage a whole queue -- with row i pinned identical to the single-state call (the batch "
+        "path can never fork). Fit-once for volume: so = mind.systemone(questions); so.decide_map(...); "
+        "so.calibrate(labeled) adds honest probabilities; so.calibration_report(held_out) gives "
+        "accuracy, Brier and ECE -- the reliability numbers a vendor claim needs before trust.",
+        example="import lecore; m=lecore.UnifiedMind(dim=512,seed=0); "
+        "print(m.systemone_map(['refund my invoice','parcel is lost'], {'cat': {'type': 'choice', "
+        "'options': ['billing','shipping'], 'examples': {'billing': ['invoice charge refund'], "
+        "'shipping': ['package tracking courier']}}})[1]['cat']['value'])",
+        aliases=("map a decision over rows", "bulk classify a queue of tickets",
+                 "score every row with confidence", "batch triage with abstention",
+                 "calibration report brier ece", "fit once decide many"),
+        module="holographic_systemone", method="systemone_map", native=True,
+    )
+    c.register_capability(
+        "systemone_stream",
+        "CLOSE THE DECISION LOOP (holographic_systemone, sweep 172 -- what a frozen hosted "
+        "decision model cannot do): systemone_stream(stream, questions, lr) runs prequential "
+        "test-then-train over [(state,{q:truth}),...] -- decide FIRST (the honest test), then "
+        "learn via the AdaptHD miss-update; lr=0 is the frozen baseline. Returns prequential "
+        "accuracy plus a two-channel drift report (label-free support + label-lagged "
+        "correctness) delegated to the regime machinery. The fitted object also gains "
+        "decide_or_escalate: a schema-enforced model-end seam.",
+        example="import lecore; m=lecore.UnifiedMind(dim=512,seed=0); "
+        "print(m.systemone_stream([('invoice charge',{'cat':'billing'}),('parcel lost',"
+        "{'cat':'shipping'}),('refund me',{'cat':'billing'})], {'cat': {'type':'choice',"
+        "'options':['billing','shipping'], 'examples': {'billing':['card charged fee'],"
+        "'shipping':['package courier delivery']}}})['prequential_accuracy'])",
+        aliases=("learn from decision outcomes online", "prequential evaluation of decisions",
+                 "detect drift in a decision stream", "close the decision loop",
+                 "online prototype update from mistakes", "escalate with schema enforced",
+                 "continual typed decisions"),
+        module="holographic_systemone", method="systemone_stream", native=True,
+    )
+    c.register_capability(
+        "decision_tree",
+        "GROW THE SUGGESTION NODE INTO A TREE (holographic_decisiontree, sweep 173). route() builds one "
+        "decision node on the fly; decision_tree(context, depth, fanout) recurses it: each node ranks "
+        "the live catalog, takes decide_or_abstain, and branches on what that choice RESULTS in, plus an "
+        "abstain branch. The child context is the request PLUS what just happened -- measured, that edge "
+        "kept 4/5 children on topic vs 0/5 for produces/consumes chaining. Returns a PlanNode; encode=True "
+        "adds it as one hypervector. A 3-option node holds the right answer 0.696 vs 0.540 for top-1.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "t=m.decision_tree('turn a point cloud into a mesh', depth=2); "
+        "print(t['root'].action, list(t['root'].branches), t['coverage'])",
+        aliases=("decision tree from context", "build a decision tree on the fly",
+                 "a decision tree that learns which option I picked", "walk the tree again and remember my choice",
+                 "walk a tree of choices to pick an action", "expand a suggestion into next steps",
+                 "what can I do after this step", "did you mean one of these, then what",
+                 "contingency tree over the capability catalog", "menu of choices with follow-ups",
+                 "route a request through a series of choices"),
+        module="holographic_decisiontree", method="decision_tree", native=True,
+    )
+    c.register_capability(
+        "decision_memory",
+        "OUTCOME AUDIT LOG with an equivalence test (holographic_decisiontree, sweep 173): record that an "
+        "input, through a tree, produced a result; ask which inputs reached the SAME result; compare() "
+        "gives four quadrants -- consistent / equivalent / brittle (alike inputs, DIFFERENT results: the "
+        "alarm) / distinct. Inputs encode by HOW THEY ROUTE (routing_fingerprint): same vs different result "
+        "pairs at AUROC 0.874 vs 0.777 (bag) and 0.695 (word overlap). NOT a router or predictor -- as "
+        "either it lost to a proper baseline. recall() abstains; one class needs a stated floor.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); om=m.decision_memory(); "
+        "om.record('turn a point cloud into a mesh','points_to_mesh',None,label='a'); "
+        "om.record('build a surface from these points','points_to_mesh',None,label='b'); "
+        "print(om.classes(), om.compare('turn a point cloud into a mesh','build a surface from these points')['quadrant'])",
+        aliases=("remember that this input gave this result", "which inputs lead to the same result",
+                 "group inputs by outcome", "same result from different inputs",
+                 "alarm when similar inputs give different results", "brittle decision detector",
+                 "outcome equivalence classes", "audit log of decisions and results",
+                 "record what a choice produced"),
+        module="holographic_decisiontree", method="decision_memory", native=True,
+    )
+
+    c.register_capability(
+        "route_tiered",
+        "ROUTE WITHOUT A BARE REJECTION (sweep 176): answer / menu / clarify / refuse instead of yes-or-no. "
+        "Reuses route_or_abstain's null-referenced z and find_scored's ranking; 'answer' needs z above a floor "
+        "and no exact tie, 'clarify' fires when the top candidates span two families, 'menu' returns the top-k "
+        "with scores, 'refuse' only in the gibberish band. Every result carries an id to report an outcome "
+        "against. Measured on held-out paraphrases (ablated, 3 seeds): the old gate rejected 94.7%; tiered "
+        "answers 24.9% at 0.833, menus 29.8% holding the answer 83%, refuses 34%; 0 of 7 gibberish answered.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.route_tiered('smooth a bumpy mesh'); "
+        "print(r['tier'], r['answer'], r['id'], [o['name'] for o in r['options'][:3]])",
+        aliases=("route without rejecting", "did you mean one of these", "answer or offer a menu",
+                 "tiered routing", "never a bare no", "which capability did I mean",
+                 "clarify which family I mean", "route with options instead of abstain",
+                 "why was this request refused"),
+        module="holographic_catalog", method="route_tiered", native=True,
+    )
+    c.register_capability(
+        "catalog_families",
+        "WHICH FAMILY IS EACH CAPABILITY IN (sweep 176): {name: (holographic/<family>/, source)} for every "
+        "card. 'module' when the module folder resolves it deterministically (497 of 876), 'decided' when a typed "
+        "decision over the card's own text is confident (measured 0.625 forced vs 0.280 majority, so only above "
+        "the margin; +17), else None -- reported by catalog_gaps, never guessed. The family is what the tiered "
+        "router's clarify tier asks about.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); f=m.catalog_families(); "
+        "print(sum(1 for v in f.values() if v[0]), 'resolved of', len(f))",
+        aliases=("which family is this capability in", "group capabilities by folder",
+                 "unresolved capability families", "capability family map", "what folder does this tool live in"),
+        module="holographic_catalog", method="catalog_families", native=True,
+    )
+    c.register_capability(
+        "systemone_lint",
+        "LINT THE QUESTION BEFORE ASKING IT (sweep 176): checks a typed-decision schema and its states -- example "
+        "token budgets imbalanced more than 2x (the shortest option owns the smoothing floor: measured 1-3 of 8 "
+        "tool decisions until balanced, then 8 of 8), options with fewer than 3 examples, the scorer the measured "
+        "regime table recommends from k, states carrying more than one clause (returned split), and contrastive "
+        "or negated states to escalate. Every failure the blueprint and 3-D experiments hit is a finding here. "
+        "Reports; never rewrites.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "print(m.systemone_lint({'cat':{'type':'choice','options':['a','b'],'examples':{'a':['x y z']*3,'b':['q']*3}}}, "
+        "states=['first thing. and then a second thing but not a third'])['findings'])",
+        aliases=("lint a decision schema before asking", "check my examples are balanced",
+                 "split a request into clauses", "is this sentence contrastive", "which scorer should I use",
+                 "why did my typed decision abstain on everything", "one observation per state"),
+        module="holographic_systemone", method="systemone_lint", native=True,
+    )
+    c.register_capability(
+        "decision_outcome",
+        "REPORT AN OUTCOME BY ID -- the one outcome path (sweep 176, backlog G1/G2). Every route_tiered and "
+        "systemone_decide result carries an id; decision_outcome(id, truth) records what happened and, for a "
+        "typed decision, forwards to the fitted SystemOne's observe() -- no teach() anywhere; the model is kept "
+        "per schema so the next call decides from what it learned. Measured: a prequential stream through the "
+        "doors equals systemone_stream (0.700 = 0.700, 120 AG News rows). Records are HRR-encoded; "
+        "decision_records() lists them; similar() finds a like decision by cosine.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "a=m.systemone_decide('parcel lost', {'cat':{'type':'choice','options':['billing','shipping'],"
+        "'examples':{'billing':['card charged twice','refund the invoice'],'shipping':['courier late','package never came']}}}, "
+        "scorer='nb', margin=0.0)['cat']; print(m.decision_outcome(a['id'], 'shipping')['was_correct'], m.decision_records()['stats'])",
+        aliases=("report the outcome of a decision", "tell the system what actually happened",
+                 "close the loop on a decision by id", "decision ledger", "list my past decisions",
+                 "was that decision right", "record what was used", "outcome feedback by id",
+                 "save my decisions to memory", "remember past decisions across sessions",
+                 "generate the prompt for the model end from the schema",
+                 "make the reflex arc learn from use", "answer a repeated request from experience",
+                 "the router learns which capability I used", "reflex bridge"),
+        module="holographic_decisionrecord", method="decision_outcome", native=True,
+    )
+    c.register_capability(
+        "systemone_batch_fdr",
+        "FALSE-DISCOVERY CONTROL OVER A BATCH OF DECISIONS (sweep 176): one calibrated p per decision cannot bound "
+        "the error of a thousand-row batch (the Cranmer seat, sweep 172). Each state gets a shuffle-null p-value of "
+        "its margin against in-vocabulary word salad at matched length, then Benjamini-Hochberg across the batch. "
+        "Measured on 150 real + 150 noise rows x 3 seeds: BH holds FDR 0.033 at q=0.05 and 0.028 at q=0.10 (real rows "
+        "accepted 13-20%); the uncorrected gate lets noise through at 0.14 / 0.22; Benjamini-Yekutieli accepts nothing.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "q={'cat':{'type':'choice','options':['billing','shipping'],'examples':{'billing':['card charged twice','refund the invoice','charge on my statement'],'shipping':['parcel lost','courier late','package never came']}}}; "
+        "print(m.systemone_batch_fdr(['my card was charged twice','courier lost it'], q, 'cat', alpha=0.1, n_null=32, encoder='ngram', scorer='nb'))",
+        aliases=("false discovery rate over a batch of decisions", "control how many wrong accepts in a batch",
+                 "benjamini hochberg over decisions", "shuffle null p value for a decision",
+                 "bound the batch error of a decision stream"),
+        module="holographic_systemone", method="systemone_batch_fdr", native=True,
+    )
+    c.register_capability(
+        "systemone_absorb",
+        "LEARN FROM UNLABELED TRAFFIC, GUARDED (sweep 176): semi-supervised EM over unlabeled states for the nb "
+        "scorer -- E-step posteriors, M-step recount, no gradient -- on the same cached model the next decision "
+        "uses. Two measured guards: refused above 10 options (EM collapsed to 0.093 on 77 intents) and kept only "
+        "if held-out accuracy did not fall. Measured: plain nb on AG News, 32 examples per class plus 600 "
+        "unlabeled rows, 0.697 -> 0.752, beating the transformed default's 0.713; under the transform the gain "
+        "vanishes, so this door defaults to nb_transform=False.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "q={'cat':{'type':'choice','options':['billing','shipping'],'examples':{'billing':['card charged twice','refund my invoice fee','charge on my statement','double charge'],'shipping':['parcel lost in transit','courier late','package never arrived','no tracking movement']}}}; "
+        "print(m.systemone_absorb(['my invoice was charged twice','the courier lost the parcel'], q, 'cat', encoder='ngram', margin=0.0))",
+        aliases=("learn from unlabeled examples", "semi-supervised typed decision", "absorb unlabeled traffic",
+                 "use unlabeled data to improve a classifier", "expectation maximization for naive bayes"),
+        module="holographic_systemone", method="systemone_absorb", native=True,
+    )
+    c.register_capability(
+        "swarm_step",
+        "THE SWARM STEP CONTRACT (sweep 176): one shape for every message a worker sends -- state, tool, args, "
+        "done_when, evidence, worker, outcome -- REFUSED without done_when and evidence, because the orchestrator "
+        "failure the literature names (misclassification that compounds) starts with steps nobody can verify. "
+        "Each step is a DecisionRecord in the ledger (outcome by id, compare by cosine) and is published on the "
+        "mind's MessageBus. swarm_evaluate runs the audit suite (reachability_audit, catalog_gaps, skill_lint) as "
+        "subprocesses and returns all_ok -- the evaluator role and the hard exit.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "s=m.swarm_step('resolve families', 'catalog_families', {'decide': False}, done_when='at least 500 resolve', "
+        "evidence={'resolved': 501}, worker='w1'); print(s['id'], s['via'], len(m.bus().history('swarm')))",
+        aliases=("publish a swarm step with done_when and evidence", "swarm step contract", "worker step message",
+                 "run the audits as the evaluator", "hard exit for a swarm run", "step record on the bus",
+                 "orchestrate workers with verifiable steps", "validated termination", "verify a step before accepting it",
+                 "NOOA style typed result with evidence and a verification command"),
+        module="holographic_decisionrecord", method="swarm_step", native=True,
+    )
+    c.register_capability(
+        "sdf_scene_shader",
+        "ONE EXACT SCENE, ONE FRAGMENT SHADER (sweep 176): a multi-part SDF scene as a WebGL2 raymarcher -- each "
+        "part's map() from the engine's own emitter, combined by min, writing the nearest-part id per pixel, rays "
+        "from the SAME basis Camera.ray_dirs uses, so the preview is the render's geometry. Measured on the 15-part "
+        "speaker scene: silhouette IoU 0.9852 vs the engine's sphere-trace, part-id agreement 0.9924, every "
+        "disagreement on an edge; 2 s per frame in a browser vs minutes for the path trace.",
+        example="import lecore; from holographic.mesh_and_geometry.holographic_sdf import sphere, box; "
+        "from holographic.rendering.holographic_render import Camera; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "sc=m.sdf_scene_shader([('ball', sphere(0.3)), ('slab', box(1,0.05,1).translate((0,-0.4,0)))], camera=Camera(eye=(0,1,3),target=(0,0,0),fov_deg=30,aspect=1.6)); "
+        "print(sc['names'], 'mapAll' in sc['fragment'], sc['uniforms']['uAspect'])",
+        aliases=("compile a whole scene to a shader", "webgl preview of the exact scene", "scene to glsl with part ids",
+                 "raymarch the scene in the browser", "make the viewport match the render", "shader for a multi-part sdf scene"),
+        module="holographic_sdfemit", method="sdf_scene_shader", native=True,
+    )
+    c.register_capability(
+        "plan_from_request",
+        "A COLD PLAN WITH NO MODEL (sweep 176): split a compound request into single-observation clauses, route "
+        "each through the tiered router, and chain the steps into a PlanNode contingency plan encoded as one "
+        "hypervector. Measured on compound requests of two exact aliases (3 seeds x 100): both steps recovered "
+        "0.860 vs 0.540 for the whole request's menu. The first measurement (0.527) was a splitter defect found "
+        "by re-testing against a single alias's routing (0.990); ', next ' is now a connective.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "p=m.plan_from_request('smooth a bumpy mesh and then grow crystals on a surface'); "
+        "print([(s['tier'], s['tool'][:24] if s['tool'] else None) for s in p['steps']], p['root'].action[:24])",
+        aliases=("break a request into steps", "plan a sequence of tool calls without a model", "cold plan from a request",
+                 "decompose a compound request", "route each clause of a request", "multi-step plan from text"),
+        module="holographic_systemone", method="plan_from_request", native=True,
+    )
+    c.register_capability(
+        "reflex_retile",
+        "RE-TILE THE EXPERIENCE TRACE AT THE MEASURED CLIFF (sweep 176): rebuild the lever-7 trace from every "
+        "tile's bit-identical audit log with a new capacity advisory. Measured: one 2048-d tile reads an exact "
+        "repeat back at 1.000 up to 50 writes, 0.93 at 100, ~0.6 at 150, while the old default split at 205 -- "
+        "after the cliff -- so a trace loaded by boot (953 writes on 6 tiles) answered a just-taught repeat below "
+        "the confidence floor; re-tiled to 14 tiles the same repeat fired via reflex. Run it after boot on a "
+        "trace persisted before sweep 176; new traces tile at the cliff by default.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "r=m.route_tiered('smooth a bumpy mesh', reflex=True); m.decision_outcome(r['id'], r['answer']); "
+        "print(m.reflex_retile(advisory_load=0.03), m.route_tiered('smooth a bumpy mesh', reflex=True)['via'])",
+        aliases=("retile the reflex trace", "rebuild the experience trace after boot", "reflex trace past capacity",
+                 "the reflex stopped firing after loading memory", "split the experience trace into more tiles"),
+        module="holographic_lever7", method="reflex_retile", native=True,
+    )
+    c.register_capability(
+        "verify_decision",
+        "IS THIS ANSWER A VALID RESPONSE TO THIS INPUT? (sweep 176) leOS step 4 done holographically: read the "
+        "experience trace with the STATE and check it cleans up to the answer (forward); read it with the ANSWER "
+        "atom and check it points back at the state (backward -- the bidirectional lookup); the displacement "
+        "profile of correct pairs; the seen gate; support against the recent stream (drift). "
+        "Measured: a seen state served the recorded truth vs a wrong label -- forward and backward AUROC 1.000, "
+        "verdict valid 0.99 vs 0.00. A verdict against experience, not a confidence; the margin ranks.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "r=m.route_tiered('smooth a bumpy mesh'); m.decision_outcome(r['id'], r['answer']); "
+        "print(m.verify_decision('smooth a bumpy mesh', r['answer'], key='fingerprint')['valid'], "
+        "m.verify_decision('smooth a bumpy mesh', 'Voxelization', key='fingerprint')['valid'])",
+        aliases=("verify the answer matches the input", "is this result valid for this prompt",
+                 "bidirectional lookup check", "does experience agree with this answer",
+                 "catch an answer that contradicts what we learned", "validate a served result",
+                 "check a decision against drift"),
+        module="holographic_decisionrecord", method="verify_decision", native=True,
     )
 
 _PART = "holographic_catalog_p08"

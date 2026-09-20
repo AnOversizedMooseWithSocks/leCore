@@ -216,6 +216,24 @@ class _UnifiedPart11:
         holographic_codeedit.Editor.insert."""
         return self._editor.insert(path, after_line, text)
 
+    def file_symbol(self, path, name):
+        """Locate a def / class / `Class.method` by NAME (ast) -> {path, name, kind, start, end, text}. The
+        stable way to read a function: no line numbers to guess, loud failure with near misses on a typo. See
+        holographic_codeedit.Editor.symbol."""
+        return self._editor.symbol(path, name)
+
+    def file_insert_after_symbol(self, path, name, text, blank_lines=1):
+        """Insert `text` after the BODY of a named def/class/`Class.method` -- add a method to a class or a
+        function after another without a text anchor that may not be unique or a line number that moves.
+        Indentation is the caller's (the target's col_offset is returned). See
+        holographic_codeedit.Editor.insert_after_symbol."""
+        return self._editor.insert_after_symbol(path, name, text, blank_lines=blank_lines)
+
+    def file_selftest(self, module, timeout=600):
+        """Run `python3 -m <module>` in a subprocess and return {module, ok, seconds, tail} -- the build loop's
+        module self-test as a tool, never in-process. See holographic_codeedit.Editor.run_selftest."""
+        return self._editor.run_selftest(module, timeout=timeout)
+
     def file_delete_lines(self, path, start, end):
         """Delete lines [start, end] (1-based inclusive). Returns {path, deleted}. See
         holographic_codeedit.Editor.delete_lines."""

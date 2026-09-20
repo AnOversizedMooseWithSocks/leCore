@@ -287,7 +287,7 @@ def register_p02(c):
                           example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
                           "print(m.resolve_capability_uri('rotation'))",
                           native=True, aliases=("resolve a capability name", "disambiguate a function name",
-                                                "full path of a capability", "which module has this function",
+                                                "full path of a capability", "which module has this function meshskin narrows",
                                                 "capability uri for a name"),
                           semantic="analyze/pipeline")
     c.register_capability("timeline", "a keyframe TIMELINE (holographic_anim) -- key(channel, t, value, interp) "

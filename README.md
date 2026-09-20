@@ -520,7 +520,7 @@ and forget to document or register it, CI tells you which one.
 
 ## Status
 
-Active research engine, and a large one — 805 `holographic_*` modules plus 6 bundled plugins, ~2,410 mind verbs behind 867 catalog capabilities, and 7,000+ collected tests (7,181), all green in CI (the full suite runs sharded, with a per-test budget that skips anything slow unless it is marked critical). It's real and it runs, but it's a research project under steady development, not a finished product. Expect sharp edges, expect it to keep growing, and expect every surprising result to come with the measurement that earned it.
+Active research engine, and a large one — 808 `holographic_*` modules plus 6 bundled plugins, ~2,410 mind verbs behind 887 catalog capabilities, and 7,000+ collected tests (7,284), all green in CI (the full suite runs sharded, with a per-test budget that skips anything slow unless it is marked critical). It's real and it runs, but it's a research project under steady development, not a finished product. Expect sharp edges, expect it to keep growing, and expect every surprising result to come with the measurement that earned it.
 
 ## License
 

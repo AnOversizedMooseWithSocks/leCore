@@ -741,7 +741,7 @@
         "point in solid",
         "point inside a brep",
         "solid membership",
-        "boolean of two solids",
+        "boolean of two solids brep classification",
         "classify faces for a boolean",
         "inside outside test for a solid",
         "solid boolean classification"
@@ -786,7 +786,7 @@
         "monitor render",
         "pause render",
         "long render",
-        "render job",
+        "render job baking slow",
         "noise bake"
       ],
       "consumes": [],
@@ -1067,8 +1067,8 @@
         "composite",
         "superpose",
         "average",
-        "crossfade",
-        "morph"
+        "crossfade lerp things",
+        "morph lerp things"
       ],
       "consumes": [],
       "does": "combine things into one: bundle (superposition, weighted = soft mixture), lerp / slerp interpolation, Frechet mean on the sphere, front-to-back alpha composite, and dict/scene merge with a conflict policy",
@@ -1239,7 +1239,7 @@
         "add a softbox light to my scene",
         "area light with soft shadows",
         "environment lighting from a sky dome",
-        "hdri lighting",
+        "hdri lighting nine classes",
         "make a spotlight",
         "key light and fill light",
         "sun lamp",
@@ -1323,7 +1323,7 @@
         "matching pursuit",
         "sparse recovery",
         "demix",
-        "how many things fit in a bundle",
+        "how many things fit in a bundle correlate revisits",
         "pull the parts out of a sum of vectors",
         "which atoms are in this mixture",
         "recovery family"
@@ -1428,7 +1428,7 @@
         "cache",
         "memoise",
         "irradiance",
-        "lut",
+        "lut cheaply matbake",
         "grid"
       ],
       "consumes": [],
@@ -2146,6 +2146,10 @@
         "undo my last edit",
         "find definition",
         "jump to definition",
+        "view a function by name",
+        "append a method to a class",
+        "insert code after a function definition",
+        "run a module selftest",
         "rename symbol",
         "rename everywhere",
         "replace across files",
@@ -2156,7 +2160,7 @@
         "see the file"
       ],
       "consumes": [],
-      "does": "read, view (line-numbered), write, exact-string replace, replace-lines, insert/delete lines, grep, find-definition, list, tree, archive, move, and UNDO -- structured source-file editing for an agent working the codebase, scoped to a project ROOT so a path can never escape it. Atomic writes; replace requires a unique match; every mutation is reversible with file_undo; replace_across renames a string across many files (with a dry-run preview); python_check (syntax) and import_check (real import in a subprocess) catch a broken edit immediately. Exposed as mind.file_* methods, so callable over the HTTP tool protocol (GET /tools, POST /invoke) like any faculty",
+      "does": "read, view (line-numbered), write, exact-string replace, replace-lines, insert/delete lines, grep, find-definition, list, tree, archive, move, and UNDO -- structured source-file editing for an agent working the codebase, scoped to a project ROOT so a path can never escape it. Atomic writes; replace requires a unique match; every mutation is reversible with file_undo; replace_across renames a string across many files (with a dry-run preview); python_check (syntax) and import_check (real import in a subprocess) catch a broken edit immediately. Sweep 176: file_symbol locates a def/class/Class.method by NAME (ast), file_insert_after_symbol adds a method after a class body without an anchor or a line number, file_selftest runs python -m <module> in a subprocess. Exposed as mind.file_* methods, so callable over the HTTP tool protocol (GET /tools, POST /invoke) like any faculty",
       "example": "import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.set_file_root('.'); mind.file_find_definition('make_cloud'); mind.file_replace('a.py', 'old()', 'new()'); mind.file_import_check('a.py'); mind.file_undo()",
       "method": "set_file_root",
       "name": "Code / file editing (agentic)",
@@ -2335,7 +2339,7 @@
         "compare renders",
         "image comparison",
         "did the render change",
-        "image similarity"
+        "image similarity paths between"
       ],
       "consumes": [],
       "does": "perceptual similarity in [0,1] between two images given as FILE PATHS (e.g. two rendered PNGs) -- SSIM + colour + edge, shift/lighting-tolerant, the on-disk companion to compare_images. The call an agent makes to check 'did my render change or match the target?' when the images are files",
@@ -2906,7 +2910,7 @@
         "five fins around the body",
         "radial symmetry",
         "attach horns",
-        "body part library",
+        "body part library attaching queryable",
         "symmetry group",
         "creature accessories",
         "put an eye on the head"
@@ -3354,7 +3358,7 @@
         "topology",
         "persistent homology",
         "kernel density",
-        "point cloud",
+        "point cloud graphsignal nystrom",
         "time series",
         "statistics",
         "analytics"
@@ -3588,7 +3592,7 @@
         "smooth",
         "nlm",
         "demodulate",
-        "sharpen",
+        "sharpen divide guided",
         "noise reduction",
         "restore"
       ],
@@ -3686,7 +3690,7 @@
         "skip work whose inputs did not change",
         "per triangle cache",
         "canonical plus delta caching",
-        "instancing generalized",
+        "instancing generalized transformed quantity",
         "deferred shading",
         "delta id",
         "is my evaluator deterministic",
@@ -3985,7 +3989,7 @@
         "non-periodic bake",
         "endpoint jump",
         "spectral leakage",
-        "lut",
+        "lut treats periodic",
         "near singular function"
       ],
       "consumes": [],
@@ -4108,16 +4112,16 @@
       "aliases": [
         "farm",
         "distributed compute",
-        "cluster",
+        "cluster machines reduce",
         "network farm",
         "worker node",
         "serve_worker",
         "render farm",
         "compute across machines",
-        "scale out",
+        "scale out machines farm",
         "map reduce",
         "parallel across nodes",
-        "grid"
+        "grid machines reduce"
       ],
       "consumes": [],
       "does": "run the same partition-and-reduce work across a FARM of machines. Each node runs holographic.scene_and_pipeline.holographic_coordinator.serve_worker(workers={name: fn}); mind.farm(['host1:9000','host2:9000'], token).run(buckets, worker_name, cache, reduce) round-robins the buckets across nodes and reassembles by the monoid reducer -- the same call as the local pool, just cross-machine. SAFE by design: workers run BY NAME (a node only runs workers it registered), so no code crosses the wire, only data. stdlib sockets/JSON.",
@@ -4156,7 +4160,7 @@
     },
     {
       "aliases": [
-        "voting",
+        "voting untrusted reassigns",
         "redundant compute",
         "retry",
         "fault tolerance",
@@ -4396,9 +4400,9 @@
       "aliases": [
         "durability",
         "crash recovery",
-        "journal",
+        "journal survive store",
         "write ahead log",
-        "wal",
+        "wal survive store",
         "snapshot recover",
         "point in time recovery",
         "replay journal",
@@ -4508,8 +4512,8 @@
         "fractional power encoding",
         "fpe",
         "encode coordinates",
-        "phasor",
-        "fhrr",
+        "phasor taper beta",
+        "fhrr taper beta",
         "sparse block codes",
         "sbc",
         "clifford",
@@ -5003,7 +5007,7 @@
     {
       "aliases": [
         "field",
-        "grid",
+        "grid interface scalar",
         "volume",
         "density",
         "sdf",
@@ -5122,7 +5126,7 @@
         "shrink wrap a mesh",
         "fixed topology",
         "vertex correspondence",
-        "retopology",
+        "retopology precondition morphing",
         "same mesh new body",
         "morph between creatures"
       ],
@@ -5691,7 +5695,7 @@
         "descendants",
         "shortest path",
         "traversal",
-        "adjacency",
+        "adjacency neighbors reachability",
         "recursive cte",
         "edges",
         "network"
@@ -5924,7 +5928,7 @@
         "cleanup between levels",
         "store many items in one vector and recall them",
         "how many items can i bundle before recall fails",
-        "capacity",
+        "capacity allows items",
         "chunked memory with a shared codebook",
         "bundle of bundles",
         "nested superposition",
@@ -6190,7 +6194,7 @@
         "bundle",
         "permute",
         "cleanup",
-        "encode"
+        "encode five permute"
       ],
       "consumes": [],
       "does": "the first-class hypervector: a raw vector + its dim / encoder / tag, with the five verbs (bind/unbind/bundle/cleanup/permute) as methods. Encoders are the constructors; the raw array stays one attribute away (.array / np.asarray(hv))",
@@ -6335,7 +6339,7 @@
         "volumetric",
         "load volume",
         "vdb",
-        "voxel",
+        "voxel files import",
         "density grid",
         "import material",
         "3d file",
@@ -6350,7 +6354,7 @@
         "deform",
         "skinning",
         "linear blend skinning",
-        "morph",
+        "morph files import",
         "blend shape",
         "pose a rig",
         "animate a model"
@@ -6369,7 +6373,7 @@
       "aliases": [
         "knn",
         "nearest",
-        "lookup",
+        "lookup pile interface",
         "recall",
         "retrieve",
         "similarity",
@@ -6538,7 +6542,7 @@
         "rainbow sheen",
         "make it iridescent",
         "peacock colour",
-        "beetle shell"
+        "beetle shell film iridescence"
       ],
       "consumes": [],
       "does": "MATERIAL: mind.iridescent_tint(thickness_nm, cos_theta) returns the view-dependent RGB tint of a thin film -- the soap-bubble / oil-slick / pearlescent sheen. Sweeping the angle or thickness cycles the tint through the spectrum (the hallmark of iridescence). n_film 1.33 = soapy water, 1.45 = oil. Multiply a surface's reflected colour by this; holographic_thinfilm.iridescent_socket builds the full f(points,normals,view)->rgb shader socket.",
@@ -6593,7 +6597,7 @@
         "hysteresis",
         "awake islands",
         "skip idle work",
-        "steady state",
+        "steady state pile settled",
         "settle",
         "quiescent",
         "energy probe",
@@ -6981,7 +6985,7 @@
         "nee",
         "direct",
         "prt",
-        "irradiance"
+        "irradiance types spot"
       ],
       "consumes": [],
       "does": "one home for lighting: the light types (point/directional/spot/area/dome/IES) and the shade INTEGRAL in each mode -- direct NEE, PRT relight, environment SH; render methods call it",
@@ -7020,7 +7024,7 @@
     {
       "aliases": [
         "load an hdri environment map",
-        "image based lighting",
+        "image based lighting piece needed",
         "light my scene with a real sky photo",
         "read a radiance hdr file",
         "load a high dynamic range image",
@@ -7388,7 +7392,7 @@
     {
       "aliases": [
         "massive game world",
-        "massively multiplayer world",
+        "massively multiplayer world occupied migrate",
         "shard entities across regions",
         "entity migration between shards",
         "cross shard snapshot",
@@ -7432,7 +7436,7 @@
         "materials",
         "physical material",
         "material properties",
-        "density",
+        "density metals gases",
         "refractive index",
         "render material",
         "pbr preset",
@@ -7505,7 +7509,7 @@
         "spectrum cache",
         "batch",
         "bind_batch",
-        "backend",
+        "backend recomputing backends",
         "gpu",
         "jit",
         "working set",
@@ -7547,7 +7551,7 @@
         "merge",
         "merge forks",
         "fork and merge",
-        "reconcile",
+        "reconcile forks conflicts",
         "combine worlds",
         "resolve conflicts",
         "multiplayer merge",
@@ -7650,17 +7654,17 @@
         "extrude",
         "bevel",
         "inset",
-        "subdivide",
+        "subdivide extrude clark",
         "smooth a mesh",
         "decimate",
         "reduce polygons",
         "uv unwrap",
         "unwrap uv",
         "rig",
-        "skin",
+        "skin extrude clark",
         "pose a skeleton",
-        "skeleton",
-        "deform",
+        "skeleton extrude clark",
+        "deform extrude clark",
         "boolean",
         "remesh",
         "dcc",
@@ -7947,10 +7951,10 @@
         "escalation ladder",
         "choose how many substeps to use",
         "tuning bank",
-        "variant bank",
+        "variant bank substepping substeps",
         "evaluate many parameter variants in one pass",
         "sweep friction and stiffness settings at once",
-        "parameter sweep",
+        "parameter sweep substepping substeps",
         "blend forcings",
         "many variants at once",
         "pick the right solver for this island",
@@ -8070,7 +8074,7 @@
         "ggx",
         "rough metal",
         "white furnace",
-        "roughness"
+        "roughness conserving rough"
       ],
       "consumes": [],
       "does": "energy-conserving GGX for rough metals: the Kulla-Conty multi-scatter term adds back the energy single-scatter GGX loses (white-furnace ~0.4 -> ~1.0 at high roughness), GATED by roughness so smooth surfaces skip it (the term overshoots at low roughness). Detector is the exact material roughness",
@@ -8114,7 +8118,7 @@
         "compress a volume",
         "compress a frame stack",
         "multiway svd",
-        "rank gate",
+        "rank gate several compress",
         "should i compress this"
       ],
       "consumes": [],
@@ -8137,7 +8141,7 @@
         "steady state filter",
         "filter to convergence",
         "shader algebra",
-        "operator power"
+        "operator power applying raised"
       ],
       "consumes": [],
       "does": "a circular convolution is diagonal in the Fourier basis, so applying it N times is just the transfer raised to the N-th power. mind.filter_passes(field, kernel, N) costs the same whether N is 1 or 1,000,000 (measured 1,824x faster at N=4096, exact to 2.3e-14). Two things a GPU cannot do: N may be FRACTIONAL (half a blur pass; two halves compose to one), and N may be INFINITE -- mind.filter_limit returns the steady state as an idempotent projection, where a literal loop can need 200,000 passes.",
@@ -8333,7 +8337,7 @@
         "navigation",
         "plan a route",
         "pathfinding",
-        "shortest path",
+        "shortest path networks navigator",
         "maze",
         "slime mould",
         "flow network",
@@ -8410,7 +8414,7 @@
         "seti",
         "worker daemon",
         "remote",
-        "cluster",
+        "cluster dispatched reduced",
         "node",
         "another machine",
         "farm"
@@ -8565,7 +8569,7 @@
         "camera spectral response",
         "integrate spectrum through filters",
         "hyperspectral to color",
-        "mantis shrimp eye"
+        "mantis shrimp eye integrating curves"
       ],
       "consumes": [
         "spectrum"
@@ -8677,7 +8681,7 @@
         "half wave plate",
         "retarder",
         "optical rotator",
-        "faraday rotation",
+        "faraday rotation mueller retarder",
         "fresnel polarization",
         "birefringence",
         "transform polarized light",
@@ -8968,7 +8972,7 @@
         "mean curvature",
         "principal curvatures",
         "draft angle",
-        "moldability analysis",
+        "moldability analysis fundamental developable",
         "is a surface developable",
         "curvature of a nurbs surface",
         "fundamental forms",
@@ -9028,8 +9032,8 @@
     {
       "aliases": [
         "partition invariant",
-        "bit exact sum",
-        "reproducible sum",
+        "bit exact sum matter item",
+        "reproducible sum matter item",
         "prefix sum of an array",
         "prefix sum",
         "scan",
@@ -9042,7 +9046,7 @@
         "same answer no matter how many machines i use",
         "reduce_sum_exact",
         "my sim gives different results on different nodes",
-        "float associativity",
+        "float associativity matter item",
         "deterministic reduction",
         "exact accumulation",
         "order independent sum",
@@ -9156,9 +9160,9 @@
       "aliases": [
         "tissue material",
         "subsurface scattering",
-        "organ material",
+        "organ material chitin deeper",
         "skin shader",
-        "bone material",
+        "bone material chitin deeper",
         "realistic flesh",
         "SSS"
       ],
@@ -9179,8 +9183,8 @@
         "matter",
         "mixture",
         "diffusion",
-        "material properties",
-        "iridescence",
+        "material properties equilibrium film",
+        "iridescence equilibrium oxidation",
         "oxidation",
         "phase"
       ],
@@ -10404,7 +10408,7 @@
       "aliases": [
         "regime shift",
         "change point",
-        "drift detection",
+        "drift detection ocean slow",
         "has the data changed",
         "double-diffusive",
         "layer detection",
@@ -10446,7 +10450,7 @@
         "render until converged",
         "one call render",
         "denoised render",
-        "adaptive sampling render",
+        "adaptive sampling render searched svgf",
         "how do I render a gem",
         "trace denoise and tone map"
       ],
@@ -10543,7 +10547,7 @@
     },
     {
       "aliases": [
-        "render a scene",
+        "render a scene illumination controller",
         "path trace",
         "ray tracing",
         "global illumination",
@@ -11068,7 +11072,7 @@
         "run ffmpeg",
         "call an external tool",
         "run a script",
-        "job runner",
+        "job runner registration injection",
         "wrap a program as a tool"
       ],
       "consumes": [],
@@ -11151,7 +11155,7 @@
         "procedural terrain",
         "procedural geometry",
         "voxelize",
-        "voxel",
+        "voxel voxelization sculpting",
         "octree",
         "tile in space",
         "implicit surface",
@@ -11216,7 +11220,7 @@
     },
     {
       "aliases": [
-        "sample",
+        "sample discrepancy weighting",
         "sampling",
         "blue_noise",
         "poisson",
@@ -11283,10 +11287,10 @@
         "scale",
         "distribute",
         "partition",
-        "map reduce",
+        "map reduce sparsefield pieces",
         "tile",
         "brick",
-        "parallel",
+        "parallel sparsefield pieces",
         "shard",
         "chunk",
         "monoid",
@@ -11484,7 +11488,7 @@
         "multi-user",
         "swarm",
         "agent isolation",
-        "inbox",
+        "inbox peer isolation",
         "directed message",
         "provenance",
         "source role",
@@ -11899,7 +11903,7 @@
         "cook_torrance",
         "lambert",
         "fresnel",
-        "ggx",
+        "ggx importance deriving",
         "specular",
         "diffuse"
       ],
@@ -11918,7 +11922,7 @@
         "shadow",
         "visibility",
         "occlusion",
-        "ambient occlusion",
+        "ambient occlusion visibility strategies",
         "penumbra",
         "shadow ray",
         "soft shadow",
@@ -12012,7 +12016,7 @@
         "significance test",
         "monte carlo p value",
         "prove it isn't noise",
-        "false alarm probability",
+        "false alarm probability resample scoring",
         "null hypothesis test"
       ],
       "consumes": [],
@@ -12028,7 +12032,7 @@
     {
       "aliases": [
         "signal processing",
-        "fft",
+        "fft flatness doppler",
         "spectral",
         "spectrum",
         "detect a signal",
@@ -12038,7 +12042,7 @@
         "dedoppler",
         "drift",
         "flatness",
-        "bandwidth",
+        "bandwidth flatness doppler",
         "frequency",
         "audio"
       ],
@@ -12597,7 +12601,7 @@
         "rest",
         "daemon",
         "database",
-        "sql",
+        "sql insert update",
         "graphql",
         "persistence",
         "drop-in database",
@@ -13286,7 +13290,7 @@
         "texture an object in my scene",
         "procedural texture on a scene object",
         "make the ball checkered",
-        "marble texture",
+        "marble texture carves mapping",
         "paint a texture onto a shape",
         "remove the texture from an object",
         "tile an image over the floor",
@@ -13695,7 +13699,7 @@
         "sdf to wgsl",
         "sdf shader",
         "brain muscle contract",
-        "one source of truth two runtimes",
+        "one source of truth two runtimes shaders brain",
         "compute shader from the scene",
         "sdf dialect",
         "map function",
@@ -13950,7 +13954,7 @@
     },
     {
       "aliases": [
-        "sample",
+        "sample stochastic draw",
         "sampler",
         "temperature sampling",
         "nucleus sampling",
@@ -14128,8 +14132,8 @@
         "matrix",
         "quaternion",
         "rotor",
-        "bind",
-        "permute",
+        "bind representations quaternions",
+        "permute representations quaternions",
         "gizmo",
         "translation matrix",
         "rotation matrix",
@@ -14173,7 +14177,7 @@
         "precomputed rotation vectors",
         "reuse a bind operator",
         "compose a chain of transforms",
-        "spectrum cache",
+        "spectrum cache rotations shifts",
         "group representation",
         "rotation as a bind",
         "why scale is not a bind"
@@ -14358,7 +14362,7 @@
         "ccd",
         "continuous collision detection",
         "tunnelling",
-        "tunneling",
+        "tunneling passing bodies",
         "stop a fast bullet going through a thin wall",
         "my object passes through the floor",
         "swept collision",
@@ -14516,7 +14520,7 @@
     },
     {
       "aliases": [
-        "call a tool",
+        "call a tool serves calls",
         "remote tools",
         "use an llm",
         "attach llm",
@@ -14528,8 +14532,8 @@
         "chain tools",
         "planner",
         "toolclient",
-        "peer node",
-        "federation"
+        "peer node serves calls",
+        "federation serves calls"
       ],
       "consumes": [],
       "does": "leCore CALLS tools in the same shape it serves them. holographic.io_and_interop.holographic_toolclient.remote_tools(base_url, token) fetches another node's /tools and yields each as a callable RemoteTool (its run(args) POSTs to that node's /invoke). mind.attach_llm(callable) wires an LLM (any text->text, no SDK). mind.orchestrator.register / register_command / register_remote add remote tools, shell programs (allowlisted), and whole remote nodes so a planner can chain local faculties, remote tools, LLMs, and commands uniformly.",
@@ -14576,13 +14580,13 @@
         "verify data integrity",
         "check data integrity",
         "is my data corrupted",
-        "tamper",
+        "tamper addressing hashing",
         "erasure code",
         "reliability",
         "delta chain",
-        "version history",
+        "version history addressing hashing",
         "rollback",
-        "compress",
+        "compress addressing hashing",
         "determinism",
         "plumbing",
         "reliability code"
@@ -14644,7 +14648,7 @@
         "udf",
         "pg_proc",
         "find program",
-        "run program",
+        "run program whitelisted procedures",
         "vsa program",
         "program catalog"
       ],
@@ -14751,7 +14755,7 @@
         "frames",
         "motion",
         "interpolate frames",
-        "keyframe",
+        "keyframe temporal sequences",
         "sequence of images",
         "movie"
       ],
@@ -15239,7 +15243,7 @@
         "schmidt rank",
         "bond rank",
         "is this compressible",
-        "should i compress this",
+        "should i compress this help compares",
         "entanglement entropy",
         "structure diagnostic"
       ],
@@ -15854,7 +15858,7 @@
       "aliases": [
         "character editor sliders",
         "body morph controls",
-        "muscle and fat sliders",
+        "muscle and fat sliders character slider",
         "body customization parameters",
         "humanoid body sliders",
         "weight muscle fat controls"
@@ -15874,7 +15878,7 @@
     {
       "aliases": [
         "boot the substrate",
-        "power on self test",
+        "power on self test subsystem fail",
         "post checks",
         "run startup self checks",
         "substrate self check",
@@ -15907,6 +15911,24 @@
       "produces": [],
       "semantic": null,
       "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "which family is this capability in",
+        "group capabilities by folder",
+        "unresolved capability families",
+        "capability family map",
+        "what folder does this tool live in"
+      ],
+      "consumes": [],
+      "does": "WHICH FAMILY IS EACH CAPABILITY IN (sweep 176): {name: (holographic/<family>/, source)} for every card. 'module' when the module folder resolves it deterministically (497 of 876), 'decided' when a typed decision over the card's own text is confident (measured 0.625 forced vs 0.280 majority, so only above the margin; +17), else None -- reported by catalog_gaps, never guessed. The family is what the tiered router's clarify tier asks about.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); f=m.catalog_families(); print(sum(1 for v in f.values() if v[0]), 'resolved of', len(f))",
+      "method": "catalog_families",
+      "name": "catalog_families",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
     },
     {
       "aliases": [
@@ -16153,6 +16175,80 @@
       "produces": [],
       "semantic": "analyze/decide",
       "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "remember that this input gave this result",
+        "which inputs lead to the same result",
+        "group inputs by outcome",
+        "same result from different inputs",
+        "alarm when similar inputs give different results",
+        "brittle decision detector",
+        "outcome equivalence classes",
+        "audit log of decisions and results",
+        "record what a choice produced"
+      ],
+      "consumes": [],
+      "does": "OUTCOME AUDIT LOG with an equivalence test (holographic_decisiontree, sweep 173): record that an input, through a tree, produced a result; ask which inputs reached the SAME result; compare() gives four quadrants -- consistent / equivalent / brittle (alike inputs, DIFFERENT results: the alarm) / distinct. Inputs encode by HOW THEY ROUTE (routing_fingerprint): same vs different result pairs at AUROC 0.874 vs 0.777 (bag) and 0.695 (word overlap). NOT a router or predictor -- as either it lost to a proper baseline. recall() abstains; one class needs a stated floor.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); om=m.decision_memory(); om.record('turn a point cloud into a mesh','points_to_mesh',None,label='a'); om.record('build a surface from these points','points_to_mesh',None,label='b'); print(om.classes(), om.compare('turn a point cloud into a mesh','build a surface from these points')['quadrant'])",
+      "method": "decision_memory",
+      "name": "decision_memory",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "report the outcome of a decision",
+        "tell the system what actually happened",
+        "close the loop on a decision by id",
+        "decision ledger",
+        "list my past decisions",
+        "was that decision right",
+        "record what was used",
+        "outcome feedback by id",
+        "save my decisions to memory",
+        "remember past decisions across sessions",
+        "generate the prompt for the model end from the schema",
+        "make the reflex arc learn from use",
+        "answer a repeated request from experience",
+        "the router learns which capability I used",
+        "reflex bridge"
+      ],
+      "consumes": [],
+      "does": "REPORT AN OUTCOME BY ID -- the one outcome path (sweep 176, backlog G1/G2). Every route_tiered and systemone_decide result carries an id; decision_outcome(id, truth) records what happened and, for a typed decision, forwards to the fitted SystemOne's observe() -- no teach() anywhere; the model is kept per schema so the next call decides from what it learned. Measured: a prequential stream through the doors equals systemone_stream (0.700 = 0.700, 120 AG News rows). Records are HRR-encoded; decision_records() lists them; similar() finds a like decision by cosine.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); a=m.systemone_decide('parcel lost', {'cat':{'type':'choice','options':['billing','shipping'],'examples':{'billing':['card charged twice','refund the invoice'],'shipping':['courier late','package never came']}}}, scorer='nb', margin=0.0)['cat']; print(m.decision_outcome(a['id'], 'shipping')['was_correct'], m.decision_records()['stats'])",
+      "method": "decision_outcome",
+      "name": "decision_outcome",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
+        "decision tree from context",
+        "build a decision tree on the fly",
+        "a decision tree that learns which option I picked",
+        "walk the tree again and remember my choice",
+        "walk a tree of choices to pick an action",
+        "expand a suggestion into next steps",
+        "what can I do after this step",
+        "did you mean one of these, then what",
+        "contingency tree over the capability catalog",
+        "menu of choices with follow-ups",
+        "route a request through a series of choices"
+      ],
+      "consumes": [],
+      "does": "GROW THE SUGGESTION NODE INTO A TREE (holographic_decisiontree, sweep 173). route() builds one decision node on the fly; decision_tree(context, depth, fanout) recurses it: each node ranks the live catalog, takes decide_or_abstain, and branches on what that choice RESULTS in, plus an abstain branch. The child context is the request PLUS what just happened -- measured, that edge kept 4/5 children on topic vs 0/5 for produces/consumes chaining. Returns a PlanNode; encode=True adds it as one hypervector. A 3-option node holds the right answer 0.696 vs 0.540 for top-1.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); t=m.decision_tree('turn a point cloud into a mesh', depth=2); print(t['root'].action, list(t['root'].branches), t['coverage'])",
+      "method": "decision_tree",
+      "name": "decision_tree",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Discover & drive it (for agents)"
     },
     {
       "aliases": [
@@ -16421,7 +16517,7 @@
     },
     {
       "aliases": [
-        "drift detection",
+        "drift detection displacement response",
         "echo detection",
         "conflict candidate",
         "stale memory",
@@ -17184,12 +17280,12 @@
     },
     {
       "aliases": [
-        "bind",
+        "bind primitive",
         "unbind",
-        "bundle",
-        "cleanup",
-        "permute",
-        "superpose",
+        "bundle primitive",
+        "cleanup primitive",
+        "permute superpose recognise",
+        "superpose recognise five",
         "blend"
       ],
       "consumes": [],
@@ -17972,6 +18068,25 @@
     },
     {
       "aliases": [
+        "break a request into steps",
+        "plan a sequence of tool calls without a model",
+        "cold plan from a request",
+        "decompose a compound request",
+        "route each clause of a request",
+        "multi-step plan from text"
+      ],
+      "consumes": [],
+      "does": "A COLD PLAN WITH NO MODEL (sweep 176): split a compound request into single-observation clauses, route each through the tiered router, and chain the steps into a PlanNode contingency plan encoded as one hypervector. Measured on compound requests of two exact aliases (3 seeds x 100): both steps recovered 0.860 vs 0.540 for the whole request's menu. The first measurement (0.527) was a splitter defect found by re-testing against a single alias's routing (0.990); ', next ' is now a connective.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); p=m.plan_from_request('smooth a bumpy mesh and then grow crystals on a surface'); print([(s['tier'], s['tool'][:24] if s['tool'] else None) for s in p['steps']], p['root'].action[:24])",
+      "method": "plan_from_request",
+      "name": "plan_from_request",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Discover & drive it (for agents)"
+    },
+    {
+      "aliases": [
         "surprise filter",
         "novelty detector",
         "event gate for a stream",
@@ -18174,6 +18289,24 @@
     },
     {
       "aliases": [
+        "retile the reflex trace",
+        "rebuild the experience trace after boot",
+        "reflex trace past capacity",
+        "the reflex stopped firing after loading memory",
+        "split the experience trace into more tiles"
+      ],
+      "consumes": [],
+      "does": "RE-TILE THE EXPERIENCE TRACE AT THE MEASURED CLIFF (sweep 176): rebuild the lever-7 trace from every tile's bit-identical audit log with a new capacity advisory. Measured: one 2048-d tile reads an exact repeat back at 1.000 up to 50 writes, 0.93 at 100, ~0.6 at 150, while the old default split at 205 -- after the cliff -- so a trace loaded by boot (953 writes on 6 tiles) answered a just-taught repeat below the confidence floor; re-tiled to 14 tiles the same repeat fired via reflex. Run it after boot on a trace persisted before sweep 176; new traces tile at the cliff by default.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.route_tiered('smooth a bumpy mesh', reflex=True); m.decision_outcome(r['id'], r['answer']); print(m.reflex_retile(advisory_load=0.03), m.route_tiered('smooth a bumpy mesh', reflex=True)['via'])",
+      "method": "reflex_retile",
+      "name": "reflex_retile",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Memory, search & recall"
+    },
+    {
+      "aliases": [
         "re-enable a niche method",
         "route by regime with a fallback",
         "gate a method behind a detector",
@@ -18279,7 +18412,7 @@
         "resolve a capability name",
         "disambiguate a function name",
         "full path of a capability",
-        "which module has this function",
+        "which module has this function meshskin narrows",
         "capability uri for a name"
       ],
       "consumes": [],
@@ -18408,6 +18541,28 @@
       "native": true,
       "produces": [],
       "semantic": "analyze/route",
+      "theme": "Discover & drive it (for agents)"
+    },
+    {
+      "aliases": [
+        "route without rejecting",
+        "did you mean one of these",
+        "answer or offer a menu",
+        "tiered routing",
+        "never a bare no",
+        "which capability did I mean",
+        "clarify which family I mean",
+        "route with options instead of abstain",
+        "why was this request refused"
+      ],
+      "consumes": [],
+      "does": "ROUTE WITHOUT A BARE REJECTION (sweep 176): answer / menu / clarify / refuse instead of yes-or-no. Reuses route_or_abstain's null-referenced z and find_scored's ranking; 'answer' needs z above a floor and no exact tie, 'clarify' fires when the top candidates span two families, 'menu' returns the top-k with scores, 'refuse' only in the gibberish band. Every result carries an id to report an outcome against. Measured on held-out paraphrases (ablated, 3 seeds): the old gate rejected 94.7%; tiered answers 24.9% at 0.833, menus 29.8% holding the answer 83%, refuses 34%; 0 of 7 gibberish answered.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.route_tiered('smooth a bumpy mesh'); print(r['tier'], r['answer'], r['id'], [o['name'] for o in r['options'][:3]])",
+      "method": "route_tiered",
+      "name": "route_tiered",
+      "native": true,
+      "produces": [],
+      "semantic": null,
       "theme": "Discover & drive it (for agents)"
     },
     {
@@ -18544,6 +18699,25 @@
         "sdf_scene"
       ],
       "semantic": "create/scene",
+      "theme": "Geometry, modeling & rendering"
+    },
+    {
+      "aliases": [
+        "compile a whole scene to a shader",
+        "webgl preview of the exact scene",
+        "scene to glsl with part ids",
+        "raymarch the scene in the browser",
+        "make the viewport match the render",
+        "shader for a multi-part sdf scene"
+      ],
+      "consumes": [],
+      "does": "ONE EXACT SCENE, ONE FRAGMENT SHADER (sweep 176): a multi-part SDF scene as a WebGL2 raymarcher -- each part's map() from the engine's own emitter, combined by min, writing the nearest-part id per pixel, rays from the SAME basis Camera.ray_dirs uses, so the preview is the render's geometry. Measured on the 15-part speaker scene: silhouette IoU 0.9852 vs the engine's sphere-trace, part-id agreement 0.9924, every disagreement on an edge; 2 s per frame in a browser vs minutes for the path trace.",
+      "example": "import lecore; from holographic.mesh_and_geometry.holographic_sdf import sphere, box; from holographic.rendering.holographic_render import Camera; m=lecore.UnifiedMind(dim=256,seed=0); sc=m.sdf_scene_shader([('ball', sphere(0.3)), ('slab', box(1,0.05,1).translate((0,-0.4,0)))], camera=Camera(eye=(0,1,3),target=(0,0,0),fov_deg=30,aspect=1.6)); print(sc['names'], 'mapAll' in sc['fragment'], sc['uniforms']['uAspect'])",
+      "method": "sdf_scene_shader",
+      "name": "sdf_scene_shader",
+      "native": true,
+      "produces": [],
+      "semantic": null,
       "theme": "Geometry, modeling & rendering"
     },
     {
@@ -18709,7 +18883,7 @@
         "swarm workspace",
         "shared slots between roles",
         "what did the roles exchange",
-        "blackboard for the swarm",
+        "blackboard for the swarm modeller inspect",
         "shared scene state",
         "role handoff workspace"
       ],
@@ -18743,7 +18917,7 @@
       "aliases": [
         "bind mesh to skeleton",
         "compute skin weights from bones",
-        "automatic skin weights",
+        "automatic skin weights meshskin anchor",
         "rig bind weights",
         "distance based skin binding",
         "skin binding"
@@ -19096,6 +19270,29 @@
     },
     {
       "aliases": [
+        "publish a swarm step with done_when and evidence",
+        "swarm step contract",
+        "worker step message",
+        "run the audits as the evaluator",
+        "hard exit for a swarm run",
+        "step record on the bus",
+        "orchestrate workers with verifiable steps",
+        "validated termination",
+        "verify a step before accepting it",
+        "NOOA style typed result with evidence and a verification command"
+      ],
+      "consumes": [],
+      "does": "THE SWARM STEP CONTRACT (sweep 176): one shape for every message a worker sends -- state, tool, args, done_when, evidence, worker, outcome -- REFUSED without done_when and evidence, because the orchestrator failure the literature names (misclassification that compounds) starts with steps nobody can verify. Each step is a DecisionRecord in the ledger (outcome by id, compare by cosine) and is published on the mind's MessageBus. swarm_evaluate runs the audit suite (reachability_audit, catalog_gaps, skill_lint) as subprocesses and returns all_ok -- the evaluator role and the hard exit.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); s=m.swarm_step('resolve families', 'catalog_families', {'decide': False}, done_when='at least 500 resolve', evidence={'resolved': 501}, worker='w1'); print(s['id'], s['via'], len(m.bus().history('swarm')))",
+      "method": "swarm_step",
+      "name": "swarm_step",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "up down sideways sweep",
         "check a capability in all directions",
         "does this work on components and wholes",
@@ -19110,6 +19307,134 @@
       "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); from holographic.agents_and_reasoning.holographic_ladder import _make_planted_corpus; print(m.sweep_directions(_make_planted_corpus())['complete'])",
       "method": "sweep_directions",
       "name": "sweep_directions",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "learn from unlabeled examples",
+        "semi-supervised typed decision",
+        "absorb unlabeled traffic",
+        "use unlabeled data to improve a classifier",
+        "expectation maximization for naive bayes"
+      ],
+      "consumes": [],
+      "does": "LEARN FROM UNLABELED TRAFFIC, GUARDED (sweep 176): semi-supervised EM over unlabeled states for the nb scorer -- E-step posteriors, M-step recount, no gradient -- on the same cached model the next decision uses. Two measured guards: refused above 10 options (EM collapsed to 0.093 on 77 intents) and kept only if held-out accuracy did not fall. Measured: plain nb on AG News, 32 examples per class plus 600 unlabeled rows, 0.697 -> 0.752, beating the transformed default's 0.713; under the transform the gain vanishes, so this door defaults to nb_transform=False.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); q={'cat':{'type':'choice','options':['billing','shipping'],'examples':{'billing':['card charged twice','refund my invoice fee','charge on my statement','double charge'],'shipping':['parcel lost in transit','courier late','package never arrived','no tracking movement']}}}; print(m.systemone_absorb(['my invoice was charged twice','the courier lost the parcel'], q, 'cat', encoder='ngram', margin=0.0))",
+      "method": "systemone_absorb",
+      "name": "systemone_absorb",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "false discovery rate over a batch of decisions",
+        "control how many wrong accepts in a batch",
+        "benjamini hochberg over decisions",
+        "shuffle null p value for a decision",
+        "bound the batch error of a decision stream"
+      ],
+      "consumes": [],
+      "does": "FALSE-DISCOVERY CONTROL OVER A BATCH OF DECISIONS (sweep 176): one calibrated p per decision cannot bound the error of a thousand-row batch (the Cranmer seat, sweep 172). Each state gets a shuffle-null p-value of its margin against in-vocabulary word salad at matched length, then Benjamini-Hochberg across the batch. Measured on 150 real + 150 noise rows x 3 seeds: BH holds FDR 0.033 at q=0.05 and 0.028 at q=0.10 (real rows accepted 13-20%); the uncorrected gate lets noise through at 0.14 / 0.22; Benjamini-Yekutieli accepts nothing.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); q={'cat':{'type':'choice','options':['billing','shipping'],'examples':{'billing':['card charged twice','refund the invoice','charge on my statement'],'shipping':['parcel lost','courier late','package never came']}}}; print(m.systemone_batch_fdr(['my card was charged twice','courier lost it'], q, 'cat', alpha=0.1, n_null=32, encoder='ngram', scorer='nb'))",
+      "method": "systemone_batch_fdr",
+      "name": "systemone_batch_fdr",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "jev",
+        "system one model",
+        "typed decision with confidence",
+        "encode text with character ngrams",
+        "route a ticket and abstain when unsure",
+        "yes no probability",
+        "classify with calibrated probability",
+        "structured output guaranteed",
+        "abstain when the input matches no option",
+        "off-manifold support floor",
+        "decision api like jev",
+        "sentiment classification from examples",
+        "few-shot text classification with examples",
+        "naive bayes text classifier",
+        "calibrated probability for a classifier",
+        "risk coverage curve accuracy on answered",
+        "classify text into categories from examples",
+        "prediction set with coverage guarantee",
+        "conformal answer set",
+        "which options could it be with 95 percent coverage"
+      ],
+      "consumes": [],
+      "does": "TYPED decisions with honest probabilities (holographic_systemone, the native System One door -- what Jev sells as an API): answer typed questions -- choice, score, noul (yes/no) -- about one state in ONE pass. Schema validated up front so an untyped output is impossible; ties ABSTAIN (value None, why named); p appears only after labeled outcomes calibrate it. Every choice carries ranked evidence and its basis. scorer='nb' (sweeps 174-175): transformed naive Bayes over the same examples, measured 0.843 vs 0.716 on AG News k=300 and 0.798 vs 0.753 on Banking77 (77 intents) k=35.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=512,seed=0); print(m.systemone_decide('card charged twice on my invoice', {'cat': {'type': 'choice', 'options': ['billing','shipping'], 'examples': {'billing': ['invoice charge refund', 'card charged a fee'], 'shipping': ['package tracking courier', 'parcel lost']}}}, scorer='nb', margin=0.05))",
+      "method": "systemone_decide",
+      "name": "systemone_decide",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "Discover & drive it (for agents)"
+    },
+    {
+      "aliases": [
+        "lint a decision schema before asking",
+        "check my examples are balanced",
+        "split a request into clauses",
+        "is this sentence contrastive",
+        "which scorer should I use",
+        "why did my typed decision abstain on everything",
+        "one observation per state"
+      ],
+      "consumes": [],
+      "does": "LINT THE QUESTION BEFORE ASKING IT (sweep 176): checks a typed-decision schema and its states -- example token budgets imbalanced more than 2x (the shortest option owns the smoothing floor: measured 1-3 of 8 tool decisions until balanced, then 8 of 8), options with fewer than 3 examples, the scorer the measured regime table recommends from k, states carrying more than one clause (returned split), and contrastive or negated states to escalate. Every failure the blueprint and 3-D experiments hit is a finding here. Reports; never rewrites.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.systemone_lint({'cat':{'type':'choice','options':['a','b'],'examples':{'a':['x y z']*3,'b':['q']*3}}}, states=['first thing. and then a second thing but not a third'])['findings'])",
+      "method": "systemone_lint",
+      "name": "systemone_lint",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "map a decision over rows",
+        "bulk classify a queue of tickets",
+        "score every row with confidence",
+        "batch triage with abstention",
+        "calibration report brier ece",
+        "fit once decide many"
+      ],
+      "consumes": [],
+      "does": "BATCH typed decisions (holographic_systemone): mind.systemone_map(states, questions, labeled=None) maps one decision schema over many states -- score every row of a table, triage a whole queue -- with row i pinned identical to the single-state call (the batch path can never fork). Fit-once for volume: so = mind.systemone(questions); so.decide_map(...); so.calibrate(labeled) adds honest probabilities; so.calibration_report(held_out) gives accuracy, Brier and ECE -- the reliability numbers a vendor claim needs before trust.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=512,seed=0); print(m.systemone_map(['refund my invoice','parcel is lost'], {'cat': {'type': 'choice', 'options': ['billing','shipping'], 'examples': {'billing': ['invoice charge refund'], 'shipping': ['package tracking courier']}}})[1]['cat']['value'])",
+      "method": "systemone_map",
+      "name": "systemone_map",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
+        "learn from decision outcomes online",
+        "prequential evaluation of decisions",
+        "detect drift in a decision stream",
+        "close the decision loop",
+        "online prototype update from mistakes",
+        "escalate with schema enforced",
+        "continual typed decisions"
+      ],
+      "consumes": [],
+      "does": "CLOSE THE DECISION LOOP (holographic_systemone, sweep 172 -- what a frozen hosted decision model cannot do): systemone_stream(stream, questions, lr) runs prequential test-then-train over [(state,{q:truth}),...] -- decide FIRST (the honest test), then learn via the AdaptHD miss-update; lr=0 is the frozen baseline. Returns prequential accuracy plus a two-channel drift report (label-free support + label-lagged correctness) delegated to the regime machinery. The fitted object also gains decide_or_escalate: a schema-enforced model-end seam.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=512,seed=0); print(m.systemone_stream([('invoice charge',{'cat':'billing'}),('parcel lost',{'cat':'shipping'}),('refund me',{'cat':'billing'})], {'cat': {'type':'choice','options':['billing','shipping'], 'examples': {'billing':['card charged fee'],'shipping':['package courier delivery']}}})['prequential_accuracy'])",
+      "method": "systemone_stream",
+      "name": "systemone_stream",
       "native": true,
       "produces": [],
       "semantic": null,
@@ -19213,6 +19538,26 @@
     },
     {
       "aliases": [
+        "verify the answer matches the input",
+        "is this result valid for this prompt",
+        "bidirectional lookup check",
+        "does experience agree with this answer",
+        "catch an answer that contradicts what we learned",
+        "validate a served result",
+        "check a decision against drift"
+      ],
+      "consumes": [],
+      "does": "IS THIS ANSWER A VALID RESPONSE TO THIS INPUT? (sweep 176) leOS step 4 done holographically: read the experience trace with the STATE and check it cleans up to the answer (forward); read it with the ANSWER atom and check it points back at the state (backward -- the bidirectional lookup); the displacement profile of correct pairs; the seen gate; support against the recent stream (drift). Measured: a seen state served the recorded truth vs a wrong label -- forward and backward AUROC 1.000, verdict valid 0.99 vs 0.00. A verdict against experience, not a confidence; the margin ranks.",
+      "example": "import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.route_tiered('smooth a bumpy mesh'); m.decision_outcome(r['id'], r['answer']); print(m.verify_decision('smooth a bumpy mesh', r['answer'], key='fingerprint')['valid'], m.verify_decision('smooth a bumpy mesh', 'Voxelization', key='fingerprint')['valid'])",
+      "method": "verify_decision",
+      "name": "verify_decision",
+      "native": true,
+      "produces": [],
+      "semantic": null,
+      "theme": "More capabilities"
+    },
+    {
+      "aliases": [
         "reversible move command",
         "undoable vertex move",
         "move command for undo",
@@ -19254,7 +19599,7 @@
         "turbulence noise",
         "flow noise",
         "swirling noise",
-        "marble texture",
+        "marble texture flowing marbled",
         "smoke noise",
         "dfbm",
         "fbm domain warp",
@@ -19374,7 +19719,7 @@
       "theme": "More capabilities"
     }
   ],
-  "count": 855,
+  "count": 871,
   "schema_version": "1.1",
   "scope": "curated capability homes only -- the full live catalog is served at runtime by mind.find_capability / mind.pipeline_map / GET /tools"
 }

@@ -85,13 +85,31 @@ def audit_aliases():
         casualty worth KEEPING, not deleting -- it still expresses intent a future tokenizer could honour. So we
         surface these for a human to read (the backlog's rule: do not auto-fix aliases), and never fail on them.
 
-    Returns {"inert": [(entry, alias)], "redundant": [(entry, alias)]}."""
+      * STOLEN (a note, sweep 173) -- the alias tokenizes fine and is not redundant, yet `find_capability(alias)`
+        ranks ANOTHER entry first. INERT and REDUNDANT are proxies for "can this alias do its job"; this is the
+        ground truth for it, and the two proxies missed all of it: measured on the live catalog, 184 of 8000
+        aliases (2.3%, across 117 entries) route to someone other than their owner -- including 'bind' and
+        'bundle', the two fundamental kernel verbs, which route to the Hypervector datatype card. Split in two so
+        a reader can triage: "specific" = the thief's NAME contains every content word of the alias (a narrower
+        card outranking a broad one -- often the right answer, e.g. 'smooth a mesh' -> the Taubin smoother), and
+        "outright" = it does not (nothing in the thief's name explains the capture). ADVISORY, never a failure:
+        the fix is an alias or a name edit, and the alias-perturbation rule says those are done one at a time
+        with the routing cluster re-run, not auto-applied.
+
+    Returns {"inert": [(entry, alias)], "redundant": [(entry, alias)],
+             "stolen": [(entry, alias, thief, "specific"|"outright")]}."""
     import re
     from holographic.caching_and_storage.holographic_catalog import _tokens
     import holographic.misc.holographic_skills as sk
     _word = re.compile(r"[a-z0-9]+")
     cat = sk._catalog()
-    inert, redundant = [], []
+    # The skills catalog = the 874 CURATED cards + ~782 AUTO-GENERATED module cards whose aliases are single
+    # words lifted from the module name ('dome', 'area', 'light'). Those lose to domain cards by their nature,
+    # so a theft on an auto card is weak evidence; a theft on a curated card is an author's promise broken.
+    # Measured: adding the auto cards changed the top-1 of only 1 of 1748 curated aliases probed.
+    from holographic.caching_and_storage.holographic_catalog import default_catalog
+    curated = set(default_catalog()._by_name)
+    inert, redundant, stolen = [], [], []
     for name, cap in cat._by_name.items():
         name_toks = set(_tokens(name))
         for a in cap.aliases:
@@ -99,6 +117,14 @@ def audit_aliases():
             if not toks:
                 inert.append((name, a))
                 continue
+            # STOLEN: the router itself is the judge -- same scorer, same tie-break the user hits.
+            top = cat.find_capability(a)
+            if top and top[0].name != name:
+                thief = top[0].name
+                kind = "specific" if toks <= set(_tokens(thief)) else "outright"
+                if name not in curated:
+                    kind = "auto-" + kind          # a theft on an auto-generated module card
+                stolen.append((name, a, thief, kind))
             # redundant = nothing NEW survives, and nothing DISTINCTIVE was lost to stopwording (a lost distinctive
             # word means the alias intends to match it -- a casualty, not dead weight, so we do NOT flag it).
             if not (toks - name_toks):
@@ -106,7 +132,7 @@ def audit_aliases():
                 distinctive_lost = {w for w in (raw - name_toks - toks) if len(w) > 2}
                 if not distinctive_lost:
                     redundant.append((name, a))
-    return {"inert": inert, "redundant": redundant}
+    return {"inert": inert, "redundant": redundant, "stolen": stolen}
 
 
 def audit_does_length():
@@ -355,6 +381,18 @@ def report(strict=False):
             print("   %-45s %r" % (entry[:45], alias))
     else:
         print("REDUNDANT (note, --strict to list): %d" % len(al["redundant"]))
+    outright = [s for s in al["stolen"] if s[3] == "outright"]
+    specific = [s for s in al["stolen"] if s[3] == "specific"]
+    auto = [s for s in al["stolen"] if s[3].startswith("auto-")]
+    print("STOLEN (note) -- find_capability(alias) ranks ANOTHER entry first: %d total" % len(al["stolen"]))
+    print("   curated card, OUTRIGHT (nothing in the thief's name explains it -- the actionable list): %d"
+          % len(outright))
+    print("   curated card, captured by a MORE SPECIFIC card (often the right answer): %d" % len(specific))
+    print("   auto-generated module card (weak evidence; --strict to list): %d" % len(auto))
+    for entry, alias, thief, _ in (outright if not strict else outright + specific + auto)[:40 if not strict else None]:
+        print("   %-38s %-28r -> %s" % (entry[:38], alias[:28], thief[:40]))
+    if not strict and len(outright) > 40:
+        print("   ... %d more (--strict lists all)" % (len(outright) - 40))
 
     # -- the CARD CONTRACT: does a card's method= name a door the card itself can reach? ------------
     #    This is the hole that let four cards promise doors that had never existed. It GATES, because
