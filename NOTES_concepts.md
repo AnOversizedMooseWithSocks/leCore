@@ -2899,3 +2899,110 @@ determinism" all returned fallbacks. holographic_codeflow.py (selftest 9 pins) +
 Cards (3, 7/7 phrasings at top-1), tests (+3), TYPED_DECISIONS.md section 8b (live examples), AGENTS.md,
 boot skill step 7. Verification: p27 20 members; pytest workflow file 20 passed; audits 0/0/0/0; docs;
 890 capabilities, 7,287 tests.
+
+## Sweep 176, the natural path (20 Sep 2026) -- the Jev discipline built into the doors agents already use
+
+Moose: make the Jev changes a natural built-in process, intuitive and easy; make the semantic system
+benefit. AUDIT FIRST: mind.route() -- the agents' own suggestion node -- had NO gate ("purple monkey
+dishwasher" -> act at confidence 0.75, because a card's text mentions it); tool_loop/delegate used the
+z=0.8 gate that rejected 98.5% of paraphrases; suggest/orient/agent_loop/serve never saw the reflex,
+the records or the lint. The Jev work was a side door. Now:
+  * route(task) is TIERED by default: act / choose / abstain with tier, z, id, via; the choose branch
+    carries the four-part prompt (goal / return format / constraints / verification) a model can answer;
+    a reported outcome answers the repeat via reflex; tiered=False keeps the old node byte-for-byte.
+  * tool_loop / delegate gate on the tiers. MEASURED TRADE-OFF and the operating point it forced: letting
+    the menu band reach a model that always claims completion raised the no-tool false-action rate from
+    0.00 to 0.25, so the loop does NOT act on a menu -- it returns a `choose` decision with the options and
+    no model call. Then the z sweep on agent_benchmark's no-tool arm vs 150 ablated paraphrases:
+      z_answer  0.8: false actions 0/20 (the arm was BUILT to be refused at 0.8) | ~4% paraphrases acted
+      z_answer  0.1: false actions 3/20, menus 6, refused 11                     | 17.3% at 0.846
+      z_answer -0.1: false actions 5/20, menus 4, refused 11                     | 41.3% at 0.823
+    ACTING NEEDS A HIGHER BAR THAN SUGGESTING: the loop's default is z_min=0.1; route() suggests at -0.1.
+    agent_benchmark now scores the loop's real decision under a tiered gate (answer = action, menu =
+    choose, counted separately as `menus`); above 0.5 it scores the old binary gate exactly.
+    KEPT: a first run scored 60 "ablated paraphrases" through the loop and found nothing changed -- the
+    loop reads the mind's catalog, which was not the ablated one. Invalid measurement, discarded.
+  * find_capability / suggest / serve LEARN FROM USE: after decision_outcome(id, what was used) for a
+    request like this one (the seen gate), the used capability comes first (via='reflex'); until an outcome
+    exists every result is identical (_find_capability_base is the old search). orient and agent_loop
+    inherit it through find_capability.
+  * typed(state, options, examples=None): the one-line front door -- schema built, schema_lint on it and
+    on the state with the findings ATTACHED to the answer, scorer from the regime table, decided, recorded.
+    A bad state comes back abstained with the reasons (2 clauses, contrastive, thin examples).
+Cards: typed (5/5 phrasings); tests +4 (route tiered + old node kept; the semantic doors learn; typed
+lints; the loop returns a menu and refuses gibberish). Verification: 55 agent tests + 24 workflow tests;
+p27 21 members; audits 0/0/0/0; docs; 891 capabilities, 7,291 tests.
+
+## Sweep 176, the MCP pass (20 Sep 2026) -- Blender MCP as the reference, the doors on the protocol
+
+Moose: make sure our MCP is as good as it can be; look at Blender MCP. RESEARCH: ahujasid/blender-mcp (~20
+tools; 92 in the naab007 fork), add-on socket inside Blender + MCP server, execute_blender_code as the
+workhorse (a cookbook's desk lamp: 44 calls, 28 of them code chunks), viewport screenshot as an image block,
+verify by renders read back, tool profiles minimal/standard/full, optional auth token; reviewers' complaint:
+no when-not-to-use guidance, no annotations. MEASURED HERE: holographic_mcp.py exposes 40 tools (21 KB of
+schema) on protocol 2024-11-05 with capabilities = tools only (resources/prompts/completion/logging -> -32601),
+stdio only, 7/40 descriptions with sibling guidance, 0/40 annotations, and lecore_find UN-TIERED -- "purple
+monkey dishwasher" came back as a confident-looking hit. Fixed now:
+  * lecore_find returns {hits, tier, z, id, via, answer, why}; refuse withholds the hits; reflex on.
+  * lecore_decide (typed, lint attached) and lecore_outcome (the outcome path) are curated tools with
+    annotations; proved over JSON-RPC: decide -> outcome -> was_correct, reflex learned.
+  * BUG: the content-addressed memo cache persists on disk and served the OLD lecore_find list after the
+    tool was rewritten. The key is now salted with the server's own source hash.
+  * Contract reconciled: `refused` means DID NOT ACT. tool_loop returns a menu as refused=True with
+    decision='choose' and the options; delegate (autonomous) treats it as a refusal; the model is never
+    consulted for either (the pinned tests). 107 tests green across MCP / agent / workflow files.
+docs/research/BACKLOG_mcp.md: the comparison table and M1-M16 with acceptance rows. Order: annotations +
+profiles + a shorter banner (one lint) -> prompts + resources -> the code and verify doors curated ->
+protocol 2025-06-18 -> HTTP transport -> the studio MCP (the Blender-add-on equivalent) -> progress,
+sampling, images in, registry, an MCP bench, gated asset doors. KEPT: no execute-code escape hatch, by
+decision; lecore_invoke + edit_verified is the measured substitute.
+
+## Sweep 176, the MCP backlog knocked out (20 Sep 2026) -- M1-M16, each with its number
+
+holographic_mcp.py (2,159 -> ~2,900 lines), tools/mcp_lint.py, tests/test_mcp_backlog.py (14 tests, 1 slow),
+server.json. Blender MCP was the reference; the comparison and the status table are in docs/research/BACKLOG_mcp.md.
+  * M1 annotations + sibling guidance as DATA (_annotate_tools): 47/47; the lint budgets description length at
+    the measured values (median 358 / max 756) so growth fails, not the present.
+  * M2 profiles: minimal 8 tools / 5.4 KB, standard 30 / 21 KB, full 47 / 35 KB. M13 banner 1,194 chars leading
+    with the natural path; every tool it names exists (lint).
+  * M3 prompts (decide / review / plan / route) from escalation_prompt, review(), plan_change, route().
+    M4 resources: map, capabilities, decisions/recent, memory/taught, scene/<handle>.
+  * M7 negotiation across 2024-11-05 / 2025-03-26 / 2025-06-18; structuredContent on 2025-* only.
+  * M6 Streamable HTTP (stdlib http.server, threaded) behind POST /mcp with the Service token as Bearer auth:
+    401 without it, proved live on :8765. M5 progress notifications per call with a progressToken, queued and
+    drained (stdio immediate, HTTP into the next _meta) -- partial: per-step progress in long doors and
+    cancellation still open.
+  * M8 THE STUDIO MCP: 8 studio3d_* + 3 studio2d_* tools registered only when the studio answers (the probe
+    waits 10 s: /api/engine_status takes ~6 s cold -- a 2 s probe registered nothing, found live). studio3d_ops
+    runs a JSON sequence under validated termination: 3 ops with a brightness check became swarm steps,
+    render_engine came back as an image block (35 KB), a disallowed op was refused, a failing check stopped
+    the sequence. No arbitrary code -- the op list is the escape hatch.
+  * M9/M10 lecore_plan / lecore_edit / lecore_review / lecore_verify / lecore_analyze curated (a broken edit
+    refused and restored over JSON-RPC). M11 an image content block as an argument is normalised.
+  * M12 sampling: lecore_decide(escalate=true) sends a WEAK or abstained answer (value None, or margin < 0.10
+    and not reflex) to the host's model under the four-part prompt; recorded via model_end; one model call,
+    then the reflex answers the repeat; a host without sampling gets the weak answer labelled escalated=False.
+    First cut escalated only on None and never fired: "zzz qqq" still got billing at margin 0.05.
+  * M14 server.json (pypi leos-core, stdio + streamable-http remote) + README snippets. M15 mcp_lint pins
+    every row. M16 asset_search / asset_fetch (Poly Haven, CC0) gated on api.polyhaven.com -- absent here.
+  BUGS THE PASS FOUND: lecore_find sat in the memo's pure-tool list and served a stale reply after learning
+  (the lint caught the repeat not coming back via reflex) -- removed; the served list now depends on the
+  environment, so the selftest and the lint pin the CORE table and treat studio/asset tools as gated; two
+  tests were slow by construction (three server builds; a review with duplicates/purity/tests on) -- fixed,
+  and the review tool now exposes those flags; the lint is @slow.
+Verification: selftest OK; 42 MCP tests (28 + 14) green incl. the slow lint; doc_coverage within budget.
+
+## Sweep 176, CI fix 2 (20 Sep 2026) -- a quantised fixture, and the clone's version
+
+  * tests/test_ladder_lookbook.py::test_the_z_floor_is_not_a_significance_test pinned "transform" as the
+    barely-clears-0.5 query. A one-word query against a one-token null sits on one of two quantised z values
+    (0.47 / 0.61 measured), and which one depends on the catalog's vocabulary: this sweep added cards with
+    "transform" in their aliases, and CI's optional plugins change the auto-cards -- it cleared locally and not
+    in CI. The test asserts a RELATIONSHIP (its own docstring), so the weak fixture is now FOUND at test time
+    from ten candidates (first that clears 0.5 with z < 2 in this catalog).
+  * lecore.py::_read_version asked importlib.metadata first and reported the PyPI leos-core 0.2.24 a studio
+    app had installed while the clone at 0.2.21 was the code running (the sandbox's only full-suite failure:
+    test_the_reported_engine_version_matches_the_packaged_one). The VERSION file next to lecore.py now wins
+    when it exists -- the clone is what was imported; an installed wheel still reads its metadata.
+  Full suite run in two halves after the fixes (the sandbox reaps a 50-minute job at a turn boundary): 65%
+  in the first run with that one pre-fix failure, the remaining 191 files 2,402 passed / 61 skipped / 0 failed.

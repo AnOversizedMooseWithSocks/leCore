@@ -70,9 +70,18 @@ def test_the_z_floor_is_not_a_significance_test(mind):
     strong = mind.route_or_abstain("smooth a bumpy mesh")
     assert strong["abstain"] is False
 
-    # a query that clears a floor only barely -- the same decision, nothing like the same evidence
-    weak = mind.route_or_abstain("transform", z_min=0.5)
-    assert weak["abstain"] is False, "fixture query no longer clears even a 0.5 floor; pick another"
+    # a query that clears a floor only barely -- the same decision, nothing like the same evidence.
+    # FOUND, NOT PINNED (sweep 176 CI): a one-word query sits on one of two quantised z values against a
+    # one-token null, and which one depends on the catalog's vocabulary -- "transform" cleared 0.5 locally
+    # (z 0.61) and not in CI, whose optional plugins change the auto-cards. The relationship is what the test
+    # asserts, so take the first candidate that barely clears the floor in THIS catalog.
+    weak = None
+    for q in ("transform", "denoise", "interpolate", "encode", "quantize", "compress", "cluster", "rotate", "tile", "bind"):
+        r = mind.route_or_abstain(q, z_min=0.5)
+        if r["abstain"] is False and r["z"] < 2.0:
+            weak = r
+            break
+    assert weak is not None, "no candidate barely clears a 0.5 floor in this catalog; extend the list"
     assert weak["p"] > 0.05, (
         "a query can clear the floor and still be far from significant; if this ever fails the floor really "
         "has become a significance test and the calibration note must change (weak p=%.4f)" % weak["p"])
