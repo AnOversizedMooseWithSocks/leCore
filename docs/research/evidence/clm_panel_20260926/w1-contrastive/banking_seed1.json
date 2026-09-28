@@ -1,0 +1,202 @@
+[
+ {
+  "dataset": "banking",
+  "n_stream": 3000,
+  "noise": 0.0,
+  "encode_s": 12.7,
+  "arms": {
+   "adapthd_miss_only": {
+    "prequential_acc": 0.5927,
+    "test_top1": 0.6974,
+    "auroc_gap": 0.8286,
+    "auroc_ptop_tau0.02": 0.8322,
+    "auroc_clm_tau0.02": 0.8322,
+    "auroc_ptop_tau0.05": 0.8079,
+    "auroc_clm_tau0.05": 0.8079,
+    "test_top1_qbnorm_tau0.05": 0.6666,
+    "test_top1_qbnorm_excl_tau0.05": 0.724,
+    "test_top1_qbnorm_excl_lam0.25": 0.712,
+    "test_top1_qbnorm_excl_lam0.50": 0.7221
+   },
+   "positive_only": {
+    "prequential_acc": 0.7023,
+    "test_top1": 0.7503,
+    "auroc_gap": 0.8347,
+    "auroc_ptop_tau0.02": 0.8414,
+    "auroc_clm_tau0.02": 0.8414,
+    "auroc_ptop_tau0.05": 0.8176,
+    "auroc_clm_tau0.05": 0.8176,
+    "test_top1_qbnorm_tau0.05": 0.6416,
+    "test_top1_qbnorm_excl_tau0.05": 0.7305,
+    "test_top1_qbnorm_excl_lam0.25": 0.7549,
+    "test_top1_qbnorm_excl_lam0.50": 0.7552
+   },
+   "adapthd_lr0.3": {
+    "prequential_acc": 0.668,
+    "test_top1": 0.7377,
+    "auroc_gap": 0.8218,
+    "auroc_ptop_tau0.02": 0.8299,
+    "auroc_clm_tau0.02": 0.8299,
+    "auroc_ptop_tau0.05": 0.8069,
+    "auroc_clm_tau0.05": 0.8069,
+    "test_top1_qbnorm_tau0.05": 0.7088,
+    "test_top1_qbnorm_excl_tau0.05": 0.7594,
+    "test_top1_qbnorm_excl_lam0.25": 0.7484,
+    "test_top1_qbnorm_excl_lam0.50": 0.7545
+   },
+   "infonce_t0.05_lr0.3": {
+    "prequential_acc": 0.7623,
+    "test_top1": 0.8218,
+    "auroc_gap": 0.8773,
+    "auroc_ptop_tau0.02": 0.8824,
+    "auroc_clm_tau0.02": 0.8824,
+    "auroc_ptop_tau0.05": 0.8558,
+    "auroc_clm_tau0.05": 0.8558,
+    "test_top1_qbnorm_tau0.05": 0.7468,
+    "test_top1_qbnorm_excl_tau0.05": 0.8227,
+    "test_top1_qbnorm_excl_lam0.25": 0.8308,
+    "test_top1_qbnorm_excl_lam0.50": 0.8308
+   },
+   "infonce_nc0.1_t0.05_lr0.3": {
+    "prequential_acc": 0.748,
+    "test_top1": 0.8205,
+    "auroc_gap": 0.8707,
+    "auroc_ptop_tau0.02": 0.8759,
+    "auroc_clm_tau0.02": 0.8759,
+    "auroc_ptop_tau0.05": 0.8516,
+    "auroc_clm_tau0.05": 0.8516,
+    "test_top1_qbnorm_tau0.05": 0.7399,
+    "test_top1_qbnorm_excl_tau0.05": 0.8179,
+    "test_top1_qbnorm_excl_lam0.25": 0.8266,
+    "test_top1_qbnorm_excl_lam0.50": 0.825
+   },
+   "staged_k3_t0.05_lr0.3": {
+    "prequential_acc": 0.7623,
+    "test_top1": 0.8218,
+    "auroc_gap": 0.8773,
+    "auroc_ptop_tau0.02": 0.8824,
+    "auroc_clm_tau0.02": 0.8824,
+    "auroc_ptop_tau0.05": 0.8558,
+    "auroc_clm_tau0.05": 0.8558,
+    "test_top1_qbnorm_tau0.05": 0.7468,
+    "test_top1_qbnorm_excl_tau0.05": 0.8227,
+    "test_top1_qbnorm_excl_lam0.25": 0.8308,
+    "test_top1_qbnorm_excl_lam0.50": 0.8308
+   },
+   "annealed_k3_t0.05_lr0.3": {
+    "prequential_acc": 0.757,
+    "test_top1": 0.8214,
+    "auroc_gap": 0.8793,
+    "auroc_ptop_tau0.02": 0.8837,
+    "auroc_clm_tau0.02": 0.8837,
+    "auroc_ptop_tau0.05": 0.859,
+    "auroc_clm_tau0.05": 0.859,
+    "test_top1_qbnorm_tau0.05": 0.7396,
+    "test_top1_qbnorm_excl_tau0.05": 0.8198,
+    "test_top1_qbnorm_excl_lam0.25": 0.8269,
+    "test_top1_qbnorm_excl_lam0.50": 0.8279
+   }
+  },
+  "total_s": 29.7
+ },
+ {
+  "dataset": "banking",
+  "n_stream": 3000,
+  "noise": 0.1,
+  "encode_s": 0.0,
+  "arms": {
+   "adapthd_miss_only": {
+    "prequential_acc": 0.5163,
+    "test_top1": 0.5968,
+    "auroc_gap": 0.794,
+    "auroc_ptop_tau0.02": 0.808,
+    "auroc_clm_tau0.02": 0.808,
+    "auroc_ptop_tau0.05": 0.7941,
+    "auroc_clm_tau0.05": 0.7941,
+    "test_top1_qbnorm_tau0.05": 0.5925,
+    "test_top1_qbnorm_excl_tau0.05": 0.6276,
+    "test_top1_qbnorm_excl_lam0.25": 0.6149,
+    "test_top1_qbnorm_excl_lam0.50": 0.6231
+   },
+   "positive_only": {
+    "prequential_acc": 0.6773,
+    "test_top1": 0.7344,
+    "auroc_gap": 0.8377,
+    "auroc_ptop_tau0.02": 0.8426,
+    "auroc_clm_tau0.02": 0.8426,
+    "auroc_ptop_tau0.05": 0.814,
+    "auroc_clm_tau0.05": 0.814,
+    "test_top1_qbnorm_tau0.05": 0.6351,
+    "test_top1_qbnorm_excl_tau0.05": 0.714,
+    "test_top1_qbnorm_excl_lam0.25": 0.7406,
+    "test_top1_qbnorm_excl_lam0.50": 0.7412
+   },
+   "adapthd_lr0.3": {
+    "prequential_acc": 0.602,
+    "test_top1": 0.6104,
+    "auroc_gap": 0.7915,
+    "auroc_ptop_tau0.02": 0.8011,
+    "auroc_clm_tau0.02": 0.8011,
+    "auroc_ptop_tau0.05": 0.7805,
+    "auroc_clm_tau0.05": 0.7805,
+    "test_top1_qbnorm_tau0.05": 0.5971,
+    "test_top1_qbnorm_excl_tau0.05": 0.6399,
+    "test_top1_qbnorm_excl_lam0.25": 0.6292,
+    "test_top1_qbnorm_excl_lam0.50": 0.6393
+   },
+   "infonce_t0.05_lr0.3": {
+    "prequential_acc": 0.7317,
+    "test_top1": 0.7812,
+    "auroc_gap": 0.85,
+    "auroc_ptop_tau0.02": 0.8587,
+    "auroc_clm_tau0.02": 0.8587,
+    "auroc_ptop_tau0.05": 0.8347,
+    "auroc_clm_tau0.05": 0.8347,
+    "test_top1_qbnorm_tau0.05": 0.7234,
+    "test_top1_qbnorm_excl_tau0.05": 0.7925,
+    "test_top1_qbnorm_excl_lam0.25": 0.7932,
+    "test_top1_qbnorm_excl_lam0.50": 0.7981
+   },
+   "infonce_nc0.1_t0.05_lr0.3": {
+    "prequential_acc": 0.7317,
+    "test_top1": 0.7964,
+    "auroc_gap": 0.8637,
+    "auroc_ptop_tau0.02": 0.8695,
+    "auroc_clm_tau0.02": 0.8695,
+    "auroc_ptop_tau0.05": 0.8445,
+    "auroc_clm_tau0.05": 0.8445,
+    "test_top1_qbnorm_tau0.05": 0.7234,
+    "test_top1_qbnorm_excl_tau0.05": 0.8045,
+    "test_top1_qbnorm_excl_lam0.25": 0.8019,
+    "test_top1_qbnorm_excl_lam0.50": 0.8062
+   },
+   "staged_k3_t0.05_lr0.3": {
+    "prequential_acc": 0.7317,
+    "test_top1": 0.7812,
+    "auroc_gap": 0.85,
+    "auroc_ptop_tau0.02": 0.8587,
+    "auroc_clm_tau0.02": 0.8587,
+    "auroc_ptop_tau0.05": 0.8347,
+    "auroc_clm_tau0.05": 0.8347,
+    "test_top1_qbnorm_tau0.05": 0.7234,
+    "test_top1_qbnorm_excl_tau0.05": 0.7925,
+    "test_top1_qbnorm_excl_lam0.25": 0.7932,
+    "test_top1_qbnorm_excl_lam0.50": 0.7981
+   },
+   "annealed_k3_t0.05_lr0.3": {
+    "prequential_acc": 0.731,
+    "test_top1": 0.788,
+    "auroc_gap": 0.8576,
+    "auroc_ptop_tau0.02": 0.8633,
+    "auroc_clm_tau0.02": 0.8633,
+    "auroc_ptop_tau0.05": 0.8395,
+    "auroc_clm_tau0.05": 0.8395,
+    "test_top1_qbnorm_tau0.05": 0.726,
+    "test_top1_qbnorm_excl_tau0.05": 0.8019,
+    "test_top1_qbnorm_excl_lam0.25": 0.7945,
+    "test_top1_qbnorm_excl_lam0.50": 0.8042
+   }
+  },
+  "total_s": 47.7
+ }
+]

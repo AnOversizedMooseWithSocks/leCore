@@ -1,0 +1,29 @@
+{
+ "dataset": "banking",
+ "n_stream": 3000,
+ "noise": 0.0,
+ "encode_s": 13.6,
+ "arms": {
+  "adapthd_lr0.3": {
+   "prequential_acc": 0.676,
+   "test_top1": 0.7253,
+   "auroc_gap": 0.8386,
+   "auroc_ptop_tau0.02": 0.8442,
+   "auroc_clm_tau0.02": 0.8442,
+   "auroc_ptop_tau0.05": 0.8141,
+   "auroc_clm_tau0.05": 0.8141,
+   "test_top1_qbnorm_tau0.05": 0.7019
+  },
+  "infonce_t0.05_lr0.3": {
+   "prequential_acc": 0.758,
+   "test_top1": 0.8263,
+   "auroc_gap": 0.866,
+   "auroc_ptop_tau0.02": 0.8726,
+   "auroc_clm_tau0.02": 0.8726,
+   "auroc_ptop_tau0.05": 0.8546,
+   "auroc_clm_tau0.05": 0.8546,
+   "test_top1_qbnorm_tau0.05": 0.7659
+  }
+ },
+ "total_s": 17.8
+}

@@ -80,6 +80,12 @@ class _UnifiedPart19:
         souvenir of it."""
         import json
         state = {"tiles": [t.to_state() for t in self.experience.tiles]}
+        # sweep 177: the reflex bridge's label book + seen gate ride along. Without them a loaded trace answers
+        # "no experience yet" (measured: 91,561-byte save, 0 fires in the second mind). Keys go as plain lists,
+        # like the audit floor above; an older loader ignores the extra key.
+        br = self.reflex_bridge_state()
+        state["reflex"] = {"labels": br["labels"], "kinds": br["kinds"], "outcomes": br["outcomes"],
+                           "keys": br["keys"].tolist()}
         with open(path, "w", encoding="utf-8") as f:
             json.dump(state, f)
         return path
@@ -89,16 +95,31 @@ class _UnifiedPart19:
         experience_load and the container loader (one rebuild, two transports)."""
         from holographic.agents_and_reasoning.holographic_lever7 import (
             DisplacementTrace, TiledDisplacementTrace)
-        tt = TiledDisplacementTrace(dim=2048, seed=0)
+        # advisory_load=0.03 -- the SAME tile size the `experience` property builds (sweep 176: readback is flat to
+        # n~50 and falls off a cliff past ~100 in one 2048-d tile). Found by the CLM panel (E1.5 pass): this rebuild
+        # dropped it, so every tile a RELOADED mind split later reverted to the old 0.10 default (split at n=205,
+        # after the cliff) -- a restart silently undid the fix.
+        tt = TiledDisplacementTrace(dim=2048, seed=0, advisory_load=0.03)
         tt.tiles = [DisplacementTrace.from_state(st) for st in state["tiles"]]
         tt._centroids = []
         tt._counts = []
         for t in tt.tiles:
-            ks = np.asarray([k for k, _ in t._audit], float)
+            # centroids are the mean of ORDINARY write keys: a raw correction (E1.5) never moves routing -- the same
+            # rule TiledDisplacementTrace.write_raw and _split use, so live and reloaded routing agree
+            ks = np.asarray([k for k, _, mode in t.audit_entries() if not mode], float)
             tt._centroids.append(ks.mean(axis=0) if len(ks) else np.zeros(t.dim))
             tt._counts.append(len(ks))
+        # The split counter seeds the NEXT split's hyperplane (seed + 104729 + splits). A rebuilt trace started it
+        # at 0, so a reloaded mind split along a different plane than the live one would have (learning-loop audit,
+        # 2026-09-27). Every split adds exactly one tile, so the count is recoverable from the tiles.
+        tt.splits = max(0, len(tt.tiles) - 1)
         self._lever7_trace = tt
-        return {"tiles": len(tt.tiles), "writes": sum(tt._counts)}
+        out = {"tiles": len(tt.tiles), "writes": sum(tt._counts)}
+        # sweep 177: restore the reflex bridge (label book + seen gate) when the state carries it. A state
+        # written before this change has no "reflex" key and loads exactly as before.
+        if state.get("reflex"):
+            out["reflex"] = self.reflex_bridge_restore(state["reflex"])
+        return out
 
     def experience_load(self, path):
         """Rebuild the displacement trace from experience_save() output (bit-identical
@@ -111,24 +132,49 @@ class _UnifiedPart19:
         return self.experience_from_state(state)
     @property
     def tool_usage(self):
-        """The mind's TOOL USAGE TRACE (lazy singleton): successful (task -> tool) pairs held in
-        superposition; predicting tools for a task is one unbind + cleanup over the tool
-        codebook. See holographic_lever7.UsageTrace."""
-        if getattr(self, "_lever7_usage", None) is None:
-            from holographic.agents_and_reasoning.holographic_lever7 import UsageTrace
-            self._lever7_usage = UsageTrace(dim=2048, seed=0)
-        return self._lever7_usage
+        """The mind's tool-usage AUDIT view: .counts (successful uses per tool), .failures (failed uses), .dim (the
+        tool door's key dimension), .note / .predict (= tool_note / tool_predict). E4.4 (CLM backlog, ONE tool
+        learner): this used to be a separate UsageTrace -- a second learner of tool choice that serve() never read.
+        The learner is now the tool door's ProtoStore (holographic_unified_p33_router); this view keeps the audit
+        tallies where callers and tests read them."""
+        # The view lives in its own module: a mixin part holds exactly ONE class (tests/test_unified_split.py -- the
+        # cross-part name-collision check reads only a part's single class). Imported HERE, not at module top, so it
+        # stays off `import lecore`'s required footprint (tests/test_deptrace.py caps the non-part modules at 35).
+        from holographic.agents_and_reasoning.holographic_toolusage import ToolUsageView
+        return ToolUsageView(self)
 
     def tool_note(self, task_vec, tool, success=True):
-        """Record a tool use against its task (only successes strengthen the trace; counts are
-        kept beside it for audit). The learned prefilter for tool selection -- leOS's
-        tool_selection_memory as one bind instead of a JSONL scan."""
-        return self.tool_usage.note(task_vec, tool, success)
+        """Record a JUDGED tool use against its task, in the tool door's ProtoStore (E4.4: the one tool learner): a
+        success pulls the tool's prototype toward task_vec by the shared InfoNCE rule (pushing its close rivals), a
+        failure is a labelled negative (push the tool away). task_vec must be in the door's key space -- build it with
+        mind.tool_key(text). Audit counts are kept beside it. Returns {tool, uses, rows}."""
+        v = np.asarray(task_vec, float).reshape(-1)
+        st = self._tool_store()
+        if v.size != st.dim:
+            raise ValueError("tool_note: task_vec has %d dims, the tool door keys are %d (use mind.tool_key(text))"
+                             % (v.size, st.dim))
+        a = self._tool_audit()
+        a["counts"][tool] = a["counts"].get(tool, 0) + (1 if success else 0)
+        if success:
+            st.update(v, tool)
+        else:
+            a["failures"][tool] = a["failures"].get(tool, 0) + 1
+            if tool in st:
+                st.negative(v, tool)
+        return {"tool": tool, "uses": a["counts"][tool], "rows": len(st)}
 
     def tool_predict(self, task_vec, k=3):
-        """Rank known tools for a task from the usage trace: one unbind + cleanup. Empty trace
-        returns [] -- refusal is a result, and the caller falls through to the full registry."""
-        return self.tool_usage.predict(task_vec, k)
+        """Rank the known tools for a task from the tool door's prototypes (cosine, best first) -> [(tool, score)].
+        An empty door returns [] -- refusal is a result, and the caller falls through to the full registry.
+        task_vec in the door's key space: mind.tool_key(text)."""
+        st = self._tool_store(create=False)
+        if st is None or not len(st):
+            return []
+        v = np.asarray(task_vec, float).reshape(-1)
+        if v.size != st.dim:
+            raise ValueError("tool_predict: task_vec has %d dims, the tool door keys are %d (use mind.tool_key(text))"
+                             % (v.size, st.dim))
+        return st.rank(v, int(k))
 
     def orient(self, topic=None):
         """THE FRONT DOOR (sweep 109 -- the anti-hand-roll compass): one screen that
@@ -174,10 +220,17 @@ class _UnifiedPart19:
         params are fixed arguments; extract_numbers optionally names params to fill
         from the NUMBERS IN THE QUERY, in order -- a declared, deterministic argument
         rule (no LLM guesses arguments; what cannot be extracted honestly is not
-        served). The reflex is stored on the mind AND noted into the usage trace so
-        tool_predict ranks it for similar tasks from day one."""
+        served). The reflex is stored on the mind AND seeds the tool door's prototype
+        (E4.3: the pattern is a labelled example of its tool) so tool_predict ranks it
+        for similar tasks from day one.
+        A CREDENTIAL IN params (an api key, a token) is stored as a ${SERVICE_PARAM} placeholder, never the value
+        (2026-09-27): api_use reads it from os.environ at call time and fails loudly naming the variable when it is
+        unset. The result's `env` lists the variables the reflex needs. (Before this, a reflex with a key in its
+        params was refused by the learning guard on its taught row -- it lived in process memory only, and died.)"""
+        from holographic.io_and_interop.holographic_apilearn import placeholderize, placeholders_in
         if not hasattr(self, "_tool_reflexes"):
             self._tool_reflexes = []
+        params = placeholderize(dict(params or {}), str(service))
         entry = {"pattern": str(pattern), "service": str(service),
                  "endpoint": str(endpoint), "params": dict(params or {}),
                  "extract_numbers": list(extract_numbers or []),
@@ -196,14 +249,19 @@ class _UnifiedPart19:
             _lg = getattr(self.zoo["ladder"], "taught_log", [])
             if _lg and len(_lg[-1]) > 3:
                 _lg[-1] = [_lg[-1][0], _lg[-1][1], _lg[-1][2], "toolreflex"]
+        # E4.3 / E4.4: the pattern seeds (or, for a tool already known, moves) the tool door's prototype -- the ONE
+        # tool learner. It used to be noted into a separate UsageTrace under a semantic_key vector that serve() never
+        # read. The audit counts the seed as one use (the old trace's convention; tests pin it).
+        tool = "%s.%s" % (service, endpoint)
         try:
-            tv = self.semantic_key(str(pattern))["vec"]
-            self.tool_note(tv, "%s.%s" % (service, endpoint), success=True)
+            self._tool_seed(str(pattern), tool)
+            a = self._tool_audit()
+            a["counts"][tool] = a["counts"].get(tool, 0) + 1
         except Exception:
             pass
-        return {"taught": True, "reflexes": len(self._tool_reflexes)}
+        return {"taught": True, "reflexes": len(self._tool_reflexes), "env": placeholders_in(params)}
 
-    def serve(self, query, k=3):
+    def serve(self, query, k=3, verify=None):
         """PREEMPTIVE SERVE (sweep 104 -- the openzoo division of labor, complete): try
         MEMORY first (T0 taught recall); then the USAGE-LEARNED TOOL REFLEX -- when a
         taught tool's pattern shares >= 2 content words with the query, extract the
@@ -211,49 +269,145 @@ class _UnifiedPart19:
         (api_use), and return its live result with provenance 'tool-reflex' and the
         tool named -- NO LLM IN THE LOOP; then ABSTAIN honestly upward ('escalate') so
         the next level (a model, a human, a bigger harness) knows the substrate could
-        not serve this alone. Every successful reflex serve strengthens the usage trace
-        (tool_note), so routing sharpens WITH USE. KEPT NEG: argument extraction is
+        not serve this alone. KEPT NEG: argument extraction is
         deterministic and declared -- a query whose arguments cannot be extracted is
-        escalated, never guessed."""
+        escalated, never guessed.
+        TOOL CALLS ARE DECISIONS (sweep 178): every tool-reflex call -- success OR failure --
+        is a DecisionRecord (via 'tool') whose id comes back as `id`. Pass
+        verify=callable(query, tool, result) -> bool and a call it passes is reported as an
+        outcome (decision_outcome -> reflex_learn + the tool door), and the next similar query
+        picks the judged tool BEFORE word overlap does. Without verify nothing is taught; uses
+        and failures are counted (tool_usage).
+        WHICH TOOL (E4.3, CLM backlog): (1) a near-repeat of a JUDGED question -> the reflex
+        bridge's experience (picked_by 'experience'); (2) once the tool door's ProtoStore has
+        learned from at least one judged call -> its prototype argmax over this mind's tools
+        (picked_by 'proto' when that OVERRIDES the overlap pick; a failed verify is a labelled
+        negative, a reported correction moves both tools); (3) cold start -> the word-overlap
+        pick, exactly as before. A query only
+        reaches a tool at all through (1) or the overlap gate (>= 2 shared words).
+        THE ROUTER (E4.5): a memory miss that no tool reflex takes is ROUTED before it escalates
+        -- a route ANSWER whose gate clears the route door's bar is served as "use capability
+        X" (via 'route', with the route's id, so the outcome can be reported); a menu or a
+        refusal escalates with the menu in the packet. A taught tool reflex that matched keeps
+        priority over the router: it is the owner's own, more specific instruction."""
+        # MAPLE SWARM RUN (2026-09-27): the escalation ledger is what memory cannot answer NOW. A question escalated
+        # once and then taught under ANOTHER wording (or linked by a later verdict on a rewording) serves at T0 the
+        # next time it is asked -- MEASURED, two such questions stayed 'open' after they served. A served answer
+        # therefore closes that question's entry; an escalation still records it (_serve_body).
+        out = self._serve_body(query, k=k, verify=verify)
+        if isinstance(out, dict) and out.get("served"):
+            led = getattr(self, "_escalations", None)
+            if led:
+                led.pop(str(query), None)
+        return out
+
+    def _serve_body(self, query, k=3, verify=None):
+        """The body of serve() (see its docstring); the public door keeps the escalation ledger current."""
         import re
         r = self.ask(str(query))
         if r.get("tier") == "T0" and str(r.get("answer") or "").strip():
-            return {"served": True, "via": "memory", "tier": "T0",
-                    "answer": r.get("answer")}
+            from holographic.agents_and_reasoning.holographic_decisionrecord import door_record, legacy_p
+            out0 = {"served": True, "via": "memory", "tier": "T0", "answer": r.get("answer")}
+            if r.get("via") == "meaning":                   # sweep 181: found by meaning -- say which row, and
+                out0.update(matched_by="meaning", row=r.get("row"), id=r.get("id"), p=legacy_p(r))  # the id to correct it
+                # E0.6: the MeaningIndex's p is isotonic P(correct) -> p_correct (no null on this door)
+                return door_record(out0, "serve-meaning", p_correct=r.get("p_correct", legacy_p(r)), p_null=None)
+            return out0
+        # sweep 181: memory knows HOW (a learned method) or knows it must ASK (a bare value, a known unclear wording)
+        if r.get("tier") == "clarify":
+            return {"served": True, "via": "clarify", "tier": "clarify", "answer": r.get("answer"),
+                    "row": r.get("row")}
+        if r.get("call") and str(r.get("via", "")).startswith("method"):
+            return {"served": r.get("via") != "method-failed", "via": r.get("via"), "tier": "T2",
+                    "answer": r.get("answer"), "call": r.get("call"), "live": r.get("live"), "row": r.get("row"),
+                    "id": r.get("id"), "why": r.get("why")}
         # THE REFLEX BRIDGE (sweep 176): after a memory miss, a request whose ROUTE outcome was reported before
         # is served from experience -- the capability that was actually used -- before the tool reflexes.
         try:
             if getattr(self, "_reflex_labels", None) and getattr(self, "_reflex_seen", None):
                 rf = self.reflex_decide(str(query), key="fingerprint")
                 if rf.get("value"):
-                    return {"served": True, "via": "reflex", "tier": "T1", "capability": rf["value"],
-                            "confidence": rf.get("confidence"), "p": (None if rf.get("error_prob") is None else 1.0 - rf["error_prob"]),
-                            "id": rf.get("id")}
+                    from holographic.agents_and_reasoning.holographic_decisionrecord import door_record
+                    # E0.6: the bridge's calibrated P(correct); the deprecated p keeps the same (old: 1 - error) value
+                    return door_record({"served": True, "via": "reflex", "tier": "T1", "capability": rf["value"],
+                                        "confidence": rf.get("confidence"), "p": rf.get("p_correct"), "id": rf.get("id")},
+                                       "serve-reflex", p_correct=rf.get("p_correct"), p_null=None)
         except Exception:
             pass
         if not getattr(self, "_tool_reflexes", None):
             # lazy rebuild from the durable rows (survives restarts on every rail)
             import json as _json
+            from holographic.io_and_interop.holographic_apilearn import placeholderize
             self._tool_reflexes = []
-            for row in getattr(self.zoo["ladder"], "taught_log", []) or []:
+            _log = getattr(self.zoo["ladder"], "taught_log", []) or []
+            for _i, row in enumerate(_log):
                 if len(row) > 3 and str(row[3]) == "toolreflex":
                     try:
                         spec = _json.loads(str(row[1]))
                     except ValueError:
                         continue
+                    # MIGRATION ON LOAD (2026-09-27): a reflex row written with a raw credential in its params is
+                    # rewritten in place to ${SERVICE_PARAM} placeholders -- the raw text is gone from the next save
+                    _pp = placeholderize(dict(spec.get("params", {}) or {}), str(spec.get("service", "")))
+                    if _pp != spec.get("params", {}):
+                        spec["params"] = _pp
+                        _log[_i] = [row[0], _json.dumps(spec)] + list(row[2:])
                     self._tool_reflexes.append(
                         {"pattern": str(row[0])[len("toolreflex: "):],
                          "service": spec["service"], "endpoint": spec["endpoint"],
                          "params": spec.get("params", {}),
                          "extract_numbers": spec.get("extract_numbers", []),
                          "uses": 0, "hits": 0})
+            # E4.3: a tool the door has no prototype for (a partition written before the tool door, or one whose
+            # door section was lost) is re-seeded from its durable pattern -- text first, like every other rail
+            try:
+                _st = self._tool_store(create=bool(self._tool_reflexes))
+                for e_ in self._tool_reflexes:
+                    t_ = "%s.%s" % (e_["service"], e_["endpoint"])
+                    if _st is not None and t_ not in _st:
+                        self._tool_seed(e_["pattern"], t_)
+            except Exception:
+                pass
         qw = {w for w in re.findall(r"[a-z]{4,}", str(query).lower())}
         best, best_shared = None, 0
-        for e in getattr(self, "_tool_reflexes", []) or []:
+        # JUDGED EXPERIENCE FIRST (sweep 178): if a verified tool call was reported for a query like this one
+        # (ngram key, the reflex's seen gate), that tool is the pick -- word overlap only ranks what has not
+        # been judged. The learned label must name one of THIS mind's tool reflexes, or it is ignored.
+        picked_by = "overlap"
+        exp_conf = None
+        try:
+            if getattr(self, "_reflex_labels", None) and getattr(self, "_reflex_seen", None):
+                rf = self.reflex_decide(str(query), key="ngram")
+                for e in getattr(self, "_tool_reflexes", []) or []:
+                    if rf.get("value") == "%s.%s" % (e["service"], e["endpoint"]):
+                        best, best_shared, picked_by = e, 99, "experience"
+                        exp_conf = rf.get("confidence")
+                        break
+        except Exception:
+            pass
+        for e in (getattr(self, "_tool_reflexes", []) or []) if picked_by == "overlap" else []:
             pw = {w for w in re.findall(r"[a-z]{4,}", e["pattern"].lower())}
             shared = len(qw & pw)
             if shared > best_shared:
                 best, best_shared = e, shared
+        proto_cos = None
+        if picked_by == "overlap" and best is not None and best_shared >= 2:
+            # E4.3: the overlap gate says "this is a tool question"; WHICH tool is the tool door's decision once it
+            # has learned from a judged call (cold start -> None -> the overlap pick stands, bit-identical).
+            try:
+                pick = self._tool_pick(str(query), ["%s.%s" % (e["service"], e["endpoint"])
+                                                     for e in self._tool_reflexes])
+            except Exception:
+                pick = None
+            if pick is not None:
+                cand = next((e for e in self._tool_reflexes if "%s.%s" % (e["service"], e["endpoint"]) == pick[0]),
+                            None)
+                # the door's choice is the pick. When it names the SAME tool the overlap rule would have called (always
+                # so with one tool), nothing was overridden: the record keeps picked_by 'overlap' and its word-overlap
+                # score, so the 'tool:overlap' calibrator keeps its one scale (E0.6). 'proto' marks an OVERRIDE.
+                if cand is not None and "%s.%s" % (cand["service"], cand["endpoint"]) != \
+                        "%s.%s" % (best["service"], best["endpoint"]):
+                    best, picked_by, proto_cos = cand, "proto", pick[1]
         if best is not None and best_shared >= 2:
             params = dict(best["params"])
             if best["extract_numbers"]:
@@ -269,20 +423,76 @@ class _UnifiedPart19:
                     params[name] = val
             out = self.api_use(best["service"], best["endpoint"], params=params)
             best["uses"] += 1
-            if isinstance(out, dict) and out.get("ok"):
+            tool = "%s.%s" % (best["service"], best["endpoint"])
+            ok = isinstance(out, dict) and bool(out.get("ok"))
+            # THE CALL IS A DECISION (sweep 178). Before this, a tool-reflex call left a trace note on success
+            # and NOTHING on failure, and no record anyone could report against -- so the decision trees and
+            # typed decisions, which learn from records, never saw a single tool call.
+            from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord, door_record
+            names = sorted({"%s.%s" % (e["service"], e["endpoint"]) for e in self._tool_reflexes})
+            # E0.6: the tool reflex had no margin and no p. Its SCORE is what picked the tool -- the word overlap
+            # (an integer >= 2) or, for a judged pick, the experience confidence -- two scales, so two door
+            # calibrators ('tool:overlap', 'tool:experience'); p_correct is None until that door has outcomes.
+            # E4.3: a door pick's score is the prototype cosine -- a third scale, a third calibrator ('tool:proto')
+            if picked_by == "experience" and exp_conf is not None:
+                score = float(exp_conf)
+            elif picked_by == "proto" and proto_cos is not None:
+                score = float(proto_cos)
+            else:
+                score = float(best_shared)
+            tdoor = "tool:" + picked_by
+            p_tool = self._door_p(tdoor, score)
+            rec = DecisionRecord(str(query), "tool-reflex", names, tool, "tool", margin=score, p_correct=p_tool,
+                                 meta={"pattern": best["pattern"], "ok": ok, "picked_by": picked_by})
+            # E4.3: a reported outcome on this record (the judge's pass, or a correction naming the right tool) is a
+            # labelled verdict for the tool door -- a live hook; the reflex bridge learns from the same report
+            _q = str(query)
+            self.decision_ledger().add(rec, hook=lambda outcome, _q=_q, _t=tool: self._tool_outcome(_q, _t, outcome),
+                                       hook_key="tooldoor")
+            # E4.4: the audit tallies (successful uses / failed uses) -- NOT learning: an unjudged call teaches
+            # nothing (the old UsageTrace strengthened on every ok call: self-report, sweep 177's trap)
+            _a = self._tool_audit()
+            _a["counts"][tool] = _a["counts"].get(tool, 0) + (1 if ok else 0)
+            if not ok:
+                _a["failures"][tool] = _a["failures"].get(tool, 0) + 1
+            if ok:
                 best["hits"] += 1
-                try:
-                    tv = self.semantic_key(str(query))["vec"]
-                    self.tool_note(tv, "%s.%s" % (best["service"], best["endpoint"]),
-                                   success=True)
-                except Exception:
-                    pass
-                return {"served": True, "via": "tool-reflex",
-                        "tool": "%s.%s" % (best["service"], best["endpoint"]),
-                        "matched_pattern": best["pattern"], "result": out.get("data"),
-                        "uses": best["uses"], "hits": best["hits"]}
-            return {"served": False, "via": "escalate",
-                    "reason": "reflex tool call failed: %s" % str(out)[:120]}
+                verified = None
+                if verify is not None:
+                    try:
+                        verified = bool(verify(str(query), tool, out.get("data")))
+                    except Exception:
+                        verified = False        # a judge that crashes has not passed anything
+                    if verified:
+                        self.decision_outcome(rec.id, tool)
+                    else:
+                        # a JUDGED miss is a calibration label for this door (score, wrong). It is NOT reported as an
+                        # outcome: no truth is known, and a 'failed' outcome would paint the failure field region-wide
+                        # (sweep 178's kept negative) -- the calibrator only needs the number.
+                        self.door_calibrator(tdoor).observe(score, False)
+                        # E4.3: ... and a LABELLED NEGATIVE for the tool door (push this tool away from this question)
+                        try:
+                            self._tool_verdict(str(query), tool, None)
+                        except Exception:
+                            pass
+                    rec.meta["verified"] = verified
+                return door_record({"served": True, "via": "tool-reflex", "tool": tool, "id": rec.id,
+                                    "verified": verified, "picked_by": picked_by, "score": score,
+                                    "matched_pattern": best["pattern"], "result": out.get("data"),
+                                    "uses": best["uses"], "hits": best["hits"]}, "tool", p_correct=p_tool, p_null=None)
+            return door_record({"served": False, "via": "escalate", "id": rec.id, "tool": tool, "score": score,
+                                "reason": "reflex tool call failed: %s" % str(out)[:120]}, "tool",
+                               p_correct=p_tool, p_null=None)
+        # E4.5 -- SERVE ASKS THE ROUTER (the panel's G4: all 20 held-out alias probes escalated because this door never
+        # consulted the catalog router). A route ANSWER that clears the route door's bar is served as "use capability
+        # X"; a menu or a refusal escalates below, with the menu in the packet.
+        route_r = None
+        try:
+            served_r, route_r = self._serve_route(str(query))
+            if served_r is not None:
+                return served_r
+        except Exception:
+            route_r = None
         # ESCALATION LEDGER (sweep 125): every ask the substrate could not serve is
         # recorded so a service swarm can route it to a human and resolve() it back
         # into memory with provenance -- the swarm's honest list of what it does not know.
@@ -291,9 +501,21 @@ class _UnifiedPart19:
                                         "count": 0})
         e["count"] += 1
         self._escalations = led
-        return {"served": False, "via": "escalate",
-                "reason": "no memory hit and no confident tool reflex -- the next "
-                          "level up decides"}
+        out_e = {"served": False, "via": "escalate",
+                 "reason": "no memory hit and no confident tool reflex -- the next "
+                           "level up decides"}
+        # sweep 181: the TYPED escalation packet -- the prompt and the nearest rows -- so the next level up (a model
+        # or person in another process) can answer it and report the verdict with meaning_resolve(query, reply)
+        try:
+            out_e["meaning"] = self.meaning_packet(str(query))
+        except Exception:
+            pass
+        # E4.5: the route the router DID produce rides in the packet -- the menu (or the answer that missed the bar)
+        # and its id, so the next level up can pick a capability and report it with decision_outcome(id, card)
+        if route_r is not None:
+            out_e["route"] = {"tier": route_r.get("tier"), "id": route_r.get("id"), "z": route_r.get("z"),
+                              "options": [o["name"] for o in route_r.get("options", [])]}
+        return out_e
 
     # -- warm-started factoring (E3.1) ------------------------------------------------------------
     def factor_warm(self, composite, context_vec, resonator, solutions, gate=0.55,
@@ -496,6 +718,10 @@ class _UnifiedPart19:
         if te is None:
             from holographic.io_and_interop.holographic_encoders import TextEncoder
             te = self._lever7_text = TextEncoder(dim=2048, seed=0)
+        # sweep 179: redact BEFORE tokenizing -- every token becomes a persisted vocabulary word, so an API key
+        # or seed phrase in live traffic would otherwise be learned verbatim as "new words".
+        from holographic.agents_and_reasoning.holographic_learnguard import redact
+        text = redact(text)
         toks = [w for w in str(text).lower().replace("-", " ").replace("_", " ").split()]
         before = len(te.context)
         if toks:

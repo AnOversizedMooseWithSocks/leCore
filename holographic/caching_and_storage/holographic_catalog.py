@@ -71,9 +71,52 @@ def _strip_filler(text):
     return s
 
 
+#: G2 (backlog, "the router path is slow per mind"): _tokens is a pure function of its text and the SAME texts are
+#: tokenised over and over -- every card's name / does / aliases at construction, again in every catalog's bake, and
+#: once per mind because every UnifiedMind builds its own catalog. MEASURED (tests/test_external_abstention.py under
+#: cProfile, 62 minds): 2.33 M _tokens calls, 17 s of 70 s. A memo keyed by the exact string returns the same words;
+#: it is bounded (cleared whole at _TOKEN_MEMO_MAX distinct strings, so a stream of user queries cannot grow it
+#: without limit) and stores tuples, handing each caller a fresh list, so no caller can edit a shared answer.
+_TOKEN_MEMO = {}
+_TOKEN_MEMO_MAX = 1 << 16
+
+
 def _tokens(text):
     """Lower-cased content words of `text` (drop stop-words and 1-char tokens). Readable and deterministic."""
-    return [w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if w not in _STOP and len(w) > 1]
+    if type(text) is not str:                       # None / odd types: the original expression, unmemoised
+        return [w for w in re.findall(r"[a-z0-9]+", (text or "").lower()) if w not in _STOP and len(w) > 1]
+    hit = _TOKEN_MEMO.get(text)
+    if hit is None:
+        hit = tuple(w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in _STOP and len(w) > 1)
+        if len(_TOKEN_MEMO) >= _TOKEN_MEMO_MAX:
+            _TOKEN_MEMO.clear()
+        _TOKEN_MEMO[text] = hit
+    return list(hit)
+
+
+#: E3.4 (CLM backlog, "cache what is actually slow"): a process-wide counter bumped EVERY time a card's `does`,
+#: `example` or `module` is assigned -- the only three inputs Capability.family() reads (resolved_module() parses
+#: them; the stem->folder map is a pure function of the package tree). Catalog.families() memoises its answer
+#: against this counter, so ANY edit anywhere -- a registration, a plugin card added after construction, a test
+#: that rewrites `.does` in place -- retires the memo without anyone having to remember to invalidate it.
+#: A list (not an int) so the property setter below can bump it without a `global` statement.
+_FAMILY_EPOCH = [0]
+
+
+def _family_input(attr):
+    """A plain data property for one of the fields families() depends on. Reading is an attribute fetch; WRITING
+    also bumps _FAMILY_EPOCH. Why a property and not Capability.__setattr__: a __setattr__ hook would tax every
+    one of the ~15 attribute writes per card (x ~5,000 cards at boot, plus the bake's three per card); a property
+    taxes only these three."""
+    slot = "_" + attr + "_v"
+
+    def _get(self):
+        return getattr(self, slot)
+
+    def _set(self, value):
+        object.__setattr__(self, slot, value)
+        _FAMILY_EPOCH[0] += 1
+    return property(_get, _set, doc="%s (an input of family(); assigning it retires Catalog.families' memo)" % attr)
 
 
 class Capability:
@@ -83,6 +126,11 @@ class Capability:
     `semantic` action path (the File->Export->PNG verb hierarchy -- e.g. 'transform/rotate', 'select/loop'). The
     semantic path is orthogonal to the physical location URI: it groups a capability by what a USER does, not by
     which module the code lives in. Default None -> the capability falls back to its location URI for grouping."""
+
+    # E3.4: the three fields family() is a pure function of -- data properties that bump _FAMILY_EPOCH on write
+    does = _family_input("does")
+    example = _family_input("example")
+    module = _family_input("module")
 
     def __init__(self, name, does, example="", native=True, aliases=(), semantic=None, consumes=(), produces=(),
                  module=None, method=None, polymorphic=False):
@@ -115,6 +163,9 @@ class Capability:
         self._nw = set(_tokens(self.name))
         self._hay = self._nw | set(_tokens(self.does)) | _alias_tokens(self.aliases)
         self._al = tuple(a.lower() for a in self.aliases)
+        # G2: WHICH objects the token sets above were made from -- Catalog._ensure_fc_baked skips a card whose three
+        # fields are still these very objects (nothing to rebuild) and re-tokenises one that was edited since.
+        self._tok_src = (self.name, self.does, self.aliases)
         self.semantic = str(semantic) if semantic else None
         self.module = str(module) if module else None
         # io-shape kinds (S3): what datatype(s) this capability takes / returns, from the closed IO_KINDS vocabulary.
@@ -145,13 +196,24 @@ class Capability:
         stem maps to no folder -- and None is reported, never guessed: catalog_gaps flags it. WHY a
         family: routing to one of 12 families first and then within it lifted held-out capability top-1
         from 0.42 to 0.71 on the cards that resolved (indicative, doc 02 s5); a family is also what the
-        tiered router's 'clarify' tier asks about when the top candidates disagree."""
+        tiered router's 'clarify' tier asks about when the top candidates disagree.
+        G2: memoised per process on (module, does, example) -- the only inputs (the stem->folder map is built once
+        per process anyway); every mind's catalog used to redo the regex + Counter for all ~4,000 cards."""
+        key = (self.module, self.does, self.example)
+        hit = _FAMILY_MEMO.get(key, _MISSING)
+        if hit is not _MISSING:
+            return hit
         stem = self.resolved_module()
         if not stem:
-            return None
-        stem = str(stem).split(".")[0]
-        stem = stem[len("holographic_"):] if stem.startswith("holographic_") else stem
-        return _stem_to_family().get(stem)
+            fam = None
+        else:
+            stem = str(stem).split(".")[0]
+            stem = stem[len("holographic_"):] if stem.startswith("holographic_") else stem
+            fam = _stem_to_family().get(stem)
+        if len(_FAMILY_MEMO) >= _TOKEN_MEMO_MAX:
+            _FAMILY_MEMO.clear()
+        _FAMILY_MEMO[key] = fam
+        return fam
 
     def __repr__(self):
         return "Capability(%r, %s)" % (self.name, "native" if self.native else "python")
@@ -175,18 +237,44 @@ def _stem_to_family():
 
 
 _STEM2FAM = None
+_FAMILY_MEMO = {}                                   # G2: (module, does, example) -> family (see Capability.family)
+_NULL_MEMO = {}                                     # G2: (content hash, null key) -> (mu, sd, null) -- route_or_abstain
+_MISSING = object()
+
+
+def _clone_cap(cap):
+    """A copy of one card that shares nothing mutable with the original's ATTRIBUTES (G2): a fresh object whose
+    __dict__ is a copy, so assigning any field of the copy -- method, consumes, does, the token sets (the bake and
+    routerlearn.loo_candidates REASSIGN them, nothing edits them in place) -- never touches the original. The
+    family-epoch properties are copied as stored values, so cloning does not bump _FAMILY_EPOCH."""
+    new = object.__new__(Capability)
+    new.__dict__.update(cap.__dict__)
+    return new
+
+
+_ALIAS_MEMO = {}                                     # G2: tuple of aliases -> frozenset (bounded like _TOKEN_MEMO)
 
 
 def _alias_tokens(aliases):
     """Every alias contributes BOTH its whole lowercased phrase (so an exact single-token alias still matches)
     and its individual content words. Without the tokenization a multi-word alias is dead weight -- see
-    Catalog.find_capability's docstring for the measurement (55.5% of this repo's aliases were inert)."""
-    out = set()
-    for a in aliases:
-        a = a.lower()
-        out.add(a)
-        out.update(_tokens(a))
-    return out
+    Catalog.find_capability's docstring for the measurement (55.5% of this repo's aliases were inert).
+    (G2: memoised per alias tuple -- a pure function of the strings; each caller gets its own set.)"""
+    key = aliases if type(aliases) is tuple else None
+    hit = _ALIAS_MEMO.get(key) if key is not None else None
+    if hit is None:
+        out = set()
+        for a in aliases:
+            a = a.lower()
+            out.add(a)
+            out.update(_tokens(a))
+        if key is None:
+            return out
+        hit = frozenset(out)
+        if len(_ALIAS_MEMO) >= _TOKEN_MEMO_MAX:
+            _ALIAS_MEMO.clear()
+        _ALIAS_MEMO[key] = hit
+    return set(hit)
 
 
 class Catalog:
@@ -195,6 +283,10 @@ class Catalog:
 
     def __init__(self):
         self._by_name = {}                                           # name -> Capability (insertion order kept)
+        # E3.4: the catalog's CONTENT version -- bumped by register_capability / unregister (a replaced or removed
+        # card changes families() even when no field of a surviving card was written). Together with the global
+        # _FAMILY_EPOCH (field writes) it keys the families() memo.
+        self._version = 0
 
     def register_capability(self, name, does, example="", native=True, aliases=(), semantic=None,
                             consumes=(), produces=(), module=None, method=None, polymorphic=False):
@@ -208,6 +300,7 @@ class Catalog:
                          produces=produces, module=module, method=method or _derive_method(name, example),
                          polymorphic=polymorphic)
         self._by_name[name] = cap
+        self._version = getattr(self, "_version", 0) + 1            # E3.4: retires the families() memo
         return cap
 
     def unregister(self, name):
@@ -225,7 +318,8 @@ class Catalog:
         if name not in self._by_name:
             return False
         del self._by_name[name]
-        for attr in ("_fc_baked", "_fc_vocab", "_fc_hash", "_fc_memo", "_fc_memo_path"):
+        self._version = getattr(self, "_version", 0) + 1            # E3.4: retires the families() memo
+        for attr in ("_fc_baked", "_fc_vocab", "_fc_hash", "_fc_memo", "_fc_memo_path", "_fc_seen"):
             if hasattr(self, attr):
                 delattr(self, attr)
         return True
@@ -248,9 +342,19 @@ class Catalog:
         if hasattr(self, "_fc_baked"):
             return
         for cap in self._by_name.values():
+            # G2: re-tokenise only a card whose name / does / aliases were REASSIGNED since its token sets were made
+            # (construction records the three objects it tokenised in _tok_src). Every card of a fresh catalog is
+            # skipped -- its sets are exactly what this loop would rebuild, from the same strings -- so the result
+            # is unchanged; a card edited in place after construction is rebuilt, as before. MEASURED: this loop
+            # re-tokenised all ~4,000 cards once per mind (0.23 s of the first route, cProfile).
+            d = cap.__dict__
+            src = d.get("_tok_src")
+            if src is not None and src[0] is d.get("name") and src[1] is d.get("_does_v") and src[2] is d.get("aliases"):
+                continue
             cap._nw = set(_tokens(cap.name))
             cap._hay = cap._nw | set(_tokens(cap.does)) | _alias_tokens(cap.aliases)
             cap._al = tuple(a.lower() for a in cap.aliases)
+            cap._tok_src = (cap.name, cap.does, cap.aliases)
         import hashlib as _hl
         blob = "\x1f".join(n + c.does + "\x1e".join(c.aliases)
                            for n, c in sorted(self._by_name.items()))
@@ -262,9 +366,12 @@ class Catalog:
             self._fc_memo = _js.load(open(self._fc_memo_path))
         except Exception:
             self._fc_memo = {}
-        # catalog vocab for the null router, tokenised ONCE per catalog state
-        self._fc_vocab = sorted(set(t for cap in self._by_name.values()
-                                    for t in cap._hay))
+        # catalog vocab for the null router, tokenised ONCE per catalog state (G2: the same set, built by C-level
+        # set unions instead of a Python generator over ~530k tokens -- 70 ms -> a few ms per mind)
+        vocab = set()
+        for cap in self._by_name.values():
+            vocab |= cap._hay
+        self._fc_vocab = sorted(vocab)
         # Disk-warmed null floors. The NULL ARRAY IS PERSISTED TOO, so a warm boot keeps the empirical p.
         #
         # BUG THIS FIXES: the memo used to store [mu, sd] only, on the reasoning that an unavailable p is
@@ -285,6 +392,15 @@ class Catalog:
                     entry = (v[0], v[1], _np.asarray(v[2], float))
                 self._null_floor_cache[(int(tc), int(nn), int(sd_), len(self._by_name))] = entry
         self._fc_baked = True
+        # G2: what the bake saw -- _fc_unchanged() compares against it before a null is shared across catalogs
+        self._fc_seen = (getattr(self, "_version", 0), _FAMILY_EPOCH[0], len(self._by_name))
+
+    def _fc_unchanged(self):
+        """True while nothing was registered, unregistered or edited (does / example / module) since the bake -- i.e.
+        _fc_hash still describes this catalog's content. Conservative: any card edit ANYWHERE in the process since this
+        bake (the global _FAMILY_EPOCH) also reads as a change."""
+        return (hasattr(self, "_fc_hash") and
+                getattr(self, "_fc_seen", None) == (getattr(self, "_version", 0), _FAMILY_EPOCH[0], len(self._by_name)))
 
     def find_capability(self, problem, k=3, accepts=None, produces=None):
         """Return up to `k` capabilities whose description best matches `problem`, best first. The score is the
@@ -397,6 +513,15 @@ class Catalog:
             # the same process cannot raise. p is simply unavailable in that case, never fabricated.
             entry = cache[key]
             mu, sd = entry[0], entry[1]
+        elif self._fc_unchanged() and (self._fc_hash, key) in _NULL_MEMO:
+            # G2: another catalog with the SAME CONTENT already drew this null in this process (every UnifiedMind
+            # builds its own catalog; before this, each one re-ran 64 full-catalog searches per query length unless
+            # the temp-dir memo happened to be readable). The null is a pure function of the content (the vocabulary
+            # and the scorer read only name / does / aliases, which _fc_hash covers), the length, n_null and seed --
+            # shared only while nothing was registered or edited since this catalog's bake (_fc_unchanged), because
+            # _fc_hash is computed AT the bake and a later edit would make it describe the wrong content.
+            entry = cache[key] = _NULL_MEMO[(self._fc_hash, key)]
+            mu, sd = entry[0], entry[1]
         else:
             self._ensure_fc_baked()
             vocab = self._fc_vocab
@@ -408,6 +533,10 @@ class Catalog:
                 null[i] = fs[0][1] if fs else 0.0
             mu, sd = float(null.mean()), float(null.std()) or 1.0
             cache[key] = (mu, sd, null)
+            if self._fc_unchanged():
+                if len(_NULL_MEMO) >= 4096:
+                    _NULL_MEMO.clear()
+                _NULL_MEMO[(self._fc_hash, key)] = cache[key]
             # persist the null array as well, so the empirical p survives a warm boot (see _ensure_fc_baked)
             self._fc_memo["~null|%d|%d|%d" % (len(q_tokens), int(n_null), int(seed))] = [
                 mu, sd, [float(x) for x in null]]
@@ -449,11 +578,16 @@ class Catalog:
         decision over the card's own text chose it CONFIDENTLY (examples = the deterministic cards,
         scorer nb; measured held-out forced accuracy 0.625 vs 0.280 majority, so decisions are taken
         only above `margin` and marked as such), or None with family None -- unresolved, reported,
-        never guessed. decide=False (default) is deterministic only and needs no encoder."""
-        out = {}
-        for c in self.all():
-            f = c.family()
-            out[c.name] = (f, "module" if f else None)
+        never guessed. decide=False (default) is deterministic only and needs no encoder.
+
+        E3.4 -- MEMOISED. The deterministic map is a pure function of every card's (module, does, example) and of
+        which cards exist, and recomputing it (a regex + Counter per card) was 15.2 of route_tiered's 16.7 ms at
+        3,952 cards (CLM panel w3, e02_attrib.json). It is now computed once per catalog CONTENT VERSION: any
+        registration or unregistration (self._version) and any write to a card's does/example/module anywhere in
+        the process (_FAMILY_EPOCH, bumped by the property setters) retires it. Plugins that add cards after
+        construction go through register_capability, so they are covered. A fresh dict is returned each call so a
+        caller that edits the answer cannot poison the memo."""
+        out = dict(self._families_memo())
         if not decide:
             return out
         from holographic.agents_and_reasoning.holographic_systemone import SystemOne, hashed_ngram_encode
@@ -470,7 +604,26 @@ class Catalog:
                 out[c.name] = (v, "decided")
         return out
 
-    def route_tiered(self, problem, k=5, z_answer=-0.1, z_refuse=-0.5, n_null=64, seed=0, clarify=False):
+    def _families_memo(self):
+        """The deterministic {name: (family, 'module'|None)} map, memoised per content version (E3.4). Internal:
+        the returned dict IS the memo -- route_tiered only reads it; families() hands out a copy.
+
+        The key is (catalog version, global field-write epoch, card count). The count is belt and braces: the
+        only writers of _by_name are register_capability and unregister, which both bump the version, but a
+        count mismatch is free to check and catches a hand edit of the dict."""
+        key = (getattr(self, "_version", 0), _FAMILY_EPOCH[0], len(self._by_name))
+        memo = getattr(self, "_fam_memo", None)
+        if memo is not None and memo[0] == key:
+            return memo[1]
+        out = {}
+        for c in self._by_name.values():
+            f = c.family()
+            out[c.name] = (f, "module" if f else None)
+        self._fam_memo = (key, out)
+        return out
+
+    def route_tiered(self, problem, k=5, z_answer=-0.1, z_refuse=-0.5, n_null=64, seed=0, clarify=False,
+                     learned=None, gate_answer=None, gate_signal="margin"):
         """TIERED ROUTING (sweep 176, backlog A1): answer / menu / clarify / refuse -- a rejection is never
         bare. MEASURED WHY: on 200 held-out aliases ablated from the index, route_or_abstain at z_min=0.8
         rejected 98.5% of honest paraphrases although the right card was top-1 for 42-54% and in the top 8
@@ -489,20 +642,46 @@ class Catalog:
           refuse  -- below z_refuse only: the gibberish band.
         Every result carries an `id` (sha256 of the canonical fields) so an outcome can be reported against
         it -- the record every door should return (doc 05). Reuses route_or_abstain's null and z, find_scored's
-        ranking, and families(); default-off everywhere it is not called."""
+        ranking, and families(); default-off everywhere it is not called.
+
+        LEARNED MODE (CLM backlog E4.1; default OFF -- learned=None is the path above, byte for byte): `learned` is a
+        reranker (holographic_routerlearn.RouteLearner: .rerank(problem, ranked), .k) that reorders the lexical top-K by
+        lexical + lam*cos(prototype) + mu*log(1 + verdicts). Options then carry score = the FUSED score plus lexical /
+        cos / verdicts. The answer tier is decided by a GATE re-derived with the E0.4 protocol instead of z plus the
+        tie rule: gate_signal 'margin' (fused top1 - top2), 'z', or 'z+margin', answer when gate >= gate_answer; the
+        refuse floor stays on z (z_refuse). tools/bench_router.py chose the signal and the thresholds on val aliases +
+        CLINC oos half A and reported them on the held-out test aliases + half B."""
         import hashlib as _hl
-        base = self.route_or_abstain(problem, k=max(k, 8), n_null=n_null, z_min=-1e9, seed=seed)
+        base = self.route_or_abstain(problem, k=max(k, 8, int(getattr(learned, "k", 0) or 0)) if learned is not None
+                                     else max(k, 8), n_null=n_null, z_min=-1e9, seed=seed)
         z = float(base["z"])
-        ranked = self.find_scored(problem, k=max(k, 8))
-        fams = self.families()
-        options = [{"name": c.name, "score": float(s), "family": fams.get(c.name, (None, None))[0],
-                    "method": c.method} for c, s in ranked[:k]]
+        # E3.4: REUSE the ranking route_or_abstain already computed. It called find_scored(problem, k=max(k, 8)) --
+        # the identical call this line used to repeat -- and with z_min=-1e9 it never abstains, so the ranking comes
+        # back in `hits` (an empty query returns hits=[], exactly what find_scored returns for no tokens). `refused`
+        # is the fallback only for a z that is somehow below -1e9. Measured: one full-catalog scoring pass saved.
+        ranked = base.get("hits") or base.get("refused") or []
+        # E3.4: the memoised families map (was: recomputed for all 3,952 cards on every route, 15.2 of 16.7 ms)
+        fams = self._families_memo()
+        gate = None
+        if learned is not None:
+            # E4.1: the learner reorders the lexical top-K; each option keeps its lexical score beside the fused one
+            options = [{"name": c.name, "score": float(f), "lexical": float(lx), "cos": float(cs), "verdicts": float(nv),
+                        "family": fams.get(c.name, (None, None))[0], "method": c.method}
+                       for c, f, lx, cs, nv in learned.rerank(problem, ranked)[:k]]
+        else:
+            options = [{"name": c.name, "score": float(s), "family": fams.get(c.name, (None, None))[0],
+                        "method": c.method} for c, s in ranked[:k]]
         top = options[0]["score"] if options else 0.0
         ties = sum(1 for o in options if o["score"] == top) if options else 0
         top_fams = {o["family"] for o in options[:3] if o["family"]}
+        if learned is not None:
+            fz = [o["score"] for o in options]
+            margin = (fz[0] - fz[1]) if len(fz) > 1 else (fz[0] if fz else 0.0)
+            gate = {"margin": margin, "z": z, "z+margin": z + margin}[gate_signal]
+            ga = float(gate_answer) if gate_answer is not None else float("inf")
         if not options or z < z_refuse:
             tier, answer = "refuse", None
-        elif z >= z_answer and ties == 1:
+        elif (learned is not None and gate >= ga) or (learned is None and z >= z_answer and ties == 1):
             tier, answer = "answer", options[0]["name"]
         elif clarify and len(top_fams) >= 2:
             # B3 MEASURED (sweep 176, tranche 4): a family question is WORSE than the menu. On the cases where
@@ -514,8 +693,14 @@ class Catalog:
         else:
             tier, answer = "menu", None
         canon = "%s\x00%s\x00%s" % (problem.strip().lower(), tier, ",".join(o["name"] for o in options))
+        # E0.6 (one meaning of p): base p is the EMPIRICAL NULL p-value of the top score against in-vocabulary word
+        # salad -- LOW means the match is significant. It travels as p_null. p_correct (calibrated P(correct), HIGH
+        # = confident) needs reported outcomes, which the catalog never sees: the mind's route_tiered fills it from
+        # the route door's calibrator. The bare "p" keeps the null p-value one release, deprecated.
+        from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionDict
         rec = {"tier": tier, "answer": answer, "z": z, "score": float(top), "ties": ties,
                "families": sorted(top_fams), "options": options, "p": base.get("p"),
+               "p_null": base.get("p"), "p_correct": None,
                "id": _hl.sha256(canon.encode("utf-8")).hexdigest()[:16],
                "question": ("which of these families did you mean: %s?" % ", ".join(sorted(top_fams)))
                            if tier == "clarify" else None,
@@ -523,7 +708,17 @@ class Catalog:
                           "menu": "z=%.2f is above the refuse floor but not a clear answer; %d option(s), %d exact tie(s)" % (z, len(options), ties),
                           "clarify": "top candidates span %d families" % len(top_fams),
                           "refuse": "z=%.2f is in the gibberish band (< %.2f)" % (z, z_refuse)}[tier]}
-        return rec
+        if learned is not None:
+            # E4.1: the learned record says which gate decided (the lexical record is left exactly as it was)
+            rec["gate"] = float(gate)
+            rec["learned"] = {"signal": gate_signal, "gate_answer": ga, "lam": getattr(learned, "lam", None),
+                              "mu": getattr(learned, "mu", None), "k": getattr(learned, "k", None)}
+            if tier == "answer":
+                rec["reason"] = "the learned gate (%s = %.2f) clears %.2f" % (gate_signal, gate, ga)
+            elif tier in ("menu", "clarify"):
+                rec["reason"] = "the learned gate (%s = %.2f) is below %.2f; %d option(s)" % (gate_signal, gate, ga,
+                                                                                              len(options))
+        return DecisionDict(rec, _door="catalog")
 
 
     def _score_all(self, problem, q, accepts=None, produces=None):
@@ -868,6 +1063,8 @@ def seed_from_mind(catalog, mind):
     for cap in catalog._by_name.values():
         if cap.method and not callable(getattr(mind, cap.method, None)):
             cap.method = None
+    klass = type(mind)
+    inst = getattr(mind, "__dict__", {})
     for name in dir(mind):
         if name.startswith("_"):
             continue
@@ -887,10 +1084,26 @@ def seed_from_mind(catalog, mind):
         # as skills.mind_methods(); measured here as the lean4 bundled plugin's verbs binding
         # correctly, answering invoke() correctly, and being invisible to find_capability.
         attr = getattr(type(mind), name, None)
+        from_class = attr is not None and name not in inst
         if attr is None:
             attr = getattr(mind, name, None)
         if not callable(attr):
             continue
+        # G2 FAST PATH. A faculty that comes from the CLASS (and is not shadowed on this instance) yields the same
+        # card for every mind of that class: its doc, its signature and its derived tag are functions of the class
+        # attribute and of the constant tables below. MEASURED: inspect.signature + getdoc + infer_semantic + the
+        # card's tokenisation were 0.48 s of every mind's first route under cProfile (2,300 faculties). So the card
+        # is built once per (class, name) and CLONED for later minds -- only while the class attribute is the very
+        # same object (a monkeypatched or redefined faculty misses and is rebuilt) and the tables still give the
+        # same inputs. Instance-bound verbs (plugins) always take the slow path.
+        memo_key = (klass, name) if from_class else None
+        if memo_key is not None:
+            hit = _SEED_MEMO.get(memo_key)
+            if (hit is not None and hit[0] is attr and hit[1] == (cons, prod, _SEMANTIC_OVERRIDES.get(name),
+                                                                  _METHOD_ALIASES.get(name, ()))):
+                catalog._by_name[name] = _clone_cap(hit[2])
+                catalog._version = getattr(catalog, "_version", 0) + 1     # exactly what register_capability does
+                continue
         doc = (inspect.getdoc(attr) or "").strip().split("\n")[0][:160]
         # S4.2 SEMANTIC TAG, DERIVED. browse_semantic() omits untagged capabilities, and every one of these
         # auto-registered faculties -- the engine's actual verb surface, the things a user DOES -- arrived with
@@ -914,17 +1127,50 @@ def seed_from_mind(catalog, mind):
             _ex = "mind.%s%s" % (name, _sig)
         except (TypeError, ValueError):
             _ex = "mind.%s(...)" % name
-        catalog.register_capability(name, doc or name, example=_ex, native=True,
-                                    consumes=cons, produces=prod,
-                                    semantic=_SEMANTIC_OVERRIDES.get(name) or infer_semantic(name, doc),
-                                    aliases=_METHOD_ALIASES.get(name, ()))   # D1: bare method-names were dark w/o these
+        cap = catalog.register_capability(name, doc or name, example=_ex, native=True,
+                                          consumes=cons, produces=prod,
+                                          semantic=_SEMANTIC_OVERRIDES.get(name) or infer_semantic(name, doc),
+                                          aliases=_METHOD_ALIASES.get(name, ()))   # D1: bare method-names were dark w/o these
+        if memo_key is not None:
+            # a PRISTINE clone is the template (later passes -- the method check, plugin cards -- edit the live card)
+            if len(_SEED_MEMO) >= _SEED_MEMO_MAX:            # bounded: a process that mints many mind CLASSES
+                _SEED_MEMO.clear()                          # (tests subclass UnifiedMind) cannot grow it forever
+            _SEED_MEMO[memo_key] = (attr, (cons, prod, _SEMANTIC_OVERRIDES.get(name), _METHOD_ALIASES.get(name, ())),
+                                    _clone_cap(cap))
     return catalog
+
+
+# G2: (mind class, faculty name) -> (class attribute, table inputs, pristine card) -- see seed_from_mind's fast path.
+# Bounded by the number of faculties of the classes a process builds minds from (a few thousand entries).
+_SEED_MEMO = {}
+_SEED_MEMO_MAX = 16384                                  # ~7 mind classes' worth of faculties (2,300 each)
+
+
+#: G2: the curated registry is static data (the eight parts register literal strings), yet every UnifiedMind built its
+#: own copy from scratch -- 1,400 register_capability calls, each tokenising its card. MEASURED: 0.15 s per mind under
+#: cProfile, and serve() now routes, so EVERY mind that serves pays it. It is built once per process as a TEMPLATE
+#: that is never handed out; each call returns a clone (fresh Catalog, fresh card objects -- see _clone_cap), so a
+#: caller that registers, unregisters or edits a card changes only its own copy. Same cards, same order, same fields.
+_DEFAULT_TEMPLATE = None
 
 
 def default_catalog():
     """A catalog seeded with the CONSOLIDATION HOMES and the key shipped modules the audits named -- the search
     indices, the caches / bakes, and the field types -- so they are findable TODAY. As each consolidation home
-    (Index, Cache, Field, ...) lands, register it here with native=True."""
+    (Index, Cache, Field, ...) lands, register it here with native=True.
+    (G2: a fresh clone of a once-per-process template -- see _DEFAULT_TEMPLATE; the caller owns what it gets.)"""
+    global _DEFAULT_TEMPLATE
+    if _DEFAULT_TEMPLATE is None:
+        _DEFAULT_TEMPLATE = _build_default_catalog()
+    t = _DEFAULT_TEMPLATE
+    c = Catalog()
+    c._by_name = {name: _clone_cap(cap) for name, cap in t._by_name.items()}
+    c._version = t._version
+    return c
+
+
+def _build_default_catalog():
+    """The registry itself, built from the parts (called once per process by default_catalog)."""
     c = Catalog()
     # Each part's entry point is register_pNN, not a shared `register`: six modules exporting the same
     # public name is a name-collision the budget must not grow to absorb, and the unified split set the
@@ -1031,8 +1277,12 @@ def seed_from_modules(catalog, module_dir=None):
             continue
         # dotted module path relative to the repo root: holographic/rendering/holographic_render.py
         #   -> holographic.rendering.holographic_render
-        rel = os.path.relpath(path, repo_root)
-        dotted = rel[:-3].replace(os.sep, ".")
+        # G2: relpath is a pure function of its two strings and was 39 ms of every mind's catalog (798 calls, cProfile)
+        rd = _RELPATH_MEMO.get((path, repo_root))
+        if rd is None:
+            rel = os.path.relpath(path, repo_root)
+            rd = _RELPATH_MEMO[(path, repo_root)] = (rel, rel[:-3].replace(os.sep, "."))
+        rel, dotted = rd
         # DOCSTRING BAKE. Profiled before building: 581 ast.parse+compile calls were
         # 2.1s of the 2.7s catalog cold start, re-extracting one docstring line per
         # module on EVERY first find_capability of every session. The summary is a
@@ -1051,6 +1301,13 @@ def seed_from_modules(catalog, module_dir=None):
             except Exception:
                 globals()["_docbake"] = {}
             globals()["_docbake_dirty"] = 0
+        # G2: the whole CARD is a pure function of (file identity, dotted path) once the summary is known -- clone it
+        # from the per-process memo instead of re-registering (re-tokenising) ~800 module cards for every mind.
+        hit = _MODULE_CARD_MEMO.get((ck, dotted))
+        if hit is not None:
+            catalog._by_name[base] = _clone_cap(hit)
+            catalog._version = getattr(catalog, "_version", 0) + 1         # exactly what register_capability does
+            continue
         if ck in _docbake:
             summary = _docbake[ck]
         else:
@@ -1070,6 +1327,7 @@ def seed_from_modules(catalog, module_dir=None):
         # exactly this. Null it at the source. None is the honest answer and IS the import-only flag (their
         # item 8) -- you reach a module through `import`, which is what the example already says.
         cap.method = None
+        _MODULE_CARD_MEMO[(ck, dotted)] = _clone_cap(cap)
     if globals().get("_docbake_dirty"):
         try:
             import json as _js
@@ -1078,6 +1336,12 @@ def seed_from_modules(catalog, module_dir=None):
         except Exception:
             pass
     return catalog
+
+
+# G2: ("rel|size|mtime_ns", dotted path) -> pristine module card (see seed_from_modules). A module edited on disk gets
+# a new key (its size / mtime changed), so a stale card is never served.
+_MODULE_CARD_MEMO = {}
+_RELPATH_MEMO = {}                                   # G2: (path, repo root) -> (relative path, dotted module path)
 
 
 def check_catalog_part(part_module, register_fn):

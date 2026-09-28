@@ -571,7 +571,7 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.suggest_pipeline('t
 *Find it by:* how do I get from points to a mesh, chain capabilities, build a pipeline, route between datatypes, what steps turn X into Y
 
 ### systemone_decide
-TYPED decisions with honest probabilities (holographic_systemone, the native System One door -- what Jev sells as an API): answer typed questions -- choice, score, noul (yes/no) -- about one state in ONE pass. Schema validated up front so an untyped output is impossible; ties ABSTAIN (value None, why named); p appears only after labeled outcomes calibrate it. Every choice carries ranked evidence and its basis. scorer='nb' (sweeps 174-175): transformed naive Bayes over the same examples, measured 0.843 vs 0.716 on AG News k=300 and 0.798 vs 0.753 on Banking77 (77 intents) k=35..
+TYPED decisions with honest probabilities (holographic_systemone, the native System One door -- what Jev sells as an API): answer typed questions -- choice, score, noul (yes/no) -- about one state in ONE pass. Schema validated up front so an untyped output is impossible; ties ABSTAIN (value None, why named); p_correct (high = confident) appears only after labeled outcomes calibrate it (bare p: deprecated). scorer='nb' (sweeps 174-175): transformed naive Bayes over the same examples, measured 0.843 vs 0.716 on AG News k=300 and 0.798 vs 0.753 on Banking77 (77 intents) k=35..
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=512,seed=0); print(m.systemone_decide('card charged twice on my invoice', {'cat': {'type': 'choice', 'options': ['billing','shipping'], 'examples': {'billing': ['invoice charge refund', 'card charged a fee'], 'shipping': ['package tracking courier', 'parcel lost']}}}, scorer='nb', margin=0.05))
@@ -849,6 +849,14 @@ point at a FOLDER, a .zip, or a file and digest it into a queryable FILE MAP: fm
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); fm = mind.ingest_files('my_project.zip'); fm.find('*.obj'); fm.search_text('normal map'); fm.tree()
 ```
 *Find it by:* ingest, ingest files, index a folder, digest a folder, read a zip, scan folder, file map, make files queryable
+
+### Find by meaning; learn rewordings and HOW answers are found
+A taught answer is found by what a question MEANS, not only its exact words; an unsure question goes to the attached model as a TYPED choice (same row / new answer + method / unclear), and the verdict is learned at once. Live answers are kept as the METHOD (tool + slots), never the value; a bare value asks back. meaning_resolve applies a verdict from any model or person..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.teach('how do i check my account balance','Open the app, tap Accounts.'); r=list(m.meaning.rows)[0]; m.meaning_resolve('how much money do i have left',{'verdict':'same','row':r}); print(m.ask('How much money do I have left?')['via'])
+```
+*Find it by:* paraphrase recall, find a taught answer when the question is reworded, learn new phrasings, semantic lookup of memory, remember how an answer was found, learn tool calls from the model, ask the user to clarify a bare ticker, resolve an escalation and teach it back
 
 ### Generational memory rollover (every boot gathers all memory into one file)
 mind.learning_rollover(root), default-ON at autoboot mount: consolidate every learning-state file under <root>/learning into ONE fresh state-<UTC>Z.lecore -- full-load the newest, union veto tombstones FIRST (cp54), replay older generations' taught rows (newest teaching wins, question-identity supersede -- gate firing alone false-hits on crosstalk, measured), save, VERIFY, only then delete priors. Read-only dirs and the shipped release_bundle refuse; LECORE_MEMORY_ROLLOVER=0 opts out. KEPT NEG: older generations contribute their durable record; hot structures come from the newest load only..
@@ -1258,7 +1266,7 @@ import lecore; m=lecore.UnifiedMind(); print(m.bm25_rank('smooth bumpy surface',
 *Find it by:* keyword search over text, bm25 lexical ranking, rank documents by term overlap, exact word match retrieval, tf-idf style document ranking, which text matches these keywords
 
 ### decision_outcome
-REPORT AN OUTCOME BY ID -- the one outcome path (sweep 176, backlog G1/G2). Every route_tiered and systemone_decide result carries an id; decision_outcome(id, truth) records what happened and, for a typed decision, forwards to the fitted SystemOne's observe() -- no teach() anywhere; the model is kept per schema so the next call decides from what it learned. Measured: a prequential stream through the doors equals systemone_stream (0.700 = 0.700, 120 AG News rows). Records are HRR-encoded; decision_records() lists them; similar() finds a like decision by cosine..
+REPORT AN OUTCOME BY ID -- the one outcome path (sweep 176). Every route, typed, rank and serve result carries an id, and ids survive a restart once the partition is booted (sweep 182); decision_outcome(id, truth) records what happened, feeds that door's own calibrator and, for a typed decision, forwards to the fitted SystemOne's observe() -- no teach() anywhere. Measured: a prequential stream through the doors equals systemone_stream (0.700 = 0.700, 120 AG News rows). decision_records() lists the records; similar() finds a like decision by cosine..
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); a=m.systemone_decide('parcel lost', {'cat':{'type':'choice','options':['billing','shipping'],'examples':{'billing':['card charged twice','refund the invoice'],'shipping':['courier late','package never came']}}}, scorer='nb', margin=0.0)['cat']; print(m.decision_outcome(a['id'], 'shipping')['was_correct'], m.decision_records()['stats'])
@@ -3821,6 +3829,14 @@ gradient-free learning on the substrate: an RL agent with a value head + drives 
 import lecore; mind=lecore.UnifiedMind(dim=256, seed=0); mind.agent(...); mind.classify(x); mind.reservoir(...)
 ```
 *Find it by:* reinforcement learning, rl agent, train a classifier, classify, policy, npc brain, game ai, reservoir
+
+### Learning guard (never learn secrets or live readings)
+WOULD THIS BE LEARNED? Every learning door refuses SENSITIVE rows (API/private keys, seed phrases, passwords, tokens; no override) and VOLATILE readings (prices, weather, balances, 'right now'), by pattern AND by meaning (a typed decision: credential / live value / unclear / ordinary -- an unclear question such as a bare ticker is asked back, never stored). leak_audit scans every store; learn_guard_example corrects the semantic layer. See holographic_learnguard for the measured numbers..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(m.learn_guard('the admin password', 'hunter2-Moose!')['kind'], m.learn_guard('what is the current price of solana', '$142.10')['kind'], m.learn_guard('sol price as of sept 22 2026 at 15:00', '$142.10')['ok'])
+```
+*Find it by:* do not learn api keys or passwords, never remember a seed phrase or private key, is it safe to teach this, would this be learned, keep secrets out of memory, do not cache a live price or the weather, stale answer from dynamic data, redact credentials before storing
 
 ### Message bus + agent (LLM) bridge
 connect a person AND an agent to the running tool at once, and let the app PUSH to the agent instead of the agent polling: mind.bus() is a message bus (publish/subscribe by topic, mailboxes to pull an inbox, history); mind.run_task('render', fn, background=True) runs a job and publishes 'render.done' with a small summary when it finishes; mind.agent_bridge(llm=my_fn).notify_on('render.done', 'does it look right?') calls YOUR llm (any text->reply callable -- no LLM library is imported, so it's fully optional) and posts the reply on the bus. Over HTTP a remote agent uses /bus/publish + /bus/poll. The LLM is optional; leCore runs with no agent attached..
@@ -6545,6 +6561,13 @@ A ready-made creature body plan -- a quadruped (spine + two mirrored leg pairs +
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); print(len(m.quadruped_spec()['limbs']))
 ```
 
+### rank
+RANK FREE-FORM CANDIDATES AGAINST A STATE (sweep 182): rank(state, candidates) -- strings or {'text', 'examples'} -- returns ONE record: value, ranked (absolute cosine, hashed n-grams), margin, p_correct (high = confident; None until 8 outcomes of both kinds), p_null (low = significant), a conformal set, an id. Under the floor 0.15 it REFUSES (value None). decision_outcome(id, label) trains its prototypes. CLINC150, 150 candidates, 3 seeds: static top-1 0.697 only TIES TF-IDF 0.696 (kept loud); learning from outcomes lifts the last third to 0.892. Warm p50 10.4 ms; cold first call 6.9 s..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.rank('my parcel never arrived', [{'text':'shipping','examples':['parcel lost in transit','package never arrived']},{'text':'billing','examples':['card charged twice','refund my invoice']}]); print(r['value'], round(r['margin'],3), r['p_correct'], r['id'])
+```
+
 ### reconstruct_tower
 expand a climbed ladder TOWER back to its ORIGINAL corpus of base symbols -- the INVERSE of climb_ladder (holographic_ladder.reconstruct). For a sequence-lens tower this is LOSSLESS (reconstruct(climb(corpus)) == corpus exactly); for a structure-lens tower it recovers the SET of base part-types (order and counts dropped by design). A tower you cannot decompress is useless -- this is the decompress half.
 
@@ -6763,7 +6786,7 @@ import lecore; m=lecore.UnifiedMind(dim=256,seed=0); tl=m.timeline(); tl.key('x'
 ```
 
 ### typed
-THE PLAIN FRONT DOOR FOR A TYPED DECISION (sweep 176): mind.typed(state, [options], examples=...) builds the schema, lints it and the state (imbalanced budgets, thin examples, multi-clause or contrastive states), picks the scorer from the measured regime table, decides, and returns ONE answer -- value, ranked, margin, p, set, id -- with the lint attached. decision_outcome(id, truth) teaches the table, the reflex and the calibration. The same discipline runs inside route() (act / choose / abstain), find_capability, suggest and serve, where a reported outcome promotes what was used..
+THE PLAIN FRONT DOOR FOR A TYPED DECISION (sweep 176): mind.typed(state, [options], examples=...) builds the schema, lints it and the state (imbalanced budgets, thin examples, multi-clause or contrastive states), picks the scorer from the measured regime table, decides, and returns ONE answer -- value, ranked, margin, p_correct, p_null, set, id -- with the lint attached. decision_outcome(id, truth) teaches the table, the reflex and the calibration. The same discipline runs inside route() (act / choose / abstain), find_capability, suggest and serve..
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); a=m.typed('courier lost the package', ['billing','shipping'], examples={'billing':['card charged twice','refund my invoice fee','charge on my statement'],'shipping':['parcel lost in transit','courier delivery late','package never arrived']}); print(a['value'], a['lint'], a['id'][:6])
@@ -6774,6 +6797,13 @@ IS THIS ANSWER A VALID RESPONSE TO THIS INPUT? (sweep 176) leOS step 4 done holo
 
 ```python
 import lecore; m=lecore.UnifiedMind(dim=256,seed=0); r=m.route_tiered('smooth a bumpy mesh'); m.decision_outcome(r['id'], r['answer']); print(m.verify_decision('smooth a bumpy mesh', r['answer'], key='fingerprint')['valid'], m.verify_decision('smooth a bumpy mesh', 'Voxelization', key='fingerprint')['valid'])
+```
+
+### verify_precheck
+WHICH ACTION WILL PASS ITS VERIFY? A cheap pre-check, never a verify (sweep 182): verify_precheck(state, actions) scores each action by learned verify SUCCESS minus FAILURE prototypes (swarm_step teaches them from every verified step, failures included) and moves an action only on STRONG evidence (|score| >= 0.5); otherwise the given order stands. The verify still runs on every accepted step. Recorded swarm runs: AUROC 0.951 vs the reflex's 0.924; judge calls 1755 vs 2691 with no reflex. KEPT NEGATIVE: novel tasks 0.545 vs 0.603..
+
+```python
+import lecore; m=lecore.UnifiedMind(dim=256,seed=0); m.swarm_step('resolve families','catalog_families',{'decide':False},done_when='500 resolve',evidence={'resolved':501},worker='w1',verify={'verb':'catalog_families','args':{}}); print(m.verify_precheck('resolve families',['skill_lint','catalog_families'])['order'])
 ```
 
 ### vertex_move_command
@@ -6820,4 +6850,4 @@ from holographic.caching_and_storage.holographic_substrate import write_multicha
 
 ---
 
-*875 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*
+*879 capability homes. Regenerate this file with `python capdoc.py` (it reads the live catalog, so it stays in step with the engine).*

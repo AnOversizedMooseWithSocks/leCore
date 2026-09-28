@@ -1,0 +1,1316 @@
+{
+ "sweep": 181,
+ "harness": "tools/bench_meaning.py",
+ "seed": 0,
+ "PYTHONHASHSEED": 0,
+ "teacher": "scripted stand-in (oracle = dataset labels; noisy:r = wrong verdict with probability r) -- measures the learning loop, not a real model",
+ "baseline_before_sweep": {
+  "clinc_offline_k1": {
+   "correct": 6,
+   "wrong": 0,
+   "of": 4500
+  },
+  "banking_offline_k1": {
+   "correct": 1,
+   "wrong": 0,
+   "of": 3080
+  }
+ },
+ "offline_cold_start": {
+  "clinc": {
+   "dataset": "clinc",
+   "k_taught_per_intent": 1,
+   "intents": 150,
+   "in_scope_test": 4500,
+   "in_scope": {
+    "correct": "68 (1.5%)",
+    "wrong": "2 (0.0%)",
+    "abstain": "4430 (98.4%)",
+    "clarify": "0 (0.0%)"
+   },
+   "out_of_scope_test": 1000,
+   "out_of_scope": {
+    "correct": "0 (0.0%)",
+    "wrong": "1 (0.1%)",
+    "abstain": "999 (99.9%)",
+    "clarify": "0 (0.0%)"
+   },
+   "teach_s": 3.4,
+   "ask_ms_per_q": 1.65
+  },
+  "banking": {
+   "dataset": "banking",
+   "k_taught_per_intent": 1,
+   "intents": 77,
+   "in_scope_test": 3080,
+   "in_scope": {
+    "correct": "35 (1.1%)",
+    "wrong": "2 (0.1%)",
+    "abstain": "3043 (98.8%)",
+    "clarify": "0 (0.0%)"
+   },
+   "out_of_scope_test": 1000,
+   "out_of_scope": {
+    "correct": "0 (0.0%)",
+    "wrong": "0 (0.0%)",
+    "abstain": "1000 (100.0%)",
+    "clarify": "0 (0.0%)"
+   },
+   "teach_s": 0.2,
+   "ask_ms_per_q": 1.93
+  }
+ },
+ "online_default_gate_P_FLOOR_0.95": {
+  "clinc_oracle": {
+   "dataset": "clinc",
+   "model": "oracle",
+   "stream": 14950,
+   "model_wrong_verdicts_given": 0,
+   "per_1000_questions": [
+    {
+     "model_calls": 898,
+     "memory_right": 101,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 745,
+     "memory_right": 251,
+     "memory_WRONG": 4,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 630,
+     "memory_right": 361,
+     "memory_WRONG": 9,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 616,
+     "memory_right": 379,
+     "memory_WRONG": 5,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 596,
+     "memory_right": 397,
+     "memory_WRONG": 7,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 587,
+     "memory_right": 406,
+     "memory_WRONG": 7,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 545,
+     "memory_right": 447,
+     "memory_WRONG": 8,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 552,
+     "memory_right": 437,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 531,
+     "memory_right": 456,
+     "memory_WRONG": 13,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 512,
+     "memory_right": 477,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 474,
+     "memory_right": 514,
+     "memory_WRONG": 12,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 449,
+     "memory_right": 536,
+     "memory_WRONG": 15,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 415,
+     "memory_right": 571,
+     "memory_WRONG": 14,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 437,
+     "memory_right": 548,
+     "memory_WRONG": 15,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 458,
+     "memory_right": 481,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 950
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 4500,
+    "in_scope": {
+     "correct": "2174 (48.3%)",
+     "wrong": "66 (1.5%)",
+     "abstain": "2260 (50.2%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "20 (2.0%)",
+     "abstain": "980 (98.0%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 602,
+    "by_kind": {
+     "answer": 602
+    },
+    "wordings": 8591,
+    "associations": 62154,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "stream_s": 260.1
+  },
+  "banking_oracle": {
+   "dataset": "banking",
+   "model": "oracle",
+   "stream": 9926,
+   "model_wrong_verdicts_given": 0,
+   "per_1000_questions": [
+    {
+     "model_calls": 832,
+     "memory_right": 157,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 785,
+     "memory_right": 207,
+     "memory_WRONG": 8,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 729,
+     "memory_right": 255,
+     "memory_WRONG": 16,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 675,
+     "memory_right": 304,
+     "memory_WRONG": 21,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 649,
+     "memory_right": 323,
+     "memory_WRONG": 28,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 575,
+     "memory_right": 394,
+     "memory_WRONG": 31,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 579,
+     "memory_right": 378,
+     "memory_WRONG": 43,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 560,
+     "memory_right": 403,
+     "memory_WRONG": 37,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 558,
+     "memory_right": 409,
+     "memory_WRONG": 33,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 527,
+     "memory_right": 366,
+     "memory_WRONG": 33,
+     "clarify": 0,
+     "n": 926
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 3080,
+    "in_scope": {
+     "correct": "1146 (37.2%)",
+     "wrong": "64 (2.1%)",
+     "abstain": "1870 (60.7%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "10 (1.0%)",
+     "abstain": "990 (99.0%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 437,
+    "by_kind": {
+     "answer": 437
+    },
+    "wordings": 6546,
+    "associations": 45774,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "stream_s": 228.4
+  },
+  "clinc_noisy_0.1": {
+   "dataset": "clinc",
+   "model": "noisy:0.1",
+   "stream": 14950,
+   "model_wrong_verdicts_given": 1399,
+   "per_1000_questions": [
+    {
+     "model_calls": 954,
+     "memory_right": 45,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 957,
+     "memory_right": 41,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 959,
+     "memory_right": 41,
+     "memory_WRONG": 0,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 896,
+     "memory_right": 104,
+     "memory_WRONG": 0,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 909,
+     "memory_right": 88,
+     "memory_WRONG": 3,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 890,
+     "memory_right": 105,
+     "memory_WRONG": 5,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 854,
+     "memory_right": 144,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 878,
+     "memory_right": 122,
+     "memory_WRONG": 0,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 896,
+     "memory_right": 99,
+     "memory_WRONG": 5,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 916,
+     "memory_right": 81,
+     "memory_WRONG": 3,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 961,
+     "memory_right": 38,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 933,
+     "memory_right": 63,
+     "memory_WRONG": 4,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 931,
+     "memory_right": 68,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 911,
+     "memory_right": 87,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 853,
+     "memory_right": 94,
+     "memory_WRONG": 3,
+     "clarify": 0,
+     "n": 950
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 4500,
+    "in_scope": {
+     "correct": "441 (9.8%)",
+     "wrong": "9 (0.2%)",
+     "abstain": "4050 (90.0%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "1 (0.1%)",
+     "abstain": "999 (99.9%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 622,
+    "by_kind": {
+     "answer": 622
+    },
+    "wordings": 13844,
+    "associations": 81114,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "stream_s": 525.4
+  }
+ },
+ "online_P_FLOOR_0.90": {
+  "clinc_oracle": {
+   "dataset": "clinc",
+   "model": "oracle",
+   "stream": 14950,
+   "model_wrong_verdicts_given": 0,
+   "per_1000_questions": [
+    {
+     "model_calls": 833,
+     "memory_right": 159,
+     "memory_WRONG": 8,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 664,
+     "memory_right": 331,
+     "memory_WRONG": 5,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 567,
+     "memory_right": 420,
+     "memory_WRONG": 13,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 527,
+     "memory_right": 466,
+     "memory_WRONG": 7,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 519,
+     "memory_right": 466,
+     "memory_WRONG": 15,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 451,
+     "memory_right": 528,
+     "memory_WRONG": 21,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 427,
+     "memory_right": 557,
+     "memory_WRONG": 16,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 444,
+     "memory_right": 532,
+     "memory_WRONG": 24,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 427,
+     "memory_right": 545,
+     "memory_WRONG": 28,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 450,
+     "memory_right": 535,
+     "memory_WRONG": 15,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 409,
+     "memory_right": 571,
+     "memory_WRONG": 20,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 428,
+     "memory_right": 554,
+     "memory_WRONG": 18,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 387,
+     "memory_right": 595,
+     "memory_WRONG": 18,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 415,
+     "memory_right": 565,
+     "memory_WRONG": 20,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 373,
+     "memory_right": 563,
+     "memory_WRONG": 14,
+     "clarify": 0,
+     "n": 950
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 4500,
+    "in_scope": {
+     "correct": "2720 (60.4%)",
+     "wrong": "154 (3.4%)",
+     "abstain": "1626 (36.1%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "33 (3.3%)",
+     "abstain": "967 (96.7%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 592,
+    "by_kind": {
+     "answer": 592
+    },
+    "wordings": 7466,
+    "associations": 58670,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "stream_s": 214.6
+  },
+  "banking_oracle": {
+   "dataset": "banking",
+   "model": "oracle",
+   "stream": 9926,
+   "model_wrong_verdicts_given": 0,
+   "per_1000_questions": [
+    {
+     "model_calls": 819,
+     "memory_right": 168,
+     "memory_WRONG": 13,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 733,
+     "memory_right": 251,
+     "memory_WRONG": 16,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 666,
+     "memory_right": 314,
+     "memory_WRONG": 20,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 618,
+     "memory_right": 359,
+     "memory_WRONG": 23,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 606,
+     "memory_right": 358,
+     "memory_WRONG": 36,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 468,
+     "memory_right": 487,
+     "memory_WRONG": 45,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 489,
+     "memory_right": 456,
+     "memory_WRONG": 55,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 458,
+     "memory_right": 492,
+     "memory_WRONG": 50,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 457,
+     "memory_right": 493,
+     "memory_WRONG": 50,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 381,
+     "memory_right": 481,
+     "memory_WRONG": 64,
+     "clarify": 0,
+     "n": 926
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 3080,
+    "in_scope": {
+     "correct": "1838 (59.7%)",
+     "wrong": "210 (6.8%)",
+     "abstain": "1032 (33.5%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "24 (2.4%)",
+     "abstain": "976 (97.6%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 433,
+    "by_kind": {
+     "answer": 433
+    },
+    "wordings": 5772,
+    "associations": 43286,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "stream_s": 195.9
+  },
+  "clinc_noisy_0.1": {
+   "dataset": "clinc",
+   "model": "noisy:0.1",
+   "stream": 14950,
+   "model_wrong_verdicts_given": 1176,
+   "per_1000_questions": [
+    {
+     "model_calls": 915,
+     "memory_right": 83,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 855,
+     "memory_right": 143,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 833,
+     "memory_right": 163,
+     "memory_WRONG": 4,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 759,
+     "memory_right": 239,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 869,
+     "memory_right": 128,
+     "memory_WRONG": 3,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 918,
+     "memory_right": 78,
+     "memory_WRONG": 4,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 862,
+     "memory_right": 135,
+     "memory_WRONG": 3,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 820,
+     "memory_right": 177,
+     "memory_WRONG": 3,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 868,
+     "memory_right": 128,
+     "memory_WRONG": 4,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 848,
+     "memory_right": 149,
+     "memory_WRONG": 3,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 620,
+     "memory_right": 374,
+     "memory_WRONG": 6,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 599,
+     "memory_right": 390,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 615,
+     "memory_right": 376,
+     "memory_WRONG": 9,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 631,
+     "memory_right": 359,
+     "memory_WRONG": 10,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 555,
+     "memory_right": 388,
+     "memory_WRONG": 7,
+     "clarify": 0,
+     "n": 950
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 4500,
+    "in_scope": {
+     "correct": "1792 (39.8%)",
+     "wrong": "60 (1.3%)",
+     "abstain": "2648 (58.8%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "21 (2.1%)",
+     "abstain": "979 (97.9%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 610,
+    "by_kind": {
+     "answer": 610
+    },
+    "wordings": 11710,
+    "associations": 77654,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "stream_s": 398.6
+  },
+  "clinc_noisy_0.2": {
+   "dataset": "clinc",
+   "model": "noisy:0.2",
+   "stream": 14950,
+   "model_wrong_verdicts_given": 2962,
+   "per_1000_questions": [
+    {
+     "model_calls": 989,
+     "memory_right": 11,
+     "memory_WRONG": 0,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 976,
+     "memory_right": 23,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 993,
+     "memory_right": 6,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 993,
+     "memory_right": 6,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 965,
+     "memory_right": 34,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 976,
+     "memory_right": 22,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 976,
+     "memory_right": 23,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 1000,
+     "memory_right": 0,
+     "memory_WRONG": 0,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 988,
+     "memory_right": 11,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 981,
+     "memory_right": 16,
+     "memory_WRONG": 3,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 981,
+     "memory_right": 19,
+     "memory_WRONG": 0,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 977,
+     "memory_right": 21,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 957,
+     "memory_right": 42,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 928,
+     "memory_right": 72,
+     "memory_WRONG": 0,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 888,
+     "memory_right": 60,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 950
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 4500,
+    "in_scope": {
+     "correct": "230 (5.1%)",
+     "wrong": "9 (0.2%)",
+     "abstain": "4261 (94.7%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "1 (0.1%)",
+     "abstain": "999 (99.9%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 610,
+    "by_kind": {
+     "answer": 610
+    },
+    "wordings": 14714,
+    "associations": 90134,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "stream_s": 572.8
+  }
+ },
+ "online_P_FLOOR_0.75": {
+  "note": "clinc/banking oracle raw output was overwritten by the 0.90 run; values transcribed from the run log. The noisy runs predate the near-miss guard.",
+  "clinc_oracle_after": {
+   "correct": "2746 (61.0%)",
+   "wrong": "152 (3.4%)",
+   "oos_wrong": "37 (3.7%)"
+  },
+  "banking_oracle_after": {
+   "correct": "1991 (64.6%)",
+   "wrong": "265 (8.6%)",
+   "oos_wrong": "41 (4.1%)"
+  },
+  "clinc_noisy_0.1": {
+   "dataset": "clinc",
+   "model": "noisy:0.1",
+   "stream": 14950,
+   "model_wrong_verdicts_given": 568,
+   "per_1000_questions": [
+    {
+     "model_calls": 716,
+     "memory_right": 254,
+     "memory_WRONG": 30,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 560,
+     "memory_right": 421,
+     "memory_WRONG": 19,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 429,
+     "memory_right": 527,
+     "memory_WRONG": 44,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 391,
+     "memory_right": 577,
+     "memory_WRONG": 32,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 384,
+     "memory_right": 583,
+     "memory_WRONG": 33,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 322,
+     "memory_right": 629,
+     "memory_WRONG": 49,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 354,
+     "memory_right": 607,
+     "memory_WRONG": 39,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 356,
+     "memory_right": 605,
+     "memory_WRONG": 39,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 354,
+     "memory_right": 603,
+     "memory_WRONG": 43,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 341,
+     "memory_right": 618,
+     "memory_WRONG": 41,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 300,
+     "memory_right": 656,
+     "memory_WRONG": 44,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 304,
+     "memory_right": 666,
+     "memory_WRONG": 30,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 290,
+     "memory_right": 672,
+     "memory_WRONG": 38,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 304,
+     "memory_right": 641,
+     "memory_WRONG": 55,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 304,
+     "memory_right": 614,
+     "memory_WRONG": 32,
+     "clarify": 0,
+     "n": 950
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 4500,
+    "in_scope": {
+     "correct": "2872 (63.8%)",
+     "wrong": "242 (5.4%)",
+     "abstain": "1386 (30.8%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "87 (8.7%)",
+     "abstain": "913 (91.3%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 592,
+    "by_kind": {
+     "answer": 592
+    },
+    "wordings": 5853,
+    "associations": 56858,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "stream_s": 159.6
+  },
+  "clinc_noisy_0.2": {
+   "dataset": "clinc",
+   "model": "noisy:0.2",
+   "stream": 14950,
+   "model_wrong_verdicts_given": 1538,
+   "per_1000_questions": [
+    {
+     "model_calls": 774,
+     "memory_right": 201,
+     "memory_WRONG": 25,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 693,
+     "memory_right": 287,
+     "memory_WRONG": 20,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 648,
+     "memory_right": 330,
+     "memory_WRONG": 22,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 516,
+     "memory_right": 466,
+     "memory_WRONG": 18,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 489,
+     "memory_right": 486,
+     "memory_WRONG": 25,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 511,
+     "memory_right": 465,
+     "memory_WRONG": 24,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 419,
+     "memory_right": 551,
+     "memory_WRONG": 30,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 470,
+     "memory_right": 505,
+     "memory_WRONG": 25,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 482,
+     "memory_right": 493,
+     "memory_WRONG": 25,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 437,
+     "memory_right": 542,
+     "memory_WRONG": 21,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 441,
+     "memory_right": 538,
+     "memory_WRONG": 21,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 425,
+     "memory_right": 549,
+     "memory_WRONG": 26,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 383,
+     "memory_right": 594,
+     "memory_WRONG": 23,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 455,
+     "memory_right": 523,
+     "memory_WRONG": 22,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 498,
+     "memory_right": 436,
+     "memory_WRONG": 16,
+     "clarify": 0,
+     "n": 950
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 4500,
+    "in_scope": {
+     "correct": "2287 (50.8%)",
+     "wrong": "128 (2.8%)",
+     "abstain": "2085 (46.3%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "41 (4.1%)",
+     "abstain": "959 (95.9%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 595,
+    "by_kind": {
+     "answer": 595
+    },
+    "wordings": 7787,
+    "associations": 70984,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "stream_s": 224.1
+  }
+ },
+ "methods_default_gate": {
+  "stream": 959,
+  "model_calls_in_stream": 691,
+  "crypto": {
+   "right_call": 11,
+   "WRONG_call": 0,
+   "clarified": 0,
+   "escalated": 9,
+   "stale": 0,
+   "n": 20,
+   "unclear_n": 6,
+   "unclear_clarified": 6,
+   "unclear_ACTED": 0
+  },
+  "exchange": {
+   "right_call": 16,
+   "WRONG_call": 1,
+   "clarified": 0,
+   "escalated": 9,
+   "stale": 0,
+   "n": 26,
+   "unclear_n": 0,
+   "unclear_clarified": 0,
+   "unclear_ACTED": 0
+  },
+  "weather": {
+   "right_call": 9,
+   "WRONG_call": 0,
+   "clarified": 0,
+   "escalated": 21,
+   "stale": 0,
+   "n": 30,
+   "unclear_n": 0,
+   "unclear_clarified": 0,
+   "unclear_ACTED": 0
+  },
+  "meaning": {
+   "rows": 242,
+   "by_kind": {
+    "answer": 227,
+    "method": 13,
+    "clarify": 2
+   },
+   "slot_values": 44
+  }
+ }
+}

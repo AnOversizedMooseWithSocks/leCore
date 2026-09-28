@@ -1,0 +1,1078 @@
+{
+ "about": "bench_core_memory.py -- what does the CORE MEMORY buy a fresh mind? (2026-09-27, owner-directed)",
+ "bundles": {
+  "b_old_bundle": "/tmp/claude-0/-home-claude/9ee53278-d85f-54b0-979e-17c930fe54e2/scratchpad/seedcheck/release_bundle_before",
+  "c_rows_only": "/tmp/claude-0/-home-claude/9ee53278-d85f-54b0-979e-17c930fe54e2/scratchpad/release_bundle_rows_only_20260927",
+  "d_extended": "/home/claude/leCore/release_bundle"
+ },
+ "command": "PYTHONHASHSEED=0 python3 tools/bench_core_memory.py --data DATA --record",
+ "domains": {
+  "banking": {
+   "arms": {
+    "L_extended": {
+     "distilled": {
+      "artifacts": {
+       "negatives": {
+        "carried": 50,
+        "excluded": {
+         "row not carried": 8
+        }
+       },
+       "sops": {
+        "carried": 0,
+        "excluded": {
+         "the seedpack installs it": 1
+        }
+       },
+       "wordings": {
+        "carried": 245,
+        "excluded": {}
+       }
+      },
+      "excluded_rows": {
+       "open-item": 1,
+       "provisional-provenance": 52
+      },
+      "promoted": 10,
+      "shipped_rows": 29
+     },
+     "first_contact_memory_alone": {
+      "WRONG": 0,
+      "abstain": 792,
+      "clarify": 0,
+      "correct": 8,
+      "model_calls_per_1000": 990.0,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 121,
+       "memory_WRONG": 10,
+       "memory_correct": 264,
+       "model_calls": 524,
+       "model_calls_per_1000": 655.0,
+       "n": 800,
+       "oos_served_WRONG": 2
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 151,
+       "memory_WRONG": 16,
+       "memory_correct": 263,
+       "model_calls": 519,
+       "model_calls_per_1000": 648.8,
+       "n": 800,
+       "oos_served_WRONG": 2
+      }
+     ],
+     "online_memory_WRONG_mean": 13.0,
+     "online_model_calls_per_1000_mean": 651.9,
+     "online_oos_served_WRONG_mean": 2.0,
+     "s": 14.9
+    },
+    "L_extended_cal": {
+     "distilled": {
+      "artifacts": {
+       "negatives": {
+        "carried": 50,
+        "excluded": {
+         "row not carried": 8
+        }
+       },
+       "sops": {
+        "carried": 0,
+        "excluded": {
+         "the seedpack installs it": 1
+        }
+       },
+       "wordings": {
+        "carried": 245,
+        "excluded": {}
+       }
+      },
+      "excluded_rows": {
+       "open-item": 1,
+       "provisional-provenance": 52
+      },
+      "promoted": 10,
+      "shipped_rows": 29
+     },
+     "first_contact_memory_alone": {
+      "WRONG": 11,
+      "abstain": 549,
+      "clarify": 0,
+      "correct": 240,
+      "model_calls_per_1000": 686.2,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 146,
+       "memory_WRONG": 5,
+       "memory_correct": 235,
+       "model_calls": 558,
+       "model_calls_per_1000": 697.5,
+       "n": 800,
+       "oos_served_WRONG": 2
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 145,
+       "memory_WRONG": 10,
+       "memory_correct": 224,
+       "model_calls": 564,
+       "model_calls_per_1000": 705.0,
+       "n": 800,
+       "oos_served_WRONG": 2
+      }
+     ],
+     "online_memory_WRONG_mean": 7.5,
+     "online_model_calls_per_1000_mean": 701.2,
+     "online_oos_served_WRONG_mean": 2.0,
+     "s": 16.4
+    },
+    "L_learner_no_restart": {
+     "first_contact_memory_alone": {
+      "WRONG": 8,
+      "abstain": 555,
+      "clarify": 0,
+      "correct": 237,
+      "model_calls_per_1000": 693.8,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 147,
+       "memory_WRONG": 13,
+       "memory_correct": 260,
+       "model_calls": 525,
+       "model_calls_per_1000": 656.2,
+       "n": 800,
+       "oos_served_WRONG": 2
+      }
+     ],
+     "online_model_calls_per_1000_mean": 656.2
+    },
+    "L_rows_only": {
+     "distilled": {
+      "artifacts": {},
+      "excluded_rows": {
+       "open-item": 1,
+       "provisional-provenance": 52
+      },
+      "promoted": 10,
+      "shipped_rows": 29
+     },
+     "first_contact_memory_alone": {
+      "WRONG": 1,
+      "abstain": 787,
+      "clarify": 0,
+      "correct": 12,
+      "model_calls_per_1000": 983.8,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 163,
+       "memory_WRONG": 11,
+       "memory_correct": 234,
+       "model_calls": 555,
+       "model_calls_per_1000": 693.8,
+       "n": 800,
+       "oos_served_WRONG": 0
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 175,
+       "memory_WRONG": 5,
+       "memory_correct": 166,
+       "model_calls": 629,
+       "model_calls_per_1000": 786.2,
+       "n": 800,
+       "oos_served_WRONG": 0
+      }
+     ],
+     "online_memory_WRONG_mean": 8.0,
+     "online_model_calls_per_1000_mean": 740.0,
+     "online_oos_served_WRONG_mean": 0.0,
+     "s": 13.5
+    },
+    "a_nothing": {
+     "first_contact_memory_alone": {
+      "WRONG": 0,
+      "abstain": 800,
+      "clarify": 0,
+      "correct": 0,
+      "model_calls_per_1000": 1000.0,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 163,
+       "memory_WRONG": 20,
+       "memory_correct": 238,
+       "model_calls": 542,
+       "model_calls_per_1000": 677.5,
+       "n": 800,
+       "oos_served_WRONG": 0
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 189,
+       "memory_WRONG": 13,
+       "memory_correct": 201,
+       "model_calls": 585,
+       "model_calls_per_1000": 731.2,
+       "n": 800,
+       "oos_served_WRONG": 1
+      }
+     ],
+     "online_memory_WRONG_mean": 16.5,
+     "online_model_calls_per_1000_mean": 704.4,
+     "online_oos_served_WRONG_mean": 0.5,
+     "s": 13.5
+    },
+    "b_old_bundle": {
+     "first_contact_memory_alone": {
+      "WRONG": 0,
+      "abstain": 800,
+      "clarify": 0,
+      "correct": 0,
+      "model_calls_per_1000": 1000.0,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 166,
+       "memory_WRONG": 13,
+       "memory_correct": 197,
+       "model_calls": 588,
+       "model_calls_per_1000": 735.0,
+       "n": 800,
+       "oos_served_WRONG": 2
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 189,
+       "memory_WRONG": 12,
+       "memory_correct": 170,
+       "model_calls": 617,
+       "model_calls_per_1000": 771.2,
+       "n": 800,
+       "oos_served_WRONG": 1
+      }
+     ],
+     "online_memory_WRONG_mean": 12.5,
+     "online_model_calls_per_1000_mean": 753.1,
+     "online_oos_served_WRONG_mean": 1.5,
+     "s": 28.1
+    },
+    "c_rows_only": {
+     "first_contact_memory_alone": {
+      "WRONG": 0,
+      "abstain": 800,
+      "clarify": 0,
+      "correct": 0,
+      "model_calls_per_1000": 1000.0,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 165,
+       "memory_WRONG": 17,
+       "memory_correct": 233,
+       "model_calls": 549,
+       "model_calls_per_1000": 686.2,
+       "n": 800,
+       "oos_served_WRONG": 1
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 191,
+       "memory_WRONG": 11,
+       "memory_correct": 183,
+       "model_calls": 605,
+       "model_calls_per_1000": 756.2,
+       "n": 800,
+       "oos_served_WRONG": 1
+      }
+     ],
+     "online_memory_WRONG_mean": 14.0,
+     "online_model_calls_per_1000_mean": 721.2,
+     "online_oos_served_WRONG_mean": 1.0,
+     "s": 16.4
+    },
+    "d_extended": {
+     "first_contact_memory_alone": {
+      "WRONG": 0,
+      "abstain": 800,
+      "clarify": 0,
+      "correct": 0,
+      "model_calls_per_1000": 1000.0,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 165,
+       "memory_WRONG": 17,
+       "memory_correct": 232,
+       "model_calls": 550,
+       "model_calls_per_1000": 687.5,
+       "n": 800,
+       "oos_served_WRONG": 1
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 191,
+       "memory_WRONG": 11,
+       "memory_correct": 183,
+       "model_calls": 605,
+       "model_calls_per_1000": 756.2,
+       "n": 800,
+       "oos_served_WRONG": 1
+      }
+     ],
+     "online_memory_WRONG_mean": 14.0,
+     "online_model_calls_per_1000_mean": 721.9,
+     "online_oos_served_WRONG_mean": 1.0,
+     "s": 16.5
+    }
+   },
+   "held_out": 800,
+   "intents": 20,
+   "learner": {
+    "clarify": 0,
+    "first_200_model_calls": 152,
+    "memory_WRONG": 8,
+    "memory_correct": 112,
+    "model_calls": 280,
+    "model_calls_per_1000": 700.0,
+    "n": 400,
+    "oos_served_WRONG": 0
+   },
+   "learner_stream": 400,
+   "learner_stream_s": 2.8
+  },
+  "clinc": {
+   "arms": {
+    "L_extended": {
+     "distilled": {
+      "artifacts": {
+       "negatives": {
+        "carried": 85,
+        "excluded": {
+         "row not carried": 19
+        }
+       },
+       "sops": {
+        "carried": 0,
+        "excluded": {
+         "the seedpack installs it": 1
+        }
+       },
+       "wordings": {
+        "carried": 430,
+        "excluded": {}
+       }
+      },
+      "excluded_rows": {
+       "history": 1,
+       "provisional-provenance": 66
+      },
+      "promoted": 30,
+      "shipped_rows": 69
+     },
+     "first_contact_memory_alone": {
+      "WRONG": 0,
+      "abstain": 776,
+      "clarify": 0,
+      "correct": 24,
+      "model_calls_per_1000": 970.0,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 146,
+       "memory_WRONG": 3,
+       "memory_correct": 299,
+       "model_calls": 497,
+       "model_calls_per_1000": 621.2,
+       "n": 800,
+       "oos_served_WRONG": 1
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 135,
+       "memory_WRONG": 2,
+       "memory_correct": 283,
+       "model_calls": 513,
+       "model_calls_per_1000": 641.2,
+       "n": 800,
+       "oos_served_WRONG": 2
+      }
+     ],
+     "online_memory_WRONG_mean": 2.5,
+     "online_model_calls_per_1000_mean": 631.2,
+     "online_oos_served_WRONG_mean": 1.5,
+     "s": 14.6
+    },
+    "L_extended_cal": {
+     "distilled": {
+      "artifacts": {
+       "negatives": {
+        "carried": 85,
+        "excluded": {
+         "row not carried": 19
+        }
+       },
+       "sops": {
+        "carried": 0,
+        "excluded": {
+         "the seedpack installs it": 1
+        }
+       },
+       "wordings": {
+        "carried": 430,
+        "excluded": {}
+       }
+      },
+      "excluded_rows": {
+       "history": 1,
+       "provisional-provenance": 66
+      },
+      "promoted": 30,
+      "shipped_rows": 69
+     },
+     "first_contact_memory_alone": {
+      "WRONG": 7,
+      "abstain": 479,
+      "clarify": 0,
+      "correct": 308,
+      "model_calls_per_1000": 598.8,
+      "oos_served_WRONG": 6
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 120,
+       "memory_WRONG": 5,
+       "memory_correct": 342,
+       "model_calls": 449,
+       "model_calls_per_1000": 561.2,
+       "n": 800,
+       "oos_served_WRONG": 4
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 113,
+       "memory_WRONG": 5,
+       "memory_correct": 334,
+       "model_calls": 456,
+       "model_calls_per_1000": 570.0,
+       "n": 800,
+       "oos_served_WRONG": 5
+      }
+     ],
+     "online_memory_WRONG_mean": 5.0,
+     "online_model_calls_per_1000_mean": 565.6,
+     "online_oos_served_WRONG_mean": 4.5,
+     "s": 14.8
+    },
+    "L_learner_no_restart": {
+     "first_contact_memory_alone": {
+      "WRONG": 8,
+      "abstain": 474,
+      "clarify": 0,
+      "correct": 312,
+      "model_calls_per_1000": 592.5,
+      "oos_served_WRONG": 6
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 113,
+       "memory_WRONG": 6,
+       "memory_correct": 343,
+       "model_calls": 447,
+       "model_calls_per_1000": 558.8,
+       "n": 800,
+       "oos_served_WRONG": 4
+      }
+     ],
+     "online_model_calls_per_1000_mean": 558.8
+    },
+    "L_rows_only": {
+     "distilled": {
+      "artifacts": {},
+      "excluded_rows": {
+       "history": 1,
+       "provisional-provenance": 66
+      },
+      "promoted": 30,
+      "shipped_rows": 69
+     },
+     "first_contact_memory_alone": {
+      "WRONG": 0,
+      "abstain": 781,
+      "clarify": 0,
+      "correct": 19,
+      "model_calls_per_1000": 976.2,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 154,
+       "memory_WRONG": 5,
+       "memory_correct": 250,
+       "model_calls": 541,
+       "model_calls_per_1000": 676.2,
+       "n": 800,
+       "oos_served_WRONG": 4
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 159,
+       "memory_WRONG": 1,
+       "memory_correct": 259,
+       "model_calls": 537,
+       "model_calls_per_1000": 671.2,
+       "n": 800,
+       "oos_served_WRONG": 3
+      }
+     ],
+     "online_memory_WRONG_mean": 3.0,
+     "online_model_calls_per_1000_mean": 673.7,
+     "online_oos_served_WRONG_mean": 3.5,
+     "s": 12.4
+    },
+    "a_nothing": {
+     "first_contact_memory_alone": {
+      "WRONG": 0,
+      "abstain": 800,
+      "clarify": 0,
+      "correct": 0,
+      "model_calls_per_1000": 1000.0,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 172,
+       "memory_WRONG": 7,
+       "memory_correct": 224,
+       "model_calls": 567,
+       "model_calls_per_1000": 708.8,
+       "n": 800,
+       "oos_served_WRONG": 2
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 175,
+       "memory_WRONG": 0,
+       "memory_correct": 189,
+       "model_calls": 610,
+       "model_calls_per_1000": 762.5,
+       "n": 800,
+       "oos_served_WRONG": 1
+      }
+     ],
+     "online_memory_WRONG_mean": 3.5,
+     "online_model_calls_per_1000_mean": 735.6,
+     "online_oos_served_WRONG_mean": 1.5,
+     "s": 12.0
+    },
+    "b_old_bundle": {
+     "first_contact_memory_alone": {
+      "WRONG": 0,
+      "abstain": 800,
+      "clarify": 0,
+      "correct": 0,
+      "model_calls_per_1000": 1000.0,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 174,
+       "memory_WRONG": 2,
+       "memory_correct": 173,
+       "model_calls": 621,
+       "model_calls_per_1000": 776.2,
+       "n": 800,
+       "oos_served_WRONG": 4
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 172,
+       "memory_WRONG": 4,
+       "memory_correct": 194,
+       "model_calls": 598,
+       "model_calls_per_1000": 747.5,
+       "n": 800,
+       "oos_served_WRONG": 4
+      }
+     ],
+     "online_memory_WRONG_mean": 3.0,
+     "online_model_calls_per_1000_mean": 761.9,
+     "online_oos_served_WRONG_mean": 4.0,
+     "s": 28.6
+    },
+    "c_rows_only": {
+     "first_contact_memory_alone": {
+      "WRONG": 0,
+      "abstain": 800,
+      "clarify": 0,
+      "correct": 0,
+      "model_calls_per_1000": 1000.0,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 168,
+       "memory_WRONG": 8,
+       "memory_correct": 200,
+       "model_calls": 590,
+       "model_calls_per_1000": 737.5,
+       "n": 800,
+       "oos_served_WRONG": 2
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 172,
+       "memory_WRONG": 2,
+       "memory_correct": 226,
+       "model_calls": 570,
+       "model_calls_per_1000": 712.5,
+       "n": 800,
+       "oos_served_WRONG": 2
+      }
+     ],
+     "online_memory_WRONG_mean": 5.0,
+     "online_model_calls_per_1000_mean": 725.0,
+     "online_oos_served_WRONG_mean": 2.0,
+     "s": 16.5
+    },
+    "d_extended": {
+     "first_contact_memory_alone": {
+      "WRONG": 0,
+      "abstain": 800,
+      "clarify": 0,
+      "correct": 0,
+      "model_calls_per_1000": 1000.0,
+      "oos_served_WRONG": 0
+     },
+     "online": [
+      {
+       "clarify": 0,
+       "first_200_model_calls": 168,
+       "memory_WRONG": 8,
+       "memory_correct": 199,
+       "model_calls": 591,
+       "model_calls_per_1000": 738.8,
+       "n": 800,
+       "oos_served_WRONG": 2
+      },
+      {
+       "clarify": 0,
+       "first_200_model_calls": 173,
+       "memory_WRONG": 2,
+       "memory_correct": 221,
+       "model_calls": 575,
+       "model_calls_per_1000": 718.8,
+       "n": 800,
+       "oos_served_WRONG": 2
+      }
+     ],
+     "online_memory_WRONG_mean": 5.0,
+     "online_model_calls_per_1000_mean": 728.8,
+     "online_oos_served_WRONG_mean": 2.0,
+     "s": 16.7
+    }
+   },
+   "held_out": 800,
+   "intents": 40,
+   "learner": {
+    "clarify": 0,
+    "first_200_model_calls": 156,
+    "memory_WRONG": 1,
+    "memory_correct": 407,
+    "model_calls": 490,
+    "model_calls_per_1000": 544.4,
+    "n": 900,
+    "oos_served_WRONG": 2
+   },
+   "learner_stream": 900,
+   "learner_stream_s": 5.7
+  },
+  "methods": {
+   "arms": {
+    "L_extended": {
+     "WRONG_call": 0,
+     "clarified": 0,
+     "distilled": {
+      "artifacts": {
+       "direction": {
+        "carried": 1,
+        "excluded": {}
+       },
+       "methods": {
+        "carried": 7,
+        "excluded": {
+         "unconfirmed (one model verdict)": 2
+        }
+       },
+       "negatives": {
+        "carried": 14,
+        "excluded": {
+         "row not carried": 2
+        }
+       },
+       "sops": {
+        "carried": 0,
+        "excluded": {
+         "the seedpack installs it": 1
+        }
+       },
+       "wordings": {
+        "carried": 172,
+        "excluded": {}
+       }
+      },
+      "shipped_rows": 15
+     },
+     "escalated_or_model": 70,
+     "model_calls": 112,
+     "model_calls_per_1000": 861.5,
+     "n": 130,
+     "right_call": 9,
+     "stale": 0,
+     "unclear_ACTED": 0,
+     "unclear_clarified": 6,
+     "unclear_n": 6
+    },
+    "L_extended_cal": {
+     "WRONG_call": 0,
+     "clarified": 0,
+     "distilled": {
+      "artifacts": {
+       "direction": {
+        "carried": 1,
+        "excluded": {}
+       },
+       "methods": {
+        "carried": 7,
+        "excluded": {
+         "unconfirmed (one model verdict)": 2
+        }
+       },
+       "negatives": {
+        "carried": 14,
+        "excluded": {
+         "row not carried": 2
+        }
+       },
+       "sops": {
+        "carried": 0,
+        "excluded": {
+         "the seedpack installs it": 1
+        }
+       },
+       "wordings": {
+        "carried": 172,
+        "excluded": {}
+       }
+      },
+      "shipped_rows": 15
+     },
+     "escalated_or_model": 47,
+     "model_calls": 73,
+     "model_calls_per_1000": 561.5,
+     "n": 130,
+     "right_call": 32,
+     "stale": 0,
+     "unclear_ACTED": 0,
+     "unclear_clarified": 6,
+     "unclear_n": 6
+    },
+    "L_learner_no_restart": {
+     "WRONG_call": 2,
+     "clarified": 1,
+     "escalated_or_model": 49,
+     "model_calls": 75,
+     "model_calls_per_1000": 576.9,
+     "n": 130,
+     "right_call": 27,
+     "stale": 0,
+     "unclear_ACTED": 0,
+     "unclear_clarified": 6,
+     "unclear_n": 6
+    },
+    "L_rows_only": {
+     "WRONG_call": 0,
+     "clarified": 0,
+     "distilled": {
+      "artifacts": {},
+      "shipped_rows": 15
+     },
+     "escalated_or_model": 65,
+     "model_calls": 105,
+     "model_calls_per_1000": 807.7,
+     "n": 130,
+     "right_call": 14,
+     "stale": 0,
+     "unclear_ACTED": 0,
+     "unclear_clarified": 6,
+     "unclear_n": 6
+    },
+    "a_nothing": {
+     "WRONG_call": 0,
+     "clarified": 0,
+     "escalated_or_model": 67,
+     "model_calls": 108,
+     "model_calls_per_1000": 830.8,
+     "n": 130,
+     "right_call": 12,
+     "stale": 0,
+     "unclear_ACTED": 0,
+     "unclear_clarified": 6,
+     "unclear_n": 6
+    },
+    "b_old_bundle": {
+     "WRONG_call": 0,
+     "clarified": 0,
+     "escalated_or_model": 69,
+     "model_calls": 114,
+     "model_calls_per_1000": 876.9,
+     "n": 130,
+     "right_call": 10,
+     "stale": 0,
+     "unclear_ACTED": 0,
+     "unclear_clarified": 6,
+     "unclear_n": 6
+    },
+    "c_rows_only": {
+     "WRONG_call": 0,
+     "clarified": 0,
+     "escalated_or_model": 72,
+     "model_calls": 115,
+     "model_calls_per_1000": 884.6,
+     "n": 130,
+     "right_call": 7,
+     "stale": 0,
+     "unclear_ACTED": 0,
+     "unclear_clarified": 6,
+     "unclear_n": 6
+    },
+    "d_extended": {
+     "WRONG_call": 0,
+     "clarified": 0,
+     "escalated_or_model": 72,
+     "model_calls": 115,
+     "model_calls_per_1000": 884.6,
+     "n": 130,
+     "right_call": 7,
+     "stale": 0,
+     "unclear_ACTED": 0,
+     "unclear_clarified": 6,
+     "unclear_n": 6
+    }
+   },
+   "held_out": 130,
+   "learner": {
+    "WRONG_call": 3,
+    "clarified": 0,
+    "escalated_or_model": 152,
+    "model_calls": 185,
+    "model_calls_per_1000": 692.9,
+    "n": 267,
+    "right_call": 61,
+    "stale": 0,
+    "unclear_ACTED": 0,
+    "unclear_clarified": 6,
+    "unclear_n": 6
+   },
+   "learner_stream": 267
+  },
+  "tools": {
+   "arms": {
+    "L_extended": {
+     "WRONG_tool": 2,
+     "called_without_auth": 0,
+     "distilled": {
+      "artifacts": {
+       "api_cards": {
+        "carried": 3,
+        "excluded": {}
+       },
+       "apis": {
+        "carried": 1,
+        "excluded": {}
+       },
+       "protostores": {
+        "carried": 1,
+        "excluded": {}
+       },
+       "reflexes": {
+        "carried": 3,
+        "excluded": {}
+       },
+       "sops": {
+        "carried": 0,
+        "excluded": {
+         "the seedpack installs it": 1
+        }
+       }
+      },
+      "env": [
+       "TOYAIR_API_KEY"
+      ],
+      "fake_key_in_bundle_bytes": false,
+      "fake_key_in_bundle_text": false
+     },
+     "escalated": 2,
+     "failed_loudly_missing_env": 0,
+     "model_calls_per_1000": 133.3,
+     "n": 15,
+     "right_tool": 11,
+     "right_zone": 13,
+     "served_tool": 13
+    },
+    "L_extended_ENV_UNSET": {
+     "WRONG_tool": 0,
+     "called_without_auth": 0,
+     "distilled": {
+      "artifacts": {
+       "api_cards": {
+        "carried": 3,
+        "excluded": {}
+       },
+       "apis": {
+        "carried": 1,
+        "excluded": {}
+       },
+       "protostores": {
+        "carried": 1,
+        "excluded": {}
+       },
+       "reflexes": {
+        "carried": 3,
+        "excluded": {}
+       },
+       "sops": {
+        "carried": 0,
+        "excluded": {
+         "the seedpack installs it": 1
+        }
+       }
+      },
+      "env": [
+       "TOYAIR_API_KEY"
+      ],
+      "fake_key_in_bundle_bytes": false,
+      "fake_key_in_bundle_text": false
+     },
+     "escalated": 15,
+     "failed_loudly_missing_env": 13,
+     "model_calls_per_1000": 1000.0,
+     "n": 15,
+     "right_tool": 0,
+     "right_zone": 0,
+     "served_tool": 0
+    },
+    "L_learner_no_restart": {
+     "WRONG_tool": 2,
+     "called_without_auth": 0,
+     "escalated": 2,
+     "failed_loudly_missing_env": 0,
+     "model_calls_per_1000": 133.3,
+     "n": 15,
+     "right_tool": 11,
+     "right_zone": 13,
+     "served_tool": 13
+    },
+    "L_rows_only": {
+     "WRONG_tool": 0,
+     "called_without_auth": 0,
+     "distilled": {
+      "artifacts": {},
+      "env": [],
+      "fake_key_in_bundle_bytes": false,
+      "fake_key_in_bundle_text": false
+     },
+     "escalated": 15,
+     "failed_loudly_missing_env": 0,
+     "model_calls_per_1000": 1000.0,
+     "n": 15,
+     "right_tool": 0,
+     "right_zone": 0,
+     "served_tool": 0
+    },
+    "a_nothing": {
+     "WRONG_tool": 0,
+     "called_without_auth": 0,
+     "escalated": 15,
+     "failed_loudly_missing_env": 0,
+     "model_calls_per_1000": 1000.0,
+     "n": 15,
+     "right_tool": 0,
+     "right_zone": 0,
+     "served_tool": 0
+    },
+    "b_old_bundle": {
+     "WRONG_tool": 0,
+     "called_without_auth": 0,
+     "escalated": 15,
+     "failed_loudly_missing_env": 0,
+     "model_calls_per_1000": 1000.0,
+     "n": 15,
+     "right_tool": 0,
+     "right_zone": 0,
+     "served_tool": 0
+    },
+    "c_rows_only": {
+     "WRONG_tool": 0,
+     "called_without_auth": 0,
+     "escalated": 15,
+     "failed_loudly_missing_env": 0,
+     "model_calls_per_1000": 1000.0,
+     "n": 15,
+     "right_tool": 0,
+     "right_zone": 0,
+     "served_tool": 0
+    },
+    "d_extended": {
+     "WRONG_tool": 0,
+     "called_without_auth": 0,
+     "escalated": 15,
+     "failed_loudly_missing_env": 0,
+     "model_calls_per_1000": 1000.0,
+     "n": 15,
+     "right_tool": 0,
+     "right_zone": 0,
+     "served_tool": 0
+    }
+   },
+   "held_out": 15,
+   "learned": {
+    "env": [
+     "TOYAIR_API_KEY"
+    ],
+    "fake_key_in_learner_rows": false,
+    "first_call_ok": true,
+    "learned_auth": null
+   }
+  }
+ },
+ "total_s": 350.7
+}

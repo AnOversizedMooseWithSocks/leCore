@@ -1,0 +1,452 @@
+{
+ "acceptance": {
+  "neighbour_kept_c0.8": 0.85,
+  "replay": 1.0,
+  "same_key": 0.95
+ },
+ "arms": [
+  "current",
+  "lms_apa",
+  "provenance",
+  "lms_noproj"
+ ],
+ "background_pairs": 40,
+ "baseline_from_panel": {
+  "neighbour_kept_c0.8": 0.9,
+  "same_key_1x": 0.453,
+  "same_key_3x": 0.66
+ },
+ "caseA_current_corr1": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.453,
+  "k_reads_truth": 0.453,
+  "k_reads_wrong": 0.547,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseA_current_corr3": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.66,
+  "k_reads_truth": 0.66,
+  "k_reads_wrong": 0.34,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseA_lms_apa_corr1": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseA_lms_apa_corr3": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseA_lms_noproj_corr1": {
+  "bg_ok": 0.999,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseA_lms_noproj_corr3": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseA_provenance_corr1": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.993,
+  "k_reads_truth": 0.993,
+  "k_reads_wrong": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseA_provenance_corr3": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_current_c0.4": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 1.0,
+  "kprime_keeps_its_answer": 1.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_current_c0.5": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.987,
+  "k_reads_truth": 0.987,
+  "k_reads_wrong": 0.013,
+  "kprime_gated_keeps": 1.0,
+  "kprime_keeps_its_answer": 1.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_current_c0.6": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.98,
+  "k_reads_truth": 0.98,
+  "k_reads_wrong": 0.02,
+  "kprime_gated_keeps": 1.0,
+  "kprime_keeps_its_answer": 1.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_current_c0.7": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.973,
+  "k_reads_truth": 0.973,
+  "k_reads_wrong": 0.027,
+  "kprime_gated_keeps": 0.96,
+  "kprime_keeps_its_answer": 0.96,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_current_c0.8": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.9,
+  "k_reads_truth": 0.9,
+  "k_reads_wrong": 0.1,
+  "kprime_gated_keeps": 0.9,
+  "kprime_keeps_its_answer": 0.9,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_current_c0.9": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.707,
+  "k_reads_truth": 0.707,
+  "k_reads_wrong": 0.293,
+  "kprime_gated_keeps": 0.813,
+  "kprime_keeps_its_answer": 0.813,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_apa_c0.4": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 0.973,
+  "kprime_keeps_its_answer": 0.973,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_apa_c0.5": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 1.0,
+  "kprime_keeps_its_answer": 1.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_apa_c0.6": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 1.0,
+  "kprime_keeps_its_answer": 1.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_apa_c0.7": {
+  "bg_ok": 0.999,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 1.0,
+  "kprime_keeps_its_answer": 1.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_apa_c0.8": {
+  "bg_ok": 0.999,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 1.0,
+  "kprime_keeps_its_answer": 1.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_apa_c0.9": {
+  "bg_ok": 0.995,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 0.993,
+  "kprime_keeps_its_answer": 0.993,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_noproj_c0.4": {
+  "bg_ok": 0.999,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 0.973,
+  "kprime_keeps_its_answer": 0.973,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_noproj_c0.5": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 0.853,
+  "kprime_keeps_its_answer": 0.847,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_noproj_c0.6": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 0.38,
+  "kprime_keeps_its_answer": 0.38,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_noproj_c0.7": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 0.02,
+  "kprime_keeps_its_answer": 0.02,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_noproj_c0.8": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 0.0,
+  "kprime_keeps_its_answer": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_lms_noproj_c0.9": {
+  "bg_ok": 0.999,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 0.0,
+  "kprime_keeps_its_answer": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_provenance_c0.4": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.993,
+  "k_reads_truth": 0.993,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 1.0,
+  "kprime_keeps_its_answer": 1.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_provenance_c0.5": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.993,
+  "k_reads_truth": 0.993,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 1.0,
+  "kprime_keeps_its_answer": 1.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_provenance_c0.6": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.993,
+  "k_reads_truth": 0.993,
+  "k_reads_wrong": 0.0,
+  "kprime_gated_keeps": 1.0,
+  "kprime_keeps_its_answer": 1.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_provenance_c0.7": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.987,
+  "k_reads_truth": 0.987,
+  "k_reads_wrong": 0.007,
+  "kprime_gated_keeps": 0.94,
+  "kprime_keeps_its_answer": 0.94,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_provenance_c0.8": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.98,
+  "k_reads_truth": 0.98,
+  "k_reads_wrong": 0.013,
+  "kprime_gated_keeps": 0.78,
+  "kprime_keeps_its_answer": 0.78,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseB_provenance_c0.9": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.913,
+  "k_reads_truth": 0.913,
+  "k_reads_wrong": 0.08,
+  "kprime_gated_keeps": 0.533,
+  "kprime_keeps_its_answer": 0.533,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseC_current_flipflop": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.453,
+  "k_reads_truth": 0.453,
+  "k_reads_wrong": 0.547,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseC_lms_apa_flipflop": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseC_lms_noproj_flipflop": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 0.998,
+  "k_gated_truth": 1.0,
+  "k_reads_truth": 1.0,
+  "k_reads_wrong": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseC_provenance_flipflop": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.993,
+  "k_reads_truth": 0.993,
+  "k_reads_wrong": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "caseC_provenance_noretract_flipflop": {
+  "bg_ok": 1.0,
+  "bg_ok_before": 1.0,
+  "k_gated_truth": 0.373,
+  "k_reads_truth": 0.373,
+  "k_reads_wrong": 0.0,
+  "reload_bit_identical": 1.0,
+  "replay_agrees": 1.0
+ },
+ "cpu_s": 1265.4,
+ "data_sha256": "36923c3705a59e08fe9c3883d8bc2dd966ef93e22cb78ac41171782a698d56e0",
+ "dim": 2048,
+ "trace": "TiledDisplacementTrace(dim=2048, seed=0, advisory_load=0.03)",
+ "trials": 150,
+ "verdict": {
+  "current": {
+   "bg_ok_min": 1.0,
+   "flipflop": 0.453,
+   "flipflop_gated": 0.453,
+   "meets_bar": false,
+   "neighbour_k_truth_c0.8": 0.9,
+   "neighbour_kept_c0.8": 0.9,
+   "replay": 1.0,
+   "same_key": 0.453,
+   "same_key_gated": 0.453
+  },
+  "lms_apa": {
+   "bg_ok_min": 0.995,
+   "flipflop": 1.0,
+   "flipflop_gated": 1.0,
+   "meets_bar": true,
+   "neighbour_k_truth_c0.8": 1.0,
+   "neighbour_kept_c0.8": 1.0,
+   "replay": 1.0,
+   "same_key": 1.0,
+   "same_key_gated": 1.0
+  },
+  "lms_noproj": {
+   "bg_ok_min": 0.999,
+   "flipflop": 1.0,
+   "flipflop_gated": 1.0,
+   "meets_bar": false,
+   "neighbour_k_truth_c0.8": 1.0,
+   "neighbour_kept_c0.8": 0.0,
+   "replay": 1.0,
+   "same_key": 1.0,
+   "same_key_gated": 1.0
+  },
+  "provenance": {
+   "bg_ok_min": 1.0,
+   "flipflop": 0.993,
+   "flipflop_gated": 0.993,
+   "meets_bar": false,
+   "neighbour_k_truth_c0.8": 0.98,
+   "neighbour_kept_c0.8": 0.78,
+   "replay": 1.0,
+   "same_key": 0.993,
+   "same_key_gated": 0.993
+  }
+ },
+ "what": "backlog E1.5 reflex-trace correction, real CLINC keys"
+}

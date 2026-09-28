@@ -1,0 +1,64 @@
+{
+ "command": "PYTHONHASHSEED=0 python3 tools/bench_meaning.py --data DATA direction",
+ "protocol": "EXCHANGE DIRECTION THROUGH THE MEANING DOOR, END TO END (backlog E3.1 wiring): the context-role reader\n    (holographic_rolecall.ContextRoles, taught by every `same` / `new` verdict's from_question -- p28\n    _meaning_direction_learn) against the positional baseline (the mind's _meaning_direction = False: bind fills\n    from / to in the order the method's first example named them), on tests/data/exchange_direction.json's\n    deterministic split: 128 labelled train + 27 symmetric train sentences stream through ask() with a stand-in model\n    that answers from the LABELS (the words that named FROM and TO; {\"either\": [...]} for a sentence with no\n    direction), mixed with 148 static CLINC150 intents as rivals (5 phrasings each, the methods mode's setup); then\n    the 51 labelled test + 14 symmetric test sentences are asked with the model DETACHED.\n    PAIRED: the memory is learned ONCE (reader on) and the test set is asked twice, reader on / off.\n    Two readings of each: END TO END (what ask() did: right / wrong direction / other wrong call / clarified\n    / escalated) and BIND LEVEL (MeaningIndex.bind on the learned fx row for EVERY test sentence -- direction alone,\n    whatever the serve gate decided).",
+ "n": {
+  "train_directional": 128,
+  "train_symmetric": 27,
+  "test_directional": 51,
+  "test_symmetric": 14
+ },
+ "arms": {
+  "positional": {
+   "end_to_end": {
+    "right_direction": 18,
+    "WRONG_direction": 11,
+    "WRONG_other": 1,
+    "clarified": 0,
+    "escalated": 21,
+    "stale": 0,
+    "sym_clarified": 0,
+    "sym_ACTED": 0,
+    "sym_escalated": 13
+   },
+   "bind_level": {
+    "right_direction": 29,
+    "WRONG_direction": 14,
+    "left_open": 7,
+    "other": 1,
+    "sym_left_open": 1,
+    "sym_filled": 12
+   }
+  },
+  "context": {
+   "end_to_end": {
+    "right_direction": 27,
+    "WRONG_direction": 2,
+    "WRONG_other": 1,
+    "clarified": 0,
+    "escalated": 21,
+    "stale": 0,
+    "sym_clarified": 0,
+    "sym_ACTED": 0,
+    "sym_escalated": 13
+   },
+   "bind_level": {
+    "right_direction": 41,
+    "WRONG_direction": 2,
+    "left_open": 7,
+    "other": 1,
+    "sym_left_open": 13,
+    "sym_filled": 0
+   }
+  }
+ },
+ "learned": {
+  "fx_rows": 2,
+  "model_calls_in_stream": 618,
+  "reader_counts": {
+   "from": 59,
+   "to": 59,
+   "either": 46
+  },
+  "stream_s": 16.1
+ }
+}

@@ -408,3 +408,13 @@ with `swarm_step` carrying `/api/analyze` evidence, `swarm_evaluate` as the exit
   worker. A step without evidence is refused by `swarm_step`.
 - Save `/api/composite.png` and `/api/workspace.lews` together; the `.lews` carries the layers.
 
+**Engine side, sweep 182 (2026-09-26; lecore-boot Step 7c has every command).** The decisions a painting swarm
+makes on the leCore service now read `p_correct` (high = confident; `None` until the door has calibrated on
+reported outcomes) and `p_null` (low = significant) — the bare `p` is deprecated. A design decision's id survives
+a service restart once `boot` has mounted the partition, so a ground or accent judged after a restart can still be
+reported with `decision_outcome(id, what was used)`. A worker `swarm_step` whose `verify` command FAILED (the
+step's `verify={"verb", "args"}`, not its `/api/analyze` evidence) is now learned as a failure example, and
+`verify_precheck(state, [candidate steps])` orders the next attempt by it (only on strong evidence; the verify
+still runs). These verbs live on a service started from a sweep-182 leCore
+checkout; the studio's own `/api/mind` allowlist is unchanged and has none of them.
+

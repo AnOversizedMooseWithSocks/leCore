@@ -1,0 +1,47 @@
+{
+ "perm_product": [
+  {
+   "D": 2048,
+   "trials": 30,
+   "noise_flip": 0.0,
+   "exact_correct": 1.0,
+   "swapped_xy": 0.0,
+   "solved_flag": 1.0,
+   "median_restarts": 3.0,
+   "median_iters": 14.0,
+   "ms_mean": 23.1
+  },
+  {
+   "D": 1024,
+   "trials": 30,
+   "noise_flip": 0.0,
+   "exact_correct": 0.9666666666666667,
+   "swapped_xy": 0.0,
+   "solved_flag": 0.9666666666666667,
+   "median_restarts": 3.0,
+   "median_iters": 35.0,
+   "ms_mean": 32.4
+  },
+  {
+   "D": 2048,
+   "trials": 20,
+   "noise_flip": 0.05,
+   "exact_correct": 0.3,
+   "swapped_xy": 0.0,
+   "solved_flag": 0.0,
+   "median_restarts": null,
+   "median_iters": null,
+   "ms_mean": 133.9
+  }
+ ],
+ "phasor_product": [
+  {
+   "D": 2048,
+   "trials": 20,
+   "exact": 0.0,
+   "swapped": 0.0,
+   "verb_right": 0.05
+  }
+ ],
+ "cpu_s": 20.6
+}

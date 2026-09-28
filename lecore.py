@@ -201,6 +201,33 @@ def agent_boot(llm="remote", partition=None, session=None):
     return autoboot(partition=partition, session=session, llm=llm, memory=True)
 
 
+def _core_memory_home():
+    """The user's own partition seeded from the CORE MEMORY that rides in the wheel (2026-09-27, owner-approved).
+
+    A pip install has no repo next to it, so there is no ./lecore_memory and no ./release_bundle. The core memory
+    ships as lecore_data/release_bundle; it is COPIED once into $LECORE_HOME/memory (default ~/.lecore/memory) and
+    that copy is what autoboot mounts -- a partition learns and saves, and the installed package directory must
+    never be written to (it may be read-only, and a second user would inherit the first user's learning). An
+    existing user partition is left exactly as it is. Returns the path, or None when there is nothing to seed."""
+    import os
+    import shutil
+    try:
+        import lecore_data
+    except Exception:
+        return None
+    home = os.path.join(os.environ.get("LECORE_HOME") or os.path.join(os.path.expanduser("~"), ".lecore"), "memory")
+    if os.path.isdir(home):
+        return home
+    pkg = lecore_data.file("release_bundle")
+    if not os.path.isdir(pkg):
+        return None
+    try:
+        shutil.copytree(pkg, home)
+    except OSError:
+        return None
+    return home
+
+
 def autoboot(partition=None, session=None, llm="auto", memory=True):
     """ONE CALL, BOTH ENDS, MEMORY IN (cp62): the standing boot ritual made standard so
     it never has to be asked for again. Finds the partition (arg, or $LECORE_PARTITION,
@@ -269,6 +296,8 @@ def autoboot(partition=None, session=None, llm="auto", memory=True):
                                 "release_bundle")
         if os.path.isdir(_shipped):
             root = _shipped
+        else:
+            root = _core_memory_home() or root    # a pip install: the wheel's core memory, copied once
     m = UnifiedMind()
     # CREATE AN EXPLICITLY-REQUESTED PARTITION INSTEAD OF SILENTLY DROPPING IT.
     # `partition=root if isdir(root) else None` meant that asking for a NEW

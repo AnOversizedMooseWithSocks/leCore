@@ -1,0 +1,66 @@
+{
+ "stream": 962,
+ "model_calls_in_stream": 681,
+ "crypto": {
+  "right_call": 12,
+  "WRONG_call": 0,
+  "clarified": 0,
+  "escalated": 8,
+  "stale": 0,
+  "n": 20,
+  "unclear_n": 6,
+  "unclear_clarified": 6,
+  "unclear_ACTED": 0
+ },
+ "exchange": {
+  "right_call": 11,
+  "WRONG_call": 3,
+  "clarified": 0,
+  "escalated": 15,
+  "stale": 0,
+  "n": 29,
+  "unclear_n": 0,
+  "unclear_clarified": 0,
+  "unclear_ACTED": 0,
+  "sym_n": 9,
+  "sym_left_open": 9,
+  "WRONG_direction": 1
+ },
+ "weather": {
+  "right_call": 23,
+  "WRONG_call": 3,
+  "clarified": 0,
+  "escalated": 4,
+  "stale": 0,
+  "n": 30,
+  "unclear_n": 0,
+  "unclear_clarified": 0,
+  "unclear_ACTED": 0
+ },
+ "exchange_positional_same_memory": {
+  "right_call": 15,
+  "WRONG_call": 5,
+  "clarified": 0,
+  "escalated": 9,
+  "stale": 0,
+  "n": 29,
+  "unclear_n": 0,
+  "unclear_clarified": 0,
+  "unclear_ACTED": 0,
+  "sym_n": 9,
+  "sym_ACTED": 6,
+  "sym_left_open": 3,
+  "WRONG_direction": 3
+ },
+ "meaning": {
+  "rows": 164,
+  "by_kind": {
+   "answer": 148,
+   "method": 14,
+   "clarify": 2
+  },
+  "slot_values": 50
+ },
+ "command": "PYTHONHASHSEED=0 python3 tools/bench_meaning.py --data DATA methods --record",
+ "scoring": "fx: a DIRECTIONAL labelled item (tests/data/exchange_direction.json) needs from AND to right; a symmetric one is scored by currency set and counted sym_ACTED / sym_left_open; exchange_positional_same_memory = the same learned memory asked with the direction reader off"
+}

@@ -1059,11 +1059,21 @@ class MCPServer:
             chunks.extend(chunk_text(str(text)))
         if not chunks:
             return {"error": "pass texts=[...] (aliases: documents=, docs=) or text='...'"}
+        # sweep 179: bound corpora are SAVED (corpora.lecore) and answered from -- a pasted key or seed phrase
+        # in a chunk is redacted before it is stored. The handle hashes the redacted text, so it names what
+        # is actually held.
+        from holographic.agents_and_reasoning.holographic_learnguard import redact as _redact
+        _before = list(chunks)
+        chunks = [_redact(c) for c in chunks]
+        n_redacted = sum(1 for a_, b_ in zip(_before, chunks) if a_ != b_)
         import hashlib
         h = "corpus:" + hashlib.sha256("\x00".join(chunks).encode()).hexdigest()[:12]
         self._corpora[h] = chunks                          # content-addressed: re-binding
         self._corpora_save()                               # E7.2: a zoo restart must not lose bindings
-        return {"handle": h, "n_chunks": len(chunks)}      # the same corpus is idempotent
+        out = {"handle": h, "n_chunks": len(chunks)}      # the same corpus is idempotent
+        if n_redacted:
+            out["redacted_chunks"] = n_redacted             # said, never silent
+        return out
 
     # -- THE ANALYST DOORS (sweep 83): series analysis + fact checking over the wire ------
 

@@ -1038,7 +1038,11 @@ def _selftest():
             assert isinstance(a, str) and _tokens(a), \
                 "INERT alias (no content words) under %r: %r" % (k, a)
     from holographic.misc.holographic_unified import UnifiedMind
-    dark = [k for k in _METHOD_ALIASES if not callable(getattr(UnifiedMind, k, None))]
+    # Look on an INSTANCE, not the class: bundled plugin verbs (lean_export from the lean4 plugin,
+    # unicron_device from gpu) are bound per mind at the end of __init__, so a class lookup called
+    # them dark -- this selftest failed on 965fdb1 for that reason alone (found 2026-09-26).
+    mind = UnifiedMind(dim=64, seed=0)
+    dark = [k for k in _METHOD_ALIASES if not callable(getattr(mind, k, None))]
     assert not dark, "alias keys that name no UnifiedMind method: %s" % dark[:8]
     print("holographic_catalog_aliases selftest OK -- %d verbs, %d aliases, none inert, all real"
           % (len(_METHOD_ALIASES), sum(len(v) for v in _METHOD_ALIASES.values())))

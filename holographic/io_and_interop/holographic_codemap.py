@@ -336,22 +336,30 @@ def evaluate_retrieval(k=10, limit=200, root=None):
         if len(cases) >= limit:
             break
 
+    # THE RANDOM BASELINE IS AN AVERAGE, NOT ONE DRAW (2026-09-27). It used to be a single seeded draw per case,
+    # so its value depended on the corpus SIZE by luck alone: 0.025 recall@10 at 8,320 labels and 0.100 at 8,582 for
+    # the SAME 40 cases and an unchanged holographic score (0.425) -- enough to flip the slow test's "signal above
+    # random" gate (h > 5 x random). RANDOM_DRAWS seeded draws per case estimate the chance level instead.
+    RANDOM_DRAWS = 200
     rng = np.random.default_rng(0)
-    res = {m: {"r1": 0, "rk": 0, "mrr": 0.0} for m in ("holographic", "jaccard", "random")}
+    res = {m: {"r1": 0.0, "rk": 0.0, "mrr": 0.0} for m in ("holographic", "jaccard", "random")}
+
+    def _score(m, order, targets, weight=1.0):
+        hit = next((i for i, l in enumerate(order) if l in targets), None)
+        if hit is not None:
+            res[m]["rk"] += weight
+            res[m]["mrr"] += weight / (hit + 1)
+            if hit == 0:
+                res[m]["r1"] += weight
+
     for qlab, targets in cases:
         qfeat = feats[qlab]
-        ranked = {
-            "holographic": [l for l, _s in _pairs(idx.nearest(encode_features(qfeat), k=k + 1)) if l != qlab][:k],
-            "jaccard": [l for l, _s in _jaccard_baseline(qfeat, feats, labels, k + 1) if l != qlab][:k],
-            "random": [labels[i] for i in rng.choice(len(labels), size=k, replace=False)],
-        }
-        for m, order in ranked.items():
-            hit = next((i for i, l in enumerate(order) if l in targets), None)
-            if hit is not None:
-                res[m]["rk"] += 1
-                res[m]["mrr"] += 1.0 / (hit + 1)
-                if hit == 0:
-                    res[m]["r1"] += 1
+        _score("holographic", [l for l, _s in _pairs(idx.nearest(encode_features(qfeat), k=k + 1)) if l != qlab][:k],
+               targets)
+        _score("jaccard", [l for l, _s in _jaccard_baseline(qfeat, feats, labels, k + 1) if l != qlab][:k], targets)
+        for _ in range(RANDOM_DRAWS):
+            _score("random", [labels[i] for i in rng.choice(len(labels), size=k, replace=False)], targets,
+                   weight=1.0 / RANDOM_DRAWS)
     n = max(len(cases), 1)
     for m in res:
         res[m] = {"recall@1": res[m]["r1"] / n, "recall@%d" % k: res[m]["rk"] / n, "mrr": res[m]["mrr"] / n}

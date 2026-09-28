@@ -1,0 +1,80 @@
+[
+ {
+  "dataset": "banking",
+  "n_stream": 3000,
+  "noise": 0.0,
+  "encode_s": 19.9,
+  "arms": {
+   "infonce_t0.05_lr0.3": {
+    "prequential_acc": 0.758,
+    "test_top1": 0.8263,
+    "auroc_gap": 0.866,
+    "auroc_ptop_tau0.02": 0.8726,
+    "auroc_clm_tau0.02": 0.8726,
+    "auroc_ptop_tau0.05": 0.8546,
+    "auroc_clm_tau0.05": 0.8546,
+    "test_top1_qbnorm_tau0.05": 0.7659
+   },
+   "infonce_nc0.1_t0.05_lr0.3": {
+    "prequential_acc": 0.749,
+    "test_top1": 0.8182,
+    "auroc_gap": 0.8715,
+    "auroc_ptop_tau0.02": 0.8786,
+    "auroc_clm_tau0.02": 0.8786,
+    "auroc_ptop_tau0.05": 0.8608,
+    "auroc_clm_tau0.05": 0.8608,
+    "test_top1_qbnorm_tau0.05": 0.7578
+   },
+   "infonce_nc0.1_t0.05_lr0.3_top8": {
+    "prequential_acc": 0.755,
+    "test_top1": 0.8256,
+    "auroc_gap": 0.8716,
+    "auroc_ptop_tau0.02": 0.8785,
+    "auroc_clm_tau0.02": 0.8785,
+    "auroc_ptop_tau0.05": 0.8555,
+    "auroc_clm_tau0.05": 0.8555,
+    "test_top1_qbnorm_tau0.05": 0.7718
+   }
+  },
+  "total_s": 32.6
+ },
+ {
+  "dataset": "banking",
+  "n_stream": 3000,
+  "noise": 0.1,
+  "encode_s": 0.0,
+  "arms": {
+   "infonce_t0.05_lr0.3": {
+    "prequential_acc": 0.728,
+    "test_top1": 0.7828,
+    "auroc_gap": 0.839,
+    "auroc_ptop_tau0.02": 0.8501,
+    "auroc_clm_tau0.02": 0.8501,
+    "auroc_ptop_tau0.05": 0.8397,
+    "auroc_clm_tau0.05": 0.8397,
+    "test_top1_qbnorm_tau0.05": 0.7347
+   },
+   "infonce_nc0.1_t0.05_lr0.3": {
+    "prequential_acc": 0.7313,
+    "test_top1": 0.7961,
+    "auroc_gap": 0.8587,
+    "auroc_ptop_tau0.02": 0.8674,
+    "auroc_clm_tau0.02": 0.8674,
+    "auroc_ptop_tau0.05": 0.8535,
+    "auroc_clm_tau0.05": 0.8535,
+    "test_top1_qbnorm_tau0.05": 0.739
+   },
+   "infonce_nc0.1_t0.05_lr0.3_top8": {
+    "prequential_acc": 0.7353,
+    "test_top1": 0.7958,
+    "auroc_gap": 0.8578,
+    "auroc_ptop_tau0.02": 0.8665,
+    "auroc_clm_tau0.02": 0.8665,
+    "auroc_ptop_tau0.05": 0.8459,
+    "auroc_clm_tau0.05": 0.8459,
+    "test_top1_qbnorm_tau0.05": 0.7461
+   }
+  },
+  "total_s": 42.0
+ }
+]

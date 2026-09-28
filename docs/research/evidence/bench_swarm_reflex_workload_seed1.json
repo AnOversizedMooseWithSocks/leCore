@@ -1,0 +1,1075 @@
+{
+"seed": 1,
+"tasks": [
+{
+"truth": "Stock a part library (why your creature parts do not render)",
+"wordings": [
+"identical part nothing seam",
+"reported time audio builds"
+]
+},
+{
+"truth": "Bake an N-D function into one vector (n-D texture unit)",
+"wordings": [
+"tool irrelevance default literally",
+"retopo double from does"
+]
+},
+{
+"truth": "phase_randomized_null",
+"wordings": [
+"template textures same destroyed",
+"order separates constant same"
+]
+},
+{
+"truth": "Rolling / streaming statistics (causal by construction, exact by default)",
+"wordings": [
+"deques splat soft window",
+"modest window cost window"
+]
+},
+{
+"truth": "soft_selection_weights",
+"wordings": [
+"kept meshselection nothing surface",
+"surface carry list math"
+]
+},
+{
+"truth": "repo_map",
+"wordings": [
+"files text mind grant",
+"from deterministic biases only"
+]
+},
+{
+"truth": "Regime gate (re-enable)",
+"wordings": [
+"linear newton predict regime",
+"direction read form bind"
+]
+},
+{
+"truth": "sop_run",
+"wordings": [
+"transform scale orders refused",
+"high sculpt that calls"
+]
+},
+{
+"truth": "Feet on the legs (limb sockets, not spine sockets)",
+"wordings": [
+"name classify needs points",
+"across point ground goes"
+]
+},
+{
+"truth": "Expand a subgraph node back into its nodes",
+"wordings": [
+"unchanged mesh routinely unknown",
+"flank floor never pastes"
+]
+},
+{
+"truth": "Scale advisor (consult every capacity law BEFORE hitting the wall)",
+"wordings": [
+"into mind behaviour factors",
+"vocab flip queries constraint"
+]
+},
+{
+"truth": "document_outline",
+"wordings": [
+"content rewritten scene access",
+"hashing rollback cohesion optional"
+]
+},
+{
+"truth": "Semantic word index (find words by meaning)",
+"wordings": [
+"words third preserving kept",
+"irregular content their build"
+]
+},
+{
+"truth": "Render graph (bake vs live)",
+"wordings": [
+"reference graphs memory deterministic",
+"live changing mesh extremity"
+]
+},
+{
+"truth": "Whole-scene .glb import (multi-mesh, node transforms, per-face materials)",
+"wordings": [
+"vert material radio detection",
+"amethyst against absorb transforms"
+]
+},
+{
+"truth": "Hypervector (datatype)",
+"wordings": [
+"asarray knob attribute point",
+"with array image vector"
+]
+},
+{
+"truth": "Database layers: durability, locking, history, graph",
+"wordings": [
+"shadowing graph plugin journal",
+"hash concurrency deterministic durability"
+]
+},
+{
+"truth": "Agent skills (discover & route)",
+"wordings": [
+"holographic layer suggest segment",
+"principal grant also route"
+]
+},
+{
+"truth": "select_face_ring",
+"wordings": [
+"band every plus ring",
+"island returns edges atlas"
+]
+},
+{
+"truth": "vsa_region",
+"wordings": [
+"complement algebra radius bevel",
+"interest luck compose reverse"
+]
+},
+{
+"truth": "Signal & spectral",
+"wordings": [
+"atlas processing signal correct",
+"into generations spectral bandwidth"
+]
+},
+{
+"truth": "Determinism, node client and BRDF doors (the rest of the import-only list)",
+"wordings": [
+"brdf tracing remote dive",
+"smith twins bbox selection"
+]
+},
+{
+"truth": "Route a mesh to its minimal repair (defect-classified)",
+"wordings": [
+"repair diagnoses between they",
+"history than rate kept"
+]
+},
+{
+"truth": "four_surface_demo",
+"wordings": [
+"codetriage field against glsl",
+"text engine measured tool"
+]
+},
+{
+"truth": "Adaptive rendering",
+"wordings": [
+"authored pixel tight field",
+"capability method subsystem render"
+]
+},
+{
+"truth": "Clean up many cues at once (batched cleanup)",
+"wordings": [
+"appear bohm cannot real",
+"disconnected make backend wgsl"
+]
+},
+{
+"truth": "gas_pressure",
+"wordings": [
+"layers binned pressure headline",
+"none layers lean share"
+]
+},
+{
+"truth": "mesh_query_chunk",
+"wordings": [
+"scales with dies pair",
+"before budget radius value"
+]
+},
+{
+"truth": "Query / database (domain)",
+"wordings": [
+"similarity fragmented query atlas",
+"evaluator diff query skill"
+]
+},
+{
+"truth": "drift_sentinel",
+"wordings": [
+"plus mantis triangle void",
+"module task echo measured"
+]
+},
+{
+"truth": "openzoo supercharge doors (limitless context + citations over MCP)",
+"wordings": [
+"testament once bend driver",
+"fast wire naming however"
+]
+},
+{
+"truth": "VSA programs as DB objects",
+"wordings": [
+"breaker safer only over",
+"never handlers inside procedures"
+]
+},
+{
+"truth": "Verified-knowledge memory (proofs as hypervectors, provenance kept)",
+"wordings": [
+"indexed stays plus recall",
+"proof capacity ownership association"
+]
+},
+{
+"truth": "decide_or_abstain",
+"wordings": [
+"shared rule from negative",
+"step confident exact encoding"
+]
+},
+{
+"truth": "B-rep membership + boolean face classification",
+"wordings": [
+"boundary flagging file much",
+"mind measured flagging with"
+]
+},
+{
+"truth": "Precomputed radiance transfer (PRT): shading as a dot product",
+"wordings": [
+"function wall what single",
+"point token state path"
+]
+},
+{
+"truth": "Realtime session (draft frames, refine pass, multi-format payload)",
+"wordings": [
+"honest noise measures itself",
+"shift margin mode four"
+]
+},
+{
+"truth": "Convolution surfaces (hands, feet, digits without bulges)",
+"wordings": [
+"every sections suarez banner",
+"cluster blob bloomenthal segment"
+]
+},
+{
+"truth": "Aharonov-Bohm ring (magnetic flux phase)",
+"wordings": [
+"phase floor working measure",
+"flux thread nets drives"
+]
+},
+{
+"truth": "dispersion_scale",
+"wordings": [
+"thickness scene glass from",
+"vectors glass resonator mean"
+]
+},
+{
+"truth": "Object snap: midpoint + intersection",
+"wordings": [
+"normal material dragged returns",
+"absent snaps records they"
+]
+},
+{
+"truth": "suggest_pipeline",
+"wordings": [
+"magnitude holographic surrogate capability",
+"children route none come"
+]
+},
+{
+"truth": "skin_bind_weights",
+"wordings": [
+"none keeping return skin",
+"cannot weights principal holographic"
+]
+},
+{
+"truth": "Job lifecycle control (start / pause / resume / cancel)",
+"wordings": [
+"take renders pause snapshot",
+"recomputing bucket into real"
+]
+},
+{
+"truth": "Certified surrogate layer (serve computation from a model, never fabricate)",
+"wordings": [
+"negative otherwise module contract",
+"which code memoised style"
+]
+},
+{
+"truth": "Streaming meters (live convergence guard and entropy, O(1) per sample)",
+"wordings": [
+"autocorrelation convergence pins second",
+"observations runs identifier entropy"
+]
+},
+{
+"truth": "Compile a filter graph to one pass (shader pipeline)",
+"wordings": [
+"faster violated shift verdicts",
+"faster subprocess unsharp never"
+]
+},
+{
+"truth": "SCALIS scale-invariant surfaces (thin features survive beside thick ones)",
+"wordings": [
+"test more delegated while",
+"shapes spectrum model returns"
+]
+},
+{
+"truth": "Physics & chemistry (domain)",
+"wordings": [
+"wrap unit their matter",
+"generate matter parameters matter"
+]
+},
+{
+"truth": "Domain operators & cosine palette (demoscene)",
+"wordings": [
+"edits tiny mirror workspace",
+"palette smooth identity scalar"
+]
+},
+{
+"truth": "Quantum dot / transmission (resonant scatterer)",
+"wordings": [
+"energy baseline monte analysis",
+"selection hole emerges energy"
+]
+},
+{
+"truth": "Sculpt-mode preparation (guarded mesh -> SDF cache)",
+"wordings": [
+"none knowledgestore note sculpting",
+"balanced resolution with lint"
+]
+},
+{
+"truth": "from_components",
+"wordings": [
+"build model through residual",
+"directory through polarized argument"
+]
+},
+{
+"truth": "Typed-section container (app-neutral workspace file)",
+"wordings": [
+"confidence share boot reader",
+"join sections image actor"
+]
+},
+{
+"truth": "Bounded previews at the /invoke boundary (what a big result costs a prompt)",
+"wordings": [
+"farm head agree bounded",
+"result persistence float agent"
+]
+},
+{
+"truth": "Floor and wall backdrop for a scene",
+"wordings": [
+"give kept direction instead",
+"spectrum observer floor recolour"
+]
+},
+{
+"truth": "quadruped_spec",
+"wordings": [
+"geom knob head plan",
+"head plan nothing field"
+]
+},
+{
+"truth": "Resonator restart budget advisor",
+"wordings": [
+"density combustion existing capacity",
+"lies silently could answer"
+]
+},
+{
+"truth": "Global worst view over the sphere (Lipschitz / DIRECT, no dense sweep)",
+"wordings": [
+"mesh laplacian jones series",
+"exist truth catalogued returning"
+]
+},
+{
+"truth": "Message bus + agent (LLM) bridge",
+"wordings": [
+"render alone your autoboot",
+"polling shading agent edge"
+]
+}
+],
+"streams": [
+[
+[
+17,
+0
+],
+[
+10,
+0
+],
+[
+38,
+0
+],
+[
+3,
+0
+],
+[
+11,
+1
+],
+[
+27,
+0
+],
+[
+0,
+0
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+5,
+0
+],
+[
+1,
+0
+],
+[
+23,
+0
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+28,
+0
+],
+[
+2,
+1
+],
+[
+0,
+1
+],
+[
+1,
+0
+],
+[
+2,
+1
+],
+[
+0,
+1
+],
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+1,
+0
+],
+[
+2,
+0
+],
+[
+1,
+0
+],
+[
+1,
+0
+],
+[
+3,
+0
+],
+[
+1,
+0
+],
+[
+14,
+0
+],
+[
+17,
+0
+],
+[
+0,
+1
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+1,
+0
+],
+[
+14,
+0
+],
+[
+13,
+1
+],
+[
+30,
+1
+],
+[
+10,
+0
+],
+[
+6,
+0
+]
+],
+[
+[
+2,
+0
+],
+[
+8,
+0
+],
+[
+0,
+1
+],
+[
+3,
+1
+],
+[
+0,
+0
+],
+[
+10,
+0
+],
+[
+27,
+0
+],
+[
+26,
+1
+],
+[
+28,
+0
+],
+[
+0,
+0
+],
+[
+53,
+0
+],
+[
+5,
+0
+],
+[
+0,
+0
+],
+[
+0,
+1
+],
+[
+0,
+1
+],
+[
+8,
+0
+],
+[
+7,
+1
+],
+[
+17,
+0
+],
+[
+9,
+0
+],
+[
+4,
+1
+],
+[
+0,
+0
+],
+[
+13,
+0
+],
+[
+0,
+0
+],
+[
+9,
+1
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+34,
+0
+],
+[
+39,
+0
+],
+[
+12,
+0
+],
+[
+0,
+0
+],
+[
+3,
+1
+],
+[
+1,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+50,
+0
+],
+[
+0,
+0
+],
+[
+2,
+0
+],
+[
+0,
+0
+],
+[
+8,
+1
+]
+],
+[
+[
+5,
+0
+],
+[
+8,
+0
+],
+[
+12,
+0
+],
+[
+0,
+0
+],
+[
+6,
+1
+],
+[
+3,
+1
+],
+[
+1,
+1
+],
+[
+50,
+0
+],
+[
+0,
+0
+],
+[
+11,
+0
+],
+[
+0,
+0
+],
+[
+44,
+0
+],
+[
+3,
+0
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+4,
+1
+],
+[
+27,
+0
+],
+[
+0,
+0
+],
+[
+8,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+25,
+0
+],
+[
+0,
+0
+],
+[
+13,
+0
+],
+[
+0,
+1
+],
+[
+4,
+0
+],
+[
+7,
+0
+],
+[
+0,
+1
+],
+[
+19,
+0
+],
+[
+0,
+0
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+15,
+0
+],
+[
+0,
+1
+],
+[
+1,
+1
+],
+[
+0,
+0
+],
+[
+33,
+0
+],
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+8,
+0
+]
+],
+[
+[
+24,
+0
+],
+[
+5,
+1
+],
+[
+35,
+0
+],
+[
+35,
+0
+],
+[
+16,
+0
+],
+[
+0,
+0
+],
+[
+5,
+0
+],
+[
+6,
+0
+],
+[
+29,
+0
+],
+[
+4,
+1
+],
+[
+7,
+0
+],
+[
+12,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+1,
+1
+],
+[
+0,
+1
+],
+[
+6,
+0
+],
+[
+5,
+1
+],
+[
+3,
+1
+],
+[
+0,
+0
+],
+[
+4,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+18,
+0
+],
+[
+35,
+0
+],
+[
+0,
+0
+],
+[
+9,
+1
+],
+[
+0,
+0
+],
+[
+6,
+0
+],
+[
+7,
+0
+],
+[
+6,
+0
+],
+[
+56,
+0
+],
+[
+7,
+0
+],
+[
+0,
+1
+],
+[
+40,
+0
+],
+[
+1,
+1
+],
+[
+4,
+0
+],
+[
+2,
+0
+]
+]
+]
+}

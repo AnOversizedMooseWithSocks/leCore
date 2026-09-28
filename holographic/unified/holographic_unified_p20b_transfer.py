@@ -27,7 +27,24 @@ class _UnifiedPart20B:
         consent. KEPT NEG, loud: a lexical screen is a FLOOR, not a proof of
         anonymity; the review sheet is the real gate and the caller reads it before
         shipping the bundle. Opt-out: never call this, or set mind._commons_optout=True
-        and even an accidental call refuses."""
+        and even an accidental call refuses.
+
+        CLM backlog wave 2 (the owner's answer to open question 3: YES, learned prototypes travel):
+        (5) a row this memory VETOED (answer_feedback ok=False -> _vetoed_qs) or whose payload it
+        marked bad (_payload_bad) never leaves -- it used to be exported as a live fact;
+        (6) PROVISIONAL model provenance is refused too: 'model:<by>' (a meaning_resolve'd model
+        reply) passed because only the exact string 'model-cached' was rejected;
+        (7) HONEST COUNTS: a row the learning guard refuses inside the bundle's own teach() is
+        moved to `rejected` with the guard's reason -- it used to be counted as kept;
+        (8) every door's learned ProtoStore that is marked shareable AND eligible travels with the
+        bundle (mind._shareable_stores(): the router, the tool door, and any door that opted in
+        with protostore_share(door, True)). ELIGIBLE = every question it learned from passed the
+        learning guard and none was session-salted ([s:<name>]) -- a prototype is a SUM of real
+        questions and cannot forget one term, so one refused question bars the whole store.
+        Withheld stores are listed with the reason. The bundle carries them in its
+        lecore.learning.protostores section; memory_import / commons_pool merge them by the
+        documented rule (_protostore_merge: verdict-count-weighted, conflicts flagged, local rows
+        never silently overwritten)."""
         import os, re
         if getattr(self, "_commons_optout", False):
             return {"refused": "this mind is opted out of the commons"}
@@ -37,6 +54,11 @@ class _UnifiedPart20B:
         DIGITS = re.compile(r"[\d][\d\s().-]{6,}[\d]")
         SECRET = re.compile(r"[A-Fa-f0-9]{24,}|[A-Za-z0-9+/=]{32,}")
         kept, rejected, seen = [], [], set()
+        # (5) what this memory itself refused: vetoed questions (normalised as answer_feedback stores them) and the
+        # questions whose reflex payload was marked bad
+        vetoed = set(getattr(lad, "_vetoed_qs", set()) or set())
+        bad_qs = {" ".join(str(getattr(lad, "_payload_qs", {}).get(pk, "")).lower().split())
+                  for pk in (getattr(lad, "_payload_bad", set()) or set())} - {""}
         for row in reversed(getattr(lad, "taught_log", []) or []):
             q, a = str(row[0]), str(row[1])
             sess = str(row[2]) if len(row) > 2 else "shared"
@@ -47,8 +69,15 @@ class _UnifiedPart20B:
             if sess != "shared":
                 rejected.append((q[:60], "session-salted: user-private by construction"))
                 continue
-            if prov == "model-cached":
-                rejected.append((q[:60], "model-cached: unverified"))
+            if prov == "model-cached" or prov.startswith("model:"):
+                rejected.append((q[:60], "%s: unverified model provenance" % prov))
+                continue
+            nq = " ".join(q.lower().split())
+            if nq in vetoed:
+                rejected.append((q[:60], "vetoed here: this memory refused the answer"))
+                continue
+            if nq in bad_qs:
+                rejected.append((q[:60], "payload marked bad here"))
                 continue
             if a == "carried tombstone":
                 continue
@@ -68,18 +97,51 @@ class _UnifiedPart20B:
             kept.append((q, a, prov))
         who = str(author) if author else "anon"
         dst = self.__class__(dim=self.dim, seed=0)
+        n_kept = 0
         for q, a, prov in reversed(kept):
-            dst.teach(q, a)
+            r_ = dst.teach(q, a)
+            if not (isinstance(r_, dict) and r_.get("taught")):
+                # (7) the guard refused it inside the bundle: it did NOT travel -- say so, never count it as kept
+                rejected.append((q[:60], "refused by the learning guard in the bundle: %s"
+                                 % (r_.get("reason") if isinstance(r_, dict) else "not taught")))
+                continue
+            n_kept += 1
             _bl = getattr(dst.zoo["ladder"], "taught_log", [])
             if _bl and str(_bl[-1][0]) == q and len(_bl[-1]) > 3:
                 keepprov = prov if prov.startswith(("wisdom:", "commons:")) else "commons:%s" % who
                 _bl[-1] = [_bl[-1][0], _bl[-1][1], _bl[-1][2], keepprov]
+        # (8) the learned prototypes that may travel, and the ones that may not (with why)
+        stores, withheld = {}, []
+        if hasattr(self, "_shareable_stores"):
+            elig = self._shareable_stores()
+            doors = set(self.__dict__.get("_protostores", {})) | set(self.__dict__.get("_protostore_share", {}))
+            for door in sorted(doors):
+                if door in elig:
+                    continue
+                flags = self.__dict__.get("_protostore_share", {}).get(door) or {}
+                why = ("not marked shareable" if not flags.get("shareable") else
+                       "a question it learned from was refused by the learning guard" if not flags.get("guard_ok") else
+                       "it learned from session-salted (user-private) questions" if flags.get("salted") else
+                       "empty")
+                withheld.append({"door": door, "why": why})
+            for door, st in elig.items():
+                from holographic.agents_and_reasoning.holographic_protostore import ProtoStore
+                meta_, _ = st.state()
+                cp = ProtoStore.from_state(meta_, {"A": np.asarray(st.A, np.float64)})
+                cp.A = np.asarray(st.A, np.float64).copy()          # float64: the merge on arrival is exact
+                cp.confusion = {}                                    # the miner's pairs stay home (not a prototype)
+                if door == "route" and getattr(self, "_router", None) and self._router() is not None:
+                    cp.__dict__["_commons_extra"] = {"features": self._router().features.digest}
+                stores[door] = cp
+            dst.__dict__["_commons_stores"] = stores
         # lever 3 (sweep 101): a contribution bundle is pure-taught BY CONSTRUCTION
         # (built row-by-row through teach), so the regen guard always passes and the
         # bundle ships as text -- the middle-out curve for the commons itself.
         dst.learning_save(str(dest), audit="regen")
-        return {"kept": len(kept), "rejected": rejected, "dest": str(dest),
+        return {"kept": n_kept, "rejected": rejected, "dest": str(dest),
                 "author": who,
+                "stores": {d: {"labels": len(st), "verdicts": int(sum(st.count))} for d, st in stores.items()},
+                "stores_withheld": withheld,
                 "advice": "read the rejected list AND spot-check the kept rows before "
                           "shipping -- the lexical screen is a floor, not a proof"}
 
@@ -95,11 +157,27 @@ class _UnifiedPart20B:
         for b in bundles:
             r = pool.memory_import(str(b), on_conflict="flag")
             report.append({"bundle": str(b), "imported": r.get("imported"),
-                           "conflicts": r.get("conflicts")})
+                           "conflicts": r.get("conflicts"), "stores": r.get("stores", [])})
+        # Q3: the learned prototypes merged from every bundle ride in the pooled partition's carrier section, so a
+        # contributor importing the commons back receives them (merged into its own stores by the same rule)
+        pooled = {}
+        if hasattr(pool, "_shareable_stores"):
+            # the pool exists only to be shared: every door a bundle brought is shareable here (each arrived from an
+            # ELIGIBLE store -- guard-clean, never salted -- and the pool itself learns from no question at all)
+            for rep_ in report:
+                for st_ in rep_["stores"]:
+                    if not st_.get("refused"):
+                        pool.protostore_share(st_["door"], True)
+            pooled = pool._shareable_stores()
+            for door, st in pooled.items():
+                if door == "route" and pool._router() is not None:
+                    st.__dict__["_commons_extra"] = {"features": pool._router().features.digest}
+            pool.__dict__["_commons_stores"] = pooled
         # lever 3 (sweep 101): the pooled commons is likewise pure-taught.
         sv = pool.learning_save(str(root), audit="regen")
         return {"bundles": report, "root": str(root),
                 "rows": len(getattr(pool.zoo["ladder"], "taught_log", []) or []),
+                "stores": {d: {"labels": len(st), "verdicts": int(sum(st.count))} for d, st in pooled.items()},
                 "saved": sv.get("saved")}
 
     def memory_export(self, dest, query=None, sessions=None, provenance=None,
@@ -264,9 +342,16 @@ class _UnifiedPart20B:
             self.answer_feedback(vq, ok=False)
         if hasattr(self, "_api_toolbox"):
             self._api_toolbox._rehydrated = False       # relearn arrivals lazily
+        # Q3: learned prototypes the bundle carries (a contribute / commons_pool bundle) merge into this mind's own
+        # stores by the documented rule -- verdict-count-weighted, conflicts FLAGGED and the local row kept, a store in
+        # another feature space refused whole (holographic_unified_p33_router._protostore_merge)
+        stores = []
+        for door, st in sorted((donor.__dict__.get("_commons_stores") or {}).items()):
+            if hasattr(self, "_protostore_merge"):
+                stores.append(self._protostore_merge(door, st, source=str(src)))
         return {"imported": imported, "skipped_identical": skipped,
                 "conflicts": conflicts, "vetoes": len(vet),
-                "on_conflict": on_conflict}
+                "on_conflict": on_conflict, "stores": stores}
 
 
 

@@ -3006,3 +3006,29 @@ Verification: selftest OK; 42 MCP tests (28 + 14) green incl. the slow lint; doc
     when it exists -- the clone is what was imported; an installed wheel still reads its metadata.
   Full suite run in two halves after the fixes (the sandbox reaps a 50-minute job at a turn boundary): 65%
   in the first run with that one pre-fix failure, the remaining 191 files 2,402 passed / 61 skipped / 0 failed.
+
+## Sweep 176, benchmarks through the doors (20 Sep 2026)
+docs/research/BENCHMARK_sweep176.md section 8: route() first contact act 33.7% (right 0.548 on the full ~3,900-card
+mind catalog) / choose 31.0% (menu holds it 62.5%) / abstain 35.3%; after the outcome a repeat via reflex 100% at
+0.977, a new paraphrase 17% at 0.885. typed() on Banking77: forced 0.767, p>=0.9 keeps 37.7% at 0.920, conformal
+0.917 at nominal 0.95 with 154 calibration rows (the guarantee needs its rows), 43 ms per decision with lint +
+decide + record + learn. FOUND: typed() ran the schema lint on every call (54.7 ms) and stamped the same budget
+warning on every row; the schema lint is now cached by content hash and only state findings ride each answer (20%
+of rows, the multi-clause ones). Acting loop: false actions 2/20 at z 0.1 (old gate 0/20), resolution 0.98 both.
+
+## Sweep 176, the coverage fix (20 Sep 2026) -- it was not the row count
+The 0.917-0.923 conformal coverage at nominal 0.95 (n=154) had three candidate causes; measured in order: the model
+learning on the stream (frozen model: 0.923 -- no); leakage of calibration rows into the scorer (scores byte-identical
+before/after calibrate; the quantile covers its own rows at 0.961 -- no); the marginal guarantee's own variation
+across calibration draws (one draw whose gaps ran small; the 5th percentile of realised coverage at n=154 is ~0.92
+-- yes). FIX: calibrate_conformal(labeled, alpha, confidence=None) -- with confidence, the training-conditional
+order statistic from the exact Beta/Binomial identity (_conformal_conditional_index: l=151 vs 148 at n=154, alpha
+0.05, confidence 0.9; None below ~59 rows, every option stays). Same calibration set, same 300 fresh rows: 0.923 ->
+0.957, mean set size 11.3 -> 26.3. Threaded as conformal_confidence= on systemone_decide and typed(); the marginal
+form stays the default. KEPT: "needs more rows" was the wrong first reading -- the guarantee type was the story.
+
+## Sweep 176, natural_path_bench (20 Sep 2026)
+tools/natural_path_bench.py: one command for the decision surface through the doors. This run: route() first contact
+act 0.337/0.548, choose 0.310 (menu holds it 0.625), abstain 0.353; repeat via reflex 1.000 at 0.977; new paraphrase
+0.170 at 0.885. typed() forced 0.767, 21 ms, p>=0.9 keeps 0.377 at 0.920; conformal marginal 0.917 / conditional
+0.957 (sets 9.8 vs 23.8). Loop false actions 2/20 at z 0.1 (old 0/20). MCP 0/10 probes answered, 51 ms, round trip OK.

@@ -6,8 +6,13 @@
 - All module selftests green: apilearn (live local HTTP loop), runtimerung (opt-outs),
   attribution (deterministic addresses), splatmem (abstention + cliff), swarm audit
   (12 groups, 0 import failures, 20x5 matrix, 0 unintended gaps).
-- The shipped memory bundle re-distilled from the current partition: 62 generic
-  entries, every exclusion itemized by reason, leakage audit 0/4.
+- The shipped memory bundle re-distilled from the current partition (`python tools/distill_release.py
+  --partition lecore_memory --out release_bundle`), then audited (`--check release_bundle` must print ok: every
+  row passes the rule). 2026-09-27: 125 generic entries, every exclusion itemized by reason in
+  `release_bundle/distill_report.json`. Found that day: the bundle had drifted to 497 rows copied from session
+  memory (only 75 passed the rule) -- a bundle must be written by the distiller and nothing else.
+- The seedpack doctrine (`holographic_seedpack.DOCTRINE`) carries the operating lessons in their timeless form;
+  the bundle carries measured engine Q&A. Session memory (`lecore_memory/`) is neither.
 - Chat front door headless-verified: teach/veto/workspaces/artifacts/memory slots/
   void loop/api verbs/commands cheatsheet.
 

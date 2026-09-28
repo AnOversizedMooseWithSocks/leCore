@@ -72,8 +72,8 @@ import time
 
 import numpy as np
 
-from holographic.io_and_interop.holographic_container import (save_container, load_container, register_kind,
-                                                               known_kinds, IMAGE_KIND)
+from holographic.io_and_interop.holographic_container import (save_container, load_container, load_container_meta,
+                                                               register_kind, known_kinds, IMAGE_KIND)
 
 LEWS_SPEC = "1.0"
 
@@ -317,6 +317,21 @@ class Workspace:
         with open(self.path, "rb") as f:
             return load_container(f.read())
 
+    def _read_meta(self):
+        """The container's file-level meta, from manifest.json alone (no section arrays are decoded), cached on the
+        file's (mtime_ns, size, inode). WHY the cache: the manifest also carries every section's meta -- for a
+        painting that is the whole stroke recipe, so even the manifest alone parsed in ~0.5 s. The container is
+        only ever replaced atomically by _write (os.replace -> new inode/mtime), so an unchanged stat means an
+        unchanged meta; presence notes go to the journal and never touch this file."""
+        st = os.stat(self.path)
+        key = (st.st_mtime_ns, st.st_size, st.st_ino)
+        cached = getattr(self, "_meta_cache", None)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        meta = load_container_meta(self.path)
+        self._meta_cache = (key, meta)
+        return meta
+
     def _write(self, cont):
         """Atomic: write a temp file beside the target, fsync, os.replace. A reader sees either the old complete file
         or the new one -- never a half-written ZIP."""
@@ -370,7 +385,8 @@ class Workspace:
         while presence notes (`bump`) only append to the journal -- rewriting a whole ZIP to say "cursor moved" would
         make the cheap signal cost as much as the expensive one. Both counters advance under the same lock, so the
         larger is the truth."""
-        return max(int((self._read()["meta"] or {}).get("rev", 0)), self._journal_rev())
+        # manifest only -- never decompress the sections just to read one integer (see load_container_meta)
+        return max(int(self._read_meta().get("rev", 0)), self._journal_rev())
 
     def sections(self, kind=None, upgrade=True):
         """Every section (optionally of one kind), upgraded to this build's schema versions."""

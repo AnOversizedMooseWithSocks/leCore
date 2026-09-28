@@ -13,6 +13,46 @@ from holographic.unified.holographic_unified_p20_zoo import _q8_pack, _q8_unpack
 
 class _UnifiedPart23:
 
+    # EVERY SECTION KIND learning_save WRITES (and the legacy ones learning_load still reads). learning_load keeps any
+    # OTHER kind it finds and learning_save writes it back untouched -- the container's round-trip promise, which
+    # learning_load used to break (learning-loop audit, 2026-09-26: a section from a newer build did not survive one
+    # rollover). Add a new kind here when you add its writer, or it will be written twice.
+    _LEARNING_KINDS = frozenset("lecore.learning." + k for k in (
+        "semantic", "affinity", "chains", "skeletons", "predictor", "ledger", "taught", "goals", "recipes",
+        "calibration", "toolcache", "experience", "factfiles", "tooldoor", "router", "protostores", "guard",
+        "meaning", "reflexbridge", "decisions", "escalations", "direction",
+        "toolusage"))           # toolusage: the pre-E4.4 UsageTrace, READ and migrated into the tool door, never re-written
+    # kinds that may appear MANY times in one file (kept by their own lists: _certificate_memory, _image_memory, ...)
+    _LEARNING_KIND_FAMILIES = ("lecore.learning.certificate", "lecore.memory.image", "lecore.memory.sequence")
+
+    def _guard_learned_clean(self, state):
+        """The semantic guard's learned state WITHOUT any example that carries a secret -> (state, dropped).
+
+        WHY (learning-loop audit, 2026-09-26): a pattern refusal teaches the guard the refused question -- normalised
+        but otherwise verbatim, so teach("my password is <secret> ...") left "... <secret, lower-cased> ..." in the
+        guard's credential examples, and learning_save wrote it to disk. An example is dropped when the pattern layer
+        flags it, when redaction would change it, or when it holds a token that looks like a normalised key (16+
+        characters mixing letters and digits: normalisation turns "sk-..." into "sk ...", which the key patterns no
+        longer see). Questions a guard legitimately learns ("what is my seed phrase") carry none of these."""
+        import re
+        from holographic.agents_and_reasoning.holographic_learnguard import redact, sensitive_reason
+        st = dict(state or {})
+        dropped = 0
+        for k, v in list(st.items()):
+            if not isinstance(v, list):
+                continue                                  # calibration / noise pairs: numbers, not texts
+            keep = []
+            for q in v:
+                q_ = str(q)
+                bad = bool(sensitive_reason(q_)) or redact(q_) != q_ or any(
+                    len(t) >= 16 and re.search(r"[a-z]", t) and re.search(r"[0-9]", t) for t in q_.lower().split())
+                if bad:
+                    dropped += 1
+                else:
+                    keep.append(q)
+            st[k] = keep
+        return st, dropped
+
     def _learning_state_files(self, root):
         """Every learning-state file under <root>/learning, OLDEST FIRST -- the merge order.
         Deterministic tie rule: legacy state.lecore sorts FIRST (it predates the generation
@@ -59,6 +99,8 @@ class _UnifiedPart23:
             return {"loaded": False, "why": "no learning partition at %s" % d}
         z = self.zoo
         deprecated = False
+        decisions_rep = None                                # E0.5: the decisions section's restore report
+        guard_dropped = {"sensitive": 0, "volatile": 0}     # sweep 179: rows the learning guard refused
         if os.path.exists(cpath):
             from holographic.io_and_interop.holographic_container import load_container
             got = load_container(open(cpath, "rb").read())
@@ -132,10 +174,9 @@ class _UnifiedPart23:
                             pass
             cal = by.get("lecore.learning.calibration")
             if cal:
-                self._reflex_calib_pairs = [[float(c), bool(o)] for c, o in
-                                            (cal["meta"].get("pairs") or [])]
-                if cal["meta"].get("fit"):
-                    self._reflex_calibration = cal["meta"]["fit"]
+                # E0.7: v2 = one stream per door; a v1 (legacy, untagged) pairs list is migrated into BOTH the ladder
+                # and the bridge stream -- and the ladder's veto is WIRED here (it used to wait for 8 new reports)
+                self._calibration_load_report = self._calibration_restore(cal["meta"])
             tcs = by.get("lecore.learning.toolcache")
             if tcs:
                 self._tool_cache = {"prefix": dict(tcs["meta"].get("prefix") or {}),
@@ -175,6 +216,9 @@ class _UnifiedPart23:
             if exp and exp["meta"].get("tiles"):
                 tls = exp["meta"]["tiles"]
                 for ti, st in enumerate(tls):
+                    for _fk in ("succ_field", "fail_field"):      # E2.1: the outcome fields (absent in older files)
+                        if ("%s_%d" % (_fk, ti)) in (exp.get("arrays") or {}):
+                            st[_fk] = exp["arrays"]["%s_%d" % (_fk, ti)]
                     if st.pop("audit_in_arrays", False):
                         # READ EITHER FORM: new partitions carry aud_kq/klo/khi,
                         # older ones the float32 aud_k. An existing partition must
@@ -207,9 +251,78 @@ class _UnifiedPart23:
                             # partition that was merely compact could not be opened at all.
                             ks, vs = [], []
                         st["audit"] = [(k, v) for k, v in zip(ks, vs)]
+                        # E1.5: the per-row RAW flags (absent in files written before them: all ordinary writes)
+                        if ("aud_raw_%d" % ti) in _A and len(st["audit"]):
+                            st["audit_raw"] = [[int(j_), int(m_)] for j_, m_ in
+                                               enumerate(np.asarray(_A["aud_raw_%d" % ti]).reshape(-1)) if int(m_)]
                 if hasattr(self, "_aud_tables_tmp"):
                     del self._aud_tables_tmp              # per-load scratch, never state
                 self.experience_from_state({"tiles": tls})
+            # sweep 177: the reflex bridge (label book + seen gate), restored AFTER the trace it
+            # guards and outside the experience branch -- a regen-mode save has no experience
+            # section but still carries this one. Absent in older containers: nothing changes.
+            # ---- F1 block (CLM backlog E4.1 / E4.4 / Q3; holographic_unified_p33_router) ---------------------------
+            # E4.4: the tool door (lecore.learning.tooldoor), and -- read-compat shim -- the sweep-178 UsageTrace section
+            # (lecore.learning.toolusage) of an older partition: its success / failure counts migrate into the door's
+            # audit; its trace vector does not (a different key space -- see _tool_restore).
+            _td, _tu = by.get("lecore.learning.tooldoor"), by.get("lecore.learning.toolusage")
+            if (_td or _tu) and hasattr(self, "_tool_restore"):
+                self._tool_restore(_td, legacy=_tu)
+            # E4.1: the learned router, rebuilt against THIS mind's catalog
+            _rt = by.get("lecore.learning.router")
+            if _rt and hasattr(self, "_router_restore"):
+                self._router_restore(_rt)
+            # Q3: the commons carrier -- held aside; memory_import merges it (never a plain load)
+            _ps = by.get("lecore.learning.protostores")
+            if _ps and hasattr(self, "_protostores_restore"):
+                self._protostores_restore(_ps)
+            # ---- end F1 block --------------------------------------------------------------------------------------
+            # sweep 180: the semantic guard's LEARNED examples, restored before the taught replay runs through it
+            _gd = by.get("lecore.learning.guard")
+            if _gd:
+                # learning-loop audit: an example that carries a secret (an older partition's guard kept refused
+                # questions verbatim) is dropped on the way IN too, so the live guard never holds it
+                _gst, self._guard_load_dropped = self._guard_learned_clean(_gd["meta"].get("learned") or {})
+                self.semantic_guard.restore(_gst)
+            # sweep 181: the meaning index BEFORE the taught replay (replay then re-adds rows idempotently)
+            _mn = by.get("lecore.learning.meaning")
+            if _mn and hasattr(self, "_meaning_restore"):
+                self._meaning_restore(_mn["meta"], _mn.get("arrays"))
+            # learning-loop audit: the direction reader's own section (written only when no meaning section carried it)
+            _dr = by.get("lecore.learning.direction")
+            if _dr and self.__dict__.get("_direction_reader_obj") is None:
+                import holographic.agents_and_reasoning.holographic_rolecall as _RC
+                self.__dict__["_direction_reader_obj"] = _RC.ContextRoles.from_state(_dr["meta"],
+                                                                                     dict(_dr.get("arrays") or {}))
+            _rb = by.get("lecore.learning.reflexbridge")
+            if _rb:
+                _rba = _rb.get("arrays") or {}
+                _vm = (_rb["meta"].get("verify") or {})
+                # learning-loop audit: verify_decision's profile + drift stream (absent in older partitions: None)
+                _vst = ({"n": _vm.get("n", 0), "meaning_n": _vm.get("meaning_n", 0),
+                         "profile": _rba.get("verify_profile"), "meaning_profile": _rba.get("verify_meaning_profile"),
+                         "support": _rba.get("verify_support")} if _vm else None)
+                self.reflex_bridge_restore({"labels": _rb["meta"].get("labels") or [],
+                                            "kinds": _rb["meta"].get("kinds") or [],
+                                            "outcomes": _rb["meta"].get("outcomes") or [],
+                                            "keys": _rba.get("keys"), "verify": _vst})
+            # learning-loop audit: the OPEN QUESTIONS (escalations) of the newest generation -- live ones win
+            _es = by.get("lecore.learning.escalations")
+            if _es:
+                _led = getattr(self, "_escalations", None) or {}
+                for _row in (_es["meta"].get("open") or []):
+                    if len(_row) >= 3:
+                        _led.setdefault(str(_row[0]), {"reason": str(_row[1]), "count": int(_row[2])})
+                self._escalations = _led
+            # learning-loop audit: every section this build does not know is KEPT, and learning_save writes it back
+            self._learning_unknown_sections = [
+                sec for sec in got["sections"]
+                if sec["kind"] not in self._LEARNING_KINDS and not str(sec["kind"]).startswith(
+                    self._LEARNING_KIND_FAMILIES)]
+            # E0.5: the decision ledger (records as text, ids re-derived and checked) and SystemOne's learned tables
+            # -- decision_outcome(<id from before the restart>) works again, and a typed door decides as it did
+            _dc = by.get("lecore.learning.decisions")
+            decisions_rep = self._decisions_restore(_dc) if _dc else None
             # taught replay runs AFTER the experience restore (cp21 ordering bug, caught by
             # the cold cross-check: replay marks written first were WIPED when the trace
             # section replaced the whole trace -- 0/8 T0. Restore the floor, THEN re-teach.)
@@ -244,32 +357,59 @@ class _UnifiedPart23:
                 # arrived too late to matter. Restore them FIRST, then replay honours
                 # them below.
                 lad._vetoed_qs = set(ta["meta"].get("vetoed_questions") or [])
-                for t_ in texts:
-                    # entries are [q, a] or, since cp36, [q, a, session]; a session
-                    # entry replays under its SALTED key so isolation survives the
-                    # save/load cycle exactly like everything else migrates: by replay
-                    q_, a_ = str(t_[0]), str(t_[1])
-                    sess_ = t_[2] if len(t_) > 2 else "shared"
-                    prov_ = t_[3] if len(t_) > 3 else "taught"   # historic rows predate
-                    key_q = q_ if sess_ == "shared" else "[s:%s] %s" % (sess_, q_)
-                    if " ".join(key_q.lower().split()) in getattr(lad, "_vetoed_qs",
-                                                                  set()):
-                        lad._log_taught([q_, a_, sess_, prov_])     # books keep history;
-                        continue                                    # the veto keeps it dead
-                    qk_ = lad._qkey(key_q)
-                    h_ = self.experience.read_gated(qk_)
-                    if h_["fired"]:
-                        pk_ = "%d:%d" % (self.experience._route(qk_), int(h_["atom"]))
-                        if getattr(lad, "_payloads", {}).get(pk_) == a_:
-                            # already served EXACTLY by the restored floor: re-writing
-                            # would grow the audit journal every load/save cycle (the
-                            # cp28 bloat) -- keep the books instead of re-teaching
-                            lad._payload_qs.setdefault(pk_, key_q)
-                            lad._log_taught([q_, a_, sess_, prov_])
+                # sweep 179: the allow_volatile overrides travel with the rows they allow
+                lad._volatile_ok = set(ta["meta"].get("volatile_ok_questions") or [])
+                lad._replaying = True                  # sweep 180: _remember judges replay by pattern only
+                try:
+                    from holographic.agents_and_reasoning.holographic_learnguard import learning_verdict as _guard_check
+                    for t_ in texts:
+                        # THE GUARD ON REPLAY (sweep 179): a partition written before the guard can hold a secret or
+                        # a stale reading. Refuse it here -- not in the log, not served. The branches below can serve
+                        # a row straight from the RESTORED floor without calling _remember, so the guard has to run
+                        # first, and _forget_served removes what the floor already restored for it.
+                        _q0 = str(t_[0])
+                        _s0 = t_[2] if len(t_) > 2 else "shared"
+                        _k0 = _q0 if _s0 == "shared" else "[s:%s] %s" % (_s0, _q0)
+                        # PATTERN LAYER ONLY here (sweep 180, measured): with the semantic layer on, replay DROPPED a
+                        # real row of the shipped partition -- "what is lever 7", intent +0.008 -- i.e. a GUESS
+                        # deleted a fact the user already had. A semantic call refuses NEW learning, visibly, with a
+                        # correction path (learn_guard_example); it never deletes what is stored. leak_audit REPORTS
+                        # semantic suspicions in stored data instead.
+                        _v0 = _guard_check(_q0, str(t_[1]), allow_volatile=" ".join(_k0.lower().split())
+                                           in lad._volatile_ok, guard=None)
+                        if not _v0["ok"]:
+                            guard_dropped[_v0["kind"]] += 1
+                            lad._forget_served(_k0, str(t_[1]))
                             continue
-                    lad._remember(qk_, a_, key_q, provenance=prov_)
-                    if lad.taught_log and lad.taught_log[-1][0] == key_q:
-                        lad._relog_last([q_, a_, sess_, prov_])
+                        # entries are [q, a] or, since cp36, [q, a, session]; a session
+                        # entry replays under its SALTED key so isolation survives the
+                        # save/load cycle exactly like everything else migrates: by replay
+                        q_, a_ = str(t_[0]), str(t_[1])
+                        sess_ = t_[2] if len(t_) > 2 else "shared"
+                        prov_ = t_[3] if len(t_) > 3 else "taught"   # historic rows predate
+                        key_q = q_ if sess_ == "shared" else "[s:%s] %s" % (sess_, q_)
+                        if " ".join(key_q.lower().split()) in getattr(lad, "_vetoed_qs",
+                                                                      set()):
+                            lad._log_taught([q_, a_, sess_, prov_])     # books keep history;
+                            continue                                    # the veto keeps it dead
+                        qk_ = lad._qkey(key_q)
+                        h_ = self.experience.read_gated(qk_)
+                        if h_["fired"]:
+                            pk_ = "%d:%d" % (self.experience._route(qk_), int(h_["atom"]))
+                            if getattr(lad, "_payloads", {}).get(pk_) == a_:
+                                # already served EXACTLY by the restored floor: re-writing
+                                # would grow the audit journal every load/save cycle (the
+                                # cp28 bloat) -- keep the books instead of re-teaching
+                                lad._payload_qs.setdefault(pk_, key_q)
+                                lad._log_taught([q_, a_, sess_, prov_])
+                                continue
+                        lad._remember(qk_, a_, key_q, provenance=prov_)
+                        # getattr: a REFUSED first row leaves no taught_log yet (latent; found by sweep 180's test)
+                        _tl = getattr(lad, "taught_log", None)
+                        if _tl and _tl[-1][0] == key_q:
+                            lad._relog_last([q_, a_, sess_, prov_])
+                finally:
+                    lad._replaying = False              # ALWAYS: a replay that raised must not leave the semantic layer off
                 # the registry DERIVES from the tags in the durable record itself --
                 # it piggybacked on the goals section once and died with it on
                 # goal-less minds (cp36 suite caught it): never store what you can
@@ -288,8 +428,14 @@ class _UnifiedPart23:
                         bqk = lad._qkey(bq)
                         bt = self.experience._route(bqk)
                         bh = self.experience.read_gated(bqk)
-                        if bh["fired"]:
-                            lad._payload_bad.add("%d:%d" % (bt, int(bh["atom"])))
+                        # learning-loop audit: re-mark THIS question's payload only (its exact entry, or a read whose
+                        # recorded question verifies) -- the fired atom can be a NEIGHBOUR's. MEASURED before: after
+                        # 3 corrections and a restart, 2 innocent questions of 90 were no longer served. A tombstoned
+                        # question has no payload at all (replay skipped it): nothing to mark, the veto already holds.
+                        _pk = lad._feedback_target([bq], bh, bt) if hasattr(lad, "_feedback_target") else \
+                            ("%d:%d" % (bt, int(bh["atom"])) if bh["fired"] else None)
+                        if _pk is not None:
+                            lad._payload_bad.add(_pk)
                 lad._feedback_log = list(ta["meta"].get("feedback_log") or [])
             else:                                         # v1 tolerance: raw payload ints,
                 pay = {int(k): str(v) for k, v in (ta["meta"]["pairs"] if ta else [])}
@@ -306,7 +452,21 @@ class _UnifiedPart23:
                 except Exception:
                     pass
         self._learning_loaded_from = cpath          # keyed per FILE (generations differ)
-        return {"loaded": True, "path": cpath,
+        # MAPLE SWARM RUN (2026-09-27): a mind that LOADED a dated generation saves back INTO it. MEASURED: a service
+        # restarted mid-session booted state-20260927-181338Z, and its next learning_save -- no rollover in between --
+        # fell through to the legacy learning/state.lecore, which the loader never reads while a generation exists
+        # (this very function loads only the newest generation): 26 calibration labels and 30 verdicts written there
+        # would have vanished on the next boot. The "roll over before saving" rule existed only to dodge this; the
+        # loaded generation is now the write target (learning_save still honours an explicit path= and a rollover's
+        # newer file). A bare mind or a legacy-only partition keeps the legacy name, as before.
+        if (not path and os.path.basename(cpath).startswith("state-")
+                and not getattr(self, "_learning_current", None)):
+            self._learning_current = cpath
+        return {"loaded": True, "path": cpath, "guard_dropped": guard_dropped,
+                "decisions": decisions_rep,
+                # learning-loop audit: sections kept for write-back, and guard examples dropped for carrying a secret
+                "unknown_sections": len(getattr(self, "_learning_unknown_sections", None) or []),
+                "guard_examples_dropped_sensitive": int(getattr(self, "_guard_load_dropped", 0) or 0),
                 "format": "container" if not deprecated else
                 "LEGACY-JSON (deprecated: re-save to migrate)", "sections": n_sections}
 
@@ -427,36 +587,41 @@ class _UnifiedPart23:
         vet = set(vetoed or []) | set(getattr(lad, "_vetoed_qs", set()) or [])
         lad._vetoed_qs = vet
         replayed = skipped_veto = skipped_dup = 0
-        for t_ in rows or []:
-            q_, a_ = str(t_[0]), str(t_[1])
-            sess_ = t_[2] if len(t_) > 2 else "shared"
-            prov_ = t_[3] if len(t_) > 3 else "taught"
-            key_q = q_ if sess_ == "shared" else "[s:%s] %s" % (sess_, q_)
-            if " ".join(key_q.lower().split()) in vet:
-                lad._log_taught([q_, a_, sess_, prov_])           # books keep history;
-                skipped_veto += 1                               # the veto keeps it dead
-                continue
-            qk_ = lad._qkey(key_q)
-            h_ = self.experience.read_gated(qk_)
-            if h_["fired"]:
-                pk_ = "%d:%d" % (self.experience._route(qk_), int(h_["atom"]))
-                if getattr(lad, "_payload_qs", {}).get(pk_) == key_q:
-                    # The CURRENT (newest) state already serves an answer FOR THIS
-                    # QUESTION: an older generation must never override it -- newest
-                    # teaching wins (rollover contract 2; the naive equal-payload dedup
-                    # let 'OLD answer' overwrite 'NEW answer', measured). The identity
-                    # check is on the RECORDED QUESTION, not on mere gate firing:
-                    # measured at dim 256, an UNSEEN question false-fired onto a
-                    # neighbour's atom via shared-word crosstalk, and a fired-only rule
-                    # silently dropped it (rollover contract 1). Books keep the history.
-                    lad._payload_qs.setdefault(pk_, key_q)
-                    lad._log_taught([q_, a_, sess_, prov_])
-                    skipped_dup += 1
+        # sweep 180: stored rows are judged by the PATTERN layer only while replaying (see learning_load)
+        lad._replaying = True
+        try:
+            for t_ in rows or []:
+                q_, a_ = str(t_[0]), str(t_[1])
+                sess_ = t_[2] if len(t_) > 2 else "shared"
+                prov_ = t_[3] if len(t_) > 3 else "taught"
+                key_q = q_ if sess_ == "shared" else "[s:%s] %s" % (sess_, q_)
+                if " ".join(key_q.lower().split()) in vet:
+                    lad._log_taught([q_, a_, sess_, prov_])           # books keep history;
+                    skipped_veto += 1                               # the veto keeps it dead
                     continue
-            lad._remember(qk_, a_, key_q, provenance=prov_)
-            if lad.taught_log and lad.taught_log[-1][0] == key_q:
-                lad._relog_last([q_, a_, sess_, prov_])
-            replayed += 1
+                qk_ = lad._qkey(key_q)
+                h_ = self.experience.read_gated(qk_)
+                if h_["fired"]:
+                    pk_ = "%d:%d" % (self.experience._route(qk_), int(h_["atom"]))
+                    if getattr(lad, "_payload_qs", {}).get(pk_) == key_q:
+                        # The CURRENT (newest) state already serves an answer FOR THIS
+                        # QUESTION: an older generation must never override it -- newest
+                        # teaching wins (rollover contract 2; the naive equal-payload dedup
+                        # let 'OLD answer' overwrite 'NEW answer', measured). The identity
+                        # check is on the RECORDED QUESTION, not on mere gate firing:
+                        # measured at dim 256, an UNSEEN question false-fired onto a
+                        # neighbour's atom via shared-word crosstalk, and a fired-only rule
+                        # silently dropped it (rollover contract 1). Books keep the history.
+                        lad._payload_qs.setdefault(pk_, key_q)
+                        lad._log_taught([q_, a_, sess_, prov_])
+                        skipped_dup += 1
+                        continue
+                lad._remember(qk_, a_, key_q, provenance=prov_)
+                if getattr(lad, "taught_log", None) and lad.taught_log[-1][0] == key_q:
+                    lad._relog_last([q_, a_, sess_, prov_])
+                replayed += 1
+        finally:
+            lad._replaying = False
         return {"replayed": replayed, "skipped_veto": skipped_veto,
                 "skipped_dup": skipped_dup}
 
@@ -507,7 +672,7 @@ class _UnifiedPart23:
             out = self.learning_load(root)                   # read-only: plain load, touch nothing
             return {"rolled": False, "why": "learning dir is read-only -- plain load, "
                                             "nothing consolidated or deleted", "loaded": out}
-        taught, vetoes, newest_rows = {}, set(), 0
+        taught, vetoes, newest_rows, decs = {}, set(), 0, {}
         for f in files:
             try:
                 got = load_container(open(f, "rb").read())
@@ -515,6 +680,8 @@ class _UnifiedPart23:
                            if s["kind"] == "lecore.learning.taught"), None)
                 taught[f] = (ta["meta"].get("texts") if ta else None) or []
                 vetoes |= set((ta["meta"].get("vetoed_questions") if ta else None) or [])
+                dc = next((s for s in got["sections"] if s["kind"] == "lecore.learning.decisions"), None)
+                decs[f] = ((dc or {}).get("meta") or {}).get("records") or []
             except Exception:
                 taught[f] = []                               # an unreadable generation
         newest = files[-1]                                   # contributes nothing, loudly
@@ -525,6 +692,17 @@ class _UnifiedPart23:
             r_ = self._replay_taught_rows(taught[f], vetoed=vetoes)
             for k_ in rep:
                 rep[k_] += r_[k_]
+        # E0.5: DECISION RECORDS are durable text like taught rows, so an older generation contributes the records the
+        # newest does not hold (newest wins by id; its SystemOne tables supersede -- hot state, as for the trace).
+        # Older records sort BEFORE the newest's, so the save's newest-4096 cap drops the oldest first.
+        L_ = self.decision_ledger()
+        before_ = set(L_._order)
+        for f in files[:-1]:
+            L_.load_text(decs.get(f) or [], merge=True)
+        added_ = [i_ for i_ in L_._order if i_ not in before_]
+        if added_:
+            L_._order = added_ + [i_ for i_ in L_._order if i_ in before_]
+        rep["decisions_merged"] = len(added_)
         # lever 3 at the generational gate (sweep 101): the rollover's whole job is
         # replaying taught text -- regen is its NATIVE mode. The count guard falls back
         # to store when non-taught rows exist, so this flip is safe by construction.
@@ -599,11 +777,21 @@ class _UnifiedPart23:
         return {"n": len(rows), "wisdom": rows[:int(k)],
                 "authors": sorted({r_["author"] for r_ in rows})}
 
-    def teach(self, query, answer):
+    def teach(self, query, answer, allow_volatile=False):
         """CANONICAL TEACH: lands in the CURRENT session's key space (or shared when no
         session is open). The taught_log records (question, answer, session) at full
-        length -- the durable text record session_search walks."""
+        length -- the durable text record session_search walks.
+        THE LEARNING GUARD (sweep 179): a secret (API key, seed phrase, password, private
+        key, token) is REFUSED with the rule named, never the value -- no override. A live
+        READING (a price, the weather, anything asked 'right now') is refused as a fact:
+        teach the tool that fetches it, or a dated snapshot ('... as of 2026-09-22'), or pass
+        allow_volatile=True, which is remembered for that question and survives a reload."""
         lad = self.zoo["ladder"]
+        lad._last_refusal = None
+        if allow_volatile:
+            if not hasattr(lad, "_volatile_ok"):
+                lad._volatile_ok = set()
+            lad._volatile_ok.add(" ".join(self.session_salt(query).lower().split()))
         sess = getattr(self, "_session", None) or "shared"
         for k_t in (" ".join(str(query).lower().split()),
                     " ".join(self.session_salt(query).lower().split())):
@@ -620,13 +808,153 @@ class _UnifiedPart23:
             # (the cp38 control-token guard, standalone __word__ tokens) and teach()
             # was reporting {"taught": True} anyway -- a silent drop that cost a full
             # debugging session. A refused teach now says so, and says why.
+            ref_ = getattr(lad, "_last_refusal", None)
+            if ref_:                                 # sweep 179: the learning guard, named
+                return {"taught": False, "session": sess, "guard": ref_["kind"],
+                        "reason": ref_["reason"]}
             return {"taught": False, "session": sess,
                     "reason": "the memory guard refused this row (standalone "
                               "__word__ control tokens are reserved; rephrase "
                               "the question)"}
         if log and log[-1][0] == self.session_salt(query):
             log[-1] = [str(query), str(answer), sess, "taught"]
-        return {"taught": True, "session": sess}
+        out = {"taught": True, "session": sess}
+        # MAPLE SWARM RUN (2026-09-27): a question that serve() escalated and a worker then TAUGHT, word for word, is
+        # answered -- it now serves at T0 -- so it leaves the open-escalation ledger (resolve() reads 'cleared' from
+        # here). Only the exact wording is cleared: a taught rewording does not prove the escalated one serves.
+        led = getattr(self, "_escalations", None)
+        if led and led.pop(str(query), None) is not None:
+            out["cleared"] = True
+        return out
+
+    def learn_guard(self, question, answer="", allow_volatile=False):
+        """WOULD THIS BE LEARNED? (sweep 179) The verdict every learning door applies, callable up front:
+        {ok, kind: None|'sensitive'|'volatile', reason}. SENSITIVE = a credential (API key, private key,
+        BIP-39 seed phrase, password, access token, a 64-byte keypair array) -- never learned, no override.
+        VOLATILE = a READING of something that moves (a price, the weather, a balance, anything asked
+        'right now') -- not learned as a fact; learn the tool that fetches it, or a dated snapshot. The
+        reason names the rule, never the secret. Deterministic regex + the vendored BIP-39 list.
+        See holographic_learnguard."""
+        from holographic.agents_and_reasoning.holographic_learnguard import learning_verdict as check
+        return check(str(question), str(answer), allow_volatile=bool(allow_volatile), guard=self.semantic_guard)
+
+    @property
+    def semantic_guard(self):
+        """This mind's SEMANTIC learning guard (sweep 180; lazy): nearest-neighbour intent in character n-gram
+        space -- does a question MEAN a request for a credential, or for a live reading? Built-in examples plus
+        the catalog's questions are shared per process; what this mind learned (from pattern refusals and
+        learn_guard_example) is its own and persists with the partition. See holographic_learnguard."""
+        g = getattr(self, "_semantic_guard", None)
+        if g is None:
+            from holographic.agents_and_reasoning.holographic_learnguard import SemanticGuard
+            g = self._semantic_guard = SemanticGuard()
+        return g
+
+    def leak_audit(self, root=None, examples=5):
+        """IS ANYTHING SENSITIVE ALREADY STORED? (sweep 180) Scan every store this mind keeps -- taught rows,
+        served payloads, exact-match answers, the semantic vocabulary, the goal step cache and goal records,
+        the decision ledger (raw, not the redacted view), the message bus -- and, with root=, every container
+        file under that partition on disk. Uses the same two-layer verdict as the learning doors.
+        Returns {stores: {name: {items, flagged, suspected, examples}}, flagged, suspected, clean}: FLAGGED is
+        the pattern layer (certain enough to refuse), SUSPECTED the semantic layer (review it). Examples name
+        the store, the
+        index and the RULE -- never the value. Run it after a boot, before sharing a partition, or any time."""
+        import os
+        from holographic.agents_and_reasoning.holographic_learnguard import (
+            learning_verdict, sensitive_reason)
+        g = self.semantic_guard
+        stores = {}
+
+        # FLAGGED = the pattern layer (calibrated: 0 false positives on the shipped partition + catalog);
+        # SUSPECTED = the semantic layer only (a nearest-neighbour guess: review, then learn_guard_example(q,
+        # 'normal') if it is fine). The audit never deletes anything.
+        def scan(name, items, judge):
+            flagged, suspected, ex = 0, 0, []
+            n = 0
+            for i, item in enumerate(items):
+                n += 1
+                why = judge(item)
+                if why:
+                    semantic = "(semantic)" in str(why)
+                    if semantic:
+                        suspected += 1
+                    else:
+                        flagged += 1
+                    if len(ex) < int(examples):
+                        ex.append({"index": i, "layer": "semantic" if semantic else "pattern",
+                                   "rule": str(why).split(" -- ")[0]})
+            stores[name] = {"items": n, "flagged": flagged, "suspected": suspected, "examples": ex}
+
+        def pair_judge(qa):
+            v = learning_verdict(str(qa[0]), str(qa[1]), guard=g)
+            return None if v["ok"] else v["reason"]
+        lad = self.zoo["ladder"]
+        vok = getattr(lad, "_volatile_ok", set())
+        scan("taught rows", [r for r in getattr(lad, "taught_log", [])
+                             if " ".join(str(r[0]).lower().split()) not in vok],
+             lambda r: pair_judge((r[0], r[1])))
+        scan("served payloads", list(getattr(lad, "_payloads", {}).values()), lambda v: sensitive_reason(str(v)))
+        scan("exact-match answers", [e.get("answer") for e in getattr(lad, "_exact", {}).values()],
+             lambda v: sensitive_reason(str(v)))
+        te = getattr(self, "_lever7_text", None)
+        scan("semantic vocabulary", list(getattr(te, "context", {}) or {}), lambda w: sensitive_reason(str(w)))
+        tc = getattr(self, "_tool_cache", None) or {"prefix": {}, "stateless": {}}
+        scan("goal step cache", list(tc["prefix"].items()) + list(tc["stateless"].items()), pair_judge)
+        try:
+            goals = list(self.goal_book.goals.values())
+        except Exception:
+            goals = []
+        scan("goal records", [st.get("deliverable") for g_ in goals for st in g_.get("steps", [])
+                              if st.get("deliverable")], lambda v: sensitive_reason(str(v)))
+        led = getattr(self, "_decision_ledger", None)
+        recs = [led.get(i) for i in getattr(led, "_order", [])] if led is not None else []
+        scan("decision ledger", recs, lambda r: sensitive_reason(repr((r.state, r.answer, r.outcome, r.meta))))
+        try:
+            hist = self.bus().history("*") if getattr(self, "_bus", None) is not None else []
+        except Exception:
+            hist = []
+        # a Message's repr carries no payload -- judge what it CARRIES (topic + payload)
+        scan("message bus", list(hist or []),
+             lambda m_: sensitive_reason(repr((getattr(m_, "topic", None), getattr(m_, "payload", m_)))))
+        if root:
+            from holographic.io_and_interop.holographic_container import load_container
+            files = []
+            for dp, _dn, fn in os.walk(str(root)):
+                files += [os.path.join(dp, f) for f in sorted(fn) if f.endswith(".lecore")]
+
+            def file_judge(path):
+                try:
+                    got = load_container(open(path, "rb").read())
+                except Exception:
+                    return None                              # not a container: nothing to read, nothing to flag
+                for sec in got.get("sections", []):
+                    if sec.get("kind") == "lecore.learning.taught":
+                        for r in (sec.get("meta") or {}).get("texts") or []:
+                            why = pair_judge((r[0], r[1])) if len(r) > 1 else None
+                            if why and " ".join(str(r[0]).lower().split()) not in vok:
+                                return "%s: %s" % (os.path.basename(path), why)
+                        continue
+                    why = sensitive_reason(repr(sec.get("meta")))
+                    if why:
+                        return "%s [%s]: %s" % (os.path.basename(path), sec.get("kind"), why)
+                return None
+            scan("partition files", files, file_judge)
+        total = sum(s_["flagged"] for s_ in stores.values())
+        sus = sum(s_["suspected"] for s_ in stores.values())
+        return {"stores": stores, "flagged": total, "suspected": sus, "clean": total == 0}
+
+    def learn_guard_example(self, question, kind):
+        """TEACH THE LEARNING GUARD what a question MEANS (sweep 180). kind='credential' or 'reading' adds an
+        example the semantic layer will refuse paraphrases of; kind='normal' marks a question as ordinary --
+        THE correction for a semantic false positive (it also removes the question from the class lists).
+        Persists with the partition. Returns {learned, kind, intent} -- intent is the question's score now."""
+        # learning-loop audit: the example is REDACTED before it is learned -- a question pasted with its secret
+        # ("my password is <secret>, is that a credential?") is kept as "my password is [redacted] ...": the guard
+        # learns what the question means, never the value (its examples are persisted with the partition)
+        from holographic.agents_and_reasoning.holographic_learnguard import redact
+        q = redact(str(question))
+        ok = self.semantic_guard.learn(q, str(kind))
+        return {"learned": bool(ok), "kind": str(kind), "intent": self.semantic_guard.intent(q)}
 
     def session_search(self, query, sessions="all", k=5, weighted=True):
         """SEARCH ACROSS SESSIONS explicitly -- the opt-in bridge over the isolation.
@@ -798,7 +1126,9 @@ class _UnifiedPart23:
                               intern=self.zoo.get("intern"),
                               main=(lambda q, c: self.zoo["llm"]("ANSWER: " + q))
                               if self.zoo.get("llm") else None,
-                              est_llm_tokens=est_llm_tokens)
+                              est_llm_tokens=est_llm_tokens,
+                              # sweep 181: the same model, asked TYPED (see AnswerLadder T4m)
+                              resolver=self.zoo.get("llm"))
         if out["tier"] in ("T0", "T1", "T2", "T3", "T4"):
             self.escalation_note(str(query), out["tier"])
         # the conversation is a corpus: the question and any served answer join the
@@ -873,12 +1203,14 @@ class _UnifiedPart23:
         return self._zoo
 
     def zoo_answer(self, query, kb_search=None, dispatchers=None, intern=None, main=None,
-                   est_llm_tokens=600):
+                   est_llm_tokens=600, resolver=None):
         """Answer through the LADDER (Z0.1). Rungs are injected callables so any deployment
         wires its own kb/tools/models; the ladder owns the order, the gates, the freshness
-        check, the reflex write-back, and the ledger entry. Refusal is a result."""
+        check, the reflex write-back, and the ledger entry. Refusal is a result.
+        resolver (sweep 181): the attached model as a raw prompt->text callable, asked the
+        TYPED meaning question (same / new / unclear) before the legacy T4."""
         return self.zoo["ladder"].answer(query, kb_search, dispatchers, intern, main,
-                                         est_llm_tokens)
+                                         est_llm_tokens, resolver=resolver)
 
     def zoo_ledger(self):
         """The token ledger (Z0.2): per-tier serves, estimated tokens saved, escalation rate --

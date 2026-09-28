@@ -181,6 +181,10 @@ class _UnifiedPart21:
                 txt = open(p, encoding="utf-8", errors="replace").read()[:int(max_text_bytes)]
             except OSError:
                 continue
+            # sweep 179: a README or notes file with a pasted key must not put the key into the corpus the
+            # gate answers from (and quotes back). Redacted before the digest and the chunks see it.
+            from holographic.agents_and_reasoning.holographic_learnguard import redact as _redact
+            txt = _redact(txt)
             d = self.document_digest(txt)
             docs.append({"path": p, "stats": d.get("stats"),
                          "toc": [str(t)[:80] for t in (d.get("toc") or [])[:12]]})

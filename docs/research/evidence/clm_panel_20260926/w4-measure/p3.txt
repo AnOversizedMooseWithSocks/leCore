@@ -1,0 +1,9 @@
+[learned] rows 602 wordings 8591 feats 29041  setup 1.8s
+base (index today)                 AURC 0.0941 | precision at served fraction 20%:0.979 30%:0.972 40%:0.962 50%:0.950 60%:0.921 | oracle cov P0.95 57.7% P0.96 52.0% P0.97 38.8% P0.98 20.4%
+literal E1.4 (lam 0.5, val-chosen) AURC 0.0944 | precision at served fraction 20%:0.981 30%:0.972 40%:0.966 50%:0.948 60%:0.916 | oracle cov P0.95 56.4% P0.96 50.3% P0.97 43.6% P0.98 25.5%
+infonce (val-chosen, seed 0)       AURC 0.0780 | precision at served fraction 20%:0.988 30%:0.988 40%:0.972 50%:0.961 60%:0.940 | oracle cov P0.95 64.4% P0.96 59.0% P0.97 53.1% P0.98 44.2%
+infonce, signal = softmax p_max    AURC 0.0797 | precision at served fraction 20%:0.986 30%:0.982 40%:0.975 50%:0.965 60%:0.938 | oracle cov P0.95 63.3% P0.96 61.2% P0.97 53.6% P0.98 39.8%
+infonce, p_max over top-8 only     AURC 0.0855 | precision at served fraction 20%:0.982 30%:0.978 40%:0.966 50%:0.954 60%:0.925 | oracle cov P0.95 60.4% P0.96 51.2% P0.97 45.9% P0.98 32.3%
+infonce, p_max over top-2 only     AURC 0.0942 | precision at served fraction 20%:0.983 30%:0.974 40%:0.961 50%:0.941 60%:0.913 | oracle cov P0.95 53.0% P0.96 50.1% P0.97 37.3% P0.98 32.1%
+adapthd (val-chosen, seed 0)       AURC 0.0911 | precision at served fraction 20%:0.983 30%:0.979 40%:0.960 50%:0.950 60%:0.922 | oracle cov P0.95 58.0% P0.96 48.4% P0.97 42.9% P0.98 33.8%
+total 7.4s

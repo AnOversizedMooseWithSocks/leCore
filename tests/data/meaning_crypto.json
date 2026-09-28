@@ -1,0 +1,373 @@
+{
+ "about": "Crypto price questions for bench_meaning.py methods mode (sweep 181). Hand-written in the ways people type in chat and LLM agents phrase tool requests; 'unclear' rows name a coin and nothing else, and must be clarified, never acted on.",
+ "questions": [
+  {
+   "text": "what's the price of solana right now",
+   "verb": "price",
+   "args": {
+    "symbol": "SOL"
+   },
+   "from": "solana"
+  },
+  {
+   "text": "how much is sol trading at",
+   "verb": "price",
+   "args": {
+    "symbol": "SOL"
+   },
+   "from": "sol"
+  },
+  {
+   "text": "yo what's sol at",
+   "verb": "price",
+   "args": {
+    "symbol": "SOL"
+   },
+   "from": "sol"
+  },
+  {
+   "text": "solana price?",
+   "verb": "price",
+   "args": {
+    "symbol": "SOL"
+   },
+   "from": "solana"
+  },
+  {
+   "text": "is solana up or down today, what's it at",
+   "verb": "price",
+   "args": {
+    "symbol": "SOL"
+   },
+   "from": "solana"
+  },
+  {
+   "text": "check the current price of solana for me",
+   "verb": "price",
+   "args": {
+    "symbol": "SOL"
+   },
+   "from": "solana"
+  },
+  {
+   "text": "how much is one bitcoin worth rn",
+   "verb": "price",
+   "args": {
+    "symbol": "BTC"
+   },
+   "from": "bitcoin"
+  },
+  {
+   "text": "btc price",
+   "verb": "price",
+   "args": {
+    "symbol": "BTC"
+   },
+   "from": "btc"
+  },
+  {
+   "text": "what's bitcoin at right now",
+   "verb": "price",
+   "args": {
+    "symbol": "BTC"
+   },
+   "from": "bitcoin"
+  },
+  {
+   "text": "where's btc trading",
+   "verb": "price",
+   "args": {
+    "symbol": "BTC"
+   },
+   "from": "btc"
+  },
+  {
+   "text": "how much would 1 btc cost me today",
+   "verb": "price",
+   "args": {
+    "symbol": "BTC"
+   },
+   "from": "btc"
+  },
+  {
+   "text": "current bitcoin price please",
+   "verb": "price",
+   "args": {
+    "symbol": "BTC"
+   },
+   "from": "bitcoin"
+  },
+  {
+   "text": "what's the price of eth",
+   "verb": "price",
+   "args": {
+    "symbol": "ETH"
+   },
+   "from": "eth"
+  },
+  {
+   "text": "how much is ethereum going for",
+   "verb": "price",
+   "args": {
+    "symbol": "ETH"
+   },
+   "from": "ethereum"
+  },
+  {
+   "text": "eth price right now?",
+   "verb": "price",
+   "args": {
+    "symbol": "ETH"
+   },
+   "from": "eth"
+  },
+  {
+   "text": "what is ethereum trading at",
+   "verb": "price",
+   "args": {
+    "symbol": "ETH"
+   },
+   "from": "ethereum"
+  },
+  {
+   "text": "tell me the ether price",
+   "verb": "price",
+   "args": {
+    "symbol": "ETH"
+   },
+   "from": "ether"
+  },
+  {
+   "text": "how much is dogecoin worth today",
+   "verb": "price",
+   "args": {
+    "symbol": "DOGE"
+   },
+   "from": "dogecoin"
+  },
+  {
+   "text": "doge price pls",
+   "verb": "price",
+   "args": {
+    "symbol": "DOGE"
+   },
+   "from": "doge"
+  },
+  {
+   "text": "what's doge at",
+   "verb": "price",
+   "args": {
+    "symbol": "DOGE"
+   },
+   "from": "doge"
+  },
+  {
+   "text": "how much is a bonk token",
+   "verb": "price",
+   "args": {
+    "symbol": "BONK"
+   },
+   "from": "bonk"
+  },
+  {
+   "text": "bonk price?",
+   "verb": "price",
+   "args": {
+    "symbol": "BONK"
+   },
+   "from": "bonk"
+  },
+  {
+   "text": "what's jup trading at",
+   "verb": "price",
+   "args": {
+    "symbol": "JUP"
+   },
+   "from": "jup"
+  },
+  {
+   "text": "how much is jupiter token right now",
+   "verb": "price",
+   "args": {
+    "symbol": "JUP"
+   },
+   "from": "jupiter"
+  },
+  {
+   "text": "price of jup",
+   "verb": "price",
+   "args": {
+    "symbol": "JUP"
+   },
+   "from": "jup"
+  },
+  {
+   "text": "whats the going rate for sol",
+   "verb": "price",
+   "args": {
+    "symbol": "SOL"
+   },
+   "from": "sol"
+  },
+  {
+   "text": "how much does solana cost",
+   "verb": "price",
+   "args": {
+    "symbol": "SOL"
+   },
+   "from": "solana"
+  },
+  {
+   "text": "show me the latest btc price",
+   "verb": "price",
+   "args": {
+    "symbol": "BTC"
+   },
+   "from": "btc"
+  },
+  {
+   "text": "give me the eth quote",
+   "verb": "price",
+   "args": {
+    "symbol": "ETH"
+   },
+   "from": "eth"
+  },
+  {
+   "text": "any idea what doge costs now",
+   "verb": "price",
+   "args": {
+    "symbol": "DOGE"
+   },
+   "from": "doge"
+  },
+  {
+   "text": "Fetch the current SOL/USD price.",
+   "verb": "price",
+   "args": {
+    "symbol": "SOL"
+   },
+   "from": "sol"
+  },
+  {
+   "text": "Retrieve the latest market price for Bitcoin (BTC).",
+   "verb": "price",
+   "args": {
+    "symbol": "BTC"
+   },
+   "from": "bitcoin"
+  },
+  {
+   "text": "Get the spot price of ETH in USD.",
+   "verb": "price",
+   "args": {
+    "symbol": "ETH"
+   },
+   "from": "eth"
+  },
+  {
+   "text": "Look up the live price of Solana.",
+   "verb": "price",
+   "args": {
+    "symbol": "SOL"
+   },
+   "from": "solana"
+  },
+  {
+   "text": "Query the current trading price of DOGE.",
+   "verb": "price",
+   "args": {
+    "symbol": "DOGE"
+   },
+   "from": "doge"
+  },
+  {
+   "text": "Obtain the most recent price quote for JUP.",
+   "verb": "price",
+   "args": {
+    "symbol": "JUP"
+   },
+   "from": "jup"
+  },
+  {
+   "text": "Return the current USD value of one BTC.",
+   "verb": "price",
+   "args": {
+    "symbol": "BTC"
+   },
+   "from": "btc"
+  },
+  {
+   "text": "Check the real-time price of BONK.",
+   "verb": "price",
+   "args": {
+    "symbol": "BONK"
+   },
+   "from": "bonk"
+  },
+  {
+   "text": "Determine the present market price of Ethereum.",
+   "verb": "price",
+   "args": {
+    "symbol": "ETH"
+   },
+   "from": "ethereum"
+  },
+  {
+   "text": "Provide the latest SOL price.",
+   "verb": "price",
+   "args": {
+    "symbol": "SOL"
+   },
+   "from": "sol"
+  },
+  {
+   "text": "SOL",
+   "unclear": true
+  },
+  {
+   "text": "sol?",
+   "unclear": true
+  },
+  {
+   "text": "$BTC",
+   "unclear": true
+  },
+  {
+   "text": "eth",
+   "unclear": true
+  },
+  {
+   "text": "ETH?",
+   "unclear": true
+  },
+  {
+   "text": "doge",
+   "unclear": true
+  },
+  {
+   "text": "bitcoin",
+   "unclear": true
+  },
+  {
+   "text": "solana",
+   "unclear": true
+  },
+  {
+   "text": "JUP",
+   "unclear": true
+  },
+  {
+   "text": "bonk!",
+   "unclear": true
+  },
+  {
+   "text": "ethereum?",
+   "unclear": true
+  },
+  {
+   "text": "btc",
+   "unclear": true
+  }
+ ]
+}

@@ -78,7 +78,7 @@ def test_structure_aware_code_tools():
 
 def test_decision_record_module_selftest():
     from holographic.agents_and_reasoning import holographic_decisionrecord as D
-    assert D._selftest() == {"ok": True, "pinned": 8}
+    assert D._selftest() == {"ok": True, "pinned": 11}      # E0.5/E0.6 added pins 9-11 (hook errors, text, p)
 
 
 def test_outcome_by_id_closes_the_loop_without_teach():
@@ -248,8 +248,15 @@ def test_seen_gate_calibration_feed_and_self_extending_escalation():
     for _ in range(2):
         for name in ("smooth a bumpy mesh", "grow crystals on a surface", "bind primitive", "render a scene with path tracing"):
             r = m.route_tiered(name, reflex=True); m.decision_outcome(r["id"], r["answer"])
-    assert len(m._reflex_calib_pairs) >= 4 and m.calibrate_reflex()["calibrated"] is True
-    assert m.route_tiered("smooth a bumpy mesh", reflex=True)["p"] is not None
+    # E0.7: reflex-answered outcomes feed the BRIDGE's own calibrator (no longer one list shared with the ladder),
+    # and a DoorCalibrator honestly refuses a one-class stream -- so one reflex answer is reported WRONG here (the
+    # caller used another capability), which is also what makes p_correct mean anything.
+    other = m.route_tiered("render a scene with path tracing", reflex=True)["answer"]
+    r = m.route_tiered("bind primitive", reflex=True)
+    assert r["via"] == "reflex" and other and other != r["answer"]
+    m.decision_outcome(r["id"], other)
+    assert len(m.door_calibrator("bridge").pairs) >= 8 and m.calibrate_reflex()["calibrated"] is True
+    assert m.route_tiered("smooth a bumpy mesh", reflex=True)["p_correct"] is not None
     q = {"cat": {"type": "choice", "options": ["billing", "shipping"], "examples": {"billing": ["card charged twice"], "shipping": ["parcel lost"]}}}
     calls = []
     a = m.systemone_decide("tracking shows no movement whatsoever", q, scorer="nb", margin=0.99, reflex=True,

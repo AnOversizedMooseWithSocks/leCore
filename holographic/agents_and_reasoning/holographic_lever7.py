@@ -132,6 +132,10 @@ class DisplacementTrace:
         self._n = 0                             # accepted writes in THIS trace (tile)
         self._surprise = 0.0                    # momentum-smoothed surprise level
         self._audit = []                        # exact floor: [(key.tolist(), value.tolist())]
+        # RAW audit entries (backlog E1.5): {audit index: mode}. Entries NOT in this map are ordinary write()s and
+        # replay through write(); entries in it replay VERBATIM (see write_raw). A side map, not a third tuple
+        # field, so every reader that unpacks `for k, v in _audit` keeps working unchanged.
+        self._audit_raw = {}
         self._atoms = []                        # response codebook (the I-frame prototypes)
         self._succ_field = np.zeros(self.dim)   # outcome memory: where fires went WELL
         self._fail_field = np.zeros(self.dim)   # ...and where they went WRONG (the compass gate)
@@ -185,6 +189,63 @@ class DisplacementTrace:
         self.stats["writes"] += 1
         return {"accepted": True, "surprise": s_now, "load": self.load()}
 
+    # -- raw writes (backlog E1.5: the reflex trace's own correction) ---------------------------------
+    # write() corrects ALONG v ONLY and clamps the stored strength at s >= 0 -- the right rule for learning a lesson,
+    # and exactly why it cannot UNLEARN one: a correction write(k, truth) leaves the wrong atom at full strength.
+    # Measured on real CLINC keys (w2, exp_d): truth read back 45% after one correction, 66% after three. A
+    # correction therefore needs a SIGNED delta (a negative along the wrong atom, or an LMS error over the
+    # codebook), and a signed delta must be replayed VERBATIM: pushed back through write() it would be re-estimated,
+    # clamped at 0 and dropped, so replay / retile / split / reload would silently undo every correction.
+    RAW_BIND, RAW_ADD, RAW_ATOM = 1, 2, 3
+    RAW_MODES = {1: "bind", 2: "add", 3: "atom"}
+
+    def _apply_raw(self, k, v, mode):
+        """The ONE code path for a raw entry, live and on replay (so a replay is bit-identical by construction):
+          RAW_BIND  trace += bind(k, v)           -- a signed delta along the key itself
+          RAW_ADD   trace += v                    -- v is ALREADY a trace-space delta (e.g. bind(u, err) with an
+                                                     affine-projected key u); k is kept only to ROUTE the entry
+                                                     (tiling, splits, retile) to the tile its key belongs to
+          RAW_ATOM  register v as a response atom -- no trace change: the codebook the gated read cleans up against
+                                                     must know an atom a raw delta writes toward"""
+        if mode == self.RAW_BIND:
+            self._trace = self._trace + bind(k, v)
+            self._n += 1
+        elif mode == self.RAW_ADD:
+            self._trace = self._trace + v
+            self._n += 1
+        elif mode == self.RAW_ATOM:
+            vn = v / (np.linalg.norm(v) + 1e-12)
+            if not self._atoms or max(float(np.dot(vn, a)) for a in self._atoms) < 0.5:
+                self._atoms.append(vn)
+        else:
+            raise ValueError("unknown raw audit mode %r" % (mode,))
+        self._null = None
+
+    def write_raw(self, task_key, delta, mode=1):
+        """Apply a raw delta and journal it as a FLAGGED audit entry that every replay path applies verbatim
+        (replay, from_state, TiledDisplacementTrace._split, the mind's reflex_retile and the partition's instanced
+        audit section all honour the flag). mode: RAW_BIND (1, default) / RAW_ADD (2) / RAW_ATOM (3) -- see
+        _apply_raw. No surprise gate: a correction is deliberate, never skipped as 'already predicted'."""
+        k = np.asarray(task_key, float)
+        v = np.asarray(delta, float)
+        mode = int(mode)
+        self._apply_raw(k, v, mode)
+        self._audit_raw[len(self._audit)] = mode
+        self._audit.append((k.tolist(), v.tolist()))
+        self.stats["raw_writes"] = self.stats.get("raw_writes", 0) + 1
+        return {"accepted": True, "raw": self.RAW_MODES[mode], "load": self.load()}
+
+    def audit_entries(self):
+        """[(key, value, mode)] in journal order; mode 0 = an ordinary write(), else the raw mode. The one reader
+        every re-tiling / persistence path should use (it cannot forget the flag)."""
+        return [(k, v, self._audit_raw.get(i, 0)) for i, (k, v) in enumerate(self._audit)]
+
+    def replay_entry(self, k, v, mode):
+        """Replay ONE audit entry the way it was first applied: mode 0 through write(), a raw mode verbatim."""
+        if mode:
+            return self.write_raw(k, v, mode)
+        return self.write(np.asarray(k, float), np.asarray(v, float))
+
     # -- read side ----------------------------------------------------------------------------
     def read(self, task_key):
         """The UNGATED read: one unbind. Exposed for measurement and composition ONLY -- the
@@ -228,9 +289,11 @@ class DisplacementTrace:
         return 1.0 / (1.0 + self._n / float(self.dim) * self.dim / max(self._n, 1) * self.load()) \
             if False else 1.0 / (1.0 + self.load())
 
-    def read_gated(self, task_key, task_vec=None):
+    def read_gated(self, task_key, task_vec=None, neg_role=None):
         """The lever-7 read: unbind, then pay the three gates -- calibrated null, crosstalk price,
-        volatility field. Returns {fired, prediction, confidence, trust, why}. Refusal is a result."""
+        volatility field. Returns {fired, prediction, confidence, trust, why}. Refusal is a result.
+        neg_role (E1.5 design b, default None = unchanged): an OUTCOME role; an atom whose negative read
+        unbind(read, neg_role) beats its positive read is SUPPRESSED here (a rejection kept as data)."""
         k = np.asarray(task_key, float)
         probe = k if task_vec is None else np.asarray(task_vec, float)
         if self.volatility.check(probe):
@@ -250,6 +313,10 @@ class DisplacementTrace:
         A = np.stack(self._atoms)
         rn = raw / (np.linalg.norm(raw) + 1e-12)
         sims = A @ rn
+        if neg_role is not None:
+            neg = unbind(raw, np.asarray(neg_role, float))
+            nsims = A @ (neg / (np.linalg.norm(neg) + 1e-12))
+            sims = np.where(nsims > sims, -1.0, sims)   # rejected here more strongly than supported: suppressed
         j = int(np.argmax(sims))
         best = float(sims[j])
         if best <= q:
@@ -318,15 +385,40 @@ class DisplacementTrace:
         t = DisplacementTrace(self.dim, self.seed, self.alpha, self.beta,
                               surprise_floor=0.0, momentum=self.momentum,
                               advisory_load=self.advisory_load, name=self.name + ":replay")
-        for k, v in self._audit:
-            t.write(np.asarray(k, float), np.asarray(v, float))
+        for k, v, mode in self.audit_entries():         # raw entries VERBATIM (E1.5), the rest through write()
+            t.replay_entry(k, v, mode)
         return t
 
     def to_state(self):
-        return {"dim": self.dim, "seed": self.seed, "alpha": self.alpha, "beta": self.beta,
-                "surprise_floor": self.surprise_floor, "momentum": self.momentum,
-                "advisory_load": self.advisory_load, "name": self.name,
-                "audit": self._audit, "volatility": self.volatility.to_state()}
+        # audit_raw (E1.5): [[index, mode]] for the raw entries; absent/empty in states written before it existed,
+        # which then replay exactly as they always did.
+        st = {"dim": self.dim, "seed": self.seed, "alpha": self.alpha, "beta": self.beta,
+              "surprise_floor": self.surprise_floor, "momentum": self.momentum,
+              "advisory_load": self.advisory_load, "name": self.name,
+              "audit": self._audit, "audit_raw": [[int(i), int(m)] for i, m in sorted(self._audit_raw.items())],
+              "volatility": self.volatility.to_state()}
+        # THE OUTCOME FIELDS TRAVEL (backlog E2.1). record_outcome's success / failure fields are the reflex trace's
+        # own negative evidence (read_gated refuses where failure outweighs success), but they are NOT in the audit
+        # (they are outcomes, not writes), so a reload, a split or a retile -- all of which rebuild from the audit --
+        # silently forgot every reported failure and the outcome gate opened again. Written only when non-zero, so
+        # a trace that never had an outcome keeps its old state shape; plain lists (exact float64 round trip).
+        if np.any(self._succ_field):
+            st["succ_field"] = [float(x) for x in self._succ_field]
+        if np.any(self._fail_field):
+            st["fail_field"] = [float(x) for x in self._fail_field]
+        return st
+
+    def outcome_fields(self):
+        """(success field, failure field) as copies -- what a split / retile carries into the new tiles."""
+        return self._succ_field.copy(), self._fail_field.copy()
+
+    def set_outcome_fields(self, succ=None, fail=None):
+        """Lay saved / inherited outcome fields over this trace (None or a wrong length = leave as is)."""
+        for attr, v in (("_succ_field", succ), ("_fail_field", fail)):
+            if v is not None:
+                v = np.asarray(v, np.float64).reshape(-1)
+                if v.shape == (self.dim,):
+                    setattr(self, attr, v.copy())
 
     @classmethod
     def from_state(cls, state):
@@ -339,10 +431,12 @@ class DisplacementTrace:
         t2 = cls(int(state["dim"]), int(state["seed"]), float(state["alpha"]), float(state["beta"]),
                  surprise_floor=0.0, momentum=float(state["momentum"]),
                  advisory_load=float(state["advisory_load"]), name=str(state["name"]))
-        for k, v in state["audit"]:
-            t2.write(np.asarray(k, float), np.asarray(v, float))
+        raw = {int(i): int(m) for i, m in (state.get("audit_raw") or [])}
+        for i, (k, v) in enumerate(state["audit"]):
+            t2.replay_entry(k, v, raw.get(i, 0))      # a raw correction replays verbatim (E1.5)
         t2.surprise_floor = float(state["surprise_floor"])
         t2.volatility = VolatilityField.from_state(state["volatility"])
+        t2.set_outcome_fields(state.get("succ_field"), state.get("fail_field"))   # E2.1 (absent: zero, as before)
         return t2
 
     def save(self, path):
@@ -390,32 +484,79 @@ class TiledDisplacementTrace:
         out["tiles"] = len(self.tiles)
         return out
 
+    def write_raw(self, task_key, delta, mode=1):
+        """A raw (verbatim-replayed) delta into the tile the KEY routes to -- see DisplacementTrace.write_raw.
+        Raw entries do not move the tile centroids (the centroid is the mean of ORDINARY write keys, the same rule
+        _split and a reload use), so a correction never drags routing toward itself."""
+        k = np.asarray(task_key, float)
+        i = self._route(k)
+        out = self.tiles[i].write_raw(k, delta, mode)
+        if self.tiles[i].advisory()["tile_recommended"]:
+            self._split(i)
+        out["tiles"] = len(self.tiles)
+        out["tile"] = i
+        return out
+
     def _split(self, i):
         """Split tile i in two by a deterministic hyperplane through its centroid; replay each
-        audit entry into its side. Journaled by construction (the audits ARE the journal)."""
+        audit entry into its side. Journaled by construction (the audits ARE the journal).
+        E1.5: a RAW entry (a signed correction) goes to the side of its routing key and replays VERBATIM --
+        through write() it would be re-estimated, clamped and lost -- and it does not move a centroid."""
         old = self.tiles[i]
         axis = random_vector(self.dim, np.random.default_rng(self.seed + 104729 + self.splits))
         a = DisplacementTrace(self.dim, self.seed, name=old.name + "a", **self.kw)
         b = DisplacementTrace(self.dim, self.seed, name=old.name + "b", **self.kw)
         ca = np.zeros(self.dim); cb = np.zeros(self.dim); na = nb = 0
-        for k, v in old._audit:
+        for k, v, mode in old.audit_entries():
             kv = np.asarray(k, float)
-            if float(np.dot(kv - self._centroids[i], axis)) >= 0:
+            side_a = float(np.dot(kv - self._centroids[i], axis)) >= 0
+            if mode:
+                (a if side_a else b).write_raw(kv, np.asarray(v, float), mode)
+            elif side_a:
                 a.write(kv, np.asarray(v, float)); na += 1; ca = ca + (kv - ca) / na
             else:
                 b.write(kv, np.asarray(v, float)); nb += 1; cb = cb + (kv - cb) / nb
         if na == 0 or nb == 0:                  # degenerate split: keep the tile, raise its ceiling
             old.advisory_load *= 2.0
             return
+        # E2.1: BOTH halves inherit the parent's outcome fields. The fields are region-wide evidence in the parent's
+        # key space and both halves route keys from that space; before this a split (replaying the audit only) wiped
+        # every reported failure of the tile it split -- the outcome gate reopened on exactly the look-alike traps it
+        # was measured to catch.
+        succ, fail = old.outcome_fields()
+        a.set_outcome_fields(succ, fail)
+        b.set_outcome_fields(succ, fail)
+        # FOUND ON THE WAY (same defect class): the halves were built with an EMPTY volatility field, so every
+        # reflex_mark_volatile region (prices, live status) stopped being refused in the tile that split. The marks
+        # are carried exactly (VolatilityField's own state; unmark stays exact subtraction).
+        vst = old.volatility.to_state()
+        a.volatility = VolatilityField.from_state(vst)
+        b.volatility = VolatilityField.from_state(vst)
         self.tiles[i] = a; self._centroids[i] = ca; self._counts[i] = na
         self.tiles.append(b); self._centroids.append(cb); self._counts.append(nb)
         self.splits += 1
 
-    def read_gated(self, task_key, task_vec=None):
+    def read_gated(self, task_key, task_vec=None, neg_role=None):
         k = np.asarray(task_key, float)
-        out = self.tiles[self._route(k)].read_gated(k, task_vec)
+        out = self.tiles[self._route(k)].read_gated(k, task_vec, neg_role=neg_role)
         out["tiles"] = len(self.tiles)
         return out
+
+    def outcome_fields(self):
+        """(success, failure) summed over every tile -- the whole trace's outcome evidence (E2.1). A RE-TILE (a new
+        tiling of the same keys) carries this into every new tile with set_outcome_fields: the keys are re-routed,
+        so per-tile fields no longer line up with their tiles, and the sum is the evidence a single tile held."""
+        succ = np.zeros(self.dim)
+        fail = np.zeros(self.dim)
+        for t in self.tiles:
+            s_, f_ = t.outcome_fields()
+            succ, fail = succ + s_, fail + f_
+        return succ, fail
+
+    def set_outcome_fields(self, succ=None, fail=None):
+        """Lay outcome fields over EVERY tile (the re-tile carry; see outcome_fields)."""
+        for t in self.tiles:
+            t.set_outcome_fields(succ, fail)
 
     @property
     def stats(self):
@@ -426,6 +567,163 @@ class TiledDisplacementTrace:
         agg["tiles"] = len(self.tiles)
         agg["splits"] = self.splits
         return agg
+
+
+# =====================================================================================================================
+# REFLEX-TRACE CORRECTION (backlog E1.5) -- two designs, both built, the measurement chose (owner's decision).
+#
+# THE DEFECT (w2, exp_d, real CLINC keys): a correction -- decision_outcome with a truth different from the served
+# answer -- only did write(k, truth). write() corrects along the truth atom and clamps at s >= 0, so the WRONG atom
+# kept its full strength: truth read back 45% after one correction, 66% after three.
+#
+# Design (a) CODEBOOK LMS + AFFINE PROJECTION (Widrow; w1's synthetic probe 40/40 + 40/40):
+#     err = sum_l (onehot(truth) - s)_l * L_l      over the codebook atoms with |s_l| >= floor, plus the target
+#     u   = the minimum-norm key with <u,k> = 1 and <u,k'_j> = 0 for the nearest REPORTED keys k'_j whose outcome
+#           differs (the neighbours this correction must not touch)
+#     trace += bind(u, err)                         journalled RAW_ADD (routed by k), replayed verbatim
+#   At k the read moves by exactly err (the LMS step to the one-hot); at each protected neighbour it moves by zero in
+#   expectation (the affine-projection step). One write fixes the leak AND the truth, whatever wrote them.
+# Design (b) BY PROVENANCE (w2): write(k, truth), then look in the audit for who wrote the wrong atom:
+#     at THIS key (audit key cosine >= 0.95)  -> a signed along-atom write  -s_a * L[a]   (RAW_BIND at k)
+#     leaked from a NEIGHBOUR                -> an outcome-role negative bind(NEG, L[a]) (RAW_BIND at k); a read with
+#                                               neg_role suppresses a label whose negative beats its positive
+# MEASURED (tools/bench_trace_correction.py -> docs/research/evidence/bench_trace_correction.json; real CLINC keys,
+# 150 trials per cell; baseline = write(k, truth) only):
+#                   same key   3 corrections   flip-flop   neighbour kept c=0.5/0.8/0.9   replay/reload
+#   baseline         0.453        0.660          0.453        1.000 / 0.900 / 0.813          1.000
+#   (a) lms_apa      1.000        1.000          1.000        1.000 / 1.000 / 0.993          1.000   <- the default
+#   (b) provenance   0.993        1.000          0.993        1.000 / 0.780 / 0.533          1.000   (fails >= 0.85)
+# KEPT NEGATIVES: the same LMS step along k itself (no projection) keeps a neighbour 0.847 / 0.38 / 0.00 at
+# c = 0.5 / 0.6 / 0.8 -- the projection is what protects it; (b) without retracting an old rejection reads a
+# flip-flop back 0.373. docs/TYPED_DECISIONS.md section 8d has the full table.
+# =====================================================================================================================
+CORRECTION_DESIGNS = ("lms_apa", "provenance")
+
+# NEIGHBOUR PROTECTION BAND for design (a). A reported key k' with a different outcome is protected when
+# PROTECT_COS <= cos(k, k') < SAME_KEY_COS.
+#   PROTECT_COS = 0.4. The algebra: an LMS step along k itself moves a neighbour at cosine c by c*err, so the
+#   neighbour's own atom drops to 1 - c^2 while the new truth rises to c -- it FLIPS once c > 0.618 and has already
+#   lost half its margin at c = 0.5 (0.75 vs 0.5). MEASURED (tools/bench_trace_correction.py, real CLINC keys, 150
+#   trials; the 'lms_noproj' arm = no protection): an unprotected neighbour keeps its answer 0.847 at c = 0.5, 0.38 at
+#   0.6, 0.02 at 0.7, 0.00 at 0.8. The FIRST cut set the line AT 0.5, and a neighbour at exactly 0.5 fell on the
+#   wrong side of float rounding (lms_apa 0.847 = unprotected, kept negative): the line sits at 0.4 so 0.5 is inside
+#   the band with margin. Below it the leak is under a loaded tile's crosstalk, and every extra constraint grows |u|
+#   (1/sqrt(1 - c^2): 1.09 at 0.4, 1.67 at 0.8) and with it the noise the write adds everywhere else.
+#   SAME_KEY_COS = 0.95, the provenance line both designs share: at or above it k' IS this question (a noisy verdict
+#   now corrected) -- its old outcome is superseded, not protected (and protecting it would blow |u| up: 3.2 at 0.95).
+PROTECT_COS = 0.4
+SAME_KEY_COS = 0.95
+PROTECT_MAX = 8          # nearest protected neighbours at most (one small Gram solve each)
+U_NORM_MAX = 4.0         # a neighbour set that would push |u| past this is cut back (nearest kept first)
+LMS_FLOOR = 0.2          # codebook atoms read at |s| >= floor are corrected (w1's floor); below it is crosstalk
+
+
+def _unit(v):
+    v = np.asarray(v, float)
+    return v / (np.linalg.norm(v) + 1e-12)
+
+
+def _tile_of(trace, k):
+    """(tile, index): the DisplacementTrace a key reads/writes in (a plain trace is its own single tile)."""
+    if hasattr(trace, "tiles"):
+        i = trace._route(k)
+        return trace.tiles[i], i
+    return trace, 0
+
+
+def affine_key(k, neighbours, ridge=1e-6, u_max=U_NORM_MAX):
+    """The minimum-norm u with <u,k> = 1 and <u,k'_j> = 0 for each neighbour key (unit rows), nearest first; a
+    neighbour whose constraint would push |u| past u_max is dropped (reported). -> (u, kept_count)."""
+    k = _unit(k)
+    kept = []
+    u = k.copy()
+    for kp in neighbours:
+        K = np.stack([k] + [_unit(x) for x in kept + [kp]])
+        G = K @ K.T + ridge * np.eye(len(K))
+        e1 = np.zeros(len(K)); e1[0] = 1.0
+        cand = K.T @ np.linalg.solve(G, e1)
+        cand = cand / float(np.dot(cand, k))            # exact <u,k> = 1 after the ridge
+        if float(np.linalg.norm(cand)) > u_max:
+            continue
+        kept.append(kp)
+        u = cand
+    return u, len(kept)
+
+
+def correct_lms_apa(trace, k, truth, book, seen=(), floor=LMS_FLOOR, protect_cos=PROTECT_COS,
+                    same_cos=SAME_KEY_COS, max_protect=PROTECT_MAX):
+    """Design (a). trace: a DisplacementTrace or TiledDisplacementTrace; k: the decision's key; truth: the reported
+    label; book: {label: atom} (the door's codebook -- only these atoms are ever corrected); seen: [(key, outcome)]
+    of REPORTED decisions of the same key kind (the neighbours to protect are picked from it). Writes RAW_ATOM (the
+    truth atom, so the gated read can clean up to it) then RAW_ADD bind(u, err). Returns the diagnostics."""
+    k = _unit(k)
+    tile, ti = _tile_of(trace, k)
+    labels = list(book)
+    if truth not in book:
+        raise KeyError("correct_lms_apa: truth %r is not in the codebook" % (truth,))
+    C = np.stack([np.asarray(book[l], float) for l in labels])
+    pred = unbind(tile._trace, k) if tile._n else np.zeros(tile.dim)
+    s = (C @ pred) / (tile._rho * np.sum(C * C, axis=1))
+    t = labels.index(truth)
+    tgt = np.zeros(len(labels)); tgt[t] = 1.0
+    keep = (np.abs(s) >= float(floor)) | (tgt > 0)
+    err = ((tgt - s)[keep, None] * C[keep]).sum(axis=0)
+    # the neighbours to protect: reported keys, SAME tile (another tile never sees this write), a DIFFERENT outcome,
+    # inside the protection band; nearest first
+    cands = []
+    for kp, o in seen or ():
+        if o == truth or o in (None, "", "fail", "failed", "__failed__"):
+            continue
+        kp = _unit(kp)
+        c = float(np.dot(kp, k))
+        if protect_cos <= c < same_cos and (not hasattr(trace, "tiles") or trace._route(kp) == ti):
+            cands.append((-c, len(cands), kp))
+    cands.sort(key=lambda x: (x[0], x[1]))              # nearest first; ties by report order
+    u, n_prot = affine_key(k, [kp for _, _, kp in cands[:int(max_protect)]])
+    trace.write_raw(k, np.asarray(book[truth], float), DisplacementTrace.RAW_ATOM)
+    trace.write_raw(k, bind(u, err), DisplacementTrace.RAW_ADD)
+    return {"design": "lms_apa", "s_truth": float(s[t]), "corrected_atoms": int(keep.sum()),
+            "err_norm": float(np.linalg.norm(err)), "u_norm": float(np.linalg.norm(u)),
+            "protected": n_prot, "protect_candidates": len(cands)}
+
+
+def correct_by_provenance(trace, k, truth_atom, wrong_atom, neg_role, same_cos=SAME_KEY_COS, retract=True):
+    """Design (b). write(k, truth) first (as the reflex always did); then, if the WRONG atom was written at this
+    key (an ordinary audit entry with key cosine >= same_cos and value cosine >= same_cos to wrong_atom), a signed
+    along-atom negative -s_a * L[a] (RAW_BIND); otherwise an outcome-role negative bind(neg_role, L[a]) (RAW_BIND)
+    that a read with neg_role consults. Returns the diagnostics."""
+    k = _unit(k)
+    a = np.asarray(wrong_atom, float)
+    y = np.asarray(truth_atom, float)
+    tile, _ = _tile_of(trace, k)
+    # RETRACT an earlier rejection of the truth at this key first. Found by the mind-level test (a typed door
+    # answered y, a noisy verdict said a -- design (b) recorded 'y is wrong here' --, then the correction back to y):
+    # the stale NEG(y) record outvoted the fresh truth write and the reflex went silent (0 fires). A rejection is
+    # evidence about THIS key, so the truth reported here now cancels it (the measured NEG strength, clamped to [0,1]).
+    retracted = 0.0
+    if retract and tile._n:
+        rn = unbind(unbind(tile._trace, k), np.asarray(neg_role, float))
+        s_ny = float(np.dot(rn, y)) / (tile._rho * float(np.dot(y, y)) + 1e-12)
+        s_ny = min(max(s_ny, 0.0), 1.0)
+        if s_ny > 0.2:                                  # above crosstalk (the same floor the LMS design uses)
+            trace.write_raw(k, -s_ny * bind(np.asarray(neg_role, float), y), DisplacementTrace.RAW_BIND)
+            retracted = s_ny
+    w = trace.write(k, y)
+    tile, _ = _tile_of(trace, k)
+    an = _unit(a)
+    here = any(float(np.dot(_unit(kk), k)) >= same_cos and float(np.dot(_unit(vv), an)) >= same_cos
+               for kk, vv, mode in tile.audit_entries() if not mode)
+    if here:
+        pred = unbind(tile._trace, k)
+        s_a = float(np.dot(pred, a)) / (tile._rho * float(np.dot(a, a)) + 1e-12)
+        s_a = min(max(s_a, 0.0), 1.0)
+        if s_a > 0.0:
+            trace.write_raw(k, -s_a * a, DisplacementTrace.RAW_BIND)
+        return {"design": "provenance", "provenance": "same-key", "s_wrong": s_a, "truth_write": w.get("accepted"),
+                "retracted_neg": retracted}
+    trace.write_raw(k, bind(np.asarray(neg_role, float), a), DisplacementTrace.RAW_BIND)
+    return {"design": "provenance", "provenance": "neighbour", "truth_write": w.get("accepted"),
+            "retracted_neg": retracted}
 
 
 def _selftest():
@@ -489,8 +787,35 @@ def _selftest():
     # On the deep-dive Part-3 workload the raw read() with a naive threshold served 48 wrong
     # answers where the full gate served 2. read() stays public for measurement; serving it is
     # the bug this module exists to prevent.
+    # -- 7. (E1.5) raw corrections: both designs fix a wrong lesson at the same key, and every replay path
+    #       (replay, state round-trip, a split) reproduces the corrected trace bit-for-bit
+    labels = {"L%d" % i: random_vector(dim, rng) for i in range(12)}
+    neg = random_vector(dim, rng)
+    for design in CORRECTION_DESIGNS:
+        tc = DisplacementTrace(dim, seed=5)
+        bgk = [random_vector(dim, rng) for _ in range(20)]
+        for i, kk in enumerate(bgk):
+            tc.write(kk, labels["L%d" % (i % 12)])
+        kq = random_vector(dim, rng)
+        tc.write(kq, labels["L3"])                        # the wrong lesson, at the same key
+        if design == "lms_apa":
+            correct_lms_apa(tc, kq, "L7", labels, seen=[(kk, "L%d" % (i % 12)) for i, kk in enumerate(bgk)])
+            g = tc.read_gated(kq)
+        else:
+            correct_by_provenance(tc, kq, labels["L7"], labels["L3"], neg)
+            g = tc.read_gated(kq, neg_role=neg)
+        assert g["fired"] and cosine(g["prediction"], labels["L7"]) > 0.9, (design, "the correction must win")
+        assert np.array_equal(tc.replay()._trace, tc._trace), (design, "raw entries must replay verbatim")
+        assert np.array_equal(DisplacementTrace.from_state(json.loads(json.dumps(tc.to_state())))._trace, tc._trace)
+    tsp = TiledDisplacementTrace(512, seed=4, advisory_load=0.5)
+    kk0 = random_vector(512, rng)
+    tsp.write(kk0, random_vector(512, rng))
+    tsp.write_raw(kk0, -0.5 * random_vector(512, rng))
+    tsp._split(0)                                        # a forced split replays the raw entry on its key's side
+    assert sum(len(t._audit_raw) for t in tsp.tiles) in (0, 1)   # 0 only for the degenerate (kept) split
     return {"replay": "bit-identical", "tiles": len(tt.tiles),
-            "tiled_recall": ok, "flat_recall": ok_flat, "stats": tt.stats}
+            "tiled_recall": ok, "flat_recall": ok_flat, "stats": tt.stats,
+            "raw_correction": "both designs replay bit-identically"}
 
 
 if __name__ == "__main__":
@@ -504,7 +829,16 @@ class UsageTrace:
     operation. Tool atoms regenerate from their names (0 bytes of index); counts are kept beside
     the trace for audit (never opaque weights). Capacity discipline: same advisory as the
     displacement trace -- at the cliff, tile by domain (the centroid-culling pass becomes the
-    tile router)."""
+    tile router).
+
+    READ-COMPAT SHIM SINCE THE CLM BACKLOG'S E4.4 (2026-09-26). The panel found tool choice LEARNED TWICE (D3):
+    this trace was written by tool_note / tool_reflex_teach / serve but read only by present_tools, which nothing
+    called, while serve picked tools by word overlap and the reflex bridge. The mind's one tool learner is now the
+    tool door's ProtoStore (holographic_unified_p33_router: tool_note / tool_predict / present_tools read and write
+    it; verified calls and reported corrections train it, a failed verify is a labelled negative). This class stays
+    ONLY so a partition written before that change -- its lecore.learning.toolusage section -- still loads: its
+    success / failure counts migrate into the tool door's audit. Its trace vector is not migrated (its task keys were
+    semantic_key vectors, a different space from the door's n-gram key). Nothing writes a UsageTrace any more."""
 
     def __init__(self, dim=2048, seed=0):
         self.dim = int(dim)
@@ -512,6 +846,7 @@ class UsageTrace:
         self._trace = np.zeros(self.dim)
         self._tools = {}                        # name -> atom
         self.counts = {}                        # name -> successful uses (the audit ledger)
+        self.failures = {}                      # name -> failed uses (sweep 178: they were counted as +0)
         self._n = 0
 
     def _atom(self, tool):
@@ -522,6 +857,10 @@ class UsageTrace:
     def note(self, task_vec, tool, success=True):
         """Record one tool use; only SUCCESSFUL uses strengthen the trace (failures only count)."""
         self.counts[tool] = self.counts.get(tool, 0) + (1 if success else 0)
+        if not success:
+            # KEPT NEGATIVE (sweep 178): before this tally a failure was `counts += 0` -- indistinguishable
+            # from a tool never tried. Failures still never touch the trace; they are audit only.
+            self.failures[tool] = self.failures.get(tool, 0) + 1
         if success:
             t = np.asarray(task_vec, float)
             self._trace = self._trace + bind(t / (np.linalg.norm(t) + 1e-12), self._atom(tool))
@@ -540,6 +879,29 @@ class UsageTrace:
                          for name, atom in self._tools.items()),
                         key=lambda x: (-x[1], x[0]))
         return scored[: int(k)]
+
+    # PERSISTENCE (sweep 178). The usage trace lived in process memory only: learning_save never wrote
+    # it, so every restart forgot which tools had worked for which tasks. The trace is a SUM of binds
+    # whose task keys are not kept, so the summed vector itself is the state (float64, exact); the tool
+    # atoms are NOT stored -- they regenerate from their names, as the class docstring promises.
+    def to_state(self):
+        """Plain-data snapshot: {dim, seed, n, tools (names, in first-use order), counts, trace (list)}."""
+        return {"dim": self.dim, "seed": self.seed, "n": int(self._n), "tools": list(self._tools),
+                "counts": dict(self.counts), "failures": dict(self.failures),
+                "trace": np.asarray(self._trace, float).tolist()}
+
+    @classmethod
+    def from_state(cls, state):
+        """Rebuild from to_state(): predictions are identical (the atoms are derived from the names)."""
+        u = cls(int(state["dim"]), int(state.get("seed", 0)))
+        for name in state.get("tools") or []:
+            u._atom(name)
+        u.counts = {str(k): int(v) for k, v in (state.get("counts") or {}).items()}
+        u.failures = {str(k): int(v) for k, v in (state.get("failures") or {}).items()}
+        u._n = int(state.get("n", 0))
+        tr = np.asarray(state.get("trace") if state.get("trace") is not None else np.zeros(u.dim), float)
+        u._trace = tr.reshape(-1) if tr.size == u.dim else np.zeros(u.dim)
+        return u
 
 
 class RecipeCache:

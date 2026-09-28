@@ -1,0 +1,1135 @@
+{
+"seed": 0,
+"tasks": [
+{
+"card": "Quantum statistics (spacing-ratio regime classifier + the Bell verdict)",
+"method": "level_statistics",
+"wordings": [
+"broken unfolding quantum with",
+"scramble spacing verdict unfolding"
+]
+},
+{
+"card": "Render-ready texture + uvs from a loaded mesh",
+"method": "asset_base_texture",
+"wordings": [
+"base image vertex texture",
+"asset model most returns"
+]
+},
+{
+"card": "Codec atlas + honest router (which compressor, measured on YOUR data)",
+"method": "codec_place",
+"wordings": [
+"refusal storage with real",
+"images bytes class ranks"
+]
+},
+{
+"card": "Dialect emitters (WGSL / C / JS / Zig from the Python kernel)",
+"method": "emit_kernel",
+"wordings": [
+"licenses with because over",
+"projection wrong supplies there"
+]
+},
+{
+"card": "Verified GLSL kernels (shader source with the number that verified it)",
+"method": "glsl_kernels",
+"wordings": [
+"stdlib heat image scatter",
+"exactness image kept hdrift"
+]
+},
+{
+"card": "Causal gates (act only on what you knew at the time)",
+"method": "causal_gate",
+"wordings": [
+"negative described sees sample",
+"drawdown claiming condition trailing"
+]
+},
+{
+"card": "Physically-based TISSUE materials (organs, bone, fat, skin -- not flat)",
+"method": "tissue_pbr",
+"wordings": [
+"weight warm scatters metallic",
+"radius mind scatter deeper"
+]
+},
+{
+"card": "Segment a photo into object regions (demux)",
+"method": "segment_image",
+"wordings": [
+"region region photo stage",
+"stats mean extent merges"
+]
+},
+{
+"card": "Style transfer (grade toward a reference image)",
+"method": "color_transfer",
+"wordings": [
+"chain like then meanstd",
+"monge reference correlated inside"
+]
+},
+{
+"card": "See what the mantis sees (false colour)",
+"method": "mantis_falsecolor",
+"wordings": [
+"falsecolor colour onto becomes",
+"show ultraviolet handedness three"
+]
+},
+{
+"card": "Deterministic data charts (numbers -> SVG a human reads)",
+"method": "chart_svg",
+"wordings": [
+"safe anchored that hypervector",
+"unanchored caller about file"
+]
+},
+{
+"card": "Star system from parameters",
+"method": "star_system",
+"wordings": [
+"params temperature position parameters",
+"each star radius system"
+]
+},
+{
+"card": "Render a specimen (adaptive trace + denoise + graded, one call)",
+"method": "render_specimen",
+"wordings": [
+"measured stop replaces pins",
+"escalates equal after caution"
+]
+},
+{
+"card": "evaluate_candidates",
+"method": "evaluate_candidates",
+"wordings": [
+"actually candidate query cosines",
+"score superposed answers candidate"
+]
+},
+{
+"card": "Compute plan (amortisation tiers before the backend race)",
+"method": "compute_plan",
+"wordings": [
+"often answer device expected",
+"certified only stream when"
+]
+},
+{
+"card": "2D SDF + extrude/revolve",
+"method": "sdf_extrude",
+"wordings": [
+"into into like circle",
+"meshes other offset into"
+]
+},
+{
+"card": "Learned chunk codebook (iterated pair promotion)",
+"method": "learn_chunks",
+"wordings": [
+"symbol trip codebook recursion",
+"bytes with order same"
+]
+},
+{
+"card": "Stock a part library (why your creature parts do not render)",
+"method": "build_creature",
+"wordings": [
+"place missed mind calling",
+"sockets library placement geometry"
+]
+},
+{
+"card": "Content-addressable scatter layers & generated variants",
+"method": "scatter_mesh",
+"wordings": [
+"index never vector into",
+"twenty without index than"
+]
+},
+{
+"card": "Native holographic micro-model (baked; the model IS the program)",
+"method": "native_model",
+"wordings": [
+"baked circulant forward deep",
+"scratch warning conditioning program"
+]
+},
+{
+"card": "Spatial memory (position hypervectors: closest-point as associative recall)",
+"method": "spatial_recall",
+"wordings": [
+"similar item points negative",
+"bundle nearest negative points"
+]
+},
+{
+"card": "Frequency-lifted (Gabor) splats",
+"method": "splat_field",
+"wordings": [
+"band counting orientation levy",
+"budget whether parameter stored"
+]
+},
+{
+"card": "Mesh as a sequence (SATO-SEQ: stable serialization + hypervector encode)",
+"method": "mesh_to_tokens",
+"wordings": [
+"sato trips orders cliff",
+"sequence tokens sato code"
+]
+},
+{
+"card": "capture_edit_command",
+"method": "capture_edit_command",
+"wordings": [
+"edits into history algebraic",
+"just bevel edit algebraic"
+]
+},
+{
+"card": "Mantis-shrimp vision (12-band + polarization)",
+"method": "mantis_view",
+"wordings": [
+"thoen receptor detectors plus",
+"shrimp receptors before view"
+]
+},
+{
+"card": "Texture-preserving mesh repair & decimation (attribute-aware weld)",
+"method": "mesh_repair",
+"wordings": [
+"aware weld only cluster",
+"were corner remesh exact"
+]
+},
+{
+"card": "panel_realm",
+"method": "panel_seat",
+"wordings": [
+"only authored deliberation recorded",
+"each deliberation silent consensus"
+]
+},
+{
+"card": "Decimate to a target face count / fraction with an optional silhouette guard",
+"method": "mesh_decimate_to",
+"wordings": [
+"mesh silhouette monotone shipped",
+"missed walks budget target"
+]
+},
+{
+"card": "Physical material lookup (116 real materials with measured properties + units)",
+"method": "material_data",
+"wordings": [
+"double libraries material melting",
+"that roster render with"
+]
+},
+{
+"card": "Cloud scene (presets x quality tiers)",
+"method": "cloud_scene",
+"wordings": [
+"grid cloud trade cloud",
+"musgrave multi tuning wispy"
+]
+},
+{
+"card": "sdf_scene",
+"method": "sdf_scene",
+"wordings": [
+"pass parts part material",
+"parts build sdfscene calls"
+]
+},
+{
+"card": "fold_fit",
+"method": "fold_fit",
+"wordings": [
+"coarse infer similarity mandelbox",
+"radius signal recover fold"
+]
+},
+{
+"card": "select_edge_loop",
+"method": "select_edge_loop",
+"wordings": [
+"across walks loop pole",
+"edge quads users returns"
+]
+},
+{
+"card": "Simulation in the weights (installed physics step, drift-audited)",
+"method": "sim_program_run",
+"wordings": [
+"host live returns steps",
+"apply identically iterate install"
+]
+},
+{
+"card": "creature",
+"method": "creature",
+"wordings": [
+"limbs hinges spine plans",
+"spine creature head creature"
+]
+},
+{
+"card": "escape_time",
+"method": "escape_time",
+"wordings": [
+"continuous returned palette default",
+"same time frame returned"
+]
+},
+{
+"card": "Parametric sky (time of day, sun, moon, stars, high cloud layers)",
+"method": "sky_model",
+"wordings": [
+"seven altocumulus solid feeds",
+"cloud cirrus altostratus feeds"
+]
+},
+{
+"card": "Variance harness (honest measurement)",
+"method": "measure",
+"wordings": [
+"mean gets seed seeds",
+"number bound assert bootstrap"
+]
+},
+{
+"card": "Rasterize a mesh (z-buffer, textured)",
+"method": "render_mesh",
+"wordings": [
+"default renders colours colors",
+"mesh need rasterise texture"
+]
+},
+{
+"card": "Mixed minerals in one growth: per-seed habits with their own lattices (grow_on habit=list|callable)",
+"method": "crystal_grow_on",
+"wordings": [
+"says crystal system cube",
+"point itself seed habit"
+]
+},
+{
+"card": "CAD export: STL + DXF",
+"method": "mesh_to_stl",
+"wordings": [
+"normals facet geometry flagged",
+"strings quads rhino vertex"
+]
+},
+{
+"card": "resolve_reference",
+"method": "resolve_reference",
+"wordings": [
+"recent deterministic query resolve",
+"session over deterministic that"
+]
+},
+{
+"card": "snap_transform_delta",
+"method": "snap_transform_delta",
+"wordings": [
+"being keeps uses target",
+"point target that edge"
+]
+},
+{
+"card": "explore_series",
+"method": "explore_series",
+"wordings": [
+"noise into decided fraction",
+"residual along measurement variance"
+]
+},
+{
+"card": "Creature body parts (eyes, mouths, feet, claws, fins)",
+"method": "creature_parts",
+"wordings": [
+"with different claw foot",
+"digits antenna parametric which"
+]
+},
+{
+"card": "Code / file editing (agentic)",
+"method": "set_file_root",
+"wordings": [
+"module check every find",
+"name file method after"
+]
+},
+{
+"card": "sdf_scene_shader",
+"method": "sdf_scene_shader",
+"wordings": [
+"each basis disagreement camera",
+"rays writing agreement path"
+]
+},
+{
+"card": "fit_shape",
+"method": "fit_shape",
+"wordings": [
+"texture closest closest fold",
+"capstone texture baseline affine"
+]
+},
+{
+"card": "Compressibility gate with horizon (does a generator exist, certified at this window)",
+"method": "compressibility_check",
+"wordings": [
+"randomised different short past",
+"this correlation signal stochastic"
+]
+},
+{
+"card": "Scatter meshes over a surface (grass, rocks, plants)",
+"method": "scatter_mesh",
+"wordings": [
+"sampling across area scale",
+"mesh share across across"
+]
+},
+{
+"card": "Journal-first documents in the workspace (content-addressed assets + op journals, GC)",
+"method": "lews_open",
+"wordings": [
+"pixels seeds identical lews",
+"asset write render asset"
+]
+},
+{
+"card": "CAD mass properties (volume / COM / inertia tensor)",
+"method": "mass_properties",
+"wordings": [
+"cube holographic centre mass",
+"moments pins holographic tonon"
+]
+},
+{
+"card": "Selftest coverage census (which modules have a real _selftest)",
+"method": "selftest_coverage",
+"wordings": [
+"missing found shelling census",
+"walker backfill door every"
+]
+},
+{
+"card": "reflex_retile",
+"method": "reflex_retile",
+"wordings": [
+"taught repeat after tile",
+"from reflex capacity below"
+]
+},
+{
+"card": "beat_sync",
+"method": "onset_detect",
+"wordings": [
+"mind silence click attacks",
+"clean envelope return where"
+]
+},
+{
+"card": "Foot slip (is this walk actually correct?)",
+"method": "gait_report",
+"wordings": [
+"planted foot sliding reports",
+"fraction slides kept means"
+]
+},
+{
+"card": "Commons doors (opt-in pooled knowledge across all users and models)",
+"method": "teach",
+"wordings": [
+"preserved real mind review",
+"review email each root"
+]
+},
+{
+"card": "Native batch kernels (Zig shared library, on the fly)",
+"method": "zig_batch_eval",
+"wordings": [
+"first contract bound include",
+"identical evaluate call content"
+]
+},
+{
+"card": "Voxel remesh (uniform cleanup)",
+"method": "voxel_remesh",
+"wordings": [
+"pairs crease self with",
+"surface axis cleanup quads"
+]
+},
+{
+"card": "doctrine_seedpack",
+"method": "doctrine_load",
+"wordings": [
+"honest stays doctrine operating",
+"provenance cold loops with"
+]
+}
+],
+"streams": [
+[
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+18,
+0
+],
+[
+1,
+1
+],
+[
+0,
+1
+],
+[
+10,
+0
+],
+[
+19,
+0
+],
+[
+8,
+0
+],
+[
+1,
+0
+],
+[
+5,
+0
+],
+[
+0,
+0
+],
+[
+5,
+0
+],
+[
+26,
+0
+],
+[
+0,
+0
+],
+[
+2,
+0
+],
+[
+0,
+0
+],
+[
+2,
+0
+],
+[
+0,
+1
+],
+[
+22,
+1
+],
+[
+3,
+1
+],
+[
+2,
+0
+],
+[
+6,
+0
+],
+[
+25,
+0
+],
+[
+1,
+0
+],
+[
+1,
+0
+],
+[
+0,
+1
+],
+[
+1,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+5,
+1
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+36,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+50,
+1
+],
+[
+9,
+0
+],
+[
+12,
+1
+],
+[
+5,
+1
+],
+[
+0,
+0
+]
+],
+[
+[
+1,
+1
+],
+[
+40,
+0
+],
+[
+39,
+1
+],
+[
+19,
+1
+],
+[
+2,
+0
+],
+[
+26,
+1
+],
+[
+3,
+1
+],
+[
+0,
+0
+],
+[
+25,
+0
+],
+[
+20,
+0
+],
+[
+0,
+0
+],
+[
+27,
+1
+],
+[
+4,
+1
+],
+[
+14,
+1
+],
+[
+1,
+0
+],
+[
+0,
+0
+],
+[
+24,
+0
+],
+[
+6,
+0
+],
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+26,
+0
+],
+[
+3,
+0
+],
+[
+1,
+0
+],
+[
+1,
+0
+],
+[
+21,
+0
+],
+[
+3,
+1
+],
+[
+44,
+0
+],
+[
+1,
+0
+],
+[
+15,
+0
+],
+[
+1,
+0
+],
+[
+16,
+0
+],
+[
+0,
+0
+],
+[
+0,
+1
+],
+[
+1,
+0
+],
+[
+28,
+1
+],
+[
+1,
+0
+],
+[
+3,
+0
+],
+[
+0,
+1
+],
+[
+5,
+1
+],
+[
+0,
+0
+]
+],
+[
+[
+10,
+0
+],
+[
+53,
+0
+],
+[
+15,
+1
+],
+[
+6,
+0
+],
+[
+4,
+0
+],
+[
+0,
+0
+],
+[
+17,
+0
+],
+[
+2,
+1
+],
+[
+0,
+0
+],
+[
+5,
+1
+],
+[
+1,
+0
+],
+[
+6,
+0
+],
+[
+0,
+1
+],
+[
+0,
+0
+],
+[
+4,
+1
+],
+[
+6,
+0
+],
+[
+0,
+1
+],
+[
+8,
+0
+],
+[
+24,
+0
+],
+[
+1,
+0
+],
+[
+4,
+0
+],
+[
+34,
+0
+],
+[
+11,
+0
+],
+[
+0,
+0
+],
+[
+49,
+0
+],
+[
+1,
+1
+],
+[
+21,
+1
+],
+[
+3,
+0
+],
+[
+18,
+0
+],
+[
+37,
+0
+],
+[
+33,
+0
+],
+[
+19,
+1
+],
+[
+1,
+0
+],
+[
+35,
+0
+],
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+8,
+1
+],
+[
+14,
+1
+],
+[
+0,
+0
+],
+[
+1,
+0
+]
+],
+[
+[
+1,
+0
+],
+[
+11,
+0
+],
+[
+10,
+0
+],
+[
+2,
+0
+],
+[
+23,
+0
+],
+[
+1,
+0
+],
+[
+7,
+1
+],
+[
+4,
+0
+],
+[
+0,
+1
+],
+[
+1,
+0
+],
+[
+5,
+1
+],
+[
+52,
+0
+],
+[
+17,
+0
+],
+[
+3,
+1
+],
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+0,
+0
+],
+[
+6,
+0
+],
+[
+2,
+0
+],
+[
+9,
+1
+],
+[
+4,
+0
+],
+[
+2,
+0
+],
+[
+1,
+0
+],
+[
+0,
+1
+],
+[
+54,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+0,
+1
+],
+[
+18,
+1
+],
+[
+0,
+0
+],
+[
+1,
+1
+],
+[
+0,
+1
+],
+[
+40,
+0
+],
+[
+1,
+0
+],
+[
+24,
+0
+],
+[
+47,
+0
+],
+[
+12,
+0
+],
+[
+1,
+0
+],
+[
+3,
+0
+]
+]
+]
+}

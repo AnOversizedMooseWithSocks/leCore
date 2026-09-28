@@ -382,7 +382,7 @@ class _UnifiedPart03:
             raise RuntimeError("no LLM attached -- call mind.attach_llm(callable) first, or pass llm=")
         return expand_query(self, query, fn, min_faithfulness=min_faithfulness, z_min=z_min, seed=seed)
 
-    def tool_loop(self, task, llm=None, max_steps=6, z_min=0.1, k_tools=6, seed=0):
+    def tool_loop(self, task, llm=None, max_steps=6, z_min=0.1, k_tools=6, seed=0, verify=None, reflex=False):
         # RENAMED from agent_loop() in sweep 63: p20's cp28 gather/act/reflect
         # agent_loop had silently shadowed this in-process tool-use loop
         # (LOOP-1). Live name stays with the live body; this one returns as
@@ -402,12 +402,18 @@ class _UnifiedPart03:
         offered manifest, and NEVER GUESSES at an unparsed reply. Args are recorded as a blake2b digest plus
         a short repr, never the live object: a live object in a job's args once crashed a worker after the
         job had already succeeded. Returns {done, refused, answer, why, steps, gate}.
+        LEARNING FROM TOOL CALLS (sweep 178): every dispatched call is recorded in the decision ledger; pass
+        verify=callable(task, tool, args, result) -> bool and each call it passes is reported as an outcome
+        (decision_outcome -> reflex_learn), so reflex=True answers a repeat from judged experience. Without
+        verify nothing is taught: a call that did not raise is the tool's own report, not a judgement.
         Pass llm= or attach one first with attach_llm()."""
         from holographic.agents_and_reasoning.holographic_agentloop import AgentLoop
         fn = llm if llm is not None else getattr(self, "_llm", None)
         if fn is None:
             raise RuntimeError("no LLM attached -- call mind.attach_llm(callable) first, or pass llm=")
-        return AgentLoop(self, fn, max_steps=max_steps, z_min=z_min, k_tools=k_tools, seed=seed).run(task)
+        # verify= / reflex= (sweep 178): the judge for tool calls and learning from it -- see AgentLoop.__init__.
+        return AgentLoop(self, fn, max_steps=max_steps, z_min=z_min, k_tools=k_tools, seed=seed,
+                         verify=verify, reflex=reflex).run(task)
 
     def delegate(self, task, llm=None, model=None, url=None, max_steps=8, z_min=0.1,
                  k_tools=6, seed=0, require_answer=True):

@@ -1,0 +1,37 @@
+setup 24.9s; top singular values of centred centroids: [2.59 2.37 2.21 2.15 2.04 2.  ]; ||mu_c||=0.096 ||mu_p||=0.077
+precompute 25.8s
+rows with an all-stopword (zero) vector: 7
+BASE       top1 val 0.8473 test 0.8413 | P.97 val-cov 37.6% -> test cov 37.7% prec 0.970 oos 2.1% (oracle 37.9%) | P.95 val-cov 57.3% -> test cov 56.9% prec 0.948 oos 4.4% (oracle 55.6%)
+ABLATION U (query norm WITHOUT the unknown-word mass): top1 val 0.8473 test 0.8413 | P.97 val-cov 4.0% -> test cov 3.4% prec 0.974 oos 0.3% (oracle 10.0%) | P.95 val-cov 37.8% -> test cov 37.5% prec 0.951 oos 4.7% (oracle 39.3%)
+  val A  k=0.0   top1 0.8473  cov@.97 37.6%  cov@.95 57.3%
+  val A  k=0.1   top1 0.8473  cov@.97 38.7%  cov@.95 55.7%
+  val A  k=0.25  top1 0.8473  cov@.97 38.9%  cov@.95 53.3%
+  val A  k=0.5   top1 0.8473  cov@.97 39.4%  cov@.95 52.3%
+  val A  k=1.0   top1 0.8473  cov@.97 35.4%  cov@.95 50.7%
+  val A  k=2.0   top1 0.8473  cov@.97 31.6%  cov@.95 46.7%
+A | P0.97(k=0.5) test cov 39.6% prec 0.970 oos 2.2% d+2.0pt CI[+1.4,+2.5] | P0.95(k=0.0) test cov 56.9% prec 0.948 oos 4.4% d+0.0pt CI[+0.0,+0.0]
+  val A2 k=0.0   top1 0.8473  cov@.97 37.6%  cov@.95 57.3%
+  val A2 k=0.1   top1 0.8473  cov@.97 38.7%  cov@.95 53.3%
+  val A2 k=0.25  top1 0.8473  cov@.97 39.8%  cov@.95 51.4%
+  val A2 k=0.5   top1 0.8473  cov@.97 36.1%  cov@.95 56.2%
+  val A2 k=1.0   top1 0.8473  cov@.97 25.3%  cov@.95 43.2%
+A2 | P0.97(k=0.25) test cov 39.6% prec 0.969 oos 2.4% d+2.0pt CI[+1.5,+2.4] | P0.95(k=0.0) test cov 56.9% prec 0.948 oos 4.4% d+0.0pt CI[+0.0,+0.0]
+  val B  k=0.0   top1 0.8473  cov@.97 37.6%  cov@.95 57.3%
+  val B  k=0.25  top1 0.8470  cov@.97 37.7%  cov@.95 57.2%
+  val B  k=0.5   top1 0.8470  cov@.97 37.8%  cov@.95 56.9%
+  val B  k=0.75  top1 0.8457  cov@.97 37.8%  cov@.95 56.6%
+  val B  k=1.0   top1 0.8460  cov@.97 37.9%  cov@.95 56.4%
+B | top-1(k=0.0) test 0.8413 d+0.0000 CI[+0.0000,+0.0000] fixed 0 broke 0 | P0.97(k=1.0) test cov 38.1% prec 0.969 oos 2.1% d+0.5pt CI[+0.2,+0.7] | P0.95(k=0.0) test cov 56.9% prec 0.948 oos 4.4% d+0.0pt CI[+0.0,+0.0]
+  val C  k=1     top1 0.8397  cov@.97 36.5%  cov@.95 55.5%
+  val C  k=2     top1 0.8383  cov@.97 36.7%  cov@.95 55.6%
+  val C  k=5     top1 0.8310  cov@.97 33.2%  cov@.95 54.5%
+  val C  k=10    top1 0.8233  cov@.97 32.2%  cov@.95 51.8%
+  val C  k=20    top1 0.8070  cov@.97 30.7%  cov@.95 47.0%
+C | top-1(k=1) test 0.8351 d-0.0062 CI[-0.0089,-0.0033] fixed 6 broke 34 | P0.97(k=2) test cov 36.9% prec 0.970 oos 2.0% d-0.8pt CI[-1.1,-0.5] | P0.95(k=2) test cov 55.6% prec 0.946 oos 4.9% d-1.3pt CI[-1.7,-0.9]
+  val H  k=0.0   top1 0.8473  cov@.97 37.6%  cov@.95 57.3%
+  val H  k=0.1   top1 0.8457  cov@.97 39.0%  cov@.95 54.3%
+  val H  k=0.2   top1 0.8450  cov@.97 42.7%  cov@.95 50.8%
+  val H  k=0.3   top1 0.8417  cov@.97 41.3%  cov@.95 49.4%
+  val H  k=0.5   top1 0.8190  cov@.97 33.7%  cov@.95 47.4%
+H | top-1(k=0.0) test 0.8413 d+0.0000 CI[+0.0000,+0.0000] fixed 0 broke 0 | P0.97(k=0.2) test cov 42.0% prec 0.959 oos 3.4% d+4.3pt CI[+3.7,+5.0] | P0.95(k=0.0) test cov 56.9% prec 0.948 oos 4.4% d+0.0pt CI[+0.0,+0.0]
+total 136.9s

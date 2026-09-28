@@ -20,12 +20,20 @@ from holographic.unified import check_part
 
 class _UnifiedPart25:
 
+    # How many open escalations learning_save keeps (the newest; insertion order is oldest first). The list is one row
+    # per DISTINCT unserved question, so a busy service grows it without bound in memory; the partition keeps a bound.
+    _ESCALATIONS_KEPT = 2048
+
     # ---------------------------------------------------------------- customer service
     def escalations(self):
         """The questions this mind could NOT serve (sweep 125): every serve() that
         escalated is recorded here, oldest first, until a human resolves it. A service
         swarm reads this list to route work to people; the list is the swarm's honest
-        account of what it does not yet know. Returns [{question, reason, count}]."""
+        account of what it does not yet know. Returns [{question, reason, count}].
+        SURVIVES A RESTART (learning-loop audit, 2026-09-26): learning_save writes the newest
+        _ESCALATIONS_KEPT open questions (never one carrying a secret) and learning_load /
+        learning_rollover bring them back -- before, a swarm that restarted lost every open
+        question and resolve() reported cleared=False for them."""
         led = getattr(self, "_escalations", None) or {}
         return [{"question": q, "reason": v["reason"], "count": v["count"]}
                 for q, v in led.items()]
@@ -45,9 +53,16 @@ class _UnifiedPart25:
             if lg and str(lg[-1][0]) == str(question) and len(lg[-1]) > 3:
                 lg[-1] = [lg[-1][0], lg[-1][1], lg[-1][2], "human:%s" % str(by)]
         led = getattr(self, "_escalations", None) or {}
-        cleared = led.pop(str(question), None) is not None
+        # teach() clears the exact escalated wording itself when it lands (maple swarm run) and says so
+        cleared = bool(r.get("cleared")) or led.pop(str(question), None) is not None
         self._escalations = led
         out = {"taught": bool(r.get("taught")), "by": str(by), "cleared": cleared}
+        if not r.get("taught") and r.get("reason"):
+            # sweep 179: the learning guard refused it (a secret, or a live reading such as today's price). The
+            # escalation is still cleared -- it WAS answered -- but the answer is not kept, and this says why.
+            out["reason"] = r["reason"]
+            if r.get("guard"):
+                out["guard"] = r["guard"]
         if propagate:
             out["propagated"] = self.contribute(str(propagate), author=str(by))
         return out

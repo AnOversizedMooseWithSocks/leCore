@@ -55,6 +55,11 @@ import numpy as np
 from holographic.misc.holographic_determinism import argmax_tiebreak
 
 
+#: procedure-matched null agreements for the tolerant exit, keyed by (dim, codebook sizes, procedure) -- see
+#: ResonatorNetwork.noise_null. A module-level cache so every network of one shape pays the fit once per process.
+_TOLERANT_NULL_CACHE = {}
+
+
 def map_codebook(n_codes, dim, seed):
     """A codebook of n_codes random bipolar (+/-1) vectors of length dim."""
     rng = np.random.default_rng(seed)
@@ -142,17 +147,14 @@ class ResonatorNetwork:
         """
         return np.sign(B.T @ (B @ est))
 
-    def _run(self, c, iters, seed):
-        rng = np.random.default_rng(seed)
-        ests = [np.sign(rng.standard_normal(self.dim)) for _ in range(self.F)]
-        # UNIFIER (P7): one iteration of this loop IS an iterate-a-projection sweep -- each factor is projected
-        # onto its own codebook (cleanup is idempotent, measured) while the others are held fixed. Because the
-        # factors are DISJOINT blocks, the "simultaneous" (Jacobi) sweep of `project_onto_constraints` sums the
-        # block moves and reproduces this update EXACTLY -- verified bit-for-bit. We delegate the sweep and keep
-        # our own exit conditions (exact reconstruction / stuck detection), which the generic engine has no
-        # opinion about.
-        from holographic.rendering.holographic_denoise import project_onto_constraints
+    def _projections(self, c):
+        """The per-factor projections one resonator sweep applies (factored out of `_run` so the exact and the
+        noise-tolerant runs share ONE update rule -- the tolerant run differs only in when it stops).
 
+        UNIFIER (P7): one iteration IS an iterate-a-projection sweep -- each factor is projected onto its own
+        codebook (cleanup is idempotent, measured) while the others are held fixed. Because the factors are
+        DISJOINT blocks, the "simultaneous" (Jacobi) sweep of `project_onto_constraints` sums the block moves
+        and reproduces this update EXACTLY -- verified bit-for-bit."""
         def _projection(f):
             def proj(x):
                 blocks = x.reshape(self.F, self.dim)
@@ -164,8 +166,16 @@ class ResonatorNetwork:
                 out[f] = self._cleanup(others, self.books[f])
                 return out.reshape(-1)
             return proj
+        return [_projection(f) for f in range(self.F)]
 
-        projections = [_projection(f) for f in range(self.F)]
+    def _run(self, c, iters, seed):
+        rng = np.random.default_rng(seed)
+        ests = [np.sign(rng.standard_normal(self.dim)) for _ in range(self.F)]
+        # We delegate the sweep (see _projections) and keep our own exit conditions (exact reconstruction /
+        # stuck detection), which the generic engine has no opinion about.
+        from holographic.rendering.holographic_denoise import project_onto_constraints
+
+        projections = self._projections(c)
         for t in range(iters):
             stacked, _sweeps, _conv = project_onto_constraints(
                 np.concatenate(ests), projections, iters=1, sweep="simultaneous")
@@ -183,7 +193,119 @@ class ResonatorNetwork:
             ests = new
         return idx, iters, False
 
-    def factor(self, composite, restarts=20, iters=400):
+    # ------------------------------------------------------------------------------------------------------
+    # THE NOISE-TOLERANT EXIT (CLM backlog E3.2). The exact exit above is a defect on any input that is not a
+    # perfect product: measured by the CLM panel (docs/research/evidence/clm_panel_20260926/w2-hd/
+    # exp_a_resonator.py, 20 verbs x 50 x 50 values, D=2048), at 5% flipped components it solved 0/20 in
+    # 757 ms each (exact_correct 0.10 -- it returned the LAST restart's guess, not the best one it had seen),
+    # and a random composite took 1,858 ms to refuse because a refusal has to exhaust every restart x iter.
+    #
+    # The fix keeps the SAME update rule and changes only the stopping and the bookkeeping:
+    #   * AGREEMENT -- the fraction of components where re-binding the current picks matches sign(composite).
+    #     Exact reconstruction is agreement 1.0; the true factors of a 5%-flipped product sit at ~0.95; a
+    #     random triple at 0.5 +/- 0.5/sqrt(D) (0.011 at D=2048).
+    #   * STALL EXIT -- a restart ends when its best agreement has not improved for `patience` sweeps (or the
+    #     estimates stop moving, the old stuck test). This is what makes a refusal cheap.
+    #   * ACCEPT EXIT -- the search stops as soon as the best agreement exceeds the agreement a STRUCTURELESS
+    #     input reaches under this very procedure at the caller's false-alarm level `accept_p`.
+    #   * BEST-OF-RESTARTS -- the returned picks are the highest-agreement ones seen (ties: earliest), never
+    #     just the last restart's.
+    #   * p_value -- the pattern of holographic_sbc.resonator_confidence: a null from the SAME procedure (same
+    #     codebook shape, restarts, iters, patience; accept exit off) run on random bipolar composites, and
+    #     p = (1 + #null >= agreement) / (n_null + 1). Small p -> real structure; large p -> abstain.
+    # Stopping early at the accept threshold can only UNDER-state the agreement a full run would have reached
+    # (best-of-restarts is monotone), so the p-value reported at an early exit is conservative.
+    #
+    # MEASURED (tools/bench_rolecall.py 'resonator'; perm-role product 20 x 50 x 50, D=2048, restarts 20 x 200
+    # iters, patience 8, m_null 100, accept_p 0.01; 20 trials per row; machine load ~9 on 2 cores):
+    #     flips   before (exact exit)                 after (tolerant exit)
+    #     0%      20/20 right, 20 solved,   62 ms     20/20 right, 20 accepted, 0 wrong accepted,  91 ms
+    #     5%       5/20 right,  0 solved,  422 ms     20/20 right, 20 accepted, 0 wrong accepted,  81 ms
+    #     10%      6/20 right,  0 solved,  579 ms     19/20 right, 19 accepted, 0 wrong accepted, 105 ms
+    #                                                 (the wrong one: p 0.57 -- it abstains)
+    #     random composite: before 4,008 ms to refuse; after 266 ms, p 0.75, not accepted.
+    # KEPT NEGATIVES: (1) the null costs m_null full searches ONCE per codebook shape (41 s at this shape under
+    # load; cached per process) -- the price of a procedure-matched p; (2) on EXACT products the stall exit cuts a
+    # few restarts that would have converged after a plateau, so the tolerant path is ~1.5x slower at 0% noise.
+    # ------------------------------------------------------------------------------------------------------
+
+    def _run_tolerant(self, c, csign, iters, seed, patience, accept_thr):
+        """One restart with the stall / accept exits. Returns (best_idx, best_agreement, t, exit) where exit is
+        'exact' (re-binds exactly: the old certificate), 'accept' (agreement beat the null threshold), 'stall',
+        'stuck' or 'budget'."""
+        from holographic.rendering.holographic_denoise import project_onto_constraints
+        rng = np.random.default_rng(seed)
+        ests = [np.sign(rng.standard_normal(self.dim)) for _ in range(self.F)]
+        projections = self._projections(c)
+        best_a, best_idx, since = -1.0, None, 0
+        for t in range(iters):
+            stacked, _s, _c = project_onto_constraints(np.concatenate(ests), projections, iters=1,
+                                                       sweep="simultaneous")
+            new = list(stacked.reshape(self.F, self.dim))
+            idx = tuple(argmax_tiebreak(self.books[f] @ new[f]) for f in range(self.F))
+            rec = np.ones(self.dim)
+            for f in range(self.F):
+                rec = rec * self.books[f][idx[f]]
+            if np.array_equal(rec, c):
+                return idx, 1.0, t, "exact"
+            a = float(np.mean(rec == csign))
+            if a > best_a + 1e-12:                   # strict improvement only: a plateau counts toward the stall
+                best_a, best_idx, since = a, idx, 0
+            else:
+                since += 1
+            if accept_thr is not None and best_a > accept_thr:
+                return best_idx, best_a, t, "accept"
+            if all(np.array_equal(new[f], ests[f]) for f in range(self.F)):
+                return best_idx, best_a, t, "stuck"
+            if since >= patience:
+                return best_idx, best_a, t, "stall"
+            ests = new
+        return best_idx, best_a, iters, "budget"
+
+    def _search_tolerant(self, c, restarts, iters, patience, accept_thr):
+        """Best-of-restarts search with the tolerant exits -> (idx, agreement, restarts_used, iters, exit)."""
+        csign = np.where(c >= 0, 1.0, -1.0)
+        best = (None, -1.0, 0, 0, "budget")
+        for r in range(int(restarts)):
+            idx, a, t, ex = self._run_tolerant(c, csign, iters, seed=r, patience=patience, accept_thr=accept_thr)
+            if ex == "exact":
+                return idx, 1.0, r + 1, t, "exact"
+            if a > best[1] + 1e-12:                  # ties keep the EARLIEST restart (one stated tie rule)
+                best = (idx, a, r + 1, t, ex)
+            if ex == "accept":
+                return idx, a, r + 1, t, "accept"
+        return best[0], best[1], int(restarts), best[3], "budget"
+
+    def noise_null(self, restarts=20, iters=400, patience=8, m=100, seed=0):
+        """The procedure-matched null: the best agreement this search (same restarts / iters / patience, accept
+        exit OFF) reaches on m random bipolar composites -> sorted array of m agreements. Cached per codebook
+        SHAPE (dim, codebook sizes, procedure), the same keying holographic_sbc._resonator_noise_null measured
+        content-independent; tests/test_holographic_resonator.py re-checks that on this bind."""
+        sig = (self.dim, tuple(int(B.shape[0]) for B in self.books), int(restarts), int(iters), int(patience),
+               int(m), int(seed))
+        if sig not in _TOLERANT_NULL_CACHE:
+            r = np.random.default_rng(int(seed) + 7919)
+            out = np.empty(int(m))
+            for i in range(int(m)):
+                junk = np.where(r.random(self.dim) < 0.5, -1.0, 1.0)
+                out[i] = self._search_tolerant(junk, restarts, iters, patience, accept_thr=None)[1]
+            _TOLERANT_NULL_CACHE[sig] = np.sort(out)
+        return _TOLERANT_NULL_CACHE[sig]
+
+    @staticmethod
+    def accept_threshold(null, accept_p):
+        """The agreement a result must EXCEED for p_value <= accept_p under `null` (None when m is too small to
+        ever reach that p: then the search runs to its stall/budget and still reports p)."""
+        n = len(null)
+        k_max = int(np.floor(float(accept_p) * (n + 1) - 1 + 1e-9))   # how many null values may reach it
+        if k_max < 0:
+            return None
+        if k_max >= n:
+            return -1.0
+        return float(np.sort(null)[n - 1 - k_max])
+
+    def factor(self, composite, restarts=20, iters=400, tolerant=False, patience=8, accept_p=0.01,
+               m_null=100):
         # BEFORE BLAMING THE UPDATE RULE, SPEND THE BUDGET. It was proposed that this resonator needs an
         # algorithmic replacement (attention-based update, recursive factorization) because it fails at
         # F=4. Measured at N=2048, V=16, F=4 -- a search space of 65,536, Df/N = 0.031:
@@ -206,11 +328,27 @@ class ResonatorNetwork:
         """Recover the factor indices (one per codebook) whose binding equals the
         composite. Returns {'factors', 'solved', 'restarts', 'iterations',
         'search_space'}. Tries random restarts because a single run may not converge,
-        but a converged run is always correct."""
+        but a converged run is always correct.
+
+        tolerant=True (opt-in; the default path above is unchanged bit-for-bit) adds the noise-tolerant exit
+        for composites that are NOT exact products (flipped components, a noisy readout): the return also
+        carries 'agreement' (fraction of components the best picks re-bind), 'p_value' (procedure-matched null,
+        m_null random composites, cached per codebook shape), 'accepted' (p_value <= accept_p) and 'exit'
+        ('exact' | 'accept' | 'budget'). 'solved' keeps its meaning: exact reconstruction only. Measured on
+        the panel's perm-role product (20 x 50 x 50, D=2048): see tools/bench_rolecall.py ->
+        docs/research/evidence/bench_rolecall.json 'resonator'."""
         c = self._demand_real(composite, "the composite", self._allow_cast)
         space = 1
         for B in self.books:
             space *= B.shape[0]
+        if tolerant:
+            null = self.noise_null(restarts=restarts, iters=iters, patience=patience, m=m_null)
+            thr = self.accept_threshold(null, accept_p)
+            idx, a, used, t, ex = self._search_tolerant(c, restarts, iters, patience, accept_thr=thr)
+            p = float((1 + int((null >= a - 1e-12).sum())) / (len(null) + 1))
+            return {"factors": idx, "solved": ex == "exact", "restarts": used, "iterations": t,
+                    "search_space": space, "agreement": float(a), "p_value": p,
+                    "accepted": bool(p <= float(accept_p)), "exit": ex, "null_max": float(null[-1])}
         for r in range(restarts):
             idx, t, ok = self._run(c, iters, seed=r)
             if ok:

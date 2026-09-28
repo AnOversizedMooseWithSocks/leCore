@@ -313,3 +313,20 @@ Everything below was run on a 14-object model built from the blueprint; the numb
   `sdf_validate_glsl` for every analytic part (worst diff 2.9e-7 after vec2/swizzles joined the shim),
   `verify_decision(state, answer)` for a served pick that might contradict what was learned.
 
+## 10. Engine side, sweep 182 (2026-09-26) — what changed for the decisions in §9
+
+The leCore checkout's decision doors were rebuilt around one learning loop (lecore-boot Step 7c has every command,
+each run on a service; `docs/research/BENCHMARK_sweep182_contrastive.md` the numbers):
+
+- Read `p_correct` (high = confident; `None` until that door has calibrated on reported outcomes) and `p_null` (low
+  = significant) on every `typed` / `route` answer; the bare `p` is deprecated and warns.
+- A material or tool pick's id survives a service restart once `boot` has mounted the partition: report
+  `decision_outcome(id, material_or_tool_used)` even if the photo that judged it finished after a restart.
+- `rank(state, candidates)` ranks candidates you already hold; give each as `{"text", "examples"}`. A bare name
+  matches only when the description says it (measured: "a shiny copper kettle" → `copper` at 0.48; "flat wooden
+  panel" → `wood_oak` at 0.148, REFUSED under the 0.15 floor). For the 141-name material library the measured door
+  is still `typed` (8 of 8).
+- These verbs exist only on an engine built from a sweep-182 checkout — `/engine/*` in this app runs its PyPI
+  `leos-core` (§9's trap), whose `/engine/tools` count (2,408 at 0.2.22) predates them; the sweep-182 checkout's
+  mind reports 2,512 faculties at `boot`. Keep decisions on your own service, geometry in the app.
+

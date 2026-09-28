@@ -109,9 +109,23 @@ def complete(prefix, k=15, mind=None):
 
 
 # ---- skill cards ------------------------------------------------------------------------------------------
+_CATALOG_CACHE = None
+
+
 def _catalog():
-    from holographic.caching_and_storage.holographic_catalog import default_catalog, seed_from_modules
-    return seed_from_modules(default_catalog())
+    """The module-seeded capability catalog, BUILT ONCE PER PROCESS (sweep 178).
+
+    MEASURED BUG this fixes: every call rebuilt the whole catalog -- default_catalog() plus seed_from_modules,
+    ~364k register_capability calls per 216 builds -- at ~0.21 s each. AgentLoop.manifest calls describe_skill
+    once per offered tool, so one ACTING step cost ~1.2 s of catalog rebuilding (95% of a tool-learning bench's
+    wall time, found by cProfile). Every caller in this module only READS the catalog (get / all / find_scored),
+    and its content is fixed for the life of the process (curated parts + module docstrings), so one shared
+    instance is safe. A mind's own catalog (with its plugins) is separate: UnifiedMind._capability_catalog."""
+    global _CATALOG_CACHE
+    if _CATALOG_CACHE is None:
+        from holographic.caching_and_storage.holographic_catalog import default_catalog, seed_from_modules
+        _CATALOG_CACHE = seed_from_modules(default_catalog())
+    return _CATALOG_CACHE
 
 
 def _params(fn):

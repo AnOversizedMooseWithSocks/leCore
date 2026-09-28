@@ -1,0 +1,35 @@
+[learned] rows 602 wordings 8591 feats 29041  setup 2.0s
+BASE blend0.8 (today)      top1 val 0.8473 test 0.8413 | P0.97 cov 37.7% prec 0.970 oos 2.1% | P0.95 cov 56.9% prec 0.948 oos 4.4%
+centroid only (init)       top1 val 0.8307 test 0.8227 | P0.97 cov 32.8% prec 0.965 oos 1.9% | P0.95 cov 47.3% prec 0.947 oos 3.6%
+   infonce tau=0.05 eta=0.003: val top1 by epoch {1: 0.8563, 2: 0.8567, 4: 0.8573}  (4.8s)
+   infonce tau=0.05 eta=0.01: val top1 by epoch {1: 0.8587, 2: 0.856, 4: 0.8593}  (4.6s)
+   infonce tau=0.05 eta=0.03: val top1 by epoch {1: 0.8573, 2: 0.861, 4: 0.8617}  (4.4s)
+   infonce tau=0.1 eta=0.003: val top1 by epoch {1: 0.8493, 2: 0.8497, 4: 0.8513}  (4.6s)
+   infonce tau=0.1 eta=0.01: val top1 by epoch {1: 0.8513, 2: 0.8517, 4: 0.8537}  (4.7s)
+   infonce tau=0.1 eta=0.03: val top1 by epoch {1: 0.8537, 2: 0.855, 4: 0.8553}  (4.5s)
+   infonce tau=0.2 eta=0.003: val top1 by epoch {1: 0.8473, 2: 0.8473, 4: 0.8483}  (4.5s)
+   infonce tau=0.2 eta=0.01: val top1 by epoch {1: 0.8483, 2: 0.8487, 4: 0.8497}  (4.5s)
+   infonce tau=0.2 eta=0.03: val top1 by epoch {1: 0.8487, 2: 0.8513, 4: 0.8517}  (4.7s)
+infonce s0 t0.05 e0.03 ep4 blend top1 val 0.8617 test 0.8616 | P0.97 cov 57.6% prec 0.963 oos 3.5% | P0.95 cov 61.8% prec 0.954 oos 4.7%  | top-1 d+0.0202 CI[+0.0129,+0.0271] fixed 182 broke 91
+   ...same, signal=softmax p_max top1 val 0.8617 test 0.8616 | P0.97 cov 53.0% prec 0.967 oos 3.5% | P0.95 cov 65.3% prec 0.944 oos 6.7%
+infonce s1 t0.05 e0.03 ep4 blend top1 val 0.8583 test 0.8616 | P0.97 cov 54.6% prec 0.962 oos 3.2% | P0.95 cov 62.5% prec 0.951 oos 5.3%  | top-1 d+0.0202 CI[+0.0127,+0.0273] fixed 183 broke 92
+infonce s2 t0.05 e0.03 ep4 blend top1 val 0.8613 test 0.8618 | P0.97 cov 55.4% prec 0.964 oos 3.2% | P0.95 cov 63.2% prec 0.951 oos 5.6%  | top-1 d+0.0204 CI[+0.0131,+0.0278] fixed 183 broke 91
+infonce TEST top-1 over seeds: mean 0.8616  range [0.8616, 0.8618]  (base 0.8413)
+   adapthd tau=None eta=0.03: val top1 by epoch {1: 0.851, 2: 0.854, 4: 0.8557}  (2.5s)
+   adapthd tau=None eta=0.1: val top1 by epoch {1: 0.8523, 2: 0.8537, 4: 0.8513}  (2.2s)
+   adapthd tau=None eta=0.3: val top1 by epoch {1: 0.848, 2: 0.8493, 4: 0.8547}  (2.4s)
+adapthd s0 tNone e0.03 ep4 blend top1 val 0.8557 test 0.8467 | P0.97 cov 45.4% prec 0.959 oos 2.5% | P0.95 cov 57.0% prec 0.950 oos 4.7%  | top-1 d+0.0053 CI[-0.0002,+0.0107] fixed 89 broke 65
+adapthd s1 tNone e0.03 ep4 blend top1 val 0.8560 test 0.8462 | P0.97 cov 47.4% prec 0.960 oos 2.7% | P0.95 cov 56.8% prec 0.949 oos 4.8%  | top-1 d+0.0049 CI[-0.0005,+0.0102] fixed 90 broke 68
+adapthd s2 tNone e0.03 ep4 blend top1 val 0.8573 test 0.8453 | P0.97 cov 45.1% prec 0.959 oos 2.5% | P0.95 cov 56.9% prec 0.949 oos 4.6%  | top-1 d+0.0040 CI[-0.0013,+0.0093] fixed 83 broke 65
+adapthd TEST top-1 over seeds: mean 0.8461  range [0.8453, 0.8467]  (base 0.8413)
+   masked tau=0.05 eta=0.003: val top1 by epoch {1: 0.856, 2: 0.856, 4: 0.8573}  (4.7s)
+   masked tau=0.05 eta=0.01: val top1 by epoch {1: 0.859, 2: 0.856, 4: 0.8597}  (4.9s)
+   masked tau=0.05 eta=0.03: val top1 by epoch {1: 0.8597, 2: 0.861, 4: 0.8623}  (4.8s)
+   masked tau=0.1 eta=0.003: val top1 by epoch {1: 0.8493, 2: 0.8497, 4: 0.8513}  (4.9s)
+   masked tau=0.1 eta=0.01: val top1 by epoch {1: 0.8517, 2: 0.8513, 4: 0.854}  (4.6s)
+   masked tau=0.1 eta=0.03: val top1 by epoch {1: 0.854, 2: 0.854, 4: 0.8553}  (5.0s)
+masked s0 t0.05 e0.03 ep4 blend top1 val 0.8623 test 0.8620 | P0.97 cov 57.1% prec 0.963 oos 3.4% | P0.95 cov 61.1% prec 0.954 oos 4.7%  | top-1 d+0.0207 CI[+0.0133,+0.0278] fixed 181 broke 88
+masked s1 t0.05 e0.03 ep4 blend top1 val 0.8590 test 0.8604 | P0.97 cov 54.9% prec 0.963 oos 3.2% | P0.95 cov 62.5% prec 0.950 oos 5.5%  | top-1 d+0.0191 CI[+0.0118,+0.0262] fixed 175 broke 89
+masked s2 t0.05 e0.03 ep4 blend top1 val 0.8620 test 0.8627 | P0.97 cov 55.7% prec 0.964 oos 3.1% | P0.95 cov 63.2% prec 0.951 oos 5.5%  | top-1 d+0.0213 CI[+0.0142,+0.0284] fixed 183 broke 87
+masked TEST top-1 over seeds: mean 0.8617  range [0.8604, 0.8627]  (base 0.8413)
+total 108.6s

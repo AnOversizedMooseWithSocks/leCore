@@ -1,0 +1,37 @@
+[
+ {
+  "dataset": "banking",
+  "n_stream": 3000,
+  "noise": 0.0,
+  "encode_s": 12.8,
+  "arms": {
+   "frozen": {
+    "prequential_acc": 0.552,
+    "test_top1": 0.5516,
+    "auroc_gap": 0.7822,
+    "auroc_ptop_tau0.02": 0.7921,
+    "auroc_clm_tau0.02": 0.7921,
+    "auroc_ptop_tau0.05": 0.7808,
+    "auroc_clm_tau0.05": 0.7808,
+    "test_top1_qbnorm_tau0.05": 0.5299,
+    "test_top1_qbnorm_excl_tau0.05": 0.5445,
+    "test_top1_qbnorm_excl_lam0.25": 0.564,
+    "test_top1_qbnorm_excl_lam0.50": 0.5653
+   },
+   "infonce_t0.05_lr0.3": {
+    "prequential_acc": 0.758,
+    "test_top1": 0.8263,
+    "auroc_gap": 0.866,
+    "auroc_ptop_tau0.02": 0.8726,
+    "auroc_clm_tau0.02": 0.8726,
+    "auroc_ptop_tau0.05": 0.8546,
+    "auroc_clm_tau0.05": 0.8546,
+    "test_top1_qbnorm_tau0.05": 0.7659,
+    "test_top1_qbnorm_excl_tau0.05": 0.8101,
+    "test_top1_qbnorm_excl_lam0.25": 0.825,
+    "test_top1_qbnorm_excl_lam0.50": 0.8256
+   }
+  },
+  "total_s": 16.9
+ }
+]

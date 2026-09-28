@@ -1,0 +1,1102 @@
+{
+ "about": "tools/audit_learning_loop.py: does each leCore learning door learn live, learn from an outcome reported AFTER a restart, keep it through another restart, and never persist a (fake) secret. Reproduce: PYTHONHASHSEED=0 python tools/audit_learning_loop.py --label <name>. Values: true = PASS, false = FAIL, null = not applicable.",
+ "runs": {
+  "after": {
+   "checks": {
+    "drift_number": {
+     "nothing_changed": {
+      "drift": 1.0,
+      "sections_changed": []
+     },
+     "one_ask": {
+      "drift": 0.7755,
+      "sections_changed": [
+       "lecore.learning.ledger",
+       "lecore.learning.meaning",
+       "lecore.learning.semantic"
+      ]
+     },
+     "one_taught_row": {
+      "drift": 0.8537,
+      "sections_changed": [
+       "lecore.learning.experience",
+       "lecore.learning.meaning",
+       "lecore.learning.taught"
+      ]
+     },
+     "one_typed_correction": {
+      "drift": 0.8847,
+      "sections_changed": [
+       "lecore.learning.decisions",
+       "lecore.learning.experience",
+       "lecore.learning.reflexbridge"
+      ]
+     },
+     "sections": 14
+    },
+    "guard_phrasings": {
+     "by_phrasing": {
+      "<S> is my password": false,
+      "here is my password, <S>": false,
+      "login with <S>": false,
+      "my passphrase is <S>": true,
+      "my password is <S>": true,
+      "password <S>": false,
+      "password: <S>": true,
+      "pwd=<S>": true,
+      "the pw is <S>": false,
+      "use password <S> to log in": false
+     },
+     "caught": 4,
+     "of": 10
+    },
+    "ladder_payload_keys": {
+     "baseline_no_sync": {
+      "corrected": [
+       0,
+       1,
+       2
+      ],
+      "fuzzy_repeat_served_right": 90,
+      "fuzzy_repeat_served_wrong": 0,
+      "misrouted_questions": 30,
+      "not_served_after_restart": [
+       0,
+       1,
+       2,
+       8,
+       13
+      ],
+      "ok": false,
+      "payload_keys": 90,
+      "splits": 1,
+      "stale_payload_keys": 60,
+      "taught": 90,
+      "via": {
+       "meaning": 81,
+       "reflex": 9
+      },
+      "wrongly_vetoed": [
+       8,
+       13
+      ]
+     },
+     "fixed": {
+      "corrected": [
+       0,
+       1,
+       2
+      ],
+      "fuzzy_repeat_served_right": 90,
+      "fuzzy_repeat_served_wrong": 0,
+      "misrouted_questions": 4,
+      "not_served_after_restart": [
+       0,
+       1,
+       2
+      ],
+      "ok": true,
+      "payload_keys": 90,
+      "splits": 1,
+      "stale_payload_keys": 0,
+      "taught": 90,
+      "via": {
+       "meaning": 64,
+       "reflex": 26
+      },
+      "wrongly_vetoed": []
+     },
+     "ok": true
+    },
+    "lookup_side_effects": {
+     "find_capability": 1,
+     "serve_seen": 0,
+     "serve_unseen": 1,
+     "suggest": 0
+    },
+    "record_sizes": {
+     "rank_150": 7654,
+     "rank_to_typed_ratio": 10.86,
+     "route": 440,
+     "typed": 705
+    },
+    "reflex_floor": {
+     "examples_per_intent": 5,
+     "intents": 13,
+     "novel_300": {
+      "floor_0.0_default": {
+       "accuracy": 0.7,
+       "reflex_fire_accuracy": 0.8571,
+       "reflex_fires": 7
+      },
+      "floor_0.1_documented": {
+       "accuracy": 0.7,
+       "reflex_fire_accuracy": 0.8333,
+       "reflex_fires": 6
+      },
+      "reflex_off": {
+       "accuracy": 0.7,
+       "reflex_fire_accuracy": null,
+       "reflex_fires": 0
+      }
+     },
+     "with_repeats_600": {
+      "floor_0.0_default": {
+       "accuracy": 0.8373,
+       "reflex_fire_accuracy": 0.9764,
+       "reflex_fires": 297
+      },
+      "floor_0.1_documented": {
+       "accuracy": 0.8356,
+       "reflex_fire_accuracy": 0.9881,
+       "reflex_fires": 253
+      },
+      "reflex_off": {
+       "accuracy": 0.8373,
+       "reflex_fire_accuracy": null,
+       "reflex_fires": 0
+      }
+     }
+    },
+    "retile_outcome_fields": {
+     "fail_norm_after": 2.228426367125899,
+     "fail_norm_before": 2.228426367125899,
+     "ok": true
+    },
+    "rollover_sections": {
+     "direction_counts_before": 2,
+     "direction_reader_without_meaning_rows_kept": true,
+     "kinds_after": [
+      "lecore.future.section",
+      "lecore.learning.affinity",
+      "lecore.learning.calibration",
+      "lecore.learning.chains",
+      "lecore.learning.decisions",
+      "lecore.learning.escalations",
+      "lecore.learning.experience",
+      "lecore.learning.goals",
+      "lecore.learning.guard",
+      "lecore.learning.ledger",
+      "lecore.learning.meaning",
+      "lecore.learning.predictor",
+      "lecore.learning.recipes",
+      "lecore.learning.reflexbridge",
+      "lecore.learning.router",
+      "lecore.learning.semantic",
+      "lecore.learning.skeletons",
+      "lecore.learning.taught"
+     ],
+     "kinds_before": [
+      "lecore.future.section",
+      "lecore.learning.affinity",
+      "lecore.learning.calibration",
+      "lecore.learning.chains",
+      "lecore.learning.decisions",
+      "lecore.learning.escalations",
+      "lecore.learning.experience",
+      "lecore.learning.goals",
+      "lecore.learning.guard",
+      "lecore.learning.ledger",
+      "lecore.learning.meaning",
+      "lecore.learning.predictor",
+      "lecore.learning.recipes",
+      "lecore.learning.reflexbridge",
+      "lecore.learning.router",
+      "lecore.learning.semantic",
+      "lecore.learning.skeletons",
+      "lecore.learning.taught"
+     ],
+     "lost_through_rollover": [],
+     "ok": true,
+     "rolled": true
+    },
+    "verify_state": {
+     "after_restart": {
+      "drift_z": 0.15394599505278628,
+      "profile": 0.5029212783201664
+     },
+     "before": {
+      "drift_z": 0.1519234379889469,
+      "profile": 0.5029212783201664
+     },
+     "ok": true
+    }
+   },
+   "doors": {
+    "call_compose": {
+     "evidence": {
+      "after_restart": {
+       "compose_calibrator_pairs": 1,
+       "forwarded": {
+        "calibrated": false,
+        "door": "compose",
+        "n": 1
+       }
+      }
+     },
+     "guard_holds": null,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "clm_plugin": {
+     "evidence": {
+      "after_restart": {
+       "clm_calibrator_pairs": 1,
+       "forwarded": {
+        "calibrated": false,
+        "door": "clm:topic",
+        "n": 1
+       }
+      },
+      "guard": {
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "learn_guard": {
+     "evidence": {
+      "guard": {
+       "learned_credential_examples": 3,
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "meaning": {
+     "evidence": {
+      "after_restart": {
+       "forwarded": {
+        "meaning": "corrected",
+        "row": "5abe427d6fc8"
+       },
+       "method_call": {
+        "args": {
+         "symbol": "SOL"
+        },
+        "verb": "price"
+       },
+       "wrong_row_again": false
+      },
+      "fresh_serve": {
+       "is_wrong_row": true,
+       "via": "meaning"
+      },
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "rank": {
+     "evidence": {
+      "after_restart": {
+       "forwarded": {
+        "conformal_n": 1,
+        "learned": true,
+        "moved": 4,
+        "p_truth": 0.042311436686030844,
+        "truth_rank": 2,
+        "was_top": false
+       },
+       "forwarded_dict_candidates": {
+        "conformal_n": 2,
+        "learned": true,
+        "moved": 2,
+        "p_truth": 0.9996950988265614,
+        "truth_rank": 0,
+        "was_top": true
+       },
+       "rank_calibrator_pairs": 2
+      },
+      "fresh_top": "track my parcel",
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "route_catalog": {
+     "evidence": {
+      "after_restart": {
+       "bridge_seen": 1,
+       "forwarded": {
+        "p_truth": 0.010279636078417032,
+        "router": true,
+        "rows": 5
+       },
+       "hooks": null,
+       "route_calibrator_pairs": 1,
+       "router_verdicts": 1
+      },
+      "fresh_top": "svgf_denoise",
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      },
+      "router_mode_after_restart": false
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "route_reflex": {
+     "evidence": {
+      "guard": {
+       "bridge_moved_by_secret": false,
+       "secret_sections": []
+      },
+      "repeat_after_restart_via": "reflex"
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "serve_router": {
+     "evidence": {
+      "after_restart": {
+       "forwarded": {
+        "p_truth": 0.6153851105817427,
+        "router": true,
+        "rows": 5
+       },
+       "route_calibrator_pairs": 1,
+       "router_verdicts": 1
+      },
+      "guard": {
+       "secret_sections": [],
+       "secret_served_via": "reflex"
+      },
+      "served_via": "route"
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "serve_tool_reflex": {
+     "evidence": {
+      "after_restart": {
+       "forwarded": {
+        "negative": {
+         "label": "convertd.f_to_c",
+         "pushed": true
+        },
+        "tool_door": true,
+        "update": {
+         "correct": true,
+         "p_truth": 0.770908442094454,
+         "pred": "convertd.c_to_f",
+         "touched": 2
+        }
+       },
+       "paraphrase_pick": "convertd.c_to_f",
+       "picked_by": "proto",
+       "tool_door_verdicts": 1
+      },
+      "fresh_pick": "convertd.f_to_c",
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": [],
+       "served_via": "tool-reflex"
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "teach_resolve_feedback": {
+     "evidence": {
+      "after_restart": {
+       "escalation_still_open": true,
+       "resolve_cleared": true,
+       "t0": "T0",
+       "vetoed_served": false
+      },
+      "guard": {
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "typed_absorb": {
+     "evidence": {
+      "absorb": {
+       "applied": true,
+       "reason": "held-out accuracy 0.500 -> 1.000"
+      },
+      "secret_sections": []
+     },
+     "guard_holds": true,
+     "learns_after_restart": null,
+     "learns_live": null,
+     "survives_reload": null
+    },
+    "typed_contrastive": {
+     "evidence": {
+      "after_restart_answer": "shipping",
+      "after_restart_forwarded": {
+       "updated": true,
+       "was_correct": false
+      },
+      "fresh_answer": "billing",
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "typed_nb": {
+     "evidence": {
+      "after_restart_answer": "shipping",
+      "after_restart_forwarded": {
+       "updated": true,
+       "was_correct": false
+      },
+      "fresh_answer": "billing",
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "verify_swarm_step": {
+     "evidence": {
+      "after_restart": {
+       "precheck_equal": true,
+       "step_outcome_reflex": true
+      },
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    }
+   },
+   "matrix": {
+    "call_compose": {
+     "guard_holds": "n/a",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "clm_plugin": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "learn_guard": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "meaning": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "rank": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "route_catalog": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "route_reflex": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "serve_router": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "serve_tool_reflex": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "teach_resolve_feedback": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "typed_absorb": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "n/a",
+     "learns_live": "n/a",
+     "survives_reload": "n/a"
+    },
+    "typed_contrastive": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "typed_nb": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "verify_swarm_step": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    }
+   },
+   "seconds": {
+    "call_compose": 0.37,
+    "check:drift_number": 0.25,
+    "check:guard_phrasings": 0.0,
+    "check:ladder_payload_keys": 7.47,
+    "check:lookup_side_effects": 0.63,
+    "check:record_sizes": 0.82,
+    "check:reflex_floor": 37.12,
+    "check:retile_outcome_fields": 0.03,
+    "check:rollover_sections": 0.77,
+    "check:verify_state": 0.35,
+    "clm_plugin": 0.79,
+    "learn_guard": 0.42,
+    "meaning": 0.7,
+    "rank": 0.94,
+    "route_catalog": 3.13,
+    "route_reflex": 1.11,
+    "serve_router": 0.88,
+    "serve_tool_reflex": 1.13,
+    "teach_resolve_feedback": 0.82,
+    "typed_absorb": 0.08,
+    "typed_contrastive": 0.38,
+    "typed_nb": 1.31,
+    "verify_swarm_step": 0.57
+   },
+   "total_seconds": 60.1
+  },
+  "before": {
+   "checks": {
+    "drift_number": {
+     "nothing_changed": 1.0,
+     "one_ask": 0.7755,
+     "one_taught_row": 0.8613,
+     "one_typed_correction": 0.8885,
+     "sections": 14
+    },
+    "guard_phrasings": {
+     "by_phrasing": {
+      "<S> is my password": false,
+      "here is my password, <S>": false,
+      "login with <S>": false,
+      "my passphrase is <S>": true,
+      "my password is <S>": true,
+      "password <S>": false,
+      "password: <S>": true,
+      "pwd=<S>": true,
+      "the pw is <S>": false,
+      "use password <S> to log in": false
+     },
+     "caught": 4,
+     "of": 10
+    },
+    "ladder_payload_keys": {
+     "fuzzy_repeat_served_right": 90,
+     "fuzzy_repeat_served_wrong": 0,
+     "ok": false,
+     "payload_keys": 90,
+     "splits": 1,
+     "stale_payload_keys": 60,
+     "taught": 90,
+     "via": {
+      "meaning": 81,
+      "reflex": 9
+     }
+    },
+    "lookup_side_effects": {
+     "find_capability": 1,
+     "serve_seen": 0,
+     "serve_unseen": 1,
+     "suggest": 0
+    },
+    "record_sizes": {
+     "rank_150": 7654,
+     "rank_to_typed_ratio": 10.86,
+     "route": 412,
+     "typed": 705
+    },
+    "retile_outcome_fields": {
+     "fail_norm_after": 0.0,
+     "fail_norm_before": 2.228426367125899,
+     "ok": "False"
+    },
+    "rollover_sections": {
+     "direction_counts_before": 2,
+     "direction_reader_without_meaning_rows_kept": false,
+     "kinds_after": [
+      "lecore.learning.affinity",
+      "lecore.learning.calibration",
+      "lecore.learning.chains",
+      "lecore.learning.decisions",
+      "lecore.learning.experience",
+      "lecore.learning.goals",
+      "lecore.learning.guard",
+      "lecore.learning.ledger",
+      "lecore.learning.meaning",
+      "lecore.learning.predictor",
+      "lecore.learning.recipes",
+      "lecore.learning.reflexbridge",
+      "lecore.learning.router",
+      "lecore.learning.semantic",
+      "lecore.learning.skeletons",
+      "lecore.learning.taught"
+     ],
+     "kinds_before": [
+      "lecore.future.section",
+      "lecore.learning.affinity",
+      "lecore.learning.calibration",
+      "lecore.learning.chains",
+      "lecore.learning.decisions",
+      "lecore.learning.experience",
+      "lecore.learning.goals",
+      "lecore.learning.guard",
+      "lecore.learning.ledger",
+      "lecore.learning.meaning",
+      "lecore.learning.predictor",
+      "lecore.learning.recipes",
+      "lecore.learning.reflexbridge",
+      "lecore.learning.router",
+      "lecore.learning.semantic",
+      "lecore.learning.skeletons",
+      "lecore.learning.taught"
+     ],
+     "lost_through_rollover": [
+      "lecore.future.section"
+     ],
+     "ok": false,
+     "rolled": true
+    },
+    "verify_state": {
+     "after_restart": {
+      "drift_z": null,
+      "profile": null
+     },
+     "before": {
+      "drift_z": 0.1519234379889469,
+      "profile": 0.5029212783201664
+     },
+     "ok": false
+    }
+   },
+   "doors": {
+    "call_compose": {
+     "evidence": {
+      "after_restart": {
+       "compose_calibrator_pairs": 0,
+       "forwarded": null
+      }
+     },
+     "guard_holds": null,
+     "learns_after_restart": false,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "clm_plugin": {
+     "evidence": {
+      "after_restart": {
+       "clm_calibrator_pairs": 0,
+       "forwarded": null
+      },
+      "guard": {
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": false,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "learn_guard": {
+     "evidence": {
+      "guard": {
+       "learned_credential_examples": 3,
+       "secret_sections": [
+        "lecore.learning.guard"
+       ]
+      }
+     },
+     "guard_holds": false,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "meaning": {
+     "evidence": {
+      "after_restart": {
+       "forwarded": {
+        "meaning": "corrected",
+        "row": "5abe427d6fc8"
+       },
+       "method_call": {
+        "args": {
+         "symbol": "SOL"
+        },
+        "verb": "price"
+       },
+       "wrong_row_again": false
+      },
+      "fresh_serve": {
+       "is_wrong_row": true,
+       "via": "meaning"
+      },
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "rank": {
+     "evidence": {
+      "after_restart": {
+       "forwarded": {
+        "conformal_n": 1,
+        "learned": false,
+        "truth_rank": 2,
+        "why": "the truth's encoding is not in this process -- rank the set again"
+       },
+       "forwarded_dict_candidates": {
+        "conformal_n": 2,
+        "learned": false,
+        "truth_rank": 0,
+        "why": "the truth's encoding is not in this process -- rank the set again"
+       },
+       "rank_calibrator_pairs": 2
+      },
+      "fresh_top": "track my parcel",
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": false,
+     "learns_live": true,
+     "survives_reload": false
+    },
+    "route_catalog": {
+     "evidence": {
+      "after_restart": {
+       "bridge_seen": 1,
+       "forwarded": null,
+       "hooks": null,
+       "route_calibrator_pairs": 1,
+       "router_verdicts": 0
+      },
+      "fresh_top": "svgf_denoise",
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      },
+      "router_mode_after_restart": false
+     },
+     "guard_holds": true,
+     "learns_after_restart": false,
+     "learns_live": true,
+     "survives_reload": false
+    },
+    "route_reflex": {
+     "evidence": {
+      "guard": {
+       "bridge_moved_by_secret": false,
+       "secret_sections": []
+      },
+      "repeat_after_restart_via": "reflex"
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "serve_router": {
+     "evidence": {
+      "after_restart": {
+       "forwarded": null,
+       "route_calibrator_pairs": 1,
+       "router_verdicts": 0
+      },
+      "guard": {
+       "secret_sections": [],
+       "secret_served_via": "reflex"
+      },
+      "served_via": "route"
+     },
+     "guard_holds": true,
+     "learns_after_restart": false,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "serve_tool_reflex": {
+     "evidence": {
+      "after_restart": {
+       "forwarded": null,
+       "paraphrase_pick": "convertd.f_to_c",
+       "picked_by": "overlap",
+       "tool_door_verdicts": 0
+      },
+      "fresh_pick": "convertd.f_to_c",
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": [],
+       "served_via": "tool-reflex"
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": false,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "teach_resolve_feedback": {
+     "evidence": {
+      "after_restart": {
+       "escalation_still_open": false,
+       "resolve_cleared": false,
+       "t0": "T0",
+       "vetoed_served": false
+      },
+      "guard": {
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": false,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "typed_absorb": {
+     "evidence": {
+      "absorb": {
+       "applied": true,
+       "reason": "held-out accuracy 0.500 -> 1.000"
+      },
+      "secret_sections": []
+     },
+     "guard_holds": true,
+     "learns_after_restart": null,
+     "learns_live": null,
+     "survives_reload": null
+    },
+    "typed_contrastive": {
+     "evidence": {
+      "after_restart_answer": "shipping",
+      "after_restart_forwarded": {
+       "updated": true,
+       "was_correct": false
+      },
+      "fresh_answer": "billing",
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "typed_nb": {
+     "evidence": {
+      "after_restart_answer": "shipping",
+      "after_restart_forwarded": {
+       "updated": true,
+       "was_correct": false
+      },
+      "fresh_answer": "billing",
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    },
+    "verify_swarm_step": {
+     "evidence": {
+      "after_restart": {
+       "precheck_equal": true,
+       "step_outcome_reflex": true
+      },
+      "guard": {
+       "door_moved_by_secret": false,
+       "secret_sections": []
+      }
+     },
+     "guard_holds": true,
+     "learns_after_restart": true,
+     "learns_live": true,
+     "survives_reload": true
+    }
+   },
+   "matrix": {
+    "call_compose": {
+     "guard_holds": "n/a",
+     "learns_after_restart": "FAIL",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "clm_plugin": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "FAIL",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "learn_guard": {
+     "guard_holds": "FAIL",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "meaning": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "rank": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "FAIL",
+     "learns_live": "PASS",
+     "survives_reload": "FAIL"
+    },
+    "route_catalog": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "FAIL",
+     "learns_live": "PASS",
+     "survives_reload": "FAIL"
+    },
+    "route_reflex": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "serve_router": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "FAIL",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "serve_tool_reflex": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "FAIL",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "teach_resolve_feedback": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "FAIL",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "typed_absorb": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "n/a",
+     "learns_live": "n/a",
+     "survives_reload": "n/a"
+    },
+    "typed_contrastive": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "typed_nb": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    },
+    "verify_swarm_step": {
+     "guard_holds": "PASS",
+     "learns_after_restart": "PASS",
+     "learns_live": "PASS",
+     "survives_reload": "PASS"
+    }
+   },
+   "seconds": {
+    "call_compose": 0.13,
+    "check:drift_number": 0.56,
+    "check:guard_phrasings": 0.0,
+    "check:ladder_payload_keys": 0.96,
+    "check:lookup_side_effects": 1.26,
+    "check:record_sizes": 1.11,
+    "check:retile_outcome_fields": 0.02,
+    "check:rollover_sections": 1.6,
+    "check:verify_state": 1.32,
+    "clm_plugin": 1.12,
+    "learn_guard": 2.57,
+    "meaning": 1.1,
+    "rank": 0.36,
+    "route_catalog": 3.66,
+    "route_reflex": 2.87,
+    "serve_router": 2.73,
+    "serve_tool_reflex": 2.04,
+    "teach_resolve_feedback": 1.31,
+    "typed_absorb": 0.05,
+    "typed_contrastive": 0.78,
+    "typed_nb": 0.9,
+    "verify_swarm_step": 1.22
+   },
+   "total_seconds": 27.7
+  }
+ }
+}

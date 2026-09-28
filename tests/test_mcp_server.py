@@ -272,7 +272,7 @@ def test_tool_reflex_serve_sweep_104(tmp_path):
     missing its declared numeric argument ESCALATES with the reason (never guessed);
     (4) an unknown query escalates upward; (5) the reflex SURVIVES save/load (it rides
     the taught rails as a toolreflex-provenance row) and fires in a fresh mind; (6)
-    successful serves strengthen the usage trace (tool_predict ranks the tool)."""
+    the taught tool is predicted by the tool door after a restart (tool_predict)."""
     import threading, json, http.server, socketserver, time
     import lecore
     class H(http.server.BaseHTTPRequestHandler):
@@ -312,8 +312,10 @@ def test_tool_reflex_serve_sweep_104(tmp_path):
         m2.learning_load(str(tmp_path))
         r3 = m2.serve("convert -40 celsius to fahrenheit")
         assert r3["via"] == "tool-reflex" and r3["result"]["fahrenheit"] == -40.0,             "the reflex must survive a restart"
-        tv = m2.semantic_key("convert 30 celsius")["vec"]
-        assert m2.tool_predict(tv, k=1), "usage must strengthen the trace"
+        # E4.4 (CLM backlog): the tool door's ProtoStore is the one tool learner, keyed by mind.tool_key (the old
+        # UsageTrace was keyed by semantic_key vectors and never read by serve)
+        assert m2.tool_predict(m2.tool_key("convert 30 celsius"), k=1)[0][0] == "convertd.c_to_f", \
+            "the taught tool must be predicted after a restart"
     finally:
         srv.shutdown()
 

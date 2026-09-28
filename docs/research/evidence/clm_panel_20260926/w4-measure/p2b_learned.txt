@@ -1,0 +1,32 @@
+[learned] rows 602 wordings 8591 feats 29041  setup 2.2s
+BASE blend0.8 (today)      top1 val 0.8473 test 0.8413 | P0.97 cov 3.3% prec 0.993 oos 0.0% | P0.95 cov 45.5% prec 0.964 oos 2.2%
+centroid only (init)       top1 val 0.8307 test 0.8227 | P0.97 cov 0.9% prec 0.975 oos 0.0% | P0.95 cov 40.1% prec 0.963 oos 2.0%
+   infonce tau=0.02 eta=0.03: val top1 by epoch {2: 0.8467, 4: 0.8537, 8: 0.8557, 16: 0.8593}  (13.8s)
+   infonce tau=0.02 eta=0.1: val top1 by epoch {2: 0.8523, 4: 0.8577, 8: 0.858, 16: 0.8607}  (14.1s)
+   infonce tau=0.05 eta=0.03: val top1 by epoch {2: 0.861, 4: 0.8617, 8: 0.858, 16: 0.8587}  (14.1s)
+   infonce tau=0.05 eta=0.1: val top1 by epoch {2: 0.86, 4: 0.8613, 8: 0.859, 16: 0.859}  (14.2s)
+infonce s0 t0.05 e0.03 ep4 blend top1 val 0.8617 test 0.8616 | P0.97 cov 47.6% prec 0.972 oos 2.0% | P0.95 cov 61.7% prec 0.956 oos 4.3%  | top-1 d+0.0202 CI[+0.0129,+0.0271] fixed 182 broke 91
+      P0.97 coverage vs base +44.3pt CI[+42.9,+45.7]
+      P0.95 coverage vs base +16.1pt CI[+15.0,+17.3]
+   ...same, signal=softmax p_max top1 val 0.8617 test 0.8616 | P0.97 cov 45.8% prec 0.976 oos 2.0% | P0.95 cov 60.2% prec 0.963 oos 3.9%
+infonce s1 t0.05 e0.03 ep4 blend top1 val 0.8583 test 0.8616 | P0.97 cov 46.3% prec 0.974 oos 1.8% | P0.95 cov 61.8% prec 0.954 oos 4.7%  | top-1 d+0.0202 CI[+0.0127,+0.0273] fixed 183 broke 92
+      P0.97 coverage vs base +43.0pt CI[+41.6,+44.4]
+      P0.95 coverage vs base +16.2pt CI[+15.1,+17.4]
+infonce s2 t0.05 e0.03 ep4 blend top1 val 0.8613 test 0.8618 | P0.97 cov 47.0% prec 0.973 oos 2.0% | P0.95 cov 61.9% prec 0.954 oos 4.5%  | top-1 d+0.0204 CI[+0.0131,+0.0278] fixed 183 broke 91
+      P0.97 coverage vs base +43.7pt CI[+42.3,+45.1]
+      P0.95 coverage vs base +16.4pt CI[+15.2,+17.6]
+infonce TEST top-1 over seeds: mean 0.8616  range [0.8616, 0.8618]  (base 0.8413)
+   adapthd tau=None eta=0.01: val top1 by epoch {2: 0.8493, 4: 0.8513, 8: 0.8547, 16: 0.854}  (4.9s)
+   adapthd tau=None eta=0.03: val top1 by epoch {2: 0.854, 4: 0.8557, 8: 0.8547, 16: 0.854}  (4.7s)
+   adapthd tau=None eta=0.1: val top1 by epoch {2: 0.8537, 4: 0.8513, 8: 0.8517, 16: 0.853}  (4.8s)
+adapthd s0 tNone e0.03 ep4 blend top1 val 0.8557 test 0.8467 | P0.97 cov 30.8% prec 0.981 oos 1.0% | P0.95 cov 54.0% prec 0.954 oos 3.5%  | top-1 d+0.0053 CI[-0.0002,+0.0107] fixed 89 broke 65
+      P0.97 coverage vs base +27.5pt CI[+26.2,+28.8]
+      P0.95 coverage vs base +8.4pt CI[+7.6,+9.3]
+adapthd s1 tNone e0.03 ep4 blend top1 val 0.8560 test 0.8462 | P0.97 cov 30.4% prec 0.982 oos 1.0% | P0.95 cov 53.5% prec 0.954 oos 3.5%  | top-1 d+0.0049 CI[-0.0005,+0.0102] fixed 90 broke 68
+      P0.97 coverage vs base +27.2pt CI[+25.9,+28.4]
+      P0.95 coverage vs base +8.0pt CI[+7.2,+8.8]
+adapthd s2 tNone e0.03 ep4 blend top1 val 0.8573 test 0.8453 | P0.97 cov 30.3% prec 0.981 oos 1.0% | P0.95 cov 53.8% prec 0.955 oos 3.3%  | top-1 d+0.0040 CI[-0.0013,+0.0093] fixed 83 broke 65
+      P0.97 coverage vs base +27.1pt CI[+25.8,+28.3]
+      P0.95 coverage vs base +8.2pt CI[+7.4,+9.1]
+adapthd TEST top-1 over seeds: mean 0.8461  range [0.8453, 0.8467]  (base 0.8413)
+total 92.8s

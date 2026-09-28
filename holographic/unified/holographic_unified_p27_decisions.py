@@ -21,14 +21,24 @@ class _UnifiedPart27:
         forwards typed decisions to SystemOne.observe by construction. See holographic_decisionrecord.Ledger."""
         from holographic.agents_and_reasoning.holographic_decisionrecord import Ledger
         if getattr(self, "_decision_ledger", None) is None:
-            self._decision_ledger = Ledger()
+            # E0.5: hooks are RE-DERIVED from each record's meta (a SystemOne cache key, the meaning door), never
+            # held as live closures -- so a record reloaded from the partition still trains the right door.
+            # spec_keys (learning-loop audit, 2026-09-26): a live closure registered under hook_key "router" or
+            # "tooldoor" is ALSO written into its record as the spec {"kind": key}, which _decision_hook rebuilds after
+            # a restart. MEASURED before: a route / tool outcome reported after a restart trained neither the router's
+            # nor the tool door's ProtoStore (0 of 1 verdicts each; tools/audit_learning_loop.py).
+            self._decision_ledger = Ledger(resolve_hook=self._decision_hook, spec_keys=("router", "tooldoor"))
         return self._decision_ledger
 
     def decision_outcome(self, record_id, outcome):
         """REPORT AN OUTCOME BY ID (sweep 176, backlog G2) -- the only outcome path. Returns {id, outcome,
         forwarded, was_correct}; for a typed decision `forwarded` is SystemOne.observe's report (the count
         table learned; no teach() call anywhere). Unknown id -> KeyError. See holographic_decisionrecord."""
-        rep = self.decision_ledger().report(record_id, outcome)
+        L = self.decision_ledger()
+        rep = L.report(record_id, outcome)
+        # E0.6 / E0.7: the outcome is a (score, correct) label for THAT door's own calibrator -- route, bridge,
+        # tool:* -- so p_correct means P(correct) at every door and no door calibrates on another's scores
+        rep["door"] = self._door_feed(L.get(record_id))
         # the reflex bridge (sweep 176): every reported outcome teaches the experience trace
         rep["reflex"] = self.reflex_learn(record_id)
         return rep
@@ -96,6 +106,10 @@ class _UnifiedPart27:
             d = int(self.experience.dim)
             encs = self._reflex_encs = {"fingerprint": routing_fingerprint(self._capability_catalog(), dim=d, seed=0, k=8),
                                         "ngram": hashed_ngram_encode(dim=d)}
+        if key == "meaning":
+            # E5.3: a meaning decision's verify key is the question's hashed n-grams (the same encoder as 'ngram'),
+            # kept under its OWN kind so the seen gate of the typed/tool doors never counts a meaning wording
+            key = "ngram"
         v = _np.asarray(encs[key](state), float).reshape(-1)
         return v / (_np.linalg.norm(v) + 1e-12)
 
@@ -105,15 +119,40 @@ class _UnifiedPart27:
         outcome confirmed the answer -- including an ESCALATED answer, which is leOS's self-extending instruction:
         one successful model-end call teaches the reflex to answer the next similar task without the model --
         and reflex_outcome(task, was_correct) always, so failures land in the failure field. Called by
-        decision_outcome; safe to call again (a write the trace already predicts is skipped free)."""
+        decision_outcome; safe to call again (a write the trace already predicts is skipped free).
+        A CORRECTION (the door answered, the outcome names another truth) is stored by the measured correction
+        design (reflex_correction_mode, E1.5); a MEANING decision joins the seen gate under its own kind so
+        verify_decision can vouch for it, without writing the trace (E5.3)."""
         rec = self.decision_ledger().get(record_id)
         if rec is None or rec.outcome is None or not isinstance(rec.state, str):
             return {"learned": False, "why": "no record / no outcome / non-text state"}
+        if rec.via == "rank":
+            # E3.3: a rank decision's lesson lives in the rank door's OWN ProtoStore and calibrator (its hook already
+            # ran). Writing its free-form candidate labels into the shared experience trace would put them in the label
+            # book and the 'ngram' seen gate the typed and tool doors read -- one door's labels served at another
+            # (separate stores per door, panel Q5; the meaning door's E5.3 reason, kept).
+            return {"learned": False, "kind": "rank",
+                    "why": "rank decisions learn in the rank door's ProtoStore, not the shared trace"}
+        # THE LEARNING GUARD (sweep 179). A reported outcome becomes a LABEL the reflex can serve, so a secret
+        # must never become one. A reading must not either -- but only when the outcome is FREE-FORM: an outcome
+        # that is one of the record's declared options is a CHOICE (a tool, a card, a class), which is exactly
+        # what a volatile question should learn ("call the price tool"), even if the choice's name has a digit.
+        from holographic.agents_and_reasoning.holographic_learnguard import learning_verdict as _guard_check
+        _is_choice = str(rec.outcome) in [str(o) for o in (rec.options or [])]
+        # a declared choice ('mesh_smooth') is a bare token by shape: the SEMANTIC credential check would misread
+        # it, so choices get the pattern layer only; free-form outcomes get both layers
+        _v = _guard_check(rec.state, rec.outcome, allow_volatile=_is_choice,
+                          guard=None if _is_choice else self.semantic_guard)
+        if not _v["ok"]:
+            return {"learned": False, "why": _v["reason"], "guard": _v["kind"]}
         kind = "fingerprint" if rec.via in ("route", "tree", "reflex") else "ngram"
         if rec.via == "reflex":
             kind = rec.meta.get("key", "fingerprint")
+        if rec.via == "meaning":
+            kind = "meaning"
         tv = self._reflex_task_vec(rec.state, key=kind)
-        ok = (rec.answer == rec.outcome)
+        from holographic.agents_and_reasoning.holographic_decisionrecord import outcome_matches
+        ok = outcome_matches(rec.answer, rec.outcome)   # a yes/no record's bool answer matches "yes"/"no" (E0.5)
         # THE SEEN GATE's memory (sweep 176): the keys of reported decisions. A reflex fire is trusted only when a
         # reported key sits within `seen_cosine` of the query -- MEASURED: trace confidence cannot separate a
         # genuine repeat on a loaded trace (median 0.076) from a wrong fire on a novel row (median 0.056).
@@ -121,13 +160,22 @@ class _UnifiedPart27:
         if keys is None:
             keys = self._reflex_seen = []
         keys.append((kind, tv, rec.outcome))
-        if rec.via == "reflex" and rec.margin is not None:
-            # CALIBRATION FEEDBACK (sweep 176): a reflex-answered decision whose outcome is reported is exactly a
-            # (confidence, ok) pair for calibrate_reflex -- before this only the zoo's own serves fed it, so the
-            # bridge's reflex answers always carried p=None.
-            if not hasattr(self, "_reflex_calib_pairs"):
-                self._reflex_calib_pairs = []
-            self._reflex_calib_pairs.append([float(rec.margin), bool(ok)])
+        # CALIBRATION FEEDBACK moved to decision_outcome -> _door_feed (E0.7): a reflex-answered decision's
+        # (confidence, ok) now feeds door_calibrator('bridge') ONLY. It used to append to the one list the ladder's
+        # veto was fitted on too (_reflex_calib_pairs), so every bridge report moved the ladder's veto.
+        if rec.via == "meaning":
+            # E5.3 -- MEANING SERVES BECOME VERIFIABLE. Before, this returned early and verify_decision could never
+            # vouch for a meaning serve. Now the reported key joins the seen gate under its OWN kind ('meaning': the
+            # typed/tool doors never see it) and the displacement profile learns the pair. The experience TRACE is
+            # still NOT written: the lesson lives in the MeaningIndex (its hook already ran), and a second copy in
+            # the trace would sit outside the meaning rung's vetoes (sweep 181's reason, kept) -- and
+            # tests/test_meaning.py pins that corrections stop the wrong serve through the meaning door alone.
+            if rec.outcome not in ("wrong",) + (None, "", "fail", "failed", "__failed__"):
+                from holographic.mesh_and_geometry.holographic_planshape import derived_atom
+                self._verify_learn(rec, tv, derived_atom(0, "answer:" + str(rec.outcome), int(self.experience.dim)),
+                                   kind="meaning")
+            return {"learned": True, "was_correct": ok, "write": None, "kind": "meaning",
+                    "why": "meaning decisions learn in the MeaningIndex; the key joined the seen gate for verify"}
         # The TRUTH is known whatever the door said, so the correct move is always written. The FAILURE
         # FIELD is marked only when an answer was GIVEN and was wrong: an abstention (menu / None) with a
         # reported truth is a learning opportunity, not a miss -- the first cut marked it as a failure and
@@ -141,7 +189,14 @@ class _UnifiedPart27:
             # A truth is known -- confirmed or a CORRECTION. Write it; the trace's delta-rule write moves the
             # prediction toward the truth. Do NOT mark the region as failed on a correction: the second cut
             # did, and a tree whose root the user corrected could never learn the pick (measured: 0 of 1).
-            w = self.reflex_write(tv, self._reflex_label_atom(rec.outcome))
+            if rec.answer is not None and not ok:
+                # E1.5 -- A CORRECTION: the door ANSWERED and the answer was wrong. write(k, truth) alone corrected
+                # along the truth atom only and left the wrong atom at full strength (truth read 45% after one
+                # correction on real CLINC keys). The chosen design (reflex_correction_mode; lms_apa by measurement)
+                # writes a signed, verbatim-replayed delta instead. See holographic_lever7 / section 8d.
+                w = self._reflex_correct(rec, tv, kind)
+            else:
+                w = self.reflex_write(tv, self._reflex_label_atom(rec.outcome))
             self._verify_learn(rec, tv, self._reflex_label_atom(rec.outcome))     # the profile + support stream
             if ok:
                 self.reflex_outcome(tv, True)
@@ -163,7 +218,13 @@ class _UnifiedPart27:
         below 0.1 (197 fires at 0.254 accuracy, all in [0, 0.1)); repeats fire higher. Without the floor the
         reflex-first typed door fell from 0.778 to 0.603 -- the count table learns from the same outcomes and
         beats a whole-key trace on paraphrases; the reflex earns its place on REPEATS and on doors that have no
-        learner of their own (the router). Default-off everywhere: reflex=True opts in."""
+        learner of their own (the router). Default-off everywhere: reflex=True opts in.
+        RE-MEASURED WITH THE SEEN GATE (learning-loop audit, 2026-09-26; tools/audit_learning_loop.py --data,
+        check reflex_floor): the 0.1 measurement above predates the seen gate, which now refuses novel rows by itself
+        -- so the default stays 0.0. 13 Banking77 intents x 5 examples, typed door (nb), truth reported after every
+        decision: 300 novel rows -> accuracy 0.700 with the reflex off, at floor 0.0 and at floor 0.1 alike (7 vs 6
+        fires); the same stream with 300 exact repeats -> 0.8373 off / 0.8373 at 0.0 (297 fires at 0.976) / 0.8356
+        at 0.1 (253 fires at 0.988). The floor only refuses repeats the count table would also have answered right."""
         # SELF-HEAL (sweep 176): a trace loaded by boot under the old advisory (split at n=205) reads back under
         # the floor; if any tile sits past twice the cliff advisory, re-tile once from the audit log instead of
         # asking an operator to remember a ritual. It runs on the FIRST reflex read -- before the bridge's first
@@ -190,7 +251,11 @@ class _UnifiedPart27:
             nearest, j = 0.0, -1
         if nearest < seen_cosine:
             return {"value": None, "why": "not seen before (nearest reported key %.2f < %.2f)" % (nearest, seen_cosine)}
-        r = self.reflex_try(tv)
+        if self.reflex_correction_mode() == "provenance":
+            # E1.5 design (b) keeps rejections as outcome-role negatives in the trace; the read must consult them
+            r = dict(self.experience.read_gated(tv, neg_role=self._reflex_neg_role()))
+        else:
+            r = self.reflex_try(tv)
         if not r.get("fired") or r.get("confidence", 0.0) < min_confidence:
             return {"value": None, "why": r.get("why"), "confidence": r.get("confidence", 0.0), "nearest_seen": nearest}
         import numpy as _np
@@ -201,13 +266,17 @@ class _UnifiedPart27:
         j = int(_np.argmax(sims))
         if float(sims[j]) < 0.5:                        # fired, but on an atom this door never wrote
             return {"value": None, "why": "atom-not-a-label", "confidence": r["confidence"]}
-        from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord
+        from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord, door_record
+        # E0.6/E0.7: the BRIDGE's own calibrator (fed only by reported reflex decisions) -- high = confident.
+        # The deprecated bare p keeps its old value, 1 - error, which is the same number.
+        pc = self._door_p("bridge", r["confidence"])
+        err = None if pc is None else 1.0 - pc
         rec = DecisionRecord(state, "reflex", labels, labels[j], "reflex", margin=float(r["confidence"]),
-                             p=(None if self.reflex_error_prob(r["confidence"]) is None else 1.0 - float(self.reflex_error_prob(r["confidence"]))),
-                             meta={"key": key, "nearest_seen": nearest})
+                             p=pc, p_correct=pc, meta={"key": key, "nearest_seen": nearest})
         self.decision_ledger().add(rec)
-        return {"value": labels[j], "confidence": float(r["confidence"]), "error_prob": self.reflex_error_prob(r["confidence"]),
-                "via": "reflex", "id": rec.id, "atom_cosine": float(sims[j])}
+        return door_record({"value": labels[j], "confidence": float(r["confidence"]), "error_prob": err,
+                            "via": "reflex", "id": rec.id, "atom_cosine": float(sims[j])}, "reflex",
+                           p_correct=pc, p_null=None)
 
     def reflex_retile(self, advisory_load=0.03):
         """RE-TILE THE EXPERIENCE TRACE AT THE MEASURED CLIFF (sweep 176): rebuild a fresh TiledDisplacementTrace
@@ -220,10 +289,21 @@ class _UnifiedPart27:
         old = self.experience
         pairs = []
         for tile in old.tiles:
-            pairs.extend(list(getattr(tile, "_audit", [])))
+            pairs.extend(tile.audit_entries())
         new = TiledDisplacementTrace(dim=old.dim, seed=old.seed, advisory_load=float(advisory_load))
-        for k, v in pairs:
-            new.write(k, v)
+        for k, v, mode in pairs:
+            # E1.5: a RAW entry (a signed correction) replays VERBATIM -- through write() it would be re-estimated,
+            # clamped at s >= 0 and dropped, and every correction would silently vanish at the next re-tile
+            if mode:
+                new.write_raw(k, v, mode)
+            else:
+                new.write(k, v)
+        # THE OUTCOME FIELDS COME ALONG (learning-loop audit, 2026-09-26; the E2.1 rule a split and a reload already
+        # follow). The success / failure fields are reported OUTCOMES, not audit writes, so a rebuild from the audit
+        # alone dropped every reported failure and the outcome gate reopened on exactly the look-alike traps it was
+        # measured to catch -- MEASURED: failure-field norm 2.23 before the retile, 0.00 after. The keys are re-routed
+        # by the new tiling, so the WHOLE trace's evidence (summed over the old tiles) is laid over every new tile.
+        new.set_outcome_fields(*old.outcome_fields())
         try:
             for tile in old.tiles:
                 vol = getattr(tile, "volatility", None)
@@ -235,6 +315,106 @@ class _UnifiedPart27:
             pass
         self._lever7_trace = new
         return {"before_tiles": len(old.tiles), "after_tiles": len(new.tiles), "writes": len(pairs)}
+
+    # ---- THE BRIDGE'S OWN STATE TRAVELS WITH THE TRACE (sweep 177) -----------------------------------------
+    # MEASURED BUG this fixes (probe 2026-09-22): mind A reported a route outcome and answered the repeat
+    # via='reflex'; experience_save wrote the trace (91,561 bytes); mind B loaded it and answered
+    # "no experience yet". The trace travelled, but the two things reflex_decide checks BEFORE it reads the
+    # trace did not: the label book (_reflex_labels -- empty book = "no experience yet") and the seen gate
+    # (_reflex_seen -- the reported keys a query must sit within cosine 0.8 of). Both were plain attributes
+    # nothing saved, so every restart and every second agent started blind. Same lesson as the factfiles
+    # section in learning_save: A GATE THAT FORGETS WHAT IT WAS GUARDING REFUSES EVERYTHING.
+    def reflex_bridge_state(self):
+        """The reflex bridge's persistent state as plain data: {labels, kinds, outcomes, keys}. `keys` is an
+        (n, dim) float32 array of the reported similarity keys, in report order; labels are NAMES only --
+        each label's atom is derived deterministically from its name, so it is rebuilt, never stored."""
+        seen = list(getattr(self, "_reflex_seen", None) or [])
+        dim = int(self.experience.dim)
+        keys = (np.stack([np.asarray(k, np.float32) for _, k, _ in seen]) if seen
+                else np.zeros((0, dim), np.float32))
+        return {"labels": [str(l) for l in (getattr(self, "_reflex_labels", None) or {})],
+                "kinds": [str(kind) for kind, _, _ in seen],
+                "outcomes": [None if o is None else str(o) for _, _, o in seen],
+                "keys": keys, "verify": self._verify_state()}
+
+    # ---- VERIFY'S OWN LEARNED STATE TRAVELS WITH THE BRIDGE (learning-loop audit, 2026-09-26) ------------------------
+    # verify_decision's displacement PROFILE (mean of bind(state, truth) over reported-correct decisions) and its
+    # drift stream (the forward support of recent reports) are learned from every reported outcome -- and lived in
+    # plain attributes nothing saved. MEASURED (tools/audit_learning_loop.py): after 9 reported typed outcomes a
+    # verdict read profile 0.503 and drift_z 0.152; after a restart, profile None and drift_z None -- the drift veto
+    # (< -2 sigma) switched off until 8 new reports arrived. Same lesson as the bridge itself (sweep 177).
+    _VERIFY_SUPPORT_KEPT = 512      # the drift check reads the last `recent` (64) supports; 512 is plenty and bounded
+
+    def _verify_state(self):
+        """verify_decision's learned state as plain data: the two profiles (arrays or None), their counts, and the
+        newest _VERIFY_SUPPORT_KEPT supports. None when nothing was learned."""
+        prof = getattr(self, "_verify_profile", None)
+        mprof = getattr(self, "_verify_meaning_profile", None)
+        sup = list(getattr(self, "_verify_support", None) or [])[-self._VERIFY_SUPPORT_KEPT:]
+        if prof is None and mprof is None and not sup:
+            return None
+        return {"profile": None if prof is None else np.asarray(prof, np.float64),
+                "n": int(getattr(self, "_verify_n", 0)),
+                "meaning_profile": None if mprof is None else np.asarray(mprof, np.float64),
+                "meaning_n": int(getattr(self, "_verify_meaning_n", 0)),
+                "support": np.asarray(sup, np.float64)}
+
+    def _verify_restore(self, st, merge=False):
+        """Inverse of _verify_state. merge=True (importing another agent's experience) combines the profiles as a
+        count-weighted mean -- exactly the running mean both sides would have had over the union of their reports --
+        and appends the other side's supports; merge=False replaces."""
+        if not st:
+            return 0
+        for pk, nk, attr, nattr in (("profile", "n", "_verify_profile", "_verify_n"),
+                                    ("meaning_profile", "meaning_n", "_verify_meaning_profile", "_verify_meaning_n")):
+            p_new, n_new = st.get(pk), int(st.get(nk) or 0)
+            if p_new is None or n_new <= 0:
+                continue
+            p_new = np.asarray(p_new, np.float64).reshape(-1)
+            p_old, n_old = getattr(self, attr, None), int(getattr(self, nattr, 0) or 0)
+            if merge and p_old is not None and n_old > 0:
+                setattr(self, attr, (n_old * np.asarray(p_old, np.float64) + n_new * p_new) / float(n_old + n_new))
+                setattr(self, nattr, n_old + n_new)
+            else:
+                setattr(self, attr, p_new.copy())
+                setattr(self, nattr, n_new)
+        sup = [float(x) for x in np.asarray(st.get("support") if st.get("support") is not None else [],
+                                            np.float64).reshape(-1)]
+        if sup:
+            base = list(getattr(self, "_verify_support", None) or []) if merge else []
+            self._verify_support = (base + sup)[-self._VERIFY_SUPPORT_KEPT:]
+        return 1
+
+    def reflex_bridge_restore(self, state, merge=False):
+        """Rebuild the label book and the seen gate from reflex_bridge_state() output. merge=False replaces
+        (a load); merge=True appends (importing another agent's experience on top of your own -- keys already
+        present are skipped, so importing twice is a no-op). Returns {labels, seen, added}."""
+        if not state:
+            return {"labels": 0, "seen": len(getattr(self, "_reflex_seen", None) or []), "added": 0}
+        if not merge:
+            self._reflex_labels = {}
+            self._reflex_seen = []
+        for name in state.get("labels") or []:
+            self._reflex_label_atom(name)               # derived from the name: bit-identical everywhere
+        seen = self._reflex_seen = getattr(self, "_reflex_seen", None) or []
+        K = np.asarray(state.get("keys") if state.get("keys") is not None else [], np.float32)
+        K = K.reshape(len(state.get("kinds") or []), -1) if len(K) else K
+        have = {(kind, np.asarray(k, np.float32).tobytes()) for kind, k, _ in seen} if merge else set()
+        added = 0
+        for kind, k, o in zip(state.get("kinds") or [], K, state.get("outcomes") or []):
+            tag = (kind, np.asarray(k, np.float32).tobytes())
+            if tag in have:
+                continue
+            have.add(tag)
+            seen.append((kind, np.asarray(k, float), o))
+            if o not in (None, "", "fail", "failed", "__failed__") and kind != "meaning":   # same FAILED set as reflex_learn
+                self._reflex_label_atom(o)              # a confirmed outcome is a label the trace may name
+                                                        # (a meaning outcome is a ROW id: never a trace label, E5.3)
+            added += 1
+        # the audit's fix: verify_decision's profile + drift stream come back with the bridge (absent in older
+        # partitions and in experience_save files: nothing changes for them)
+        self._verify_restore(state.get("verify"), merge=merge)
+        return {"labels": len(self._reflex_labels), "seen": len(seen), "added": added}
 
     # ---- VERIFY (sweep 176, Moose: "verify the final result is a valid response to the input") -------------
     def verify_decision(self, state, answer, key="ngram", question=None, recent=64):
@@ -268,7 +448,14 @@ class _UnifiedPart27:
         import numpy as _np
         from holographic.agents_and_reasoning.holographic_ai import bind, unbind, cosine
         tv = self._reflex_task_vec(state, key=key)
-        av = self._reflex_label_atom(answer)
+        meaning = (key == "meaning")
+        if meaning:
+            # E5.3: a meaning answer is a ROW id -- never registered as a trace label (the book is what the reflex
+            # may NAME); its atom is derived from the name only for the profile check
+            from holographic.mesh_and_geometry.holographic_planshape import derived_atom
+            av = derived_atom(0, "answer:" + str(answer), int(self.experience.dim))
+        else:
+            av = self._reflex_label_atom(answer)
         checks = {}
         # forward / backward over every tile (the pair may live in any) -- RELATIVE to the alternatives: on a
         # boot-loaded trace (~950 writes) every atom carries ~0.06 of crosstalk, so an absolute floor let a wrong
@@ -286,14 +473,16 @@ class _UnifiedPart27:
                 bwd_alt = max(bwd_alt, max(float(cosine(unbind(t._trace, b), tv)) for b in others))
         checks["forward"], checks["backward"] = fwd, bwd
         checks["forward_margin"], checks["backward_margin"] = fwd - fwd_alt, bwd - bwd_alt
-        prof = getattr(self, "_verify_profile", None)
+        prof = getattr(self, "_verify_meaning_profile" if meaning else "_verify_profile", None)
         pair = bind(tv, av)
         checks["profile"] = float(cosine(pair, prof)) if prof is not None else None
         seen = [(k, o) for kind, k, o in (getattr(self, "_reflex_seen", None) or []) if kind == key]
         sims_seen = [float(k @ tv) for k, _ in seen]
         j = int(_np.argmax(sims_seen)) if sims_seen else -1
         checks["seen"] = float(max(sims_seen, default=0.0))
-        sup = getattr(self, "_verify_support", None) or []
+        # the drift stream is the TRACE's forward support; a meaning answer is never in the trace (E5.3), so its
+        # drift is judged by the MeaningIndex's own calibration instead -- comparing it here would be scale-mixing
+        sup = (getattr(self, "_verify_support", None) or []) if not meaning else []
         if len(sup) >= 8:
             arr = _np.asarray(sup[-int(recent):], float)
             checks["drift_z"] = float((fwd - arr.mean()) / (arr.std() + 1e-9))
@@ -303,6 +492,11 @@ class _UnifiedPart27:
         if not known and not seen:
             return {"valid": None, "score": None, "checks": checks, "why": "no experience to verify against"}
         both = (fwd > 0.0 and bwd > 0.0 and checks["forward_margin"] > 0.0 and checks["backward_margin"] > 0.0)
+        if meaning:
+            # the trace holds no meaning lessons BY DESIGN, so forward/backward on a row atom are pure crosstalk --
+            # with an empty label book they would 'agree' by chance. A meaning serve is vouched for only by the seen
+            # gate: a reported, confirmed wording at cosine >= 0.8 whose outcome was THIS row.
+            both = False
         near_truth = (seen[j][1] if (seen and j >= 0) else None)
         near = (checks["seen"] >= 0.8 and near_truth == answer)
         parts = [v for v in (fwd, bwd, checks["profile"], checks["seen"]) if v is not None]
@@ -316,12 +510,19 @@ class _UnifiedPart27:
             why += "; support %.2f sigma below the recent stream" % checks["drift_z"]
         return {"valid": valid, "score": score, "checks": checks, "why": why}
 
-    def _verify_learn(self, rec, tv, av):
+    def _verify_learn(self, rec, tv, av, kind=None):
         """Keep the displacement PROFILE (mean of bind(state, truth) over correct outcomes) and the support stream
-        that verify_decision's drift check compares against. Called from reflex_learn."""
+        that verify_decision's drift check compares against. Called from reflex_learn. kind='meaning' (E5.3) keeps
+        its OWN profile and no support stream (the trace never holds a meaning lesson, so its forward read is 0)."""
         import numpy as _np
         from holographic.agents_and_reasoning.holographic_ai import bind
         pair = bind(tv, av)
+        if kind == "meaning":
+            prof = getattr(self, "_verify_meaning_profile", None)
+            n = getattr(self, "_verify_meaning_n", 0)
+            self._verify_meaning_profile = pair if prof is None else prof + (pair - prof) / (n + 1)
+            self._verify_meaning_n = n + 1
+            return
         prof = getattr(self, "_verify_profile", None)
         n = getattr(self, "_verify_n", 0)
         self._verify_profile = pair if prof is None else prof + (pair - prof) / (n + 1)
@@ -333,6 +534,8 @@ class _UnifiedPart27:
         for t in self.experience.tiles:
             fwd = max(fwd, float(_np.dot(t.read(tv), av) / (_np.linalg.norm(t.read(tv)) * _np.linalg.norm(av) + 1e-12)))
         sup.append(fwd)
+        if len(sup) > 4 * self._VERIFY_SUPPORT_KEPT:
+            del sup[:-self._VERIFY_SUPPORT_KEPT]        # bounded in memory too (the drift check reads the last 64)
 
     def decision_tree(self, context, depth=2, fanout=3, margin=0.1, encode=False,
                       dim=1024, seed=0, reflex=False):
@@ -580,7 +783,8 @@ class _UnifiedPart27:
             scorer = lint["recommended_scorer"]
         out = self.systemone_decide(state, q, labeled=labeled, margin=margin, encoder="ngram", scorer=scorer,
                                     conformal_alpha=conformal_alpha, reflex=reflex, escalate=escalate)
-        a = dict(out[question])
+        from holographic.agents_and_reasoning.holographic_decisionrecord import door_record
+        a = door_record(dict(out[question]), "typed")  # E0.6: dict() would drop the p deprecation; re-wrap
         a["lint"] = [f for f in lint["findings"] if f["level"] != "note" or "clause" in f["what"] or "contrastive" in f["what"]]
         a["scorer"] = scorer
         return a
@@ -592,8 +796,11 @@ class _UnifiedPart27:
         Measured: BH holds FDR 0.03 at nominal 0.05 / 0.10 while the naive per-test gate lets noise through at
         0.14 / 0.22; BY accepts nothing (kept negative). Power is low (13-20% of real rows) by construction.
         See holographic_systemone.SystemOne.batch_fdr."""
+        from holographic.agents_and_reasoning.holographic_decisionrecord import door_record
         so = self.systemone(questions, margin=margin, encoder=encoder, scorer=scorer, nb_bigrams=nb_bigrams)
-        return so.batch_fdr(states, question, alpha=alpha, n_null=n_null)
+        r = so.batch_fdr(states, question, alpha=alpha, n_null=n_null)
+        # E0.6: these are NULL p-values (low = significant) -> p_null; there is no P(correct) here
+        return door_record(r, "typed-fdr", p_correct=None, p_null=list(r["p"]))
 
     def systemone_absorb(self, states, questions, question, iters=3, lam=1.0, max_options=10, labeled=None,
                          margin=None, encoder="perceive", min_support=None, scorer="nb", nb_bigrams=False,
@@ -606,7 +813,10 @@ class _UnifiedPart27:
         here by default. See holographic_systemone.SystemOne.absorb_unlabeled."""
         so = self._systemone_cached(questions, labeled, margin, encoder, min_support, scorer, nb_bigrams,
                                     conformal_alpha=conformal_alpha)
-        return so.absorb_unlabeled(states, question, iters=iters, lam=lam, max_options=max_options)
+        out = so.absorb_unlabeled(states, question, iters=iters, lam=lam, max_options=max_options)
+        if out.get("applied"):
+            so._learned = True      # E0.5: absorbed tables are learned state -- learning_save must persist them
+        return out
 
     def swarm_step(self, state, tool, args=None, done_when=None, evidence=None, topic="swarm", worker="worker",
                    outcome=None, verify=None, expect=None):
@@ -619,26 +829,66 @@ class _UnifiedPart27:
         callable(result) -> bool, or a value compared for equality, or None (any non-error result passes).
         A step whose verification fails is REFUSED with the result attached -- it never reaches the bus.
         Accepted steps are DecisionRecords in the ledger (outcome by id, cosine similarity to past steps) and
-        are published on this mind's MessageBus under `topic`. Returns the published record dict."""
+        are published on this mind's MessageBus under `topic`. Returns the published record dict.
+        E5.2: every verified step -- passed OR failed -- is a labelled example for the tool's verifier prototypes
+        (verify_precheck orders candidates by them); the pre-check's prediction is recorded in meta['precheck'] and
+        NEVER replaces the verify, which runs on every step that carries one."""
         if not done_when or evidence is None:
             raise ValueError("swarm_step refuses a step without done_when and evidence -- a step nobody can verify is not a step")
         verified = None
+        precheck = None
         if verify is not None:
             verb = getattr(self, str(verify.get("verb", "")), None)
             if verb is None:
                 raise ValueError("swarm_step: verify.verb %r is not a mind verb" % verify.get("verb"))
+            # E5.2 -- THE VERIFIER'S PRE-CHECK SCORE, taken BEFORE the verify runs (so its calibration label is honest,
+            # never fitted on the result it is about to see). It is recorded, never obeyed: the verify below ALWAYS
+            # runs, whatever the pre-check predicts (pinned by tests/test_verifier.py).
+            if isinstance(state, str):
+                try:
+                    pre = self._verifier_score(self._verifier_vec(state), tool)
+                    precheck = {"score": pre, "p_correct": self._door_p("verify", pre)}
+                except Exception:
+                    precheck = None
             result = verb(**(verify.get("args") or {}))
             ok = (bool(expect(result)) if callable(expect) else (result == expect if expect is not None else True))
+            # E5.2 -- BOTH outcomes teach the verifier prototypes. Before this, only a PASSED verify taught anything
+            # (via decision_outcome below); a failed verify raised with no trace of what it had learned about the
+            # tool. It is now a labelled FAILURE example for this tool's failure prototype -- the verifier's
+            # prototypes only, NOT the reflex trace or its failure field (region-wide: one refused tool would silence
+            # every later, correct tool on the task -- the trap below, kept).
+            try:
+                self._verifier_learn(state, tool, ok, None if precheck is None else precheck["score"])
+            except Exception:
+                pass                                    # a learning error never changes whether a step is accepted
             if not ok:
                 raise ValueError("swarm_step refused: verification %r returned %r, expected %r"
                                  % (verify.get("verb"), str(result)[:200], expect if not callable(expect) else "expect(result) True"))
             verified = {"verb": verify.get("verb"), "passed": True}
         from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord
-        rec = DecisionRecord(state, "step:" + str(tool), [str(tool)], str(tool), "swarm", outcome=outcome,
-                             meta={"args": args or {}, "done_when": done_when, "evidence": evidence, "worker": worker,
-                                   "verify": verify, "verified": verified})
+        meta = {"args": args or {}, "done_when": done_when, "evidence": evidence, "worker": worker,
+                "verify": verify, "verified": verified}
+        if precheck is not None:
+            meta["precheck"] = precheck                 # what the verifier predicted before the verify ran (E5.2)
+        rec = DecisionRecord(state, "step:" + str(tool), [str(tool)], str(tool), "swarm", outcome=outcome, meta=meta)
         self.decision_ledger().add(rec)
+        # THE JUDGE TEACHES THE REFLEX (sweep 177; Moose: "the reflex arc isn't connected to the learning stuff").
+        # Before this, a step the harness had just VERIFIED went to the ledger and the bus and nowhere else --
+        # the only thing the reflex ever learned from was decision_outcome, i.e. whatever string a caller
+        # reported. Now a step whose verification RAN AND PASSED is reported through the one outcome path
+        # (decision_outcome -> Ledger.report -> reflex_learn), so the swarm's experience is built only from
+        # judged results. Deliberately NOT done:
+        #   * an unverified step (verify=None) does not teach -- its outcome is self-reported, the thing we fix;
+        #   * a REFUSED step does not mark the failure field -- it raised above, before any record exists, and
+        #     the failure field is region-wide: one refused tool would silence the reflex for every later,
+        #     correct tool on the same task (the same trap the second cut of reflex_learn fell into).
+        # A caller-supplied `outcome` that disagrees with the tool is respected as a CORRECTION (it is written).
+        learned = None
+        if verified is not None:
+            rep = self.decision_outcome(rec.id, str(outcome) if outcome is not None else str(tool))
+            learned = rep.get("reflex")
         payload = rec.to_dict()
+        payload["reflex"] = learned                     # None when the step was not verified
         self.bus().publish(topic, payload)
         return payload
 

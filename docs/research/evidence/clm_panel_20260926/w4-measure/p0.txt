@@ -1,0 +1,9 @@
+built in 3.0s; rows 602 phrasings 8591 feats 29041
+exactness vs MeaningIndex.answers on 300 test questions: 0 mismatches
+BASELINE (as learned, BLEND 0.8): top-1 val 0.8473  test 0.8413
+  P0.97  oracle-on-test: cov 37.9% oos 2.1% (thr 0.795) | val-chosen thr 0.797 -> test cov 37.7% wrong-in 0.7% oos 2.1% realised prec 0.970
+  P0.95  oracle-on-test: cov 55.6% oos 4.1% (thr 0.666) | val-chosen thr 0.656 -> test cov 56.9% wrong-in 2.1% oos 4.4% realised prec 0.948
+stored negatives 1835, resolvable 1835, pointing at a row of the SAME intent (false negatives): 0
+rows 602, answer keys 602, intents 151; intents split over >1 row: 119; rows that share an intent with another row: 571
+test questions whose runner-up row is the SAME intent as the top row: 8.2%
+total 7.4s
