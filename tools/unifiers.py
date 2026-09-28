@@ -618,10 +618,24 @@ def _repo_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+# Module names that exist in MORE THAN ONE subfolder, and the subfolder whose module the registry means. Found by CI
+# (2026-09-27): holographic_session.py lives in scene_and_pipeline/ (RenderSession -- the MarginCache client),
+# io_and_interop/ (the session store) and caching_and_storage/ (the prefix cache). os.walk order is the filesystem's,
+# so the checker read a DIFFERENT file on the CI runner than locally and reported a wired client as unwired.
+AMBIGUOUS = {"holographic_session": "scene_and_pipeline"}
+
+
 def _find_module(name, root=None):
-    """The path of `name`.py anywhere under holographic/ (the package layout groups modules into subfolders)."""
+    """The path of `name`.py anywhere under holographic/ (the package layout groups modules into subfolders).
+    Deterministic: subfolders are walked in sorted order, and a name listed in AMBIGUOUS resolves to its subfolder."""
     root = root or _repo_root()
-    for dirpath, _dirs, files in os.walk(os.path.join(root, "holographic")):
+    base = os.path.join(root, "holographic")
+    if name in AMBIGUOUS:
+        path = os.path.join(base, AMBIGUOUS[name], name + ".py")
+        if os.path.exists(path):
+            return path
+    for dirpath, dirs, files in os.walk(base):
+        dirs.sort()                                  # never depend on the filesystem's directory order
         if name + ".py" in files:
             return os.path.join(dirpath, name + ".py")
     return None

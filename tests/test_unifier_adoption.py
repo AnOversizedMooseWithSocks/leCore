@@ -304,3 +304,22 @@ def test_project_onto_constraints_returns_residual_optin():
     pb = lambda v: np.array([0.0, 1.0, 0.0])
     _, _, conv2, res2 = m.project_onto_constraints(np.zeros(3), [pa, pb], iters=20, return_residual=True)
     assert conv2 is False and abs(res2 - np.sqrt(2.0)) < 1e-9, ("fighting residual = sqrt(2)", res2)
+
+
+def test_a_module_name_in_several_subfolders_resolves_the_same_on_every_filesystem(monkeypatch):
+    """CI (2026-09-27): holographic_session.py exists in three subfolders and os.walk order is the filesystem's, so the
+    runner read the session STORE and reported RenderSession's MarginCache wiring as broken. Walk in REVERSE order
+    (what a different filesystem may do) and the answer must not change."""
+    import os as _os
+    import unifiers
+    real_walk = _os.walk
+
+    def reversed_walk(top, *a, **k):
+        for dirpath, dirs, files in real_walk(top, *a, **k):
+            dirs.sort(reverse=True)
+            yield dirpath, dirs, files
+    key = "cachehome.MarginCache (fat margin for a drifting query)"
+    monkeypatch.setattr(unifiers.os, "walk", reversed_walk)
+    path = unifiers._find_module("holographic_session", REPO)
+    assert path.replace("\\", "/").endswith("scene_and_pipeline/holographic_session.py")
+    assert unifiers.cites("holographic_session", key, REPO) is True

@@ -557,10 +557,16 @@ class _UnifiedPart29:
         for name, st in sorted((self.__dict__.get("_protostores") or {}).items()):
             if name in ("route", "tool") or st is None or not len(st):
                 continue
-            m_, _ = st.state()
+            m_, a_ = st.state(dtype="float64")
             # float64, not ProtoStore.state()'s float32: a rank after a cold reload must be BIT-IDENTICAL to the one
-            # before it (pinned in tests/test_rank.py; float32 rows moved the 10th decimal and broke that)
-            arrays["ps%d_A" % len(ps_rows)] = np.asarray(st.A, dtype=np.float64)
+            # before it (pinned in tests/test_rank.py; float32 rows moved the 10th decimal and broke that).
+            # The unit rows P travel too (CI, py3.12, 2026-09-27): recomputing P from A on load moved a verify score by
+            # one ulp (0.008086684778032812 -> ...809) -- a row seeded by add_option and a row moved by update are
+            # normalised by two different norm computations, and which one differs in the last bit depends on the
+            # numpy/BLAS build. ProtoStore.state(dtype="float64") stores both matrices; see its docstring.
+            k_ = len(ps_rows)
+            arrays["ps%d_A" % k_] = a_["A"]
+            arrays["ps%d_P" % k_] = a_["P"]
             ps_rows.append({"name": name, "state": m_})
         rs = self.__dict__.get("_rank_door")
         rank_meta = {"sets": rs["sets"], "truth": rs["truth"]} if rs and (rs["sets"] or rs["truth"]) else None
@@ -605,7 +611,8 @@ class _UnifiedPart29:
             if A is None:
                 continue
             try:
-                stores[row["name"]] = ProtoStore.from_state(row["state"], {"A": A})
+                # ps%d_P is absent in partitions written before 2026-09-27: from_state then recomputes the unit rows
+                stores[row["name"]] = ProtoStore.from_state(row["state"], {"A": A, "P": arrays.get("ps%d_P" % i)})
                 n_ps += 1
             except Exception as e:
                 refused.append("protostore %s: %s" % (row.get("name"), str(e)[:80]))

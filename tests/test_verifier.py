@@ -131,3 +131,25 @@ def test_the_verifier_survives_a_restart(tmp_path):
     m2.learning_load(root)
     after = m2.verify_precheck("smooth this bumpy mesh surface", TOOLS)
     assert after["order"] == before["order"] and after["scores"] == before["scores"]
+
+
+def test_the_verifier_stores_reload_bit_for_bit(tmp_path):
+    """CI (py3.12, 2026-09-27): a verify score moved by one ulp across save/load (0.008086684778032812 -> ...809)
+    because only the accumulators A were saved and the unit rows P were recomputed -- and whether the recomputed norm
+    matches the live one in the last bit depends on the numpy/BLAS build. P now travels with A. The test nudges a
+    live P row by a few ulps (what a different norm computation does) and requires the reload to keep it exactly."""
+    import numpy as np
+    m = _mind()
+    for task in TRUTH:
+        _try_all(m, task, TOOLS)
+    stores = {k: v for k, v in m.__dict__["_protostores"].items() if k.startswith("verify:")}
+    assert stores
+    name = sorted(stores)[0]
+    stores[name].P[0] = np.nextafter(np.nextafter(stores[name].P[0], 2.0), 2.0)
+    root = str(tmp_path / "partition")
+    m.learning_save(root)
+    m2 = _mind()
+    m2.learning_load(root)
+    for k, st in stores.items():
+        st2 = m2.__dict__["_protostores"][k]
+        assert np.array_equal(st2.A, st.A) and np.array_equal(st2.P, st.P), k
