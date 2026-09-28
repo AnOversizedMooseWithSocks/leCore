@@ -1,0 +1,1945 @@
+{
+ "about": "tools/bench_meaning.py online: teach one wording per intent, stream the rest through ask() with the SCRIPTED stand-in model attached (oracle / noisy:r), detach it, ask the test set. Measures the learning loop, not any real model. Command per run: PYTHONHASHSEED=0 python3 tools/bench_meaning.py --data DATA [--dataset banking] online --model M --seed S [--protos on|off] --record",
+ "runs": {
+  "banking|oracle|seed0|protosoff": {
+   "dataset": "banking",
+   "model": "oracle",
+   "seed": 0,
+   "protos": false,
+   "stream": 9926,
+   "model_wrong_verdicts_given": 0,
+   "model_calls_total": 6534,
+   "per_1000_questions": [
+    {
+     "model_calls": 832,
+     "memory_right": 157,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 785,
+     "memory_right": 207,
+     "memory_WRONG": 8,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 729,
+     "memory_right": 255,
+     "memory_WRONG": 16,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 675,
+     "memory_right": 304,
+     "memory_WRONG": 21,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 649,
+     "memory_right": 323,
+     "memory_WRONG": 28,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 575,
+     "memory_right": 394,
+     "memory_WRONG": 31,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 579,
+     "memory_right": 378,
+     "memory_WRONG": 43,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 560,
+     "memory_right": 403,
+     "memory_WRONG": 37,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 558,
+     "memory_right": 409,
+     "memory_WRONG": 33,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 527,
+     "memory_right": 366,
+     "memory_WRONG": 33,
+     "clarify": 0,
+     "n": 926
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 3080,
+    "in_scope": {
+     "correct": "1146 (37.2%)",
+     "wrong": "64 (2.1%)",
+     "abstain": "1870 (60.7%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "10 (1.0%)",
+     "abstain": "990 (99.0%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 437,
+    "by_kind": {
+     "answer": 437
+    },
+    "wordings": 6546,
+    "associations": 45774,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "teacher": {
+    "eps_hat": 0.0,
+    "re_asks": 65,
+    "agreement": 1.0,
+    "held_back": 0
+   },
+   "negatives": {
+    "exact_vetoes": 1680,
+    "resolvable": 1680,
+    "false_negatives_same_intent": 0,
+    "prototype_negatives": 0
+   },
+   "merged_wordings": 0,
+   "stream_s": 247.7
+  },
+  "clinc|oracle|seed0|protosoff": {
+   "dataset": "clinc",
+   "model": "oracle",
+   "seed": 0,
+   "protos": false,
+   "stream": 14950,
+   "model_wrong_verdicts_given": 0,
+   "model_calls_total": 8566,
+   "per_1000_questions": [
+    {
+     "model_calls": 898,
+     "memory_right": 101,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 745,
+     "memory_right": 251,
+     "memory_WRONG": 4,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 630,
+     "memory_right": 361,
+     "memory_WRONG": 9,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 616,
+     "memory_right": 379,
+     "memory_WRONG": 5,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 596,
+     "memory_right": 397,
+     "memory_WRONG": 7,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 587,
+     "memory_right": 406,
+     "memory_WRONG": 7,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 545,
+     "memory_right": 447,
+     "memory_WRONG": 8,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 552,
+     "memory_right": 437,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 531,
+     "memory_right": 456,
+     "memory_WRONG": 13,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 512,
+     "memory_right": 477,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 474,
+     "memory_right": 514,
+     "memory_WRONG": 12,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 449,
+     "memory_right": 536,
+     "memory_WRONG": 15,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 416,
+     "memory_right": 570,
+     "memory_WRONG": 14,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 437,
+     "memory_right": 548,
+     "memory_WRONG": 15,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 488,
+     "memory_right": 453,
+     "memory_WRONG": 9,
+     "clarify": 0,
+     "n": 950
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 4500,
+    "in_scope": {
+     "correct": "2174 (48.3%)",
+     "wrong": "72 (1.6%)",
+     "abstain": "2254 (50.1%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "20 (2.0%)",
+     "abstain": "980 (98.0%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 604,
+    "by_kind": {
+     "answer": 604
+    },
+    "wordings": 8624,
+    "associations": 62304,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "teacher": {
+    "eps_hat": 0.0,
+    "re_asks": 90,
+    "agreement": 1.0,
+    "held_back": 0
+   },
+   "negatives": {
+    "exact_vetoes": 1836,
+    "resolvable": 1836,
+    "false_negatives_same_intent": 0,
+    "prototype_negatives": 0
+   },
+   "merged_wordings": 0,
+   "stream_s": 455.1
+  },
+  "clinc|noisy:0.1|seed0|protosoff": {
+   "dataset": "clinc",
+   "model": "noisy:0.1",
+   "seed": 0,
+   "protos": false,
+   "stream": 14950,
+   "model_wrong_verdicts_given": 1081,
+   "model_calls_total": 10535,
+   "per_1000_questions": [
+    {
+     "model_calls": 943,
+     "memory_right": 56,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 846,
+     "memory_right": 148,
+     "memory_WRONG": 6,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 749,
+     "memory_right": 247,
+     "memory_WRONG": 4,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 667,
+     "memory_right": 328,
+     "memory_WRONG": 5,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 564,
+     "memory_right": 422,
+     "memory_WRONG": 14,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 859,
+     "memory_right": 136,
+     "memory_WRONG": 5,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 620,
+     "memory_right": 371,
+     "memory_WRONG": 9,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 617,
+     "memory_right": 373,
+     "memory_WRONG": 10,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 684,
+     "memory_right": 305,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 718,
+     "memory_right": 276,
+     "memory_WRONG": 6,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 637,
+     "memory_right": 354,
+     "memory_WRONG": 9,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 585,
+     "memory_right": 403,
+     "memory_WRONG": 12,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 530,
+     "memory_right": 459,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 571,
+     "memory_right": 418,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 649,
+     "memory_right": 295,
+     "memory_WRONG": 6,
+     "clarify": 0,
+     "n": 950
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 4500,
+    "in_scope": {
+     "correct": "1245 (27.7%)",
+     "wrong": "23 (0.5%)",
+     "abstain": "3232 (71.8%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "5 (0.5%)",
+     "abstain": "995 (99.5%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 629,
+    "by_kind": {
+     "answer": 629
+    },
+    "wordings": 9563,
+    "associations": 63766,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "teacher": {
+    "eps_hat": 0.1003,
+    "re_asks": 296,
+    "agreement": 0.8108108108108109,
+    "held_back": 821
+   },
+   "negatives": {
+    "exact_vetoes": 2035,
+    "resolvable": 2035,
+    "false_negatives_same_intent": 343,
+    "prototype_negatives": 0
+   },
+   "merged_wordings": 0,
+   "stream_s": 491.5,
+   "config": "shipped defaults: MEANING_REASK_RATE 0.03, TEACHER_EPS_Z 1.0, MERGE_SAME_ANSWER False, protos off"
+  },
+  "clinc|noisy:0.1|seed1|protosoff": {
+   "dataset": "clinc",
+   "model": "noisy:0.1",
+   "seed": 1,
+   "protos": false,
+   "stream": 14950,
+   "model_wrong_verdicts_given": 1009,
+   "model_calls_total": 10009,
+   "per_1000_questions": [
+    {
+     "model_calls": 896,
+     "memory_right": 101,
+     "memory_WRONG": 3,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 746,
+     "memory_right": 247,
+     "memory_WRONG": 7,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 888,
+     "memory_right": 110,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 888,
+     "memory_right": 110,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 786,
+     "memory_right": 210,
+     "memory_WRONG": 4,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 671,
+     "memory_right": 322,
+     "memory_WRONG": 7,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 703,
+     "memory_right": 292,
+     "memory_WRONG": 5,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 583,
+     "memory_right": 411,
+     "memory_WRONG": 6,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 470,
+     "memory_right": 512,
+     "memory_WRONG": 18,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 554,
+     "memory_right": 437,
+     "memory_WRONG": 9,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 529,
+     "memory_right": 462,
+     "memory_WRONG": 9,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 523,
+     "memory_right": 464,
+     "memory_WRONG": 13,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 554,
+     "memory_right": 429,
+     "memory_WRONG": 17,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 479,
+     "memory_right": 505,
+     "memory_WRONG": 16,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 464,
+     "memory_right": 470,
+     "memory_WRONG": 16,
+     "clarify": 0,
+     "n": 950
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 4500,
+    "in_scope": {
+     "correct": "2057 (45.7%)",
+     "wrong": "57 (1.3%)",
+     "abstain": "2386 (53.0%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "20 (2.0%)",
+     "abstain": "980 (98.0%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 630,
+    "by_kind": {
+     "answer": 630
+    },
+    "wordings": 9140,
+    "associations": 63904,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "teacher": {
+    "eps_hat": 0.1023,
+    "re_asks": 275,
+    "agreement": 0.8072727272727273,
+    "held_back": 742
+   },
+   "negatives": {
+    "exact_vetoes": 2043,
+    "resolvable": 2043,
+    "false_negatives_same_intent": 354,
+    "prototype_negatives": 0
+   },
+   "merged_wordings": 0,
+   "stream_s": 283.5,
+   "config": "shipped defaults: MEANING_REASK_RATE 0.03, TEACHER_EPS_Z 1.0, MERGE_SAME_ANSWER False, protos off"
+  },
+  "clinc|noisy:0.1|seed2|protosoff": {
+   "dataset": "clinc",
+   "model": "noisy:0.1",
+   "seed": 2,
+   "protos": false,
+   "stream": 14950,
+   "model_wrong_verdicts_given": 1138,
+   "model_calls_total": 10497,
+   "per_1000_questions": [
+    {
+     "model_calls": 909,
+     "memory_right": 90,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 932,
+     "memory_right": 66,
+     "memory_WRONG": 2,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 877,
+     "memory_right": 122,
+     "memory_WRONG": 1,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 864,
+     "memory_right": 131,
+     "memory_WRONG": 5,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 703,
+     "memory_right": 291,
+     "memory_WRONG": 6,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 740,
+     "memory_right": 257,
+     "memory_WRONG": 3,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 523,
+     "memory_right": 456,
+     "memory_WRONG": 21,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 502,
+     "memory_right": 482,
+     "memory_WRONG": 16,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 542,
+     "memory_right": 454,
+     "memory_WRONG": 4,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 590,
+     "memory_right": 399,
+     "memory_WRONG": 11,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 581,
+     "memory_right": 411,
+     "memory_WRONG": 8,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 526,
+     "memory_right": 464,
+     "memory_WRONG": 10,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 632,
+     "memory_right": 358,
+     "memory_WRONG": 10,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 609,
+     "memory_right": 383,
+     "memory_WRONG": 8,
+     "clarify": 0,
+     "n": 1000
+    },
+    {
+     "model_calls": 681,
+     "memory_right": 260,
+     "memory_WRONG": 9,
+     "clarify": 0,
+     "n": 950
+    }
+   ],
+   "after_stream_model_detached": {
+    "in_scope_test": 4500,
+    "in_scope": {
+     "correct": "1963 (43.6%)",
+     "wrong": "68 (1.5%)",
+     "abstain": "2469 (54.9%)",
+     "clarify": "0 (0.0%)"
+    },
+    "out_of_scope_test": 1000,
+    "out_of_scope": {
+     "correct": "0 (0.0%)",
+     "wrong": "18 (1.8%)",
+     "abstain": "982 (98.2%)",
+     "clarify": "0 (0.0%)"
+    }
+   },
+   "meaning": {
+    "rows": 657,
+    "by_kind": {
+     "answer": 657
+    },
+    "wordings": 9489,
+    "associations": 64532,
+    "calibration_labels": 1024,
+    "calibrated": true
+   },
+   "teacher": {
+    "eps_hat": 0.1081,
+    "re_asks": 286,
+    "agreement": 0.7972027972027972,
+    "held_back": 870
+   },
+   "negatives": {
+    "exact_vetoes": 2127,
+    "resolvable": 2127,
+    "false_negatives_same_intent": 338,
+    "prototype_negatives": 0
+   },
+   "merged_wordings": 0,
+   "stream_s": 494.2,
+   "config": "shipped defaults: MEANING_REASK_RATE 0.03, TEACHER_EPS_Z 1.0, MERGE_SAME_ANSWER False, protos off"
+  }
+ },
+ "baseline_before_phase_c": {
+  "about": "The SAME bench on a snapshot of the tree taken before the phase-C changes (2026-09-26 19:40, wave-1 code: no re-ask / noise correction, no merge rule, no learned rows), same stand-in, same seeds. The sweep-181 document's 9.8% / 0.2% (CLINC noisy) and 48.3% / 1.5% (CLINC perfect) were measured on the sweep-181 code; the snapshot reproduces 48.3% / 1.6% perfect, and 37.2% / 2.1% Banking77 perfect.",
+  "runs": {
+   "clinc|noisy:0.1|seed0": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "808 (18.0%)",
+      "wrong": "19 (0.4%)",
+      "abstain": "3673 (81.6%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "4 (0.4%)",
+      "abstain": "996 (99.6%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "model_wrong_verdicts_given": 1396,
+    "rows": 621,
+    "stream_s": 1662.0,
+    "per_1000_questions": [
+     {
+      "model_calls": 954,
+      "memory_right": 45,
+      "memory_WRONG": 1,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 957,
+      "memory_right": 41,
+      "memory_WRONG": 2,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 959,
+      "memory_right": 41,
+      "memory_WRONG": 0,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 896,
+      "memory_right": 104,
+      "memory_WRONG": 0,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 909,
+      "memory_right": 88,
+      "memory_WRONG": 3,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 890,
+      "memory_right": 105,
+      "memory_WRONG": 5,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 854,
+      "memory_right": 144,
+      "memory_WRONG": 2,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 878,
+      "memory_right": 122,
+      "memory_WRONG": 0,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 896,
+      "memory_right": 99,
+      "memory_WRONG": 5,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 916,
+      "memory_right": 81,
+      "memory_WRONG": 3,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 961,
+      "memory_right": 38,
+      "memory_WRONG": 1,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 933,
+      "memory_right": 63,
+      "memory_WRONG": 4,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 931,
+      "memory_right": 68,
+      "memory_WRONG": 1,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 909,
+      "memory_right": 89,
+      "memory_WRONG": 2,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 847,
+      "memory_right": 100,
+      "memory_WRONG": 3,
+      "clarify": 0,
+      "n": 950
+     }
+    ]
+   },
+   "clinc|noisy:0.1|seed1": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "366 (8.1%)",
+      "wrong": "10 (0.2%)",
+      "abstain": "4124 (91.6%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "2 (0.2%)",
+      "abstain": "998 (99.8%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "model_wrong_verdicts_given": 1399,
+    "rows": 647,
+    "stream_s": 819.5,
+    "per_1000_questions": [
+     {
+      "model_calls": 879,
+      "memory_right": 114,
+      "memory_WRONG": 7,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 925,
+      "memory_right": 74,
+      "memory_WRONG": 1,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 989,
+      "memory_right": 11,
+      "memory_WRONG": 0,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 967,
+      "memory_right": 33,
+      "memory_WRONG": 0,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 933,
+      "memory_right": 66,
+      "memory_WRONG": 1,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 937,
+      "memory_right": 63,
+      "memory_WRONG": 0,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 907,
+      "memory_right": 91,
+      "memory_WRONG": 2,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 953,
+      "memory_right": 45,
+      "memory_WRONG": 2,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 996,
+      "memory_right": 4,
+      "memory_WRONG": 0,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 989,
+      "memory_right": 11,
+      "memory_WRONG": 0,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 961,
+      "memory_right": 38,
+      "memory_WRONG": 1,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 949,
+      "memory_right": 50,
+      "memory_WRONG": 1,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 955,
+      "memory_right": 45,
+      "memory_WRONG": 0,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 926,
+      "memory_right": 72,
+      "memory_WRONG": 2,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 875,
+      "memory_right": 71,
+      "memory_WRONG": 4,
+      "clarify": 0,
+      "n": 950
+     }
+    ]
+   },
+   "clinc|noisy:0.1|seed2": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "471 (10.5%)",
+      "wrong": "15 (0.3%)",
+      "abstain": "4014 (89.2%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "1 (0.1%)",
+      "abstain": "999 (99.9%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "model_wrong_verdicts_given": 1482,
+    "rows": 631,
+    "stream_s": 829.2,
+    "per_1000_questions": [
+     {
+      "model_calls": 882,
+      "memory_right": 116,
+      "memory_WRONG": 2,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 938,
+      "memory_right": 60,
+      "memory_WRONG": 2,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 940,
+      "memory_right": 59,
+      "memory_WRONG": 1,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 929,
+      "memory_right": 67,
+      "memory_WRONG": 4,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 926,
+      "memory_right": 69,
+      "memory_WRONG": 5,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 930,
+      "memory_right": 68,
+      "memory_WRONG": 2,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 889,
+      "memory_right": 106,
+      "memory_WRONG": 5,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 889,
+      "memory_right": 109,
+      "memory_WRONG": 2,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 861,
+      "memory_right": 137,
+      "memory_WRONG": 2,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 988,
+      "memory_right": 11,
+      "memory_WRONG": 1,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 970,
+      "memory_right": 30,
+      "memory_WRONG": 0,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 972,
+      "memory_right": 28,
+      "memory_WRONG": 0,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 941,
+      "memory_right": 58,
+      "memory_WRONG": 1,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 905,
+      "memory_right": 90,
+      "memory_WRONG": 5,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 837,
+      "memory_right": 108,
+      "memory_WRONG": 5,
+      "clarify": 0,
+      "n": 950
+     }
+    ]
+   },
+   "clinc|oracle|seed0": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "2174 (48.3%)",
+      "wrong": "72 (1.6%)",
+      "abstain": "2254 (50.1%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "20 (2.0%)",
+      "abstain": "980 (98.0%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "model_wrong_verdicts_given": 0,
+    "rows": 604,
+    "stream_s": 691.9,
+    "per_1000_questions": [
+     {
+      "model_calls": 898,
+      "memory_right": 101,
+      "memory_WRONG": 1,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 745,
+      "memory_right": 251,
+      "memory_WRONG": 4,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 630,
+      "memory_right": 361,
+      "memory_WRONG": 9,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 616,
+      "memory_right": 379,
+      "memory_WRONG": 5,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 596,
+      "memory_right": 397,
+      "memory_WRONG": 7,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 587,
+      "memory_right": 406,
+      "memory_WRONG": 7,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 545,
+      "memory_right": 447,
+      "memory_WRONG": 8,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 552,
+      "memory_right": 437,
+      "memory_WRONG": 11,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 531,
+      "memory_right": 456,
+      "memory_WRONG": 13,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 512,
+      "memory_right": 477,
+      "memory_WRONG": 11,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 474,
+      "memory_right": 514,
+      "memory_WRONG": 12,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 449,
+      "memory_right": 536,
+      "memory_WRONG": 15,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 416,
+      "memory_right": 570,
+      "memory_WRONG": 14,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 437,
+      "memory_right": 548,
+      "memory_WRONG": 15,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 488,
+      "memory_right": 453,
+      "memory_WRONG": 9,
+      "clarify": 0,
+      "n": 950
+     }
+    ]
+   },
+   "banking|oracle|seed0": {
+    "after_stream_model_detached": {
+     "in_scope_test": 3080,
+     "in_scope": {
+      "correct": "1146 (37.2%)",
+      "wrong": "64 (2.1%)",
+      "abstain": "1870 (60.7%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "10 (1.0%)",
+      "abstain": "990 (99.0%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "model_wrong_verdicts_given": 0,
+    "rows": 437,
+    "stream_s": 525.4,
+    "per_1000_questions": [
+     {
+      "model_calls": 832,
+      "memory_right": 157,
+      "memory_WRONG": 11,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 785,
+      "memory_right": 207,
+      "memory_WRONG": 8,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 729,
+      "memory_right": 255,
+      "memory_WRONG": 16,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 675,
+      "memory_right": 304,
+      "memory_WRONG": 21,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 649,
+      "memory_right": 323,
+      "memory_WRONG": 28,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 575,
+      "memory_right": 394,
+      "memory_WRONG": 31,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 579,
+      "memory_right": 378,
+      "memory_WRONG": 43,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 560,
+      "memory_right": 403,
+      "memory_WRONG": 37,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 558,
+      "memory_right": 409,
+      "memory_WRONG": 33,
+      "clarify": 0,
+      "n": 1000
+     },
+     {
+      "model_calls": 527,
+      "memory_right": 366,
+      "memory_WRONG": 33,
+      "clarify": 0,
+      "n": 926
+     }
+    ]
+   }
+  }
+ },
+ "kept_negatives": {
+  "held_back_verdicts_skipped_the_calibration_label": {
+   "what": "the first cut of E2.3 skipped the gate's calibration label for a held-back verdict (rank >= 5). Those are almost all DISAGREEMENTS, so ~7% of the labels vanished, P(agree) read high, and the noise correction amplified it: the gate over-served. Fixed: every verdict is a label, held back from LEARNING only.",
+   "clinc|noisy:0.1|seed0": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "2724 (60.5%)",
+      "wrong": "144 (3.2%)",
+      "abstain": "1632 (36.3%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "43 (4.3%)",
+      "abstain": "957 (95.7%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0717,
+     "re_asks": 80,
+     "agreement": 0.8625,
+     "held_back": 512
+    },
+    "negatives": {
+     "exact_vetoes": 1831,
+     "resolvable": 1831,
+     "false_negatives_same_intent": 308,
+     "prototype_negatives": 0
+    }
+   }
+  },
+  "point_eps_with_merge_rule": {
+   "what": "E2.3 as first shipped: the gate corrected by the POINT estimate eps_hat, with the E2.1 merge rule on. 1 of 3 seeds passed the bar (>= 30% correct at <= 2.0% wrong and <= 2.0% out-of-scope). The failures track eps_hat's sampling error at ~100 re-asks: seed 2 read eps_hat 0.1355 (true 0.10) and served bins that were only ~91% right. Replaced by the one-sided lower bound (MeaningIndex.TEACHER_EPS_Z = 1).",
+   "clinc|noisy:0.1|seed0": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "1445 (32.1%)",
+      "wrong": "26 (0.6%)",
+      "abstain": "3029 (67.3%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "9 (0.9%)",
+      "abstain": "991 (99.1%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0997,
+     "re_asks": 101,
+     "agreement": 0.8118811881188119,
+     "held_back": 656
+    },
+    "negatives": {
+     "exact_vetoes": 1970,
+     "resolvable": 1970,
+     "false_negatives_same_intent": 363,
+     "prototype_negatives": 0
+    },
+    "rows": 192,
+    "merged_wordings": 452,
+    "model_calls_total": 9452,
+    "stream_s": 999.3
+   },
+   "clinc|noisy:0.1|seed1": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "2288 (50.8%)",
+      "wrong": "78 (1.7%)",
+      "abstain": "2134 (47.4%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "21 (2.1%)",
+      "abstain": "979 (97.9%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0877,
+     "re_asks": 96,
+     "agreement": 0.8333333333333334,
+     "held_back": 635
+    },
+    "negatives": {
+     "exact_vetoes": 1977,
+     "resolvable": 1977,
+     "false_negatives_same_intent": 370,
+     "prototype_negatives": 0
+    },
+    "rows": 196,
+    "merged_wordings": 457,
+    "model_calls_total": 9508,
+    "stream_s": 1006.7
+   },
+   "clinc|noisy:0.1|seed2": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "2463 (54.7%)",
+      "wrong": "107 (2.4%)",
+      "abstain": "1930 (42.9%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "31 (3.1%)",
+      "abstain": "969 (96.9%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.1355,
+     "re_asks": 72,
+     "agreement": 0.75,
+     "held_back": 500
+    },
+    "negatives": {
+     "exact_vetoes": 1897,
+     "resolvable": 1897,
+     "false_negatives_same_intent": 305,
+     "prototype_negatives": 0
+    },
+    "rows": 195,
+    "merged_wordings": 437,
+    "model_calls_total": 7658,
+    "stream_s": 521.2
+   },
+   "clinc|oracle|seed0": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "2372 (52.7%)",
+      "wrong": "74 (1.6%)",
+      "abstain": "2054 (45.6%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "24 (2.4%)",
+      "abstain": "976 (97.6%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0,
+     "re_asks": 86,
+     "agreement": 1.0,
+     "held_back": 0
+    },
+    "negatives": {
+     "exact_vetoes": 1691,
+     "resolvable": 1691,
+     "false_negatives_same_intent": 0,
+     "prototype_negatives": 0
+    },
+    "rows": 191,
+    "merged_wordings": 438,
+    "model_calls_total": 7919,
+    "stream_s": 620.5
+   },
+   "banking|oracle|seed0": {
+    "after_stream_model_detached": {
+     "in_scope_test": 3080,
+     "in_scope": {
+      "correct": "785 (25.5%)",
+      "wrong": "58 (1.9%)",
+      "abstain": "2237 (72.6%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "1 (0.1%)",
+      "abstain": "999 (99.9%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0,
+     "re_asks": 79,
+     "agreement": 1.0,
+     "held_back": 0
+    },
+    "negatives": {
+     "exact_vetoes": 1692,
+     "resolvable": 1692,
+     "false_negatives_same_intent": 0,
+     "prototype_negatives": 0
+    },
+    "rows": 83,
+    "merged_wordings": 613,
+    "model_calls_total": 7722,
+    "stream_s": 679.4
+   }
+  },
+  "merge_rule_on_banking77": {
+   "what": "The E2.1 merge rule (a new answer with an existing row's answer key joins that row) cut Banking77's perfect-teacher coverage by a third: 25.5% / 1.9% / 0.1% with it (83 rows) vs 37.2% / 2.1% / 1.0% without (437 rows, bit-for-bit the pre-change numbers). CLINC150 gained (52.7% vs 48.3%, out-of-scope 2.4% vs 2.0%). Shipped OFF (MeaningIndex.MERGE_SAME_ANSWER = False), the mechanism kept as a per-mind switch.",
+   "banking|oracle|seed0|merge_on": {
+    "after_stream_model_detached": {
+     "in_scope_test": 3080,
+     "in_scope": {
+      "correct": "785 (25.5%)",
+      "wrong": "58 (1.9%)",
+      "abstain": "2237 (72.6%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "1 (0.1%)",
+      "abstain": "999 (99.9%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0,
+     "re_asks": 79,
+     "agreement": 1.0,
+     "held_back": 0
+    },
+    "negatives": {
+     "exact_vetoes": 1692,
+     "resolvable": 1692,
+     "false_negatives_same_intent": 0,
+     "prototype_negatives": 0
+    },
+    "rows": 83,
+    "merged_wordings": 613,
+    "model_calls_total": 7722,
+    "stream_s": 679.4
+   },
+   "banking|oracle|seed0|merge_off": {
+    "after_stream_model_detached": {
+     "in_scope_test": 3080,
+     "in_scope": {
+      "correct": "1146 (37.2%)",
+      "wrong": "64 (2.1%)",
+      "abstain": "1870 (60.7%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "10 (1.0%)",
+      "abstain": "990 (99.0%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0,
+     "re_asks": 65,
+     "agreement": 1.0,
+     "held_back": 0
+    },
+    "negatives": {
+     "exact_vetoes": 1680,
+     "resolvable": 1680,
+     "false_negatives_same_intent": 0,
+     "prototype_negatives": 0
+    },
+    "rows": 437,
+    "merged_wordings": 0,
+    "model_calls_total": 6534,
+    "stream_s": 247.7
+   },
+   "clinc|oracle|seed0|merge_on": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "2372 (52.7%)",
+      "wrong": "74 (1.6%)",
+      "abstain": "2054 (45.6%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "24 (2.4%)",
+      "abstain": "976 (97.6%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0,
+     "re_asks": 86,
+     "agreement": 1.0,
+     "held_back": 0
+    },
+    "negatives": {
+     "exact_vetoes": 1691,
+     "resolvable": 1691,
+     "false_negatives_same_intent": 0,
+     "prototype_negatives": 0
+    },
+    "rows": 191,
+    "merged_wordings": 438,
+    "model_calls_total": 7919,
+    "stream_s": 620.5
+   }
+  },
+  "arms_with_merge_rule_on": {
+   "what": "single-seed arms measured with the merge rule on, before it was switched off",
+   "clinc|noisy:0.1|seed2|conservative_eps_z1": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "1716 (38.1%)",
+      "wrong": "42 (0.9%)",
+      "abstain": "2742 (60.9%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "13 (1.3%)",
+      "abstain": "987 (98.7%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.104,
+     "re_asks": 92,
+     "agreement": 0.8043478260869565,
+     "held_back": 626
+    },
+    "negatives": {
+     "exact_vetoes": 2024,
+     "resolvable": 2024,
+     "false_negatives_same_intent": 374,
+     "prototype_negatives": 0
+    },
+    "rows": 193,
+    "merged_wordings": 450,
+    "model_calls_total": 9146,
+    "stream_s": 316.1
+   },
+   "clinc|noisy:0.1|seed1|posterior_hold_rule": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "2357 (52.4%)",
+      "wrong": "88 (2.0%)",
+      "abstain": "2055 (45.7%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "22 (2.2%)",
+      "abstain": "978 (97.8%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0866,
+     "re_asks": 85,
+     "agreement": 0.8352941176470589,
+     "held_back": 473
+    },
+    "negatives": {
+     "exact_vetoes": 1973,
+     "resolvable": 1973,
+     "false_negatives_same_intent": 242,
+     "prototype_negatives": 0
+    },
+    "rows": 193,
+    "merged_wordings": 427,
+    "model_calls_total": 8358,
+    "stream_s": 564.7
+   }
+  },
+  "reask_1pct_lower_bound_z1": {
+   "what": "the gate on eps's z = 1 lower bound at the panel's ~1% re-ask rate (~100 re-asks): eps_hat 0.075 / 0.099 / 0.142 for a true 0.10 -> 1 of 3 seeds in the bar's window (seed 0 too closed, seed 2 too open). The calibrated P(agree) is flat at its ceiling (~0.86-0.90), so the corrected value of that whole plateau sits near the 0.95 bar and eps to +-0.01 decides whether the gate opens it.",
+   "clinc|noisy:0.1|seed0": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "828 (18.4%)",
+      "wrong": "13 (0.3%)",
+      "abstain": "3659 (81.3%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "3 (0.3%)",
+      "abstain": "997 (99.7%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0746,
+     "re_asks": 112,
+     "agreement": 0.8571428571428571,
+     "held_back": 790
+    },
+    "negatives": {
+     "exact_vetoes": 2213,
+     "resolvable": 2213,
+     "false_negatives_same_intent": 402,
+     "prototype_negatives": 0
+    },
+    "rows": 616,
+    "merged_wordings": 0,
+    "model_calls_total": 11105,
+    "stream_s": 411.4
+   },
+   "clinc|noisy:0.1|seed1": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "1790 (39.8%)",
+      "wrong": "58 (1.3%)",
+      "abstain": "2652 (58.9%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "14 (1.4%)",
+      "abstain": "986 (98.6%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0994,
+     "re_asks": 96,
+     "agreement": 0.8125,
+     "held_back": 691
+    },
+    "negatives": {
+     "exact_vetoes": 2110,
+     "resolvable": 2110,
+     "false_negatives_same_intent": 388,
+     "prototype_negatives": 0
+    },
+    "rows": 637,
+    "merged_wordings": 0,
+    "model_calls_total": 10154,
+    "stream_s": 316.1
+   },
+   "clinc|noisy:0.1|seed2": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "2427 (53.9%)",
+      "wrong": "111 (2.5%)",
+      "abstain": "1962 (43.6%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "33 (3.3%)",
+      "abstain": "967 (96.7%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.1422,
+     "re_asks": 88,
+     "agreement": 0.7386363636363636,
+     "held_back": 595
+    },
+    "negatives": {
+     "exact_vetoes": 2062,
+     "resolvable": 2062,
+     "false_negatives_same_intent": 332,
+     "prototype_negatives": 0
+    },
+    "rows": 634,
+    "merged_wordings": 0,
+    "model_calls_total": 8554,
+    "stream_s": 462.8
+   }
+  },
+  "reask_1pct_lower_bound_z0.5": {
+   "what": "z = 0.5 at 1%: 0 of 2 seeds (seed 0 over-serves out-of-scope, seed 1 barely opens)",
+   "clinc|noisy:0.1|seed0": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "1960 (43.6%)",
+      "wrong": "68 (1.5%)",
+      "abstain": "2472 (54.9%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "22 (2.2%)",
+      "abstain": "978 (97.8%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0901,
+     "re_asks": 117,
+     "agreement": 0.8290598290598291,
+     "held_back": 801
+    },
+    "negatives": {
+     "exact_vetoes": 2264,
+     "resolvable": 2264,
+     "false_negatives_same_intent": 428,
+     "prototype_negatives": 0
+    },
+    "rows": 619,
+    "merged_wordings": 0,
+    "model_calls_total": 11475,
+    "stream_s": 441.6
+   },
+   "clinc|noisy:0.1|seed1": {
+    "after_stream_model_detached": {
+     "in_scope_test": 4500,
+     "in_scope": {
+      "correct": "325 (7.2%)",
+      "wrong": "10 (0.2%)",
+      "abstain": "4165 (92.6%)",
+      "clarify": "0 (0.0%)"
+     },
+     "out_of_scope_test": 1000,
+     "out_of_scope": {
+      "correct": "0 (0.0%)",
+      "wrong": "1 (0.1%)",
+      "abstain": "999 (99.9%)",
+      "clarify": "0 (0.0%)"
+     }
+    },
+    "teacher": {
+     "eps_hat": 0.0877,
+     "re_asks": 102,
+     "agreement": 0.8333333333333334,
+     "held_back": 672
+    },
+    "negatives": {
+     "exact_vetoes": 2149,
+     "resolvable": 2149,
+     "false_negatives_same_intent": 398,
+     "prototype_negatives": 0
+    },
+    "rows": 638,
+    "merged_wordings": 0,
+    "model_calls_total": 10148,
+    "stream_s": 316.6
+   }
+  }
+ },
+ "configs_tried_e2.3": "5 on CLINC150 noisy:0.1: point eps @1% (merge on, 3 seeds), posterior hold rule @1% (merge on, seed 1), z=1 @1% (3 seeds), z=0.5 @1% (2 seeds), z=1 @3% (3 seeds, shipped)",
+ "acceptance_e2.3": {
+  "bar": ">= 30% correct at <= 2.0% wrong and <= 2.0% out-of-scope served, 3 seeds (today 9.8% / 0.2% on the sweep-181 code; 18.0 / 8.1 / 10.5% correct on the phase-C baseline snapshot)",
+  "shipped": {
+   "seed0": [
+    27.7,
+    0.5,
+    0.5
+   ],
+   "seed1": [
+    45.7,
+    1.3,
+    2.0
+   ],
+   "seed2": [
+    43.6,
+    1.5,
+    1.8
+   ]
+  },
+  "verdict": "2 of 3 seeds pass; seed 0 is 2.3 points short on coverage (within both safety bars); every seed meets <= 2.0% wrong and <= 2.0% out-of-scope"
+ }
+}

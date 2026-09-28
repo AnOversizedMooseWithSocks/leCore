@@ -1,4 +1,12 @@
 {
+  "bip39_english.txt": {
+    "license": "MIT",
+    "license_file": "LICENSE_BIP39_MNEMONIC.txt",
+    "purpose": "learning guard (sweep 179): detect wallet seed phrases so they are never learned",
+    "sha256": "2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda",
+    "source": "BIP-0039 English wordlist, as vendored by the `mnemonic` package 0.21 (Trezor)",
+    "words": 2048
+  },
   "compression": "lzma (xz), preset 9",
   "corpus.txt.xz": {
     "builder": "tools/build_corpus.py (deterministic; no RNG)",

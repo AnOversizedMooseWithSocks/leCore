@@ -702,16 +702,28 @@ class _UnifiedPart15:
         import holographic.agents_and_reasoning.holographic_hashatom as _ha
         return _ha.term_id(text)
 
-    def phasor_factor(self, composite, codebooks, iters=100):
+    def phasor_factor(self, composite, codebooks, iters=100, tolerant=False):
         """Factor a phasor product into one atom per codebook, KEEPING THE PHASE.
 
         Use this and not factor_composite for complex/phasor composites: that faculty is correct
         for the real/bipolar family it was validated on, but casts a complex composite to float
         and discards the imaginary part. Measured over 60 random 3-factor products (search space
         512): real-cast 0.250, this 0.967, chance 0.002. See holographic_phasor.factor.
+
+        tolerant=False (the default) is the original path, bit for bit, and returns a tuple of
+        indices. tolerant=True (CLM backlog wave 2, 2026-09-26) returns a DICT {factors, agreement,
+        p_value, accepted, exit, solved, ...}: restarts, an agreement exit and a procedure-matched
+        null p-value, so a NOISY composite is still factored and a structureless one is refused
+        (accepted False) instead of guessed. MEASURED at 20 x 50 x 50, D=2048, 20 trials per row
+        (python -m holographic.agents_and_reasoning.holographic_phasor --bench): the default path
+        solves 0/20 even EXACT products (2/20 at phase noise 0.3, 0/20 at 0.6); tolerant 20/20
+        right and accepted at 0.0 / 0.3 / 0.6, 0 wrong accepted; a random composite 0/20 accepted
+        (median p 0.45), 1.2 s to refuse. KEPT NEGATIVE: the first call per codebook shape pays the
+        procedure-matched null fit once (126 s at 20 x 50 x 50 under load 7; cached per process).
         """
         import holographic.agents_and_reasoning.holographic_phasor as _ph
-        return _ph.factor(composite, codebooks, iters=iters)
+        # the faculty used to drop `tolerant` on the floor -- the mind could not reach the wave-2 fix
+        return _ph.factor(composite, codebooks, iters=iters, tolerant=tolerant)
 
     def phasor_power(self, atom, x):
         """Fractional power of a phasor atom -- phase scaling, so continuous coordinates, time and

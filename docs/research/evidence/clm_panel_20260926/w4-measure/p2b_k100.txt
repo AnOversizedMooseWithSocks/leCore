@@ -1,0 +1,29 @@
+[k100] rows 151 wordings 15100 feats 34123  setup 3.5s
+BASE blend0.8 (today)      top1 val 0.8300 test 0.8184 | P0.97 cov 35.6% prec 0.975 oos 1.0% | P0.95 cov 49.8% prec 0.957 oos 1.6%
+centroid only (init)       top1 val 0.7963 test 0.7876 | P0.97 cov 27.2% prec 0.978 oos 1.0% | P0.95 cov 39.0% prec 0.961 oos 1.6%
+   infonce tau=0.05 eta=0.03: val top1 by epoch {2: 0.8827, 4: 0.8803, 8: 0.882}  (5.3s)
+   infonce tau=0.05 eta=0.1: val top1 by epoch {2: 0.8837, 4: 0.8807, 8: 0.8817}  (5.7s)
+   infonce tau=0.02 eta=0.1: val top1 by epoch {2: 0.8803, 4: 0.878, 8: 0.881}  (5.2s)
+infonce s0 t0.02 e0.1 ep8 proto top1 val 0.8850 test 0.8709 | P0.97 cov 50.9% prec 0.977 oos 1.4% | P0.95 cov 72.2% prec 0.949 oos 4.7%  | top-1 d+0.0524 CI[+0.0438,+0.0616] fixed 331 broke 95
+      P0.97 coverage vs base +15.2pt CI[+14.0,+16.5]
+      P0.95 coverage vs base +22.5pt CI[+21.2,+23.7]
+   ...same, signal=softmax p_max top1 val 0.8850 test 0.8709 | P0.97 cov 59.0% prec 0.976 oos 2.3% | P0.95 cov 73.9% prec 0.951 oos 4.9%
+infonce s1 t0.02 e0.1 ep8 proto top1 val 0.8807 test 0.8756 | P0.97 cov 53.6% prec 0.979 oos 1.0% | P0.95 cov 68.4% prec 0.962 oos 3.3%  | top-1 d+0.0571 CI[+0.0484,+0.0656] fixed 345 broke 88
+      P0.97 coverage vs base +18.0pt CI[+16.7,+19.2]
+      P0.95 coverage vs base +18.6pt CI[+17.4,+19.8]
+infonce s2 t0.02 e0.1 ep8 proto top1 val 0.8797 test 0.8740 | P0.97 cov 57.3% prec 0.976 oos 1.6% | P0.95 cov 71.5% prec 0.952 oos 4.3%  | top-1 d+0.0556 CI[+0.0467,+0.0644] fixed 352 broke 102
+      P0.97 coverage vs base +21.7pt CI[+20.3,+22.9]
+      P0.95 coverage vs base +21.7pt CI[+20.4,+23.0]
+infonce TEST top-1 over seeds: mean 0.8735  range [0.8709, 0.8756]  (base 0.8184)
+   adapthd tau=None eta=0.03: val top1 by epoch {2: 0.8717, 4: 0.874, 8: 0.876}  (1.7s)
+adapthd s0 tNone e0.03 ep8 blend top1 val 0.8760 test 0.8587 | P0.97 cov 47.4% prec 0.976 oos 1.4% | P0.95 cov 62.4% prec 0.946 oos 3.5%  | top-1 d+0.0402 CI[+0.0327,+0.0484] fixed 252 broke 71
+      P0.97 coverage vs base +11.8pt CI[+10.8,+12.8]
+      P0.95 coverage vs base +12.6pt CI[+11.6,+13.7]
+adapthd s1 tNone e0.03 ep8 blend top1 val 0.8747 test 0.8607 | P0.97 cov 48.7% prec 0.977 oos 1.4% | P0.95 cov 61.8% prec 0.952 oos 3.3%  | top-1 d+0.0422 CI[+0.0349,+0.0498] fixed 250 broke 60
+      P0.97 coverage vs base +13.0pt CI[+12.0,+14.0]
+      P0.95 coverage vs base +12.0pt CI[+11.0,+13.0]
+adapthd s2 tNone e0.03 ep8 blend top1 val 0.8740 test 0.8627 | P0.97 cov 49.5% prec 0.979 oos 1.4% | P0.95 cov 62.6% prec 0.953 oos 3.3%  | top-1 d+0.0442 CI[+0.0364,+0.0520] fixed 260 broke 61
+      P0.97 coverage vs base +13.9pt CI[+12.8,+14.9]
+      P0.95 coverage vs base +12.8pt CI[+11.8,+13.8]
+adapthd TEST top-1 over seeds: mean 0.8607  range [0.8587, 0.8627]  (base 0.8184)
+total 44.0s

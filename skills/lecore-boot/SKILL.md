@@ -8,7 +8,9 @@ description: "Boot the leCore holographic engine (leos-core) as the working envi
 leCore is a NumPy-only Vector Symbolic Architecture engine: memory, meaning, geometry,
 images and programs as points in one high-dimensional space, with calibrated abstention
 (it refuses rather than guesses), self-measuring search, bit-reproducible determinism,
-and ~2,440 faculties behind one `UnifiedMind` facade (27 parts; the decision faculties live in part 27). Its own instruction to agents is
+and ~2,510 faculties behind one `UnifiedMind` facade (33 parts; the decision faculties live in parts 27–33:
+typed / route / verify in 27, meaning in 28, the one contrastive rule + `rank` + `verify_precheck` in 29, call
+composition in 30, the router and the tool door in 33). Its own instruction to agents is
 short and worth taking literally: **do not summarize this project from the file tree —
 ask the engine.** It carries a semantic search over its own capabilities and is better
 at finding the right module than grep.
@@ -57,7 +59,7 @@ See "Acceleration" below before promising a GPU anything.
     export LECORE_MEMORY_ROOT=$LECORE_PARTITION
     nohup setsid python3 holographic_service.py --port 8080 \
         --persist "$LECORE_PARTITION/service_store.json" > lecore_service.log 2>&1 < /dev/null &
-    sleep 5; curl -s http://127.0.0.1:8080/health           # {"ok": true, "name": "leCore", "capabilities": 868, ...}
+    sleep 5; curl -s http://127.0.0.1:8080/health           # {"ok": true, "name": "leCore", "capabilities": 895, ...}
 
 `setsid` + `< /dev/null`: a plain `nohup … &` was reaped mid-turn in a cloud sandbox, and
 background processes do not survive between turns there. Start every turn with
@@ -117,15 +119,19 @@ a swarm step; a failing brightness check stops it). Gate: `python3 tools/mcp_lin
 
 The service starts with an EMPTY mind; `boot` mounts the partition (order: POST → mount →
 doctrine → services → report). Require `mounted` == the partition path and every row of
-`post_after_mount` `true` or `skipped`; report `inventory.taught` (385 on the shipped
-partition). If `mounted` is null, STOP — never work on a virgin mind while believing
-memory is loaded.
+`post_after_mount` `true` or `skipped`; report `inventory.taught` (627 on the repo's
+`lecore_memory` on 2026-09-27; 385 on the older shipped partition). If `mounted` is null,
+STOP — never work on a virgin mind while believing memory is loaded. `boot` is also what
+brings back the decision ledger: until it runs, `decision_outcome` on an id from an earlier
+session raises `KeyError: no decision record` (measured on a restarted service; after
+`boot` the same id landed).
 
 `learning_rollover` is NOT optional. Measured bug: `learning_save` without a prior
 rollover writes the legacy `learning/state.lecore`, which the loader ranks OLDEST — a
 session's teaching vanished on the next boot (402 rows taught, 385 came back). After the
 rollover the partition holds exactly one generation, `learning/state-YYYYMMDD-HHMMSSZ.lecore`,
-and saves go there. Report the row count and the file name, then prove recall with one
+and saves go there. Report the row count (`taught_rows`), `decisions_merged` (records older
+generations contributed to the ledger) and the file name, then prove recall with one
 `ask` of something taught in an earlier session, in its taught wording — recall matches
 wording closely, and a loose rewording is refused by design.
 
@@ -147,8 +153,50 @@ person is never wired in as the back end. Over the service the same contract is 
       inv '{"name":"resolve","args":{"question":"...","answer":"...","by":"<agent-name>"}}'
 
   The next `serve` is T0 with provenance `human:<agent-name>`. Before finishing,
-  `inv '{"name":"escalations","args":{}}'` must be empty. Note `escalations()` is
-  in-process only (it does not survive a restart) and only `serve()` populates it.
+  `inv '{"name":"escalations","args":{}}'` must be empty. Only `serve()` populates it. Since
+  2026-09-27 open escalations are SAVED with the partition (newest 2,048; a question carrying a
+  secret is never written), so a restarted service still lists them and `resolve` still clears
+  them (before, a restart lost them and `resolve` returned `cleared: false`).
+
+Since sweep 182 (2026-09-26) `serve` does two more things (both run against a service
+started from that code; a service started earlier does not have them — restart it):
+
+- **It asks the router after a memory miss.** A capability question can come back
+  `{"served": true, "via": "route", "tier": "T1", "capability": …, "method": …, "answer":
+  "use capability '…' -- mind.<method>(...)", "id", "bar", "p_correct", "p_null"}` — e.g.
+  `serve("decode a png")` → "Read a render back (PNG -> array, …)". Measured on the panel's
+  20 alias probes: 0/20 served before, 19/20 now, 0 wrong. It serves only when the route's
+  gate clears a bar re-derived for precision 0.90; a menu or a refusal escalates.
+- **The escalation packet carries both halves of the decision.** `meaning: {prompt,
+  candidates}` is a typed question about the WORDING (is it one of these taught rows?), and
+  `route: {tier, id, z, options}` is the capability menu (on a mind that had not seen it,
+  `serve("denoise an image")` → tier `menu`, five options; after its pick was reported by
+  `route.id`, the same question was served from experience, `via: "reflex"`). Answer the one
+  that fits:
+
+      # the question rewords a taught row -> link it (no duplicate row); the next serve is T0 "matched_by": "meaning"
+      inv '{"name":"meaning_resolve","args":{"query":"how should i draw hands on a cartoon character","verdict":{"verdict":"same","row":"<row id from candidates>"},"by":"<agent-name>"}}'
+      # a new fact -> {"verdict":"new","answer":"..."}; a bare value ("eth?") -> {"verdict":"unclear","clarify":"<one question>"}
+      # you used one of the route menu's capabilities -> report it by the route id, with the card NAME
+      inv '{"name":"decision_outcome","args":{"record_id":"<route.id>","outcome":"Denoise (domain)"}}'
+
+  `meaning_resolve` takes `verdict` (the dict or the raw JSON reply), not `reply`. Since the
+  maple swarm run (2026-09-27; docs/research/BENCHMARK_maple_swarm.md), on a service started
+  from that code:
+  - an applied verdict clears that question from `escalations()` (`cleared: true`). So does a
+    `teach` of the exact wording, and so does a later `serve` that answers it. Before, 26 of 55
+    "open" questions were already serving at T0.
+  - a wording a verdict linked is served as that row, word for word: 86/86 after a restart,
+    up from 33/48.
+  - a verdict is labelled against the candidates the model was SHOWN, so two workers answering
+    the same question no longer poison the calibrated gate.
+  - a restarted service saves into the generation it booted, not the legacy file. The rollover
+    stays the rule.
+  Pick `same` only when a candidate asks the SAME thing. A related row is not the same thing:
+  a wrong `same` teaches a wrong reflex, and a wrong `new` answer is served until someone
+  re-teaches it. In the run, one worker taught that hatchfill "only fills circles", which was
+  wrong. Measured on unseen rewordings: 1–2 of 16 serve per round, with 0 wrong; the rest come
+  back with the right row among the candidates, which makes a cheap `same`.
 
 ## The semantic system — what the tiers and words mean
 
@@ -170,12 +218,17 @@ ways across the doors, so check `card["primary"]` when in doubt:
 |---|---|---|---|
 | a faculty for a problem | `find_capability(problem, k, accepts, produces)` | `POST /capabilities/search {"query"}` | `lecore_find(query)` |
 | rank skills for a task | `suggest(task, k)`, `route(task)` → act / choose / unknown | `POST /skills/suggest`, `/skills/route` | — |
+| rank candidates YOU hold (sweep 182) | `rank(state, candidates)` → value, ranked, p_correct, p_null, id | `/invoke` | `lecore_invoke` |
 | one faculty's contract | `describe_skill(name)`, `complete_method(prefix)` | `POST /skills/card`, `/skills/complete` | `lecore_describe(name)` |
 | ask / teach | `ask(query)`, `serve(query)`, `teach(query, answer)`, `teach_about(question, answer, paths)`, `resolve(question, answer, by)` | `/invoke` | `zoo_ask`, `zoo_teach` |
 | what is stale | `stale_facts(root)`, `codebase_sync(root, only_stale=True)` | `/invoke` | — |
 | plugins present | `plugin_list()` → available / missing / install | `/invoke` | `lecore_map` |
 
-`teach()` can refuse (`{"taught": false, "reason"}`) — check the flag. `suggest_pipeline
+`teach()` can refuse (`{"taught": false, "guard", "reason"}`) — check the flag. `guard:
+"sensitive"` is a secret (never learned, no override); `guard: "volatile"` is a live reading
+(teach the tool that fetches it, or a dated snapshot) — or, since sweep 182, a question too
+bare to tell what it asks (`teach("eth", "3100")` → "unclear … ask what was meant"): ask the
+person, do not rephrase it into the memory. `suggest_pipeline
 (start_kind, goal_kind)` chains faculties by io kind. `route_semantic` is the embedding
 router (7/12 top-1 vs 2/12 for token overlap, measured) and returns `None` rather than
 fabricate an embedding — fall back to `find_capability`. Once oriented, the engine is
@@ -200,6 +253,9 @@ partition, its one-line role, the `inv` helper, and this contract verbatim:
     - Write as you go: inv '{"name":"teach","args":{"query":"<question>","answer":"<answer>"}}'
       after every measurement, bug located, decision settled, and approach RULED OUT.
     - A refused or escalated answer is a result. Never paraphrase it into a guess.
+    - Every result you ACTED on carries an id (typed, route, rank, serve): report what actually happened,
+        inv '{"name":"decision_outcome","args":{"record_id":"<id>","outcome":"<what was right>"}}'
+      so the door that decided learns (read p_correct, never the deprecated bare p).
     - Report numbers with baselines. Keep negatives loud.
     - Finish by listing every teach/resolve you made, with the exact query strings.
 
@@ -312,7 +368,8 @@ reference with live-generated JSON is `docs/TYPED_DECISIONS.md`; measurements ar
     # 0. the natural path: route() is tiered and learns; typed() is the one-line decision with the lint built in
     inv '{"name":"route","args":{"task":"smooth a bumpy mesh"}}'          # act / choose / abstain + tier, z, id
     inv '{"name":"typed","args":{"state":"courier lost the package","options":["billing","shipping"]}}'
-    #    -> value, ranked, p, id, lint (heed the warns); then decision_outcome(id, truth) -- everything learns
+    #    -> value, ranked, p_correct, p_null, id, lint (heed the warns); then decision_outcome(id, truth) -- everything learns
+    #    (p_correct is None until that door has calibrated on reported outcomes; the bare "p" is deprecated -- Step 7c)
 
     # 1. lint the question BEFORE asking (every failure the tool experiments hit is a finding)
     inv '{"name":"systemone_lint","args":{"questions":{"cat":{"type":"choice","options":["billing","shipping"],
@@ -320,10 +377,11 @@ reference with live-generated JSON is `docs/TYPED_DECISIONS.md`; measurements ar
          "states":["my card was charged twice. also the parcel is late"]}}'
     #    -> findings: budgets imbalanced >2x, <3 examples, recommended scorer, multi-clause state (split), contrastive
 
-    # 2. decide; scorer nb from ~20 examples per option; labeled rows give p and (with conformal_alpha) a SET
+    # 2. decide; scorer nb from ~20 examples per option; labeled rows calibrate p_correct and (with conformal_alpha) a SET
     inv '{"name":"systemone_decide","args":{"state":"courier lost the package","questions":{...},
          "scorer":"nb","encoder":"ngram","labeled":[["parcel is lost",{"cat":"shipping"}],...],"conformal_alpha":0.1}}'
-    #    -> {"cat":{"value","ranked","margin_gap","p","set","via","id"}}   (coverage 0.960 at nominal 0.95)
+    #    -> {"cat":{"value","ranked","margin_gap","p_correct","p_null","set","via","id"}}   (coverage 0.960 at nominal 0.95)
+    #    scorer "contrastive" (sweep 182) learns from EVERY outcome, not only misses: Banking77 one pass 0.826 vs 0.725
 
     # 3. report the outcome BY ID -- the only outcome path; the table, the reflex and the calibration learn
     inv '{"name":"decision_outcome","args":{"record_id":"<id>","outcome":"shipping"}}'
@@ -371,12 +429,115 @@ installed by a studio app shadows the checkout — `PYTHONPATH=.`); a 30-minute 
 turn boundary with nothing written — checkpoint per unit (strips, instances) and resume; the
 scorer bench was reaped by memory pressure with the studio, the service and the bench resident.
 
+## Step 7c — one learning loop under every door (sweep 182, the CLM backlog, 2026-09-26)
+
+Every door that decides now returns the same record — `value, ranked, margin, p_correct, p_null, id`
+(plus `set`, `via`, `evidence` where the door has them) — takes its outcome through
+`decision_outcome(id, truth)`, and learns through ONE contrastive rule on its own prototype store with
+its OWN calibrator. Measurements with baselines: `docs/research/BENCHMARK_sweep182_contrastive.md`;
+syntax with live JSON: `docs/TYPED_DECISIONS.md` sections 8d–8e. Every command below ran over
+`/invoke` against a service started from that code. What changes for an agent:
+
+**Read `p_correct` and `p_null`; stop reading `p`.**
+
+- `p_correct` = calibrated P(this answer is right). HIGH = confident. `None` until that door's own
+  calibrator has labelled outcomes of both kinds (8 for the door calibrators) — an uncalibrated door
+  says so instead of inventing a number.
+- `p_null` = a significance p-value against the door's null (the route's catalog null, `rank`'s word
+  salad of the state's length). LOW = significant. `None` where a door has no null.
+- The bare `p` stays one release with its OLD per-door meaning — the route's null p-value (low = good)
+  but the reflex's 1 − error (high = good) — and reading it in process emits a `DeprecationWarning`.
+  Over HTTP it is still in the JSON: ignore it.
+- `inv '{"name":"door_calibration_report","args":{}}'` → `{door: {labels, correct, calibrated}}`: which
+  doors can already give you a `p_correct`.
+
+**Report every outcome by id; every door learns from it.** Report `"failed"` only when NO truth is
+known — it paints the reflex's failure field and teaches no calibrator.
+
+| door | the id comes from | report as truth | what learns |
+|---|---|---|---|
+| typed | `typed`, `systemone_decide` | the option that was right | the SystemOne table and its isotonic `p_correct`; the reflex trace |
+| route | `route`, `route_tiered`, `serve` (a served `via: "route"`, or `route.id` in an escalation) | the capability card's NAME | the route calibrator, the learned router's pair, the reflex |
+| rank | `rank` | the label that was right | the rank door's prototypes, calibrator and conformal set |
+| meaning | `serve` / `ask` with `"matched_by": "meaning"` | the right row id | the MeaningIndex (a corrected serve teaches the wording); `verify_decision(query, row, key="meaning")` then vouches |
+| compose | `call_from_question`, `call_compose` | the right call string, e.g. `fx(amount=200, from=USD, to=EUR)` | the compose calibrator |
+| swarm step | automatic | nothing: the verify result IS the label | `verify_precheck`'s success AND failure prototypes |
+
+    inv '{"name":"decision_outcome","args":{"record_id":"<rank id>","outcome":"shipping"}}'
+    #    -> "door": "rank", "forwarded": {"learned": true, "p_truth": 0.9987, ...}
+
+**Ids survive a restart.** `learning_save` writes the ledger and SystemOne's learned tables into
+`lecore.learning.decisions` (newest 4,096 records; a record carrying a secret is never written);
+`boot` restores them; `learning_rollover` carries them. Measured: a typed decision issued, saved,
+the service killed and restarted — `KeyError` before `boot`, the outcome landed after `boot`.
+Route, tool, compose and CLM outcomes used to be the exception (their hooks were live closures, so an
+outcome reported after a restart trained nothing, `"forwarded": null`). FIXED by the learning-loop audit (2026-09-27, `tools/audit_learning_loop.py`, `docs/research/evidence/audit_learning_loop.json`): route and tool-door records now carry a restart-proof hook spec in their meta, and compose and the CLM plugin use the restart-proof `calibrate` spec -- after a restart, an outcome reported by id trains the router, the tool door, the compose calibrator and the CLM calibrator (all four were 0 of 1 before). The door x property matrix (learns live / after a restart / survives a reload / guard holds) is all PASS for 14 doors; `reflex_retile` keeps the trace's outcome fields (before, a retile dropped the failure field's norm from 2.23 to 0.00).
+
+**A correction now unlearns.** `decision_outcome(id, <a different answer>)` writes the truth AND takes
+the wrong answer back out of the reflex trace (`reflex_correction_mode()` → `"lms_apa"`): the same
+key reads the truth 1.000 after one correction (0.453 before); a neighbour at cosine 0.8 keeps its
+own answer 1.000 (0.900 before). `provenance` stays selectable and fails the neighbour bar (0.780).
+
+**New doors** (each ran as written):
+
+    # rank candidates YOU already hold -- strings, or {"text", "examples"}; under the absolute floor 0.15 it refuses
+    inv '{"name":"rank","args":{"state":"my parcel never arrived","candidates":[{"text":"shipping","examples":["parcel lost in transit","package never arrived","courier delivery late"]},{"text":"billing","examples":["card charged twice","refund my invoice"]},{"text":"account","examples":["reset my password","cannot log in"]}]}}'
+    #    -> value "shipping", margin 0.349, p_correct None (uncalibrated), p_null 0.26, id
+    #    bare phrases share few character n-grams: ["billing question","lost or late delivery",...] REFUSED (top 0.013)
+
+    # which action will pass its verify? a pre-check that orders, never a verify (swarm_step teaches it)
+    inv '{"name":"verify_precheck","args":{"state":"resolve families","actions":["skill_lint","catalog_families"]}}'
+    #    after one verified swarm_step on catalog_families -> order ["catalog_families","skill_lint"], score 1.0
+
+    # compose a call from a question (a CANDIDATE, never executed); teach direction first or it is positional
+    inv '{"name":"direction_learn","args":{"question":"how many euros do i get for 200 dollars","from_question":{"from":"dollars","to":"euros"}}}'
+    inv '{"name":"call_from_question","args":{"question":"how many euros do i get for 200 dollars","verb":"fx","mentions":{"euros":"EUR","dollars":"USD"}}}'
+    #    untaught it read via "positional" -> fx(from=EUR, to=USD): WRONG direction. One taught example and
+    #    direction_read("how many yen do i get for 50 pounds") -> from pounds, to yen (via context)
+
+    # the learned capability router: OFF by default (a fresh mind routes exactly as before)
+    inv '{"name":"router_learn","args":{}}'      # 45 s at load 0.9: 10,792 alias pairs -> 3,990 rows, mode on
+    inv '{"name":"router_report","args":{}}'
+
+`router_learn` buys +1.5 points of held-out top-1 (0.412 vs 0.397 lexical, CI [+0.45, +2.5]) and costs
+the partition: 5.6 MB → 20.8 MB after one save (measured). Leave it off unless routing quality is the
+task. `systemone_decide(..., scorer="contrastive")` is opt-in (the default stays `prototype`, bit for
+bit). `protostore_share(door)` says whether a door's learned prototypes may travel through `contribute`
+/ `commons_pool`: the router and the tool door are shareable by default, and a store that ever learned
+a question the guard refused, or a session-salted one, never travels. `phasor_factor(...,
+tolerant=True)` and the resonator's `tolerant=True` factor NOISY composites with a p-value (phasor
+0/20 → 20/20 at 20×50×50; resonator 5/20 → 20/20 at 5% flips) — opt-in. The CLM model end is a
+plugin: `clm_status` says why it is unreachable (here: no torch, no `LECORE_CLM_URL`); its answers
+are one more typed verdict whose `p_correct` is OURS.
+
+Kept negatives from this pass (do not re-litigate): static `rank` only TIES TF-IDF (0.697 vs 0.696 —
+it earns its keep by learning: 0.892 on the last third); `verify_precheck` is no better than chance
+on NOVEL tasks (0.545 vs the reflex's 0.603); with the probes' own aliases removed from the index
+`serve` routes 0/20 — it answers near-exact capability wording, not paraphrases; the consult's
+steady-state cost is small (serve on a miss p50 3.2 / p95 4.2 ms, warm, 2026-09-27) but a process's FIRST
+route builds the catalog (~0.4 s) and the first question of a new word count computes the router's null
+(~0.2 s, then cached on disk); the router's serve bar must be re-derived when the catalog changes
+materially (`tools/bench_router.py --sections gate,serve`: 6.8685 → 7.1680 at 3,996 cards); the typed learning guard misses its bar
+(credential 28/35, live 28/40 on the old sets) but refuses 3/705 ordinary questions vs 47/705 before;
+the meaning rows'
+learned prototypes (`meaning_protos`) are OFF (+2.6 to +3.7 points top-1, but they serve out-of-scope
+past the bar); superposed n-gram / word / synonym encoders tie or lose to n-grams alone.
+
 ## Step 8 — land it
 
     inv '{"name":"learning_save","args":{"root":"'"$LECORE_PARTITION"'"}}'
 
-Report `bytes`, `drift_vs_previous_save`, the file written (the dated generation, never
-the legacy `state.lecore`), and the consolidated list of every teach/resolve. Then the
+Report `bytes`, `sections`, `sections_changed` (which sections this save actually moved — the
+honest "what was learned" line, since 2026-09-27), `drift_vs_previous_save`, the file written (the dated
+generation, never the legacy `state.lecore`), and the consolidated list of every
+teach/resolve. Baselines (2026-09-27, the repo partition): 6,792,169 bytes and 14 sections
+(`lecore.learning.decisions` is one of them; the router and tool door add their own once
+they learn — 20.8 MB after `router_learn`). Read the drift correctly: it is the cosine
+between partition fingerprints built from one hashed term per SECTION, so it counts how
+many sections changed, not how much — 1.0 means nothing changed (a second save in a row);
+two typed decisions, one reported outcome and a few serves read 0.6951 (the ledger,
+decisions, experience and calibration sections all moved); a `router_learn` read 0.5213. A drift under 1.0 after a
+session that learned anything is expected, not a warning. Then the
 deliverable, per the user's standing rule: ONE zip of only the changed/new files, paths
 relative to the repo root so it unzips in place over the checkout — no split archives,
 no full-repo zip, no commits or pushes unless asked. Include
@@ -397,6 +558,9 @@ Report every number next to its baseline and say what did NOT work.
   and teaches back, or leaves it escalated and says so.
 - Decide, don't prompt: a fixed-answer question is a typed decision (`systemone_decide`) with an
   outcome reported by id, not a model guess; a rejection is a menu (`route_tiered`), never a bare no.
+- Confidence is `p_correct` (high = confident, None = the door has not calibrated yet) and
+  significance is `p_null` (low = significant); never the deprecated bare `p`. Report the outcome
+  of every id you acted on — rank, route, meaning and compose doors learn from it too (Step 7c).
 - Decompose before you tune: when a result looks wrong, measure the terms that make it
   (a probe with a fixed region and a metric) before changing a parameter.
 - Look at every image you produce (Read the PNG); a byte count is not a picture.

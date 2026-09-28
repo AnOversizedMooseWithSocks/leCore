@@ -200,6 +200,119 @@ DOCTRINE = [
      "model went 100% to 0% errors in one round while a frozen control stayed "
      "flat",
      "branch import, sweep 76"),
+    # -- THE DECISION-LOOP PACK (sweeps 171-182, distilled 2026-09-27): what typed decisions, the meaning rung, the
+    #    CLM panel and the learning-loop audit taught about driving and teaching this engine. Admission test as
+    #    above -- each row would help a DIFFERENT deployment driven by a DIFFERENT model; the numbers are local
+    #    measurements (docs/research/BENCHMARK_sweep182_contrastive.md and the sweep-171..181 benchmarks), kept so
+    #    the reader knows the lesson was measured, not assumed.
+    ("how do I make a decision with a fixed set of answers in lecore",
+     "ask a TYPED question instead of prompting a model: typed(state, options) or systemone_decide with a "
+     "schema returns value, ranked, margin, p_correct, p_null, an honest abstention and an id; lint the schema "
+     "first (systemone_lint: balanced example budgets, at least 3 examples per option, split multi-clause "
+     "states) -- a fixed-answer question answered in free text is a guess nothing can learn from",
+     "sweeps 171-176"),
+    ("how does a lecore decision learn from what actually happened",
+     "report the outcome by id: decision_outcome(id, truth) for every id you acted on -- typed, route, rank, "
+     "serve, meaning, compose -- is the ONLY outcome path and it trains that door's prototypes, its calibrator "
+     "and the reflex; ids survive a restart once the partition is booted; report 'failed' only when no truth is "
+     "known; never let an unjudged self-report train a door (measured: agents that believed themselves learned "
+     "14 wrong answers where judged agents learned 0)",
+     "sweeps 176-182"),
+    ("how do I read the confidence of a lecore answer",
+     "p_correct is the calibrated probability the answer is right (HIGH = confident) and is None until that "
+     "door has calibrated on reported outcomes of both kinds -- an uncalibrated door says so instead of "
+     "inventing a number; p_null is a significance p-value against the door's null (LOW = significant); the "
+     "bare p is deprecated because it meant opposite things at different doors",
+     "sweep 182"),
+    ("should different decision doors share one calibration or one learned store",
+     "share the algorithm, never the state: one update rule and one store class, but every door keeps its own "
+     "prototypes, codebook, label stream and calibrator -- a shared calibration let one door's outcomes move "
+     "another door's veto, and a correction written for one key erased a neighbour's answer at cosine 0.8",
+     "sweep 182"),
+    ("how should a correction be written into an associative memory trace",
+     "subtract the wrong answer as well as adding the truth, and project the correction off the nearest keys "
+     "that own a different answer (LMS plus an affine projection): a truth-only write left the wrong answer at "
+     "full strength (the truth read back 45% of the time after one correction); the projected correction reads "
+     "100% and leaves a neighbour at cosine 0.8 untouched; corrections are raw deltas and must be replayed "
+     "verbatim on every rebuild, split and reload",
+     "sweep 182"),
+    ("how can I tell a noisy teacher from genuinely confusable data",
+     "measure the teacher against ITSELF: re-ask a few percent of questions with the candidates permuted and "
+     "solve P(agree) = (1-e)^2 + e^2/m for the flip rate e -- agreement with your own most confident rows "
+     "cannot tell the two apart (it read 0.94-0.99 for a PERFECT teacher); with e measured, correct the serve "
+     "gate and train on noise-corrected targets, using a conservative bound on e, because a small re-ask "
+     "sample misreads it and swings coverage",
+     "sweep 182"),
+    ("how do I choose a serve or abstain threshold honestly",
+     "calibrate on validation plus half of a held-out off-topic set, report on test plus the other half, under "
+     "the deployment's real mix of in-scope and off-topic questions; report risk-coverage (AURC) and several "
+     "operating points with paired-bootstrap intervals over seeds, and count the configurations you tried -- "
+     "one coverage-at-exact-precision number swung from 37.7% to 3.3% between two calibration samples of the "
+     "same model",
+     "sweep 182"),
+    ("what confidence signal should an abstaining door use",
+     "the door's own score, calibrated isotonically on its reported outcomes, with an absolute floor for "
+     "refusals; a softmax over the candidates is a feature, never the confidence -- it cannot say 'none of "
+     "these' and abstained worse (AURC 0.094 vs 0.078 for the absolute cosine); measure top score against "
+     "margin per door (ranking a caller's own candidates, the margin won at every set size)",
+     "sweep 182"),
+    ("how do I know learned state survives a restart",
+     "test the whole life cycle, door by door: decide, roll over and save, cold-reload in a FRESH mind, report "
+     "the outcome by id, check the door learned, reload again and check it kept it, and scan the saved files "
+     "for secrets; live closures die with the process, so a record must name WHAT to call (a hook spec) for "
+     "the reloaded mind to re-derive -- an audit of 14 doors found 10 that silently stopped learning or leaked "
+     "across a restart",
+     "sweep 182"),
+    ("when must a learned threshold be re-derived",
+     "whenever the population it was calibrated on changes: a threshold on a z-score against a null built from "
+     "the catalog's own vocabulary moved (6.87 to 7.17) when the catalog grew, and a benchmark's answer/menu "
+     "split moved with it; re-run the calibration, and freeze benchmark workloads as fixtures so the questions "
+     "stay put while the code under test is compared",
+     "sweeps 179-182"),
+    ("what must lecore never learn or save",
+     "secrets -- keys, passwords, seed phrases, in every wording people paste them, including 'X is my "
+     "password' -- and static answers to live questions (prices, weather): remember the METHOD that fetches a "
+     "live value, never the value; a question made only of a value (a bare ticker) is clarified, never acted "
+     "on; and redact before remembering anything you refused -- a guard that learned from its refusals once "
+     "saved the refused secret into its own examples",
+     "sweeps 179-182"),
+    ("how does lecore find a taught answer when the question is reworded",
+     "near-exact repeats belong to the reflex; rewordings belong to the meaning rung, which serves a taught row "
+     "only at a calibrated probability the model would agree, and hands an unsure question to the model as a "
+     "TYPED choice (same row / new answer plus how it was found / unclear) whose verdict is learned at once -- "
+     "each new wording costs one model call, once",
+     "sweep 181"),
+    ("what is a good hard negative for a learned prototype",
+     "the candidate that actually beat the truth, labelled by the teacher or an outcome -- never a generated "
+     "sentence; and check the teacher's margin before trusting it: a wrong 'not A' usually points at a far "
+     "candidate, so cos(q, pick) - cos(q, A) flags planted teacher errors (AUROC 0.936) where a hardness-based "
+     "quality score did worse than chance",
+     "sweep 182"),
+    ("how should a swarm of agents share one lecore memory",
+     "one service process per memory partition and N agents on one URL, never in-process minds on the same "
+     "partition; every step goes through swarm_step with done_when, evidence and a verify that runs before the "
+     "step is accepted; only a verified outcome teaches, and a failed verify is a labelled failure too; teach "
+     "measurements and ruled-out approaches as you go, so the next agent's first question finds them",
+     "sweeps 176-182"),
+    # -- THE CORE-MEMORY PACK (2026-09-27, owner-directed: the seed and core memory exist to cut model calls and
+    #    pick tools; what a mind learns about wording, methods and APIs must reach it). Numbers are local
+    #    measurements (tools/bench_core_memory.py -> docs/research/evidence/bench_core_memory.json).
+    ("how does lecore remember how to use an api that needs a key",
+     "as a named environment placeholder, never the key: api_learn reads the spec's security scheme, and a key "
+     "passed once by hand to api_use teaches which header or query parameter carries it -- both are stored as "
+     "${SERVICE_PARAM} (toyair + X-Api-Key -> ${TOYAIR_API_KEY}); tool reflex params and method constants too. The "
+     "value is read from the environment only at call time, and an unset variable fails loudly naming it, before "
+     "any request is made -- a learned call never goes out without its auth",
+     "core memory, 2026-09-27"),
+    ("what should travel from a working memory into the core memory",
+     "whatever saves a model call or picks a tool, once it is confirmed: the confirmed wordings of shipped rows "
+     "(associations re-learned from shipped wordings only), method rows (verb, slots, words-to-value maps, never a "
+     "live value), api specs and tool reflexes with placeholders, and door stores the commons rule calls "
+     "shareable; a row the model created ships only after a second event confirmed it. Measured on CLINC150: "
+     "rows alone carried 19 of 800 held-out rewordings a fresh mind could serve, the extended distillate with its "
+     "calibration 308 (the mind that learned them: 312); question vectors without their text, one user's "
+     "decisions and a deployment's thresholds stay home",
+     "core memory, 2026-09-27"),
 ]
 
 
@@ -249,6 +362,18 @@ def register_doctrine(mind, force=False):
     lad = mind.zoo["ladder"]
     n = 0
     for q, a, prov in DOCTRINE:
+        if not force:
+            # TEACH ONLY WHAT IS MISSING (2026-09-27). The first+last probe above answers "is the whole pack
+            # here?"; when a pack GROWS, a partition seeded earlier fails it and the old code re-taught EVERY row,
+            # duplicating the rows the store already served (the bloat the two fixes above exist to stop). Ask
+            # the store about each row and teach only the rows it cannot answer with their doctrine tag.
+            try:
+                got = lad.answer(q)
+                txt = str(got.get("answer") if isinstance(got, dict) else got or "")
+                if "[doctrine" in txt and txt.startswith(a[:40]):
+                    continue
+            except Exception:
+                pass
         lad._remember(lad._qkey(q), "%s  [doctrine %s]" % (a, prov), q)
         n += 1
     mind._doctrine_registered = True
@@ -322,6 +447,21 @@ def _selftest():
                       ("how does a model boot on this substrate", "rollover")]:
         _a = m.ask(_q)
         assert _a["tier"] == "T0" and _frag in str(_a["answer"]).lower(), (_q, _a)
+    # the decision-loop pack (sweeps 171-182) answers at T0 too
+    for _q, _frag in [("how do I read the confidence of a lecore answer", "p_correct"),
+                      ("how does a lecore decision learn from what actually happened", "decision_outcome"),
+                      ("what must lecore never learn or save", "method"),
+                      ("how can I tell a noisy teacher from genuinely confusable data", "re-ask")]:
+        _a = m.ask(_q)
+        assert _a["tier"] == "T0" and _frag in str(_a["answer"]).lower(), (_q, _a)
+    # a GROWN pack teaches only the new rows into a store that already holds the old ones
+    g = lecore.UnifiedMind()
+    g.zoo_attach(lambda p: "MODEL")
+    lad = g.zoo["ladder"]
+    for _q, _a2, _p in DOCTRINE[:-3]:
+        lad._remember(lad._qkey(_q), "%s  [doctrine %s]" % (_a2, _p), _q)
+    before = len(lad.taught_log)
+    assert register_doctrine(g) == 3 and len(lad.taught_log) == before + 3
     a = m.ask("how do I run a long agent task with lecore")
     assert a["tier"] == "T0" and "idle" in str(a["answer"]).lower()
     b = m.ask("what is the right size policy for memory")

@@ -1,0 +1,1135 @@
+{
+"seed": 2,
+"tasks": [
+{
+"card": "Nested memory library (many knowledge bases in ONE vector, one-unbind queries)",
+"method": "nested_memory",
+"wordings": [
+"bind pair facts holding",
+"superposes flat values into"
+]
+},
+{
+"card": "Islands + sleep (solve only what is still moving)",
+"method": "islands",
+"wordings": [
+"only constraint step operator",
+"settles after rest bodies"
+]
+},
+{
+"card": "Who is in the workspace (cross-app presence, host, notes, long-poll, open an app's .lews file)",
+"method": "lews_open",
+"wordings": [
+"file import root polls",
+"long file live every"
+]
+},
+{
+"card": "Global worst view over the sphere (Lipschitz / DIRECT, no dense sweep)",
+"method": "worst_view",
+"wordings": [
+"best without mode dense",
+"direction without when turntable"
+]
+},
+{
+"card": "query_fuzzy",
+"method": "query_fuzzy",
+"wordings": [
+"fuzzy near role role",
+"value scene layer similarity"
+]
+},
+{
+"card": "sdf_scene",
+"method": "sdf_scene",
+"wordings": [
+"optional parts cull scene",
+"argmin material parts radius"
+]
+},
+{
+"card": "chart_space",
+"method": "chart_space",
+"wordings": [
+"holographic rays runner than",
+"zones random placement honest"
+]
+},
+{
+"card": "systemone_map",
+"method": "systemone_map",
+"wordings": [
+"needs volume honest vendor",
+"identical batch reliability labeled"
+]
+},
+{
+"card": "Bake a normal map (high to low)",
+"method": "bake_normal_map",
+"wordings": [
+"optionally flat bakes find",
+"with project size bakes"
+]
+},
+{
+"card": "Topology gate (reject remeshes that punch holes or shatter components)",
+"method": "topology_gate",
+"wordings": [
+"present preserved verdict rejected",
+"genus with verdict boundary"
+]
+},
+{
+"card": "Search the engine's own source by meaning",
+"method": "code_search",
+"wordings": [
+"what docstring only catalog",
+"which latency functions negative"
+]
+},
+{
+"card": "Blendshape basis with DECLARED local support (STAR's fix, without the scans)",
+"method": "mesh_from_sdf",
+"wordings": [
+"long realism blend activation",
+"displaces away authors range"
+]
+},
+{
+"card": "LBS volume-loss bound (predict the candy wrapper, then refuse the pose)",
+"method": "skin_twist_shrink",
+"wordings": [
+"conservative theorem skin volume",
+"loses under pose twist"
+]
+},
+{
+"card": "chain_transport",
+"method": "chain_transport",
+"wordings": [
+"prefix deep time ahead",
+"ahead dive pixels lever"
+]
+},
+{
+"card": "Safe offset / wrap injectivity (the reach, both conditions)",
+"method": "mesh_from_sdf",
+"wordings": [
+"reads error collinear surface",
+"term wrap fold each"
+]
+},
+{
+"card": "Fork and apply a shared world (workspace)",
+"method": "apply",
+"wordings": [
+"named world reads copy",
+"reconcile writes deltas your"
+]
+},
+{
+"card": "Blend M shader variants into one transfer",
+"method": "shader_combine",
+"wordings": [
+"weighted variants orthogonal shift",
+"pipes than itself just"
+]
+},
+{
+"card": "Batched bind on ANY GPU (circular convolution)",
+"method": "wgsl_bind_batch",
+"wordings": [
+"verified shape verified rfft",
+"convolution purpose single arithmetic"
+]
+},
+{
+"card": "Decoded-instruction cache (fetch/decode split from execute)",
+"method": "vm_decode_plan",
+"wordings": [
+"identical flip iteration vector",
+"decodeplan decodes spectral rule"
+]
+},
+{
+"card": "as_atom",
+"method": "as_atom",
+"wordings": [
+"atom layer descriptor vector",
+"bindable atom harmonic descriptor"
+]
+},
+{
+"card": "Quad remesh (field-guided tris-to-quads)",
+"method": "quad_remesh",
+"wordings": [
+"triangle edges field whose",
+"quad field preferring field"
+]
+},
+{
+"card": "Routed roles (the semantic system staffs the swarm)",
+"method": "dispatch_roles",
+"wordings": [
+"ambiguity channels task misstaffing",
+"member nobody targets match"
+]
+},
+{
+"card": "match_record",
+"method": "match_record",
+"wordings": [
+"matches score query general",
+"astronomy bound conserved market"
+]
+},
+{
+"card": "ascii_sdf",
+"method": "ascii_sdf",
+"wordings": [
+"scene shade pass text",
+"edge shade loop small"
+]
+},
+{
+"card": "Retopo destruction fixes (singular-cell snap + feature-sized lattice)",
+"method": "surface_retopo",
+"wordings": [
+"degenerate never retopo both",
+"spatialmemory sized mesh finer"
+]
+},
+{
+"card": "Proportional edit (soft grab with falloff)",
+"method": "proportional_edit",
+"wordings": [
+"ring geodesic grab sharp",
+"proportional neighbours rotate instead"
+]
+},
+{
+"card": "Decomposition contract (do the pieces sum back, and may you use them at time t)",
+"method": "decomposition_contract",
+"wordings": [
+"implicit removed components sliver",
+"correlated sharp causal projection"
+]
+},
+{
+"card": "Plugins (extend a mind's verbs without growing the core)",
+"method": "plugin_list",
+"wordings": [
+"holographic optional does points",
+"preflight version faculty plugins"
+]
+},
+{
+"card": "Selection ledger (correct over everything you TRIED, not what survived)",
+"method": "selection_ledger",
+"wordings": [
+"pass selection keeps over",
+"values effect elsewhere behind"
+]
+},
+{
+"card": "Distributional codec (store the distribution, not the samples)",
+"method": "distribution_encode",
+"wordings": [
+"codec sample report encode",
+"never point inverts points"
+]
+},
+{
+"card": "Navigation & planning",
+"method": "solve_maze",
+"wordings": [
+"plan mould through flow",
+"space plan navigator maze"
+]
+},
+{
+"card": "Build a scene from a photo (image -> editable scene)",
+"method": "scene_from_image",
+"wordings": [
+"from assemble colour build",
+"objects image assembles roles"
+]
+},
+{
+"card": "scene_cost",
+"method": "scene_cost",
+"wordings": [
+"real language model approx",
+"cost time plain scene"
+]
+},
+{
+"card": "Spectroscopist's bench (lines, identity with abstention, redshift verdict, decay)",
+"method": "spectral_lines",
+"wordings": [
+"line math lambda single",
+"mind explain hunting delta"
+]
+},
+{
+"card": "The machine model (leCore's hardware units + memory tiers)",
+"method": "machine_spec_sheet",
+"wordings": [
+"caveat compiled batch margin",
+"must access width replaces"
+]
+},
+{
+"card": "spec_conformance",
+"method": "spec_conformance",
+"wordings": [
+"atomic supported tree abstained",
+"evidence mechanical source claims"
+]
+},
+{
+"card": "Rotation-measure synthesis (Faraday depth)",
+"method": "rm_phi_grid",
+"wordings": [
+"faraday grid sampled sequence",
+"field into recover holographic"
+]
+},
+{
+"card": "sop_check",
+"method": "sop_check",
+"wordings": [
+"until model authored follow",
+"count cannot author refuse"
+]
+},
+{
+"card": "Horizon profile (one stream, verdicts across scales -- drift localization)",
+"method": "holographic_rnn",
+"wordings": [
+"change window climbs narrows",
+"holographic narrows scales measured"
+]
+},
+{
+"card": "Preview (swatch & material ball)",
+"method": "preview_texture",
+"wordings": [
+"preview shaded material plain",
+"material texture ball missing"
+]
+},
+{
+"card": "Render-ready texture + uvs from a loaded mesh",
+"method": "asset_base_texture",
+"wordings": [
+"mesh multi render renders",
+"color mesh material none"
+]
+},
+{
+"card": "Deformation strain directions (retopo guide)",
+"method": "strain_directions",
+"wordings": [
+"surface cannot guide shelf",
+"remesher which retopo direction"
+]
+},
+{
+"card": "Rate-distortion report (bits per vector at a fidelity)",
+"method": "rate_distortion_report",
+"wordings": [
+"float distortion loud ratio",
+"cosine that report rank"
+]
+},
+{
+"card": "Byte-plane float packing (compress the 'incompressible', byte-exact)",
+"method": "float_pack_bytes",
+"wordings": [
+"groups float measured nothing",
+"float rows real negative"
+]
+},
+{
+"card": "Structure fingerprint + drift (did this stream change between releases)",
+"method": "structure_fingerprint",
+"wordings": [
+"solver pipelines asset stream",
+"observed units asset structural"
+]
+},
+{
+"card": "timeline",
+"method": "timeline",
+"wordings": [
+"vectorised value then animation",
+"channel ease value drive"
+]
+},
+{
+"card": "Will compression pay? (area law vs volume law)",
+"method": "tensor_structure",
+"wordings": [
+"rank noise white find",
+"scores degree saturate compares"
+]
+},
+{
+"card": "similar_to",
+"method": "similar_to",
+"wordings": [
+"where priced floor whose",
+"above encoded floor layer"
+]
+},
+{
+"card": "Single-branch skeleton curve (medial ridge collapsed to a polyline)",
+"method": "skeleton_curve",
+"wordings": [
+"orders need cross then",
+"cross line centerline measurement"
+]
+},
+{
+"card": "Describe a scene (scene from description, semantic)",
+"method": "build_scene",
+"wordings": [
+"understood hints which environment",
+"scene darker render mind"
+]
+},
+{
+"card": "rectify_carrier",
+"method": "rectify_carrier",
+"wordings": [
+"then holographic lift path",
+"repair needed below sometimes"
+]
+},
+{
+"card": "Bake a displacement (height) map (high to low, same projection as the normal bake)",
+"method": "mesh_decimate_to",
+"wordings": [
+"normal poly from normal",
+"pass bake changing detail"
+]
+},
+{
+"card": "compress_arrays",
+"method": "compress_arrays",
+"wordings": [
+"stays place libraries recipe",
+"replayable place recipe libraries"
+]
+},
+{
+"card": "ifs_fit",
+"method": "ifs_fit",
+"wordings": [
+"recovery fractal tree mandelbox",
+"negative fern sierpinski fractal"
+]
+},
+{
+"card": "identify_dynamics",
+"method": "identify_dynamics",
+"wordings": [
+"conservation whichever honest mass",
+"ratio interaction gauge momentum"
+]
+},
+{
+"card": "Make a mesh manifold (split non-manifold vertices)",
+"method": "mesh_make_manifold",
+"wordings": [
+"over manifold retopo faces",
+"umbrellas manifold field report"
+]
+},
+{
+"card": "Mixed minerals in one growth: per-seed habits with their own lattices (grow_on habit=list|callable)",
+"method": "crystal_grow_on",
+"wordings": [
+"mineral grow itself bravais",
+"field habit geode habits"
+]
+},
+{
+"card": "Optical elements (Mueller matrices)",
+"method": "stokes_report",
+"wordings": [
+"apply light elements whole",
+"plate matrices matrix retarder"
+]
+},
+{
+"card": "Make a 3-D primitive by name (placed, one door)",
+"method": "shape",
+"wordings": [
+"worst translate this plus",
+"cylinder render fallbacks cube"
+]
+},
+{
+"card": "Partition-invariant sums (same answer at any bucket count)",
+"method": "distribute_exact",
+"wordings": [
+"exact farm precision every",
+"diverged worker then mind"
+]
+}
+],
+"streams": [
+[
+[
+0,
+0
+],
+[
+55,
+1
+],
+[
+1,
+0
+],
+[
+23,
+0
+],
+[
+14,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+2,
+0
+],
+[
+0,
+0
+],
+[
+37,
+0
+],
+[
+50,
+1
+],
+[
+7,
+0
+],
+[
+1,
+0
+],
+[
+0,
+1
+],
+[
+0,
+0
+],
+[
+5,
+0
+],
+[
+0,
+1
+],
+[
+0,
+0
+],
+[
+12,
+0
+],
+[
+28,
+0
+],
+[
+7,
+1
+],
+[
+46,
+1
+],
+[
+21,
+0
+],
+[
+2,
+0
+],
+[
+1,
+0
+],
+[
+0,
+0
+],
+[
+19,
+0
+],
+[
+4,
+0
+],
+[
+29,
+0
+],
+[
+3,
+0
+],
+[
+29,
+0
+],
+[
+12,
+0
+],
+[
+5,
+0
+],
+[
+13,
+0
+],
+[
+13,
+1
+],
+[
+0,
+0
+],
+[
+20,
+0
+],
+[
+0,
+1
+],
+[
+4,
+1
+],
+[
+3,
+0
+]
+],
+[
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+0,
+1
+],
+[
+13,
+0
+],
+[
+0,
+0
+],
+[
+37,
+0
+],
+[
+5,
+0
+],
+[
+2,
+0
+],
+[
+0,
+1
+],
+[
+2,
+0
+],
+[
+1,
+0
+],
+[
+27,
+0
+],
+[
+4,
+0
+],
+[
+0,
+0
+],
+[
+41,
+0
+],
+[
+55,
+0
+],
+[
+57,
+0
+],
+[
+1,
+0
+],
+[
+3,
+1
+],
+[
+12,
+0
+],
+[
+0,
+0
+],
+[
+2,
+0
+],
+[
+1,
+1
+],
+[
+26,
+0
+],
+[
+0,
+0
+],
+[
+38,
+0
+],
+[
+0,
+0
+],
+[
+38,
+0
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+41,
+1
+],
+[
+0,
+0
+],
+[
+20,
+0
+],
+[
+31,
+0
+],
+[
+1,
+0
+],
+[
+6,
+0
+],
+[
+4,
+0
+],
+[
+40,
+1
+],
+[
+0,
+1
+]
+],
+[
+[
+32,
+1
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+3,
+0
+],
+[
+1,
+0
+],
+[
+5,
+1
+],
+[
+0,
+0
+],
+[
+17,
+0
+],
+[
+6,
+0
+],
+[
+8,
+1
+],
+[
+51,
+0
+],
+[
+0,
+1
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+4,
+1
+],
+[
+15,
+0
+],
+[
+0,
+1
+],
+[
+20,
+0
+],
+[
+12,
+1
+],
+[
+3,
+0
+],
+[
+28,
+0
+],
+[
+2,
+0
+],
+[
+54,
+0
+],
+[
+48,
+1
+],
+[
+2,
+0
+],
+[
+46,
+0
+],
+[
+16,
+0
+],
+[
+4,
+1
+],
+[
+7,
+0
+],
+[
+19,
+0
+],
+[
+47,
+0
+],
+[
+34,
+0
+],
+[
+46,
+0
+],
+[
+2,
+1
+],
+[
+0,
+1
+],
+[
+0,
+0
+],
+[
+2,
+1
+],
+[
+0,
+0
+],
+[
+4,
+0
+]
+],
+[
+[
+13,
+0
+],
+[
+0,
+0
+],
+[
+0,
+1
+],
+[
+4,
+1
+],
+[
+1,
+1
+],
+[
+17,
+0
+],
+[
+59,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+0,
+1
+],
+[
+2,
+0
+],
+[
+0,
+0
+],
+[
+6,
+0
+],
+[
+2,
+0
+],
+[
+4,
+1
+],
+[
+26,
+0
+],
+[
+26,
+0
+],
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+5,
+1
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+13,
+0
+],
+[
+18,
+0
+],
+[
+2,
+0
+],
+[
+0,
+0
+],
+[
+11,
+0
+],
+[
+0,
+1
+],
+[
+0,
+1
+],
+[
+5,
+0
+],
+[
+2,
+0
+],
+[
+55,
+0
+],
+[
+0,
+0
+],
+[
+0,
+1
+],
+[
+1,
+0
+],
+[
+28,
+1
+],
+[
+10,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+44,
+0
+]
+]
+]
+}

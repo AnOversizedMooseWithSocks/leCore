@@ -1,0 +1,37 @@
+{
+ "synthetic_D2048": {
+  "cos_swapped_no_verb_mean": 0.024,
+  "sd": 0.0262,
+  "cos_swapped_with_verb_mean": 0.349,
+  "sd_v": 0.0205,
+  "cos_unordered_bag_x_plus_y": 1.0,
+  "noise_floor_abs_cos_mean": 0.0179,
+  "noise_floor_abs_cos_p99": 0.0563,
+  "decode_from_to_exact": 1.0
+ },
+ "synthetic_D1024": {
+  "cos_swapped_no_verb_mean": 0.019,
+  "sd": 0.0395,
+  "cos_swapped_with_verb_mean": 0.3457,
+  "sd_v": 0.0304,
+  "cos_unordered_bag_x_plus_y": 1.0,
+  "noise_floor_abs_cos_mean": 0.0238,
+  "noise_floor_abs_cos_p99": 0.0797,
+  "decode_from_to_exact": 1.0
+ },
+ "clinc_exchange": {
+  "train_directional": 74,
+  "heldout_directional_val_test": 26,
+  "test_items_total": 26,
+  "test_symmetric": 9,
+  "positional_truth_semantically_wrong": {
+   "train": 29,
+   "test": 5
+  },
+  "heldout_positional_correct": "21/26",
+  "heldout_learned_context_role_correct": "26/26",
+  "train_fit_learned": "72/74",
+  "heldout_errors": []
+ },
+ "cpu_s": 2.0
+}

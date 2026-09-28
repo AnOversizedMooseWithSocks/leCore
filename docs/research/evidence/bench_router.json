@@ -1,0 +1,1201 @@
+{
+ "command": "PYTHONHASHSEED=0 python tools/bench_router.py --data <dir> --sections latency,panel,learn,gate,serve",
+ "gate": {
+  "chosen_lexical_signal": "lexical|z+margin",
+  "chosen_signal": "fused|z+margin",
+  "configs_tried": 6,
+  "data_sha256": "36923c3705a59e08fe9c3883d8bc2dd966ef93e22cb78ac41171782a698d56e0",
+  "n": {
+   "oos": 1000,
+   "oos_cal": 489,
+   "test": 3959,
+   "val": 1158
+  },
+  "prior": [
+   4500.0,
+   1000.0
+  ],
+  "refuse": {
+   "baseline_oos_refused_cal": 0.8814,
+   "baseline_z_refuse": -0.5,
+   "rederived_z_refuse": -0.4651
+  },
+  "signals": {
+   "fused|margin": {
+    "report": {
+     "aurc": 0.4560610546380866,
+     "calibrated": {
+      "P0.70": {
+       "coverage": 0.08234402626925992,
+       "oos_served": 0.003913894324853229,
+       "precision": 0.8100518846338172,
+       "served_all": 0.08317045661815857,
+       "thr": 1.4909819732484535,
+       "wrong_all": 0.015798071488764092,
+       "wrong_in": 0.01843899974741095
+      },
+      "P0.75": {
+       "coverage": 0.06617832786057085,
+       "oos_served": 0.0,
+       "precision": 0.8370607028753992,
+       "served_all": 0.06468575627454132,
+       "thr": 1.6740267469448957,
+       "wrong_all": 0.010539851661346994,
+       "wrong_in": 0.012882040919424104
+      },
+      "P0.80": {
+       "coverage": 0.02677443798939126,
+       "oos_served": 0.0,
+       "precision": 0.9059829059829061,
+       "served_all": 0.024179659693678385,
+       "thr": 2.2649567207443586,
+       "wrong_all": 0.0022733013387218975,
+       "wrong_in": 0.00277847941399343
+      },
+      "P0.90": {
+       "coverage": 0.0,
+       "oos_served": 0.0,
+       "precision": 0.0,
+       "served_all": 0.0,
+       "thr": 4.678888409807421,
+       "wrong_all": 0.0,
+       "wrong_in": 0.0
+      }
+     },
+     "n": {
+      "cal_in": 1158,
+      "cal_oos": 489,
+      "rep_in": 3959,
+      "rep_oos": 511
+     },
+     "oracle": {
+      "P0.70": {
+       "coverage": 0.16847688810305633
+      },
+      "P0.75": {
+       "coverage": 0.13336701187168476
+      },
+      "P0.80": {
+       "coverage": 0.09042687547360445
+      },
+      "P0.90": {
+       "coverage": 0.02753220510229856
+      }
+     },
+     "precision_at_served": {
+      "0.20": 0.6964510435893321,
+      "0.30": 0.6278711644144553,
+      "0.40": 0.560836150513202,
+      "0.50": 0.5050803916778974,
+      "0.60": 0.45838763077252254
+     },
+     "prior": [
+      4500.0,
+      1000.0
+     ],
+     "top1": 0.4114675423086638
+    },
+    "val_aurc": 0.5172
+   },
+   "fused|z": {
+    "report": {
+     "aurc": 0.46210971445824245,
+     "calibrated": {
+      "P0.70": {
+       "coverage": 0.01414498610760293,
+       "oos_served": 0.0,
+       "precision": 0.8615384615384616,
+       "served_all": 0.013433144274265769,
+       "thr": 1.435194915116483,
+       "wrong_all": 0.0018599738225906438,
+       "wrong_in": 0.002273301338721898
+      },
+      "P0.75": {
+       "coverage": 0.0035362465269007325,
+       "oos_served": 0.0,
+       "precision": 0.8749999999999999,
+       "served_all": 0.003306620129050036,
+       "thr": 1.8305319156314648,
+       "wrong_all": 0.00041332751613125477,
+       "wrong_in": 0.0005051780752715336
+      },
+      "P0.80": {
+       "coverage": 0.0035362465269007325,
+       "oos_served": 0.0,
+       "precision": 0.8749999999999999,
+       "served_all": 0.003306620129050036,
+       "thr": 1.8305319156314648,
+       "wrong_all": 0.00041332751613125477,
+       "wrong_in": 0.0005051780752715336
+      },
+      "P0.90": {
+       "coverage": 0.0035362465269007325,
+       "oos_served": 0.0,
+       "precision": 0.8749999999999999,
+       "served_all": 0.003306620129050036,
+       "thr": 1.8305319156314648,
+       "wrong_all": 0.00041332751613125477,
+       "wrong_in": 0.0005051780752715336
+      }
+     },
+     "n": {
+      "cal_in": 1158,
+      "cal_oos": 489,
+      "rep_in": 3959,
+      "rep_oos": 511
+     },
+     "oracle": {
+      "P0.70": {
+       "coverage": 0.12452639555443294
+      },
+      "P0.75": {
+       "coverage": 0.09345794392523364
+      },
+      "P0.80": {
+       "coverage": 0.06390502652184896
+      },
+      "P0.90": {
+       "coverage": 0.01035615054306643
+      }
+     },
+     "precision_at_served": {
+      "0.20": 0.6704545454545454,
+      "0.30": 0.6054879615988574,
+      "0.40": 0.5659860877911603,
+      "0.50": 0.5075459596216952,
+      "0.60": 0.479109859889098
+     },
+     "prior": [
+      4500.0,
+      1000.0
+     ],
+     "top1": 0.4114675423086638
+    },
+    "val_aurc": 0.5408
+   },
+   "fused|z+margin": {
+    "report": {
+     "aurc": 0.4301327815087306,
+     "calibrated": {
+      "P0.70": {
+       "coverage": 0.08234402626925992,
+       "oos_served": 0.0,
+       "precision": 0.8211586901763226,
+       "served_all": 0.082045511952054,
+       "thr": 1.9099462556215459,
+       "wrong_all": 0.01467312682265952,
+       "wrong_in": 0.017933821672139416
+      },
+      "P0.75": {
+       "coverage": 0.01717605455923213,
+       "oos_served": 0.0,
+       "precision": 0.9444444444444444,
+       "served_all": 0.014879790580725161,
+       "thr": 3.5120867152198643,
+       "wrong_all": 0.0008266550322625102,
+       "wrong_in": 0.001010356150543068
+      },
+      "P0.80": {
+       "coverage": 0.016670876483960595,
+       "oos_served": 0.0,
+       "precision": 0.9428571428571426,
+       "served_all": 0.014466463064593907,
+       "thr": 3.5328990062968373,
+       "wrong_all": 0.0008266550322625102,
+       "wrong_in": 0.001010356150543068
+      },
+      "P0.90": {
+       "coverage": 0.0,
+       "oos_served": 0.0,
+       "precision": 0.0,
+       "served_all": 0.0,
+       "thr": 7.346901286866451,
+       "wrong_all": 0.0,
+       "wrong_in": 0.0
+      }
+     },
+     "n": {
+      "cal_in": 1158,
+      "cal_oos": 489,
+      "rep_in": 3959,
+      "rep_oos": 511
+     },
+     "oracle": {
+      "P0.70": {
+       "coverage": 0.20661783278605708
+      },
+      "P0.75": {
+       "coverage": 0.16064662793634757
+      },
+      "P0.80": {
+       "coverage": 0.11770649153826723
+      },
+      "P0.90": {
+       "coverage": 0.04294013639808032
+      }
+     },
+     "precision_at_served": {
+      "0.20": 0.7374775720473765,
+      "0.30": 0.6602946865515765,
+      "0.40": 0.5934630077509285,
+      "0.50": 0.542919351614563,
+      "0.60": 0.49104469945612195
+     },
+     "prior": [
+      4500.0,
+      1000.0
+     ],
+     "top1": 0.4114675423086638
+    },
+    "val_aurc": 0.5029
+   },
+   "lexical|margin": {
+    "report": {
+     "aurc": 0.471078651223952,
+     "calibrated": {
+      "P0.70": {
+       "coverage": 0.03207880777974236,
+       "oos_served": 0.0,
+       "precision": 0.9007092198581561,
+       "served_all": 0.029139589887253438,
+       "thr": 2.0,
+       "wrong_all": 0.00289329261291878,
+       "wrong_in": 0.003536246526900731
+      },
+      "P0.75": {
+       "coverage": 0.03207880777974236,
+       "oos_served": 0.0,
+       "precision": 0.9007092198581561,
+       "served_all": 0.029139589887253438,
+       "thr": 2.0,
+       "wrong_all": 0.00289329261291878,
+       "wrong_in": 0.003536246526900731
+      },
+      "P0.80": {
+       "coverage": 0.03207880777974236,
+       "oos_served": 0.0,
+       "precision": 0.9007092198581561,
+       "served_all": 0.029139589887253438,
+       "thr": 2.0,
+       "wrong_all": 0.00289329261291878,
+       "wrong_in": 0.003536246526900731
+      },
+      "P0.90": {
+       "coverage": 0.0,
+       "oos_served": 0.0,
+       "precision": 0.0,
+       "served_all": 0.0,
+       "thr": Infinity,
+       "wrong_all": 0.0,
+       "wrong_in": 0.0
+      }
+     },
+     "n": {
+      "cal_in": 1158,
+      "cal_oos": 489,
+      "rep_in": 3959,
+      "rep_oos": 511
+     },
+     "oracle": {
+      "P0.70": {
+       "coverage": 0.16999242232887093
+      },
+      "P0.75": {
+       "coverage": 0.11720131346299571
+      },
+      "P0.80": {
+       "coverage": 0.08158625915635262
+      },
+      "P0.90": {
+       "coverage": 0.03485728719373579
+      }
+     },
+     "precision_at_served": {
+      "0.20": 0.6943380235307002,
+      "0.30": 0.5894016682484383,
+      "0.40": 0.5334861215498428,
+      "0.50": 0.4731134172855762,
+      "0.60": 0.43568578928622564
+     },
+     "prior": [
+      4500.0,
+      1000.0
+     ],
+     "top1": 0.3963122000505178
+    },
+    "val_aurc": 0.5423
+   },
+   "lexical|z": {
+    "report": {
+     "aurc": 0.47439702944680345,
+     "calibrated": {
+      "P0.70": {
+       "coverage": 0.016670876483960595,
+       "oos_served": 0.0,
+       "precision": 0.8354430379746833,
+       "served_all": 0.01632643688718455,
+       "thr": 1.4212973392007486,
+       "wrong_all": 0.002686628854853155,
+       "wrong_in": 0.0032836574892649677
+      },
+      "P0.75": {
+       "coverage": 0.003283657489264966,
+       "oos_served": 0.0,
+       "precision": 0.8124999999999999,
+       "served_all": 0.003306620129050036,
+       "thr": 1.8305319156314648,
+       "wrong_all": 0.000619991274196882,
+       "wrong_in": 0.0007577671129073002
+      },
+      "P0.80": {
+       "coverage": 0.003283657489264966,
+       "oos_served": 0.0,
+       "precision": 0.8124999999999999,
+       "served_all": 0.003306620129050036,
+       "thr": 1.8305319156314648,
+       "wrong_all": 0.000619991274196882,
+       "wrong_in": 0.0007577671129073002
+      },
+      "P0.90": {
+       "coverage": 0.003283657489264966,
+       "oos_served": 0.0,
+       "precision": 0.8124999999999999,
+       "served_all": 0.003306620129050036,
+       "thr": 1.8305319156314648,
+       "wrong_all": 0.000619991274196882,
+       "wrong_in": 0.0007577671129073002
+      }
+     },
+     "n": {
+      "cal_in": 1158,
+      "cal_oos": 489,
+      "rep_in": 3959,
+      "rep_oos": 511
+     },
+     "oracle": {
+      "P0.70": {
+       "coverage": 0.11139176559737307
+      },
+      "P0.75": {
+       "coverage": 0.08941651932306138
+      },
+      "P0.80": {
+       "coverage": 0.06011619095731245
+      },
+      "P0.90": {
+       "coverage": 0.0
+      }
+     },
+     "precision_at_served": {
+      "0.20": 0.6570247933884298,
+      "0.30": 0.594466565255761,
+      "0.40": 0.5489445358777404,
+      "0.50": 0.49225345106631846,
+      "0.60": 0.47049897096226306
+     },
+     "prior": [
+      4500.0,
+      1000.0
+     ],
+     "top1": 0.3963122000505178
+    },
+    "val_aurc": 0.5617
+   },
+   "lexical|z+margin": {
+    "report": {
+     "aurc": 0.45320905384055094,
+     "calibrated": {
+      "P0.70": {
+       "coverage": 0.04571861581207375,
+       "oos_served": 0.0,
+       "precision": 0.8578199052132701,
+       "served_all": 0.04360605295184734,
+       "thr": 2.2725059481152194,
+       "wrong_all": 0.006199912741968821,
+       "wrong_in": 0.007577671129073003
+      },
+      "P0.75": {
+       "coverage": 0.025511492801212426,
+       "oos_served": 0.0,
+       "precision": 0.9181818181818182,
+       "served_all": 0.022733013387218993,
+       "thr": 2.871266638273376,
+       "wrong_all": 0.0018599738225906451,
+       "wrong_in": 0.0022733013387218996
+      },
+      "P0.80": {
+       "coverage": 0.0,
+       "oos_served": 0.0,
+       "precision": 0.0,
+       "served_all": 0.0,
+       "thr": 7.168012877059031,
+       "wrong_all": 0.0,
+       "wrong_in": 0.0
+      },
+      "P0.90": {
+       "coverage": 0.0,
+       "oos_served": 0.0,
+       "precision": 0.0,
+       "served_all": 0.0,
+       "thr": 7.168012877059031,
+       "wrong_all": 0.0,
+       "wrong_in": 0.0
+      }
+     },
+     "n": {
+      "cal_in": 1158,
+      "cal_oos": 489,
+      "rep_in": 3959,
+      "rep_oos": 511
+     },
+     "oracle": {
+      "P0.70": {
+       "coverage": 0.17277090174286436
+      },
+      "P0.75": {
+       "coverage": 0.13665066936094974
+      },
+      "P0.80": {
+       "coverage": 0.09017428643596868
+      },
+      "P0.90": {
+       "coverage": 0.027784794139934326
+      }
+     },
+     "precision_at_served": {
+      "0.20": 0.7023595924260729,
+      "0.30": 0.6169176633474583,
+      "0.40": 0.5590001952410173,
+      "0.50": 0.5201944168057342,
+      "0.60": 0.46762206561714664
+     },
+     "prior": [
+      4500.0,
+      1000.0
+     ],
+     "top1": 0.3963122000505178
+    },
+    "val_aurc": 0.5369
+   }
+  },
+  "tiers": {
+   "P0.70": {
+    "answer_threshold": 1.9099462556215459,
+    "in_scope": {
+     "answer": 0.0998,
+     "answer_accuracy": 0.8228,
+     "menu": 0.5954,
+     "menu_holds_truth": 0.7387,
+     "refuse": 0.3049
+    },
+    "oos": {
+     "answer": 0.0,
+     "menu": 0.1135,
+     "refuse": 0.8865
+    }
+   },
+   "P0.75": {
+    "answer_threshold": 3.5120867152198643,
+    "in_scope": {
+     "answer": 0.0182,
+     "answer_accuracy": 0.9444,
+     "menu": 0.6769,
+     "menu_holds_truth": 0.7597,
+     "refuse": 0.3049
+    },
+    "oos": {
+     "answer": 0.0,
+     "menu": 0.1135,
+     "refuse": 0.8865
+    }
+   },
+   "P0.80": {
+    "answer_threshold": 3.5328990062968373,
+    "in_scope": {
+     "answer": 0.0177,
+     "answer_accuracy": 0.9429,
+     "menu": 0.6774,
+     "menu_holds_truth": 0.7599,
+     "refuse": 0.3049
+    },
+    "oos": {
+     "answer": 0.0,
+     "menu": 0.1135,
+     "refuse": 0.8865
+    }
+   },
+   "P0.90": {
+    "answer_threshold": 7.346901286866451,
+    "in_scope": {
+     "answer": 0.0,
+     "answer_accuracy": null,
+     "menu": 0.6951,
+     "menu_holds_truth": 0.766,
+     "refuse": 0.3049
+    },
+    "oos": {
+     "answer": 0.0,
+     "menu": 0.1135,
+     "refuse": 0.8865
+    }
+   }
+  },
+  "tiers_baseline_z": {
+   "in_scope": {
+    "answer": 0.3703,
+    "answer_accuracy": 0.5941,
+    "menu": 0.3248,
+    "menu_holds_truth": 0.6571,
+    "refuse": 0.3049
+   },
+   "oos": {
+    "answer": 0.0098,
+    "menu": 0.1037,
+    "refuse": 0.8865
+   }
+  },
+  "tiers_lexical_rederived": {
+   "P0.70": {
+    "answer_threshold": 2.2725059481152194,
+    "in_scope": {
+     "answer": 0.0533,
+     "answer_accuracy": 0.8578,
+     "menu": 0.6418,
+     "menu_holds_truth": 0.7285,
+     "refuse": 0.3049
+    },
+    "oos": {
+     "answer": 0.0,
+     "menu": 0.1135,
+     "refuse": 0.8865
+    }
+   },
+   "P0.75": {
+    "answer_threshold": 2.871266638273376,
+    "in_scope": {
+     "answer": 0.0278,
+     "answer_accuracy": 0.9182,
+     "menu": 0.6673,
+     "menu_holds_truth": 0.7354,
+     "refuse": 0.3049
+    },
+    "oos": {
+     "answer": 0.0,
+     "menu": 0.1135,
+     "refuse": 0.8865
+    }
+   },
+   "P0.80": {
+    "answer_threshold": 7.168012877059031,
+    "in_scope": {
+     "answer": 0.0,
+     "answer_accuracy": null,
+     "menu": 0.6951,
+     "menu_holds_truth": 0.7453,
+     "refuse": 0.3049
+    },
+    "oos": {
+     "answer": 0.0,
+     "menu": 0.1135,
+     "refuse": 0.8865
+    }
+   },
+   "P0.90": {
+    "answer_threshold": 7.168012877059031,
+    "in_scope": {
+     "answer": 0.0,
+     "answer_accuracy": null,
+     "menu": 0.6951,
+     "menu_holds_truth": 0.7453,
+     "refuse": 0.3049
+    },
+    "oos": {
+     "answer": 0.0,
+     "menu": 0.1135,
+     "refuse": 0.8865
+    }
+   }
+  }
+ },
+ "latency": {
+  "cards": 3996,
+  "families_ms_memoised": {
+   "mean": 0.028,
+   "n": 50,
+   "p50": 0.026,
+   "p95": 0.038
+  },
+  "machine_load_1min": 0.31396484375,
+  "mind_route_tiered_ms": {
+   "mean": 1.226,
+   "n": 100,
+   "p50": 1.18,
+   "p95": 1.747
+  },
+  "panel": {
+   "families_ms": 15.2,
+   "route_ms": 16.7
+  },
+  "queries": 300,
+  "records_differing": 0,
+  "route_tiered_ms_after": {
+   "mean": 1.182,
+   "n": 300,
+   "p50": 1.088,
+   "p95": 1.902
+  },
+  "route_tiered_ms_before": {
+   "mean": 5.024,
+   "n": 300,
+   "p50": 4.654,
+   "p95": 7.067
+  }
+ },
+ "learn": {
+  "K": 30,
+  "acceptance": {
+   "beats_panel": true,
+   "ci_vs_lexical_excludes_zero": true,
+   "panel_top1": 0.402,
+   "val_choice_test_top1": 0.4115
+  },
+  "chosen_on_val": {
+   "constants_match": true,
+   "lam": 2.0,
+   "module_constants": {
+    "dim": 1024,
+    "lam": 2.0,
+    "mu": 0.45
+   },
+   "mu": 0.45,
+   "val_top1": 0.38
+  },
+  "configs_tried": 40,
+  "grid": {
+   "lam0.00_mu0.00": 0.3532,
+   "lam0.00_mu0.05": 0.3523,
+   "lam0.00_mu0.10": 0.3523,
+   "lam0.00_mu0.20": 0.3549,
+   "lam0.00_mu0.30": 0.3644,
+   "lam0.00_mu0.45": 0.3636,
+   "lam0.00_mu0.70": 0.3385,
+   "lam0.00_mu1.00": 0.304,
+   "lam0.25_mu0.00": 0.3351,
+   "lam0.25_mu0.05": 0.3713,
+   "lam0.25_mu0.10": 0.3627,
+   "lam0.25_mu0.20": 0.3618,
+   "lam0.25_mu0.30": 0.367,
+   "lam0.25_mu0.45": 0.3661,
+   "lam0.25_mu0.70": 0.3446,
+   "lam0.25_mu1.00": 0.3083,
+   "lam0.50_mu0.00": 0.3351,
+   "lam0.50_mu0.05": 0.361,
+   "lam0.50_mu0.10": 0.3713,
+   "lam0.50_mu0.20": 0.3627,
+   "lam0.50_mu0.30": 0.3696,
+   "lam0.50_mu0.45": 0.3705,
+   "lam0.50_mu0.70": 0.3463,
+   "lam0.50_mu1.00": 0.3152,
+   "lam1.00_mu0.00": 0.3351,
+   "lam1.00_mu0.05": 0.3532,
+   "lam1.00_mu0.10": 0.361,
+   "lam1.00_mu0.20": 0.3713,
+   "lam1.00_mu0.30": 0.3722,
+   "lam1.00_mu0.45": 0.3748,
+   "lam1.00_mu0.70": 0.3601,
+   "lam1.00_mu1.00": 0.3256,
+   "lam2.00_mu0.00": 0.3282,
+   "lam2.00_mu0.05": 0.342,
+   "lam2.00_mu0.10": 0.3532,
+   "lam2.00_mu0.20": 0.3627,
+   "lam2.00_mu0.30": 0.3644,
+   "lam2.00_mu0.45": 0.38,
+   "lam2.00_mu0.70": 0.3661,
+   "lam2.00_mu1.00": 0.3437
+  },
+  "lexical": {
+   "test_top1": 0.3963,
+   "val_top1": 0.3532
+  },
+  "pretrain_s_1024": 18.1,
+  "pretrain_s_2048": 26.0,
+  "splits": {
+   "test": 3959,
+   "train": 4429,
+   "val": 1158
+  },
+  "store_rows_1024": 3921,
+  "store_rows_2048": 3921,
+  "test": {
+   "lexical": {
+    "top1": 0.3963,
+    "top5": 0.6345
+   },
+   "prior_only": {
+    "top1": 0.4077,
+    "top5": 0.6449,
+    "vs_lexical": {
+     "a": 0.3963,
+     "a_only": 146,
+     "b": 0.4077,
+     "b_only": 191,
+     "diff": 0.0114,
+     "hi": 0.0205,
+     "lo": 0.0023,
+     "n": 2000,
+     "seed": 0
+    }
+   },
+   "prototype_only": {
+    "top1": 0.3556,
+    "top5": 0.6252,
+    "vs_lexical": {
+     "a": 0.3963,
+     "a_only": 326,
+     "b": 0.3556,
+     "b_only": 165,
+     "diff": -0.0407,
+     "hi": -0.0301,
+     "lo": -0.0518,
+     "n": 2000,
+     "seed": 0
+    }
+   },
+   "untrained": {
+    "top1": 0.3476,
+    "top5": 0.6161,
+    "vs_lexical": {
+     "a": 0.3963,
+     "a_only": 359,
+     "b": 0.3476,
+     "b_only": 166,
+     "diff": -0.0487,
+     "hi": -0.0374,
+     "lo": -0.0604,
+     "n": 2000,
+     "seed": 0
+    }
+   },
+   "val_choice": {
+    "top1": 0.4115,
+    "top5": 0.6641,
+    "vs_lexical": {
+     "a": 0.3963,
+     "a_only": 176,
+     "b": 0.4115,
+     "b_only": 236,
+     "diff": 0.0152,
+     "hi": 0.0253,
+     "lo": 0.0056,
+     "n": 2000,
+     "seed": 0
+    }
+   },
+   "val_choice_dim2048": {
+    "top1": 0.4102,
+    "top5": 0.6648,
+    "vs_lexical": {
+     "a": 0.3963,
+     "a_only": 174,
+     "b": 0.4102,
+     "b_only": 229,
+     "diff": 0.0139,
+     "hi": 0.0235,
+     "lo": 0.0043,
+     "n": 2000,
+     "seed": 0
+    }
+   }
+  }
+ },
+ "panel": {
+  "cards": 3996,
+  "held_out": 3959,
+  "panel": {
+   "answer_accuracy": 0.604,
+   "answer_share": 0.371,
+   "top1": 0.402,
+   "top5": 0.638
+  },
+  "route_tiered": {
+   "answer_accuracy": 0.6058,
+   "menu_holds_truth": 0.6191,
+   "n": 3959,
+   "shares": {
+    "answer": 0.3678,
+    "clarify": 0.0,
+    "menu": 0.3807,
+    "refuse": 0.2516
+   }
+  },
+  "skills_aliases": 8103,
+  "top1": 0.4011,
+  "top5": 0.6368
+ },
+ "seconds": 93.6,
+ "serve": {
+  "ablated": {
+   "ablated": true,
+   "escalated": 20,
+   "panel_served": 0,
+   "probes": 20,
+   "rows": [
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "1d curve from medial voxels",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "audio drives parameters",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "cache invalidation",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "combine shader variants",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "decode a png",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "draw the mandelbrot set",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "faraday rotation",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "generate many surrogates cheaply",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "identify a generator",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "kernel",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "mandelbrot field",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "my glb bake is hollow",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "pcg hash",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "put the sphere on top of the box",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "render points to an image",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "scattering off a well",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "silhouette iou sweep",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "store a frame stack",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "too many factors",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "wave state encoder carrier and envelope",
+     "right": null,
+     "via": "escalate"
+    }
+   ],
+   "serve_ms": {
+    "mean": 31.818,
+    "n": 20,
+    "p50": 2.253,
+    "p95": 168.042
+   },
+   "served": 0,
+   "served_right": 0,
+   "served_wrong": 0
+  },
+  "in_index": {
+   "ablated": false,
+   "escalated": 1,
+   "panel_served": 0,
+   "probes": 20,
+   "rows": [
+    {
+     "capability": "Single-branch skeleton curve (medial ridge collapsed to a polyline)",
+     "gate": 11.674497923092234,
+     "p_correct": null,
+     "q": "1d curve from medial voxels",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Node-graph editor backend",
+     "gate": 8.642231796900088,
+     "p_correct": null,
+     "q": "audio drives parameters",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Fat-margin cache (for a query that drifts)",
+     "gate": 8.976159088472247,
+     "p_correct": null,
+     "q": "cache invalidation",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Blend M shader variants into one transfer",
+     "gate": 8.820487564190493,
+     "p_correct": null,
+     "q": "combine shader variants",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Read a render back (PNG -> array, the see-then-fix loop)",
+     "gate": 9.476159088472247,
+     "p_correct": null,
+     "q": "decode a png",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "escape_time",
+     "gate": 9.142231796900088,
+     "p_correct": null,
+     "q": "draw the mandelbrot set",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Faraday sky map (telescope as observer)",
+     "gate": 7.976159088472246,
+     "p_correct": null,
+     "q": "faraday rotation",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Directional & scale surrogates (pick the null that destroys YOUR claim)",
+     "gate": 11.801470657409062,
+     "p_correct": null,
+     "q": "generate many surrogates cheaply",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "fit_deterministic",
+     "gate": 7.610247605475168,
+     "p_correct": null,
+     "q": "identify a generator",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": null,
+     "gate": null,
+     "p_correct": null,
+     "q": "kernel",
+     "right": null,
+     "via": "escalate"
+    },
+    {
+     "capability": "escape_time",
+     "gate": 8.110247605475168,
+     "p_correct": null,
+     "q": "mandelbrot field",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Robust mesh-to-SDF sign for scan soups (winding number)",
+     "gate": 9.642231796900088,
+     "p_correct": null,
+     "q": "my glb bake is hollow",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "GPU-reproducible 32-bit hash (PCG, matches GLSL)",
+     "gate": 9.842070571469325,
+     "p_correct": null,
+     "q": "pcg hash",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Describe a scene (scene from description, semantic)",
+     "gate": 9.928443391725892,
+     "p_correct": null,
+     "q": "put the sphere on top of the box",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "2D image editing & generation",
+     "gate": 8.48135968054529,
+     "p_correct": null,
+     "q": "render points to an image",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Quantum dot / transmission (resonant scatterer)",
+     "gate": 9.142231796900088,
+     "p_correct": null,
+     "q": "scattering off a well",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Turntable silhouette sweep (fast orthographic 3-D preservation check)",
+     "gate": 9.320487564190493,
+     "p_correct": null,
+     "q": "silhouette iou sweep",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Store a multi-way array (tensor-train file)",
+     "gate": 8.98135968054529,
+     "p_correct": null,
+     "q": "store a frame stack",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Scale advisor (consult every capacity law BEFORE hitting the wall)",
+     "gate": 8.142231796900088,
+     "p_correct": null,
+     "q": "too many factors",
+     "right": true,
+     "via": "route"
+    },
+    {
+     "capability": "Wave-state encoder (carrier + envelope as one recallable state)",
+     "gate": 13.25797122294486,
+     "p_correct": null,
+     "q": "wave state encoder carrier and envelope",
+     "right": true,
+     "via": "route"
+    }
+   ],
+   "serve_ms": {
+    "mean": 39.019,
+    "n": 20,
+    "p50": 3.362,
+    "p95": 168.879
+   },
+   "served": 19,
+   "served_right": 19,
+   "served_wrong": 0
+  }
+ },
+ "serve_bar_rederived_2026_09_27": {
+  "first_derivation": {
+   "fused": 7.0465,
+   "lexical": 6.8685
+  },
+  "fused": 7.3469,
+  "lexical": 7.168,
+  "why": "catalog content grew (3,982 -> 3,996 cards, longer docstrings), lifting z; serve section re-run with the new bar"
+ }
+}

@@ -386,6 +386,8 @@ BUNDLED_VERBS = {
     "wgsl": ["run_wgsl_kernel"],
     "gpu": ["unicron_device"],
     "lean4": ["lean_export", "lean_verify", "lean_status", "lean_fuzz"],
+    # not a migration: a NEW bundled plugin (CLM backlog E6.2/E6.3), pinned in the same census
+    "clm": ["clm_status", "clm_systemone", "clm_rank", "clm_escalator", "clm_embedder"],
 }
 
 

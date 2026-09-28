@@ -1,0 +1,38 @@
+{
+ "Q1 where should contrastive learning land first": {
+  "silent": false,
+  "consensus": null,
+  "surfaced": [
+   "meaning rows first (measured +2.0 top-1)",
+   "one shared prototype store, router as first consumer (free noiseless labels)",
+   "reflex trace first (measured defect 45 to 99 percent)",
+   "systemone first via a shared update primitive"
+  ]
+ },
+ "Q2 learned head": {
+  "silent": true,
+  "consensus": "per-row prototypes, no matrix",
+  "surfaced": null
+ },
+ "Q3 abstention": {
+  "silent": false,
+  "consensus": null,
+  "surfaced": [
+   "floor and gate primary, NULL only from off-domain labels",
+   "floor and gate primary, NULL optional"
+  ]
+ },
+ "Q4 guard before the core loop": {
+  "silent": true,
+  "consensus": "no",
+  "surfaced": null
+ },
+ "Q5 merge into one substrate": {
+  "silent": false,
+  "consensus": null,
+  "surfaced": [
+   "one store class and one rule, separate codebooks per door",
+   "shared primitives, separate stores"
+  ]
+ }
+}

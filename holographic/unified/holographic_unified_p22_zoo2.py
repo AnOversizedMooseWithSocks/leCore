@@ -906,51 +906,39 @@ class _UnifiedPart22:
                                  if x["deliverable"]}}
 
     def calibrate_reflex(self):
-        """UCCI ADOPTED (cp23, arXiv:2605.18796's recipe in pure NumPy): fit an ISOTONIC
-        map (pool-adjacent-violators) from reflex CONFIDENCE to observed ERROR PROBABILITY,
-        using the feedback log's (confidence, ok) pairs. The fixed calibrated null stays as
-        the floor; this map turns 'the gate fired at 0.41' into 'expected error 12%' -- the
-        number a cost-optimal escalation threshold actually needs. Honest refusal below 4
-        labeled pairs (no calibration from anecdotes)."""
-        pairs = list(getattr(self, "_reflex_calib_pairs", []))
-        if len(pairs) < 4:
-            return {"calibrated": False, "why": "need >= 4 feedback-labeled serves, have %d"
-                    % len(pairs)}
-        pairs.sort(key=lambda x: x[0])
-        conf = np.array([c for c, _ in pairs], float)
-        err = np.array([0.0 if ok_ else 1.0 for _, ok_ in pairs], float)
-        # PAV for a DECREASING error-vs-confidence fit: fit increasing on -conf order
-        y = err[::-1].copy()
-        w = np.ones_like(y)
-        i = 0
-        vals, wts = list(y), list(w)
-        k = 0
-        vals, wts = [], []
-        for v in y:
-            vals.append(v); wts.append(1.0)
-            while len(vals) > 1 and vals[-2] > vals[-1]:
-                v2, w2 = vals.pop(), wts.pop()
-                v1, w1 = vals.pop(), wts.pop()
-                vals.append((v1 * w1 + v2 * w2) / (w1 + w2)); wts.append(w1 + w2)
-        fit = np.repeat(vals, [int(x) for x in wts])[::-1]
-        self._reflex_calibration = {"conf": conf.tolist(), "err": fit.tolist()}
-        self.zoo["ladder"]._error_prob = self.reflex_error_prob   # B2: the gate consults
-                                                                  # calibration from the
-                                                                  # moment it exists
-        return {"calibrated": True, "pairs": len(pairs),
-                "err_at_min_conf": round(float(fit[0]), 3),
-                "err_at_max_conf": round(float(fit[-1]), 3)}
+        """UCCI ADOPTED (cp23, arXiv:2605.18796's recipe in pure NumPy): an ISOTONIC map (pool-adjacent-violators)
+        from reflex CONFIDENCE to P(correct), from outcome-labelled (confidence, ok) pairs. The fixed calibrated null
+        stays as the floor; the map turns 'the gate fired at 0.41' into 'expected error 12%'.
+        E0.7 (CLM panel defect D2): ONE curve used to be fitted from pairs fed by TWO doors -- the ladder's T0 reflex
+        (answer_feedback, on the _qkey confidence) and the reflex bridge (reflex_learn, on bridge confidences) -- and
+        it drove BOTH the ladder's calib_veto and the bridge's p, so every bridge outcome moved the ladder's veto.
+        Now each door has its own DoorCalibrator ('ladder', 'bridge'), refit on every label; this call refits both,
+        WIRES the ladder's veto, and reports. Honest refusal: a door with fewer than its min_count labels, or with
+        only one kind of outcome, stays uncalibrated (p_correct None) -- no calibration from anecdotes."""
+        doors = {}
+        for door in ("ladder", "bridge"):
+            c = self.door_calibrator(door)
+            c.refit()
+            ys = [y for _, y in c.pairs]
+            doors[door] = {"calibrated": c.calibrated(), "pairs": len(ys), "correct": int(sum(ys))}
+            if c.calibrated():
+                lo, hi = min(x for x, _ in c.pairs), max(x for x, _ in c.pairs)
+                doors[door].update(err_at_min_conf=round(1.0 - c.p_correct(lo), 3),
+                                   err_at_max_conf=round(1.0 - c.p_correct(hi), 3))
+        self._wire_ladder_calibration()     # B2: the ladder's gate consults ITS calibration from the moment it exists
+        out = {"calibrated": any(d["calibrated"] for d in doors.values()), "doors": doors,
+               "pairs": sum(d["pairs"] for d in doors.values())}
+        if not out["calibrated"]:
+            out["why"] = ("no door has >= %d labelled serves with both outcomes yet"
+                          % self.door_calibrator("ladder").min_count)
+        return out
 
-    def reflex_error_prob(self, confidence):
-        """The calibrated error probability for a reflex confidence (step interpolation
-        over the isotonic fit); None when uncalibrated -- the fixed gate then stands alone."""
-        cal = getattr(self, "_reflex_calibration", None)
-        if not cal:
-            return None
-        conf = np.asarray(cal["conf"], float)
-        err = np.asarray(cal["err"], float)
-        i = int(np.searchsorted(conf, float(confidence), side="right")) - 1
-        return float(err[max(0, min(i, len(err) - 1))])
+    def reflex_error_prob(self, confidence, door="ladder"):
+        """The calibrated error probability (1 - P(correct)) for a reflex confidence at a DOOR -- 'ladder' (the
+        ladder's T0 reflex, the default) or 'bridge' (reflex_decide) -- None while that door is uncalibrated, and
+        the fixed gate then stands alone. E0.7: the two doors no longer share one curve."""
+        p = self._door_p(str(door), confidence)
+        return None if p is None else 1.0 - p
 
     def cache_invalidate(self, step=None):
         """B1 (cp28): the exact-prefix cache finally has an ERASER. step=None clears all;
@@ -989,12 +977,31 @@ class _UnifiedPart22:
         escalation decision tree (reflex_outcome on the query key) and PERSISTS in the
         taught section, so a bad answer stays dead across processes."""
         lad = self.zoo["ladder"]
+        # sweep 181: an answer served BY MEANING was a decision about which row this wording means -- feedback on it
+        # corrects the LINK (calibration label + this wording never served that row again), never the row's answer,
+        # which is still right for the questions it was taught for
+        _ml = getattr(self, "_meaning_last", None)
+        if _ml and _ml.get("query") == " ".join(str(query).lower().split()):
+            rep_m = self.decision_outcome(_ml["id"], _ml["row"] if ok else "wrong")
+            return {"located": True, "via": "meaning", "row": _ml["row"], "marked": "ok" if ok else "bad",
+                    "will_serve_again": bool(ok), "forwarded": rep_m.get("forwarded")}
+        # learning-loop audit: the payload keys must follow the trace's layout BEFORE this feedback names one -- after a
+        # tile split, a stale key named ANOTHER question, which the veto then hit after a restart (measured: 2 innocent
+        # questions of 90 stopped being served after 3 corrections)
+        if hasattr(lad, "_payload_sync"):
+            lad._payload_sync()
         qk = lad._qkey(str(query))
         t = self.experience._route(qk)
         hit = self.experience.read_gated(qk)
-        if not hit["fired"]:
-            return {"located": False, "why": "no reflex payload near this query"}
-        pid_key = "%d:%d" % (t, int(hit.get("atom", -1)))
+        # learning-loop audit: mark the payload THIS question is served (its exact entry's, or a gated read whose
+        # recorded question passes verify-on-hit) -- never whatever atom the read happens to fire. A key routed to a
+        # tile that does not hold its atom fires a NEIGHBOUR's atom; marking that vetoed an innocent question after a
+        # restart (measured). An exact-served question whose read does not fire is located through its exact entry.
+        pid_key = lad._feedback_target([str(query), self.session_salt(query)], hit, t) \
+            if hasattr(lad, "_feedback_target") else ("%d:%d" % (t, int(hit.get("atom", -1))) if hit["fired"] else None)
+        if pid_key is None:
+            return {"located": False, "why": ("no reflex payload near this query" if not hit["fired"] else
+                                              "the payload near this query belongs to another question -- not marked")}
         if not hasattr(lad, "_payload_bad"):
             lad._payload_bad = set()
         if not hasattr(lad, "_feedback_log"):
@@ -1006,6 +1013,8 @@ class _UnifiedPart22:
                 getattr(lad, "_vetoed_qs", set()).discard(k_ok)
         else:
             lad._payload_bad.add(pid_key)
+            # E2.1 ONE NEGATIVE STORE: a vetoed payload that answers a MEANING row trains that row too (p28)
+            self._meaning_ladder_negative(query, pid_key)
             # cp54: THE VETO MUST SURVIVE A RESTART. It did not: load replays the durable
             # record through _remember, which re-inserted every vetoed answer into the
             # exact sidecar -- the same 43 noise reflexes were purged in cp48 and again in
@@ -1024,9 +1033,11 @@ class _UnifiedPart22:
                 getattr(lad, "_exact", {}).pop(k_fb, None)
         lad._feedback_log.append([lad._payload_qs.get(pid_key, str(query)), bool(ok),
                                   str(note or "")])
-        if not hasattr(self, "_reflex_calib_pairs"):
-            self._reflex_calib_pairs = []
-        self._reflex_calib_pairs.append([float(hit.get("confidence", 0.0)), bool(ok)])
+        # E0.7: the LADDER's own calibration stream (it used to share one list with the reflex bridge). Only a label
+        # for a read that FIRED: an exact-located correction has no reflex confidence to calibrate.
+        if hit["fired"]:
+            self.door_calibrator("ladder").observe(float(hit.get("confidence", 0.0)), bool(ok))
+        self._wire_ladder_calibration()
         # KEPT NEGATIVE (cp22): the first cut also called reflex_outcome(qk, False) -- but
         # that suppresses the QUERY KEY's trust, which then blocked even the CORRECTED
         # answer taught afterward (read_gated stopped firing at all). The bad-set vetoes the
@@ -1265,8 +1276,12 @@ class _UnifiedPart22:
         LOOSE JSON IS NOT A STORAGE FORMAT HERE ANY MORE (kept negative: pass 5 shipped
         manifest.json + state.npz + experience.json -- three ad-hoc files where the engine
         already owned a blessed one). Sections: lecore.learning.{semantic, affinity, chains,
-        skeletons, predictor, ledger, taught, goals, experience}. The artifact registers into
+        skeletons, predictor, ledger, taught, goals, experience, ...} -- the full list is
+        _LEARNING_KINDS (part 23); a section this build does not know, read by learning_load, is
+        written back untouched (the container's round-trip promise). The artifact registers into
         the KnowledgeStore so the partition catalogs its own learning."""
+        import hashlib as _hashlib
+        import json as _json
         import os
         from holographic.io_and_interop.holographic_container import save_container
         d = os.path.join(str(root), "learning")
@@ -1336,24 +1351,37 @@ class _UnifiedPart22:
         secs.append({"kind": "lecore.learning.predictor", "id": "v1",
                      "meta": {"counts": dict(pred.counts) if pred is not None else {}},
                      "arrays": ({"trace": pred._trace} if pred is not None else {})})
+        from holographic.agents_and_reasoning.holographic_learnguard import (
+            sensitive_pair_reason as _sens_pair, sensitive_reason as _sensitive, redact_args as _redact_rows)
+        if hasattr(z["ladder"], "_payload_sync"):
+            z["ladder"]._payload_sync()                  # learning-loop audit: bad_questions / pairs by CURRENT keys
         secs.append({"kind": "lecore.learning.ledger", "id": "v1",
                      "meta": {"by_tier": z["ladder"].ledger.by_tier,
                               "est_tokens_saved": z["ladder"].ledger.est_tokens_saved,
                               "queries": z["ladder"].ledger.queries,
-                              "query_log": list(getattr(z["ladder"], "query_log", []))[-500:]},
+                              # sweep 179: raw queries are what users TYPE -- a pasted key lands here first
+                              "query_log": _redact_rows(list(getattr(z["ladder"], "query_log", []))[-500:])},
                      "arrays": {}})
         secs.append({"kind": "lecore.learning.taught", "id": "v2",
-                     "meta": {"texts": list(getattr(z["ladder"], "taught_log", [])),
+                     # sweep 179: a row carrying a secret is never written, whatever path logged it
+                     "meta": {"texts": [r_ for r_ in list(getattr(z["ladder"], "taught_log", []))
+                                        if not _sens_pair(str(r_[0]), str(r_[1]))],
                               "bad_questions": sorted({z["ladder"]._payload_qs.get(pk, "")
                                                        for pk in getattr(z["ladder"],
                                                        "_payload_bad", set())} - {""}),
                               "vetoed_questions": sorted(getattr(z["ladder"],
                                                           "_vetoed_qs", set())),
-                              "feedback_log": list(getattr(z["ladder"], "_feedback_log",
-                                                           [])),                                                  # full feedback history: the
+                              # sweep 179: questions taught with allow_volatile=True
+                              "volatile_ok_questions": sorted(getattr(z["ladder"],
+                                                               "_volatile_ok", set())),
+                              "feedback_log": _redact_rows(list(getattr(z["ladder"], "_feedback_log",
+                                                           []))),                                                  # full feedback history: the
                                                        # calibration eats every pair
+                              # sweep 179, defence in depth: a payload that carries a secret is never
+                              # written, whatever path put it in the table
                               "pairs": [[str(k), str(v)] for k, v in
-                                        getattr(z["ladder"], "_payloads", {}).items()]},
+                                        getattr(z["ladder"], "_payloads", {}).items()
+                                        if not _sensitive(str(v))]},
                      "arrays": {}})
         book = self.goal_book.to_manifest()
         gv_names, gv_stack = [], []
@@ -1375,10 +1403,14 @@ class _UnifiedPart22:
                      "meta": {"book": getattr(self, "_recipe_book", {}),
                               "archive": getattr(self, "_archive_corpora", {})},
                      "arrays": {}})
-        secs.append({"kind": "lecore.learning.calibration", "id": "v1",
-                     "meta": {"pairs": [[float(c), bool(o)] for c, o in
-                                        getattr(self, "_reflex_calib_pairs", [])],
-                              "fit": getattr(self, "_reflex_calibration", None)},
+        # E0.7: v2 carries one calibration STREAM per door (ladder, bridge, route, tool:*). `pairs` is still written
+        # (ladder + bridge, untagged -- the v1 shape) so a partition opened by an older build keeps a calibration;
+        # this build reads `streams` whenever present and migrates a v1 `pairs` list into BOTH ladder and bridge.
+        _streams = self._calibration_streams()
+        secs.append({"kind": "lecore.learning.calibration", "id": "v2",
+                     "meta": {"pairs": [[float(c), bool(y)] for d_ in ("ladder", "bridge")
+                                        for c, y in (_streams.get(d_) or {}).get("pairs", [])],
+                              "fit": None, "streams": _streams},
                      "arrays": {}})
         tc = getattr(self, "_tool_cache", None)
         if tc:
@@ -1409,7 +1441,10 @@ class _UnifiedPart22:
             n_audit = sum(len(getattr(t, "_audit", []) or [])
                           for t in self.experience.tiles)
             n_taught = len(getattr(self.zoo["ladder"], "taught_log", []) or [])
-            if n_audit and n_audit == n_taught:
+            # E1.5: a RAW correction is never a taught row, so regen could not rebuild it -- any raw entry forces the
+            # stored form (the count guard alone could coincide: skipped taught writes + raw rows = the same count)
+            n_raw = sum(len(getattr(t, "_audit_raw", {}) or {}) for t in self.experience.tiles)
+            if n_audit and n_audit == n_taught and not n_raw:
                 self._audit_regen_applied = True
             else:
                 # MEASURED (sweep 101): a lived-in mind accrues non-taught experience
@@ -1441,6 +1476,17 @@ class _UnifiedPart22:
         for ti, t in enumerate(self.experience.tiles):
             st = t.to_state()
             aud = st.pop("audit", None)
+            # E1.5: the raw-entry map moves out of the meta into a per-row uint8 flag array (0 = an ordinary write,
+            # else the raw mode) -- written only when a tile HAS raw entries; an old file has none and loads as before
+            _raw = {int(i_): int(m_) for i_, m_ in (st.pop("audit_raw", None) or [])}
+            if aud and _raw:
+                aud_arrays["aud_raw_%d" % ti] = np.asarray([_raw.get(j_, 0) for j_ in range(len(aud))], np.uint8)
+            # E2.1: the tile's outcome fields (reported successes / failures -- not audit writes) as float64 arrays,
+            # not 2,048 JSON numbers each; only tiles that have them
+            for _fk in ("succ_field", "fail_field"):
+                _fv = st.pop(_fk, None)
+                if _fv is not None:
+                    aud_arrays["%s_%d" % (_fk, ti)] = np.asarray(_fv, np.float64)
             if aud:
                 kref, vref = [], []
                 for k, v in aud:
@@ -1488,21 +1534,155 @@ class _UnifiedPart22:
         if _ff:
             secs.append({"kind": "lecore.learning.factfiles", "id": "v1",
                          "meta": {"refs": _ff}})
+        # THE REFLEX BRIDGE TRAVELS WITH THE PARTITION (sweep 177). Same rule as factfiles
+        # just above: the trace survived a reboot but the gate in front of it did not, so a
+        # booted mind answered every reported repeat with "no experience yet". Written in
+        # BOTH modes (normal and audit-regen): regen rebuilds the trace from taught rows,
+        # but decision outcomes are not taught rows, so only this section carries them.
+        # Keys are float32 in an array (exact; the seen gate compares at cosine 0.8).
+        # ---- F1 block (CLM backlog E4.1 / E4.3 / E4.4 / Q3; holographic_unified_p33_router) -------------------------
+        # THE TOOL DOOR TRAVELS (E4.4 -- one tool learner). Sweep 178 persisted the old UsageTrace here as
+        # lecore.learning.toolusage; the tool door's ProtoStore + audit tallies replace it (lecore.learning.tooldoor).
+        # The old section is still READ by learning_load (a read-compat shim), never written again.
+        _tds = self._tool_section() if hasattr(self, "_tool_section") else None
+        if _tds is not None:
+            secs.append(_tds)
+        # THE LEARNED ROUTER TRAVELS (E4.1): the router's ProtoStore over cards (only cards that were labelled or were
+        # a labelled question's rival), its fusion settings, feature-space digest and share flags.
+        _rts = self._router_section() if hasattr(self, "_router_section") else None
+        if _rts is not None:
+            secs.append(_rts)
+        # THE COMMONS CARRIER (Q3): a contribution / commons bundle carries the shareable learned stores here.
+        _pss = self._protostores_section() if hasattr(self, "_protostores_section") else None
+        if _pss is not None:
+            secs.append(_pss)
+        # ---- end F1 block ----------------------------------------------------------------------------------------
+        # sweep 180: what the SEMANTIC guard learned (pattern refusals, learn_guard_example) travels too --
+        # a guard that forgets its corrections re-flags the same false positive after every restart
+        _sg = getattr(self, "_semantic_guard", None)
+        if _sg is not None and any(_sg.learned.values()):
+            # THE GUARD MUST NOT KEEP WHAT IT REFUSED (learning-loop audit, 2026-09-26). A pattern refusal teaches the
+            # semantic guard the refused QUESTION as a credential example -- verbatim (normalised), secret included:
+            # MEASURED, teach("my password is <fake secret> ...") put "... hunter2 fake 9c1d ..." into this section,
+            # on disk. The examples that carry a secret are dropped here (counted, never named); the learner itself
+            # is fixed at the source by redacting before it learns (learn_guard_example here; the auto-learn path in
+            # holographic_learnguard -- proposed to its owner).
+            _gst, _gdrop = self._guard_learned_clean(_sg.state())
+            secs.append({"kind": "lecore.learning.guard", "id": "v1",
+                         "meta": {"learned": _gst, "dropped_sensitive": _gdrop}, "arrays": {}})
+        # sweep 181: the MEANING index -- every confirmed wording, learned association, method, clarify row and
+        # calibration label. Without it a restart would forget every rewording the model ever resolved (the rows
+        # themselves come back from the taught replay; what they MEAN would not).
+        _ms = self._meaning_state() if hasattr(self, "_meaning_state") else None
+        if _ms is not None:
+            # E1.1 c3 / E3.1: the learned row prototypes' delta and the direction reader's prototypes are ARRAYS
+            secs.append({"kind": "lecore.learning.meaning", "id": "v1", "meta": _ms, "arrays": self._meaning_arrays()})
+        else:
+            # THE DIRECTION READER WITHOUT MEANING ROWS (learning-loop audit): it rode inside the meaning section only,
+            # so a mind that learned directions (direction_learn) but had no meaning row lost them at every restart
+            # (MEASURED: counts 2 -> reader absent after a rollover). Its own section, written only in that case.
+            _rd = self.__dict__.get("_direction_reader_obj")
+            if _rd is not None and getattr(_rd, "counts", None):
+                _rdm, _rda = _rd.state()
+                secs.append({"kind": "lecore.learning.direction", "id": "v1", "meta": _rdm, "arrays": dict(_rda)})
+        if getattr(self, "_reflex_seen", None) or getattr(self, "_reflex_labels", None):
+            _br = self.reflex_bridge_state()
+            _bra = {"keys": _br["keys"]}
+            _brm = {"labels": _br["labels"], "kinds": _br["kinds"], "outcomes": _br["outcomes"]}
+            _vs = _br.get("verify")
+            if _vs:
+                # learning-loop audit: verify_decision's profile + drift stream ride with the bridge (they were lost
+                # at every restart: profile 0.503 -> None, drift_z 0.152 -> None, measured)
+                _brm["verify"] = {"n": _vs["n"], "meaning_n": _vs["meaning_n"]}
+                for _k in ("profile", "meaning_profile", "support"):
+                    if _vs.get(_k) is not None:
+                        _bra["verify_" + _k] = np.asarray(_vs[_k], np.float64)
+            secs.append({"kind": "lecore.learning.reflexbridge", "id": "v1", "meta": _brm, "arrays": _bra})
+        # THE OPEN QUESTIONS TRAVEL (learning-loop audit, 2026-09-26). serve() records every question it could not
+        # answer in escalations() -- a service swarm's honest list of what it does not know, which a human resolve()s
+        # back into memory. It lived in process memory only: MEASURED, an escalation open before a restart was gone
+        # after it and resolve() then reported cleared=False. The newest _ESCALATIONS_KEPT (insertion order = oldest
+        # first) are written; a question carrying a secret is never written (counted). Older generations do not
+        # contribute (a question they held open may have been resolved since -- the newest file is the truth).
+        _esc = getattr(self, "_escalations", None)
+        if _esc:
+            _erows, _edrop = [], 0
+            for _q, _v in list(_esc.items())[-self._ESCALATIONS_KEPT:]:
+                if _sensitive(str(_q)):
+                    _edrop += 1
+                    continue
+                _erows.append([str(_q), str((_v or {}).get("reason", "")), int((_v or {}).get("count", 0))])
+            secs.append({"kind": "lecore.learning.escalations", "id": "v1",
+                         "meta": {"open": _erows, "dropped_sensitive": _edrop}, "arrays": {}})
+        # E0.5: THE DECISION LEDGER AND SYSTEMONE'S LEARNED TABLES TRAVEL. Before this, decision_outcome(<an id issued
+        # before a restart>) raised KeyError and every typed decision's learning was lost on reload. Records go as
+        # TEXT (ids re-derive -- migration by replay; the stored id is checked), newest 4096 kept, and a record whose
+        # state / question / answer / outcome carries a secret is never written (counted). Written in both modes.
+        _dsec = self._decisions_section()
+        if _dsec is not None:
+            secs.append(_dsec)
+        # SECTIONS THIS BUILD DOES NOT KNOW ARE WRITTEN BACK UNTOUCHED (learning-loop audit, 2026-09-26). The
+        # container's promise (holographic_container.load_container): "the reader is expected to keep it and write it
+        # back out, so a file round-trips through an app that only understands SOME of its kinds". learning_load
+        # used to drop them, so a partition written by a NEWER build, opened by an older component (a second swarm
+        # agent, a pinned service) lost that data at the next save -- MEASURED: an injected lecore.future.section did
+        # not survive one rollover. learning_load now keeps them (_learning_unknown_sections); they go back out here,
+        # except one whose meta carries a secret by the pattern layer (never re-written by this build; counted).
+        _written = {s_["kind"] for s_ in secs}
+        self._learning_unknown_dropped = 0
+        for _u in getattr(self, "_learning_unknown_sections", None) or []:
+            if _u.get("kind") in _written:
+                continue                                 # a kind this build now writes itself wins
+            if _sensitive(_json.dumps(_u.get("meta"), sort_keys=True, default=str)):
+                self._learning_unknown_dropped += 1
+                continue
+            secs.append(_u)
         prev_fp = None
         # WRITE TARGET, three rungs: explicit path= wins; else the generation file the
         # rollover registered on this mind (_learning_current -- "just one file" holds
         # mid-session, not only at boot); else the legacy name, byte-for-byte the old
         # behavior for every bare mind and existing test.
-        path = str(path) if path else (getattr(self, "_learning_current", None)
-                                       or os.path.join(d, "state.lecore"))
+        cur = getattr(self, "_learning_current", None)
+        if cur and os.path.dirname(os.path.abspath(cur)) != os.path.abspath(d):
+            cur = None          # a generation registered under ANOTHER root is never this root's write target
+        path = str(path) if path else (cur or os.path.join(d, "state.lecore"))
         if os.path.exists(path):
             try:
                 prev_fp = self.partition_fingerprint(str(root))["fingerprint"]
             except Exception:
                 prev_fp = None
-        blob = save_container(secs, meta={"app": "lecore.learning", "version": 2})
+        # WHAT CHANGED SINCE THE LAST SAVE, BY SECTION (learning-loop audit, 2026-09-26). drift_vs_previous_save is the
+        # cosine of two partition fingerprints, each a bundle of one random vector per section seeded by the FIRST
+        # 2,000 characters of that section's sorted meta -- so it reads ~ (sections unchanged) / (sections): the
+        # owner's last real save, 0.6639 on a 12-section partition, is "4 sections' meta prefix changed" (8/12 =
+        # 0.667). It is blind to learning held in ARRAYS (the trace, every ProtoStore) and dominated by bookkeeping:
+        # MEASURED on a 14-section partition, one ask moved it to 0.776 while one typed correction moved it only to
+        # 0.885 (tools/audit_learning_loop.py, check drift_number). It stays as it was (callers read it); the
+        # honest companion is the list of sections whose FULL content (meta + array bytes) changed, computed from
+        # per-section sha256 digests kept in the container's top-level meta (read back cheaply from the manifest).
+        _digests = {}
+        for _i, _s in enumerate(secs):
+            _h = _hashlib.sha256(_json.dumps(_s.get("meta"), sort_keys=True, default=str).encode())
+            for _an in sorted((_s.get("arrays") or {})):
+                _h.update(_an.encode())
+                _h.update(np.ascontiguousarray(np.asarray(_s["arrays"][_an])).tobytes())
+            _k = str(_s.get("kind"))
+            _k = _k if _k not in _digests else "%s#%d" % (_k, _i)
+            _digests[_k] = _h.hexdigest()[:16]
+        _prev_digests = None
+        if os.path.exists(path):
+            try:
+                from holographic.io_and_interop.holographic_container import load_container_meta
+                with open(path, "rb") as _pf:
+                    _prev_digests = (load_container_meta(_pf.read()) or {}).get("section_digests")
+            except Exception:
+                _prev_digests = None
+        blob = save_container(secs, meta={"app": "lecore.learning", "version": 2, "section_digests": _digests})
         with open(path, "wb") as f:
             f.write(blob)
+        sections_changed = (sorted(k for k in set(_digests) | set(_prev_digests)
+                                   if _digests.get(k) != _prev_digests.get(k))
+                            if isinstance(_prev_digests, dict) else None)
         drift_vs_prev = None
         if prev_fp is not None:
             try:
@@ -1532,9 +1712,17 @@ class _UnifiedPart22:
         except Exception:
             pass
         return {"saved": True, "path": path, "sections": len(secs),
+                # learning-loop audit: sections this build does not know, written back untouched (and any dropped
+                # because their meta carried a secret)
+                "unknown_sections_kept": sum(1 for s_ in secs if s_.get("kind") not in self._LEARNING_KINDS
+                                             and not str(s_.get("kind", "")).startswith(self._LEARNING_KIND_FAMILIES)),
+                "unknown_sections_dropped_sensitive": int(getattr(self, "_learning_unknown_dropped", 0)),
                 "audit_regen": bool(self._audit_regen_applied),
                 "audit_regen_reason": getattr(self, "_audit_regen_reason", None),
                 "drift_vs_previous_save": drift_vs_prev,
+                # the audit's companion to the drift number: which sections' full content changed (None when the
+                # previous file carried no digests -- written by an older build, or no previous file)
+                "sections_changed": sections_changed,
                 "bytes": len(blob)}
 
 

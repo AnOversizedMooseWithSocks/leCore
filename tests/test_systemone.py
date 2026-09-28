@@ -66,7 +66,8 @@ def test_mind_decide_types_and_honesty():
     # value is schema-typed or None -- nothing else is constructible.
     assert a["cat"]["value"] in QS["cat"]["options"] + [None]
     # No probability before calibration: honesty is part of the contract, not a mood.
-    assert a["cat"]["p"] is None and a["cat"]["calibrated"] is False
+    # (E0.6: the mind's typed door reports this as p_correct -- high = confident; the bare p is deprecated)
+    assert a["cat"]["p_correct"] is None and a["cat"]["calibrated"] is False
     assert a["cat"]["ranked"][0][0] in QS["cat"]["options"]
 
 
@@ -86,7 +87,7 @@ def test_calibration_gives_bounded_probability():
                ("segfault error report", {"cat": "bug"})]
     a = m.systemone_decide("refund the invoice charge", QS, labeled=labeled)
     # In (0,1) strictly: the PAV clip forbids claiming a certainty n=6 outcomes cannot support.
-    assert a["cat"]["p"] is not None and 0.0 < a["cat"]["p"] < 1.0
+    assert a["cat"]["p_correct"] is not None and 0.0 < a["cat"]["p_correct"] < 1.0
     assert a["cat"]["calibrated"] is True
 
 

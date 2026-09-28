@@ -836,8 +836,8 @@ def register_p08_digest(c):
         "TYPED decisions with honest probabilities (holographic_systemone, the native System One "
         "door -- what Jev sells as an API): answer typed questions -- choice, score, noul (yes/no) "
         "-- about one state in ONE pass. Schema validated up front so an untyped output is "
-        "impossible; ties ABSTAIN (value None, why named); p appears only after labeled outcomes "
-        "calibrate it. Every choice carries ranked evidence and its basis. scorer='nb' (sweeps "
+        "impossible; ties ABSTAIN (value None, why named); p_correct (high = confident) appears only after "
+        "labeled outcomes calibrate it (bare p: deprecated). scorer='nb' (sweeps "
         "174-175): transformed naive Bayes over the same examples, measured 0.843 vs 0.716 on AG "
         "News k=300 and 0.798 vs 0.753 on Banking77 (77 intents) k=35.",
         example="import lecore; m=lecore.UnifiedMind(dim=512,seed=0); "
@@ -982,12 +982,12 @@ def register_p08_digest(c):
     )
     c.register_capability(
         "decision_outcome",
-        "REPORT AN OUTCOME BY ID -- the one outcome path (sweep 176, backlog G1/G2). Every route_tiered and "
-        "systemone_decide result carries an id; decision_outcome(id, truth) records what happened and, for a "
-        "typed decision, forwards to the fitted SystemOne's observe() -- no teach() anywhere; the model is kept "
-        "per schema so the next call decides from what it learned. Measured: a prequential stream through the "
-        "doors equals systemone_stream (0.700 = 0.700, 120 AG News rows). Records are HRR-encoded; "
-        "decision_records() lists them; similar() finds a like decision by cosine.",
+        "REPORT AN OUTCOME BY ID -- the one outcome path (sweep 176). Every route, typed, rank and serve result "
+        "carries an id, and ids survive a restart once the partition is booted (sweep 182); decision_outcome(id, "
+        "truth) records what happened, feeds that door's own calibrator and, for a "
+        "typed decision, forwards to the fitted SystemOne's observe() -- no teach() anywhere. Measured: a "
+        "prequential stream through the doors equals systemone_stream (0.700 = 0.700, 120 AG News rows). "
+        "decision_records() lists the records; similar() finds a like decision by cosine.",
         example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
         "a=m.systemone_decide('parcel lost', {'cat':{'type':'choice','options':['billing','shipping'],"
         "'examples':{'billing':['card charged twice','refund the invoice'],'shipping':['courier late','package never came']}}}, "
@@ -1159,9 +1159,9 @@ def register_p08_digest(c):
         "THE PLAIN FRONT DOOR FOR A TYPED DECISION (sweep 176): mind.typed(state, [options], examples=...) builds "
         "the schema, lints it and the state (imbalanced budgets, thin examples, multi-clause or contrastive states), "
         "picks the scorer from the measured regime table, decides, and returns ONE answer -- value, ranked, margin, "
-        "p, set, id -- with the lint attached. decision_outcome(id, truth) teaches the table, the reflex and the "
+        "p_correct, p_null, set, id -- with the lint attached. decision_outcome(id, truth) teaches the table, the reflex and the "
         "calibration. The same discipline runs inside route() (act / choose / abstain), find_capability, suggest "
-        "and serve, where a reported outcome promotes what was used.",
+        "and serve.",
         example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
         "a=m.typed('courier lost the package', ['billing','shipping'], examples={'billing':['card charged twice','refund my invoice fee','charge on my statement'],"
         "'shipping':['parcel lost in transit','courier delivery late','package never arrived']}); print(a['value'], a['lint'], a['id'][:6])",
@@ -1170,6 +1170,75 @@ def register_p08_digest(c):
                  "one line typed decision"),
         module="holographic_systemone", method="typed", native=True,
     )
+    c.register_capability(
+        "Learning guard (never learn secrets or live readings)",
+        "WOULD THIS BE LEARNED? Every learning door refuses SENSITIVE rows (API/private keys, seed phrases, "
+        "passwords, tokens; no override) and VOLATILE readings (prices, weather, balances, 'right now'), by "
+        "pattern AND by meaning (a typed decision: credential / live value / unclear / ordinary -- an unclear "
+        "question such as a bare ticker is asked back, never stored). leak_audit scans every store; "
+        "learn_guard_example corrects the semantic layer. See holographic_learnguard for the measured numbers.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "print(m.learn_guard('the admin password', 'hunter2-Moose!')['kind'], "
+        "m.learn_guard('what is the current price of solana', '$142.10')['kind'], "
+        "m.learn_guard('sol price as of sept 22 2026 at 15:00', '$142.10')['ok'])",  # no ISO date: capdoc must stay timestamp-free
+        aliases=("do not learn api keys or passwords", "never remember a seed phrase or private key",
+                 "is it safe to teach this", "would this be learned", "keep secrets out of memory",
+                 "do not cache a live price or the weather", "stale answer from dynamic data",
+                 "redact credentials before storing"),
+        module="holographic_learnguard", method="learn_guard", native=True,
+    )
+    c.register_capability(
+        "Find by meaning; learn rewordings and HOW answers are found",
+        "A taught answer is found by what a question MEANS, not only its exact words; an unsure question goes "
+        "to the attached model as a TYPED choice (same row / new answer + method / unclear), and the verdict is "
+        "learned at once. Live answers are kept as the METHOD (tool + slots), never the value; a bare value asks "
+        "back. meaning_resolve applies a verdict from any model or person.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "m.teach('how do i check my account balance','Open the app, tap Accounts.'); "
+        "r=list(m.meaning.rows)[0]; m.meaning_resolve('how much money do i have left',{'verdict':'same','row':r}); "
+        "print(m.ask('How much money do I have left?')['via'])",
+        aliases=("paraphrase recall", "find a taught answer when the question is reworded", "learn new phrasings",
+                 "semantic lookup of memory", "remember how an answer was found", "learn tool calls from the model",
+                 "ask the user to clarify a bare ticker", "resolve an escalation and teach it back"),
+        module="holographic_meaning", method="meaning_resolve", native=True,
+    )
+    # CLM backlog wave 2 (sweep 182, 2026-09-26): the two new decision doors get curated homes like every sweep-176
+    # door above -- without a card, find_capability answers a stranger's phrasing with an auto module home or nothing.
+    c.register_capability(
+        "rank",
+        "RANK FREE-FORM CANDIDATES AGAINST A STATE (sweep 182): rank(state, candidates) -- strings or {'text', "
+        "'examples'} -- returns ONE record: value, ranked (absolute cosine, hashed n-grams), margin, p_correct "
+        "(high = confident; None until 8 outcomes of both kinds), p_null (low = significant), a conformal set, an "
+        "id. Under the floor 0.15 it REFUSES (value None). decision_outcome(id, label) trains its prototypes. "
+        "CLINC150, 150 candidates, 3 seeds: static top-1 0.697 only TIES TF-IDF 0.696 (kept loud); learning "
+        "from outcomes lifts the last third to 0.892. Warm p50 10.4 ms; cold first call 6.9 s.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "r=m.rank('my parcel never arrived', [{'text':'shipping','examples':['parcel lost in transit',"
+        "'package never arrived']},{'text':'billing','examples':['card charged twice','refund my invoice']}]); "
+        "print(r['value'], round(r['margin'],3), r['p_correct'], r['id'])",
+        aliases=("rank these candidates for this question", "score a list of options against a text",
+                 "which of these answers fits best", "rerank candidate actions", "rank with a confidence and abstain",
+                 "free form ranking with a floor", "pick the best candidate and learn from the outcome"),
+        module="holographic_protostore", method="rank", native=True,
+    )
+    c.register_capability(
+        "verify_precheck",
+        "WHICH ACTION WILL PASS ITS VERIFY? A cheap pre-check, never a verify (sweep 182): verify_precheck(state, "
+        "actions) scores each action by learned verify SUCCESS minus FAILURE prototypes (swarm_step teaches them "
+        "from every verified step, failures included) and moves an action only on STRONG evidence (|score| >= "
+        "0.5); otherwise the given order stands. The verify still runs on every accepted step. Recorded swarm "
+        "runs: AUROC 0.951 vs the reflex's 0.924; judge calls 1755 vs 2691 with no reflex. KEPT NEGATIVE: novel "
+        "tasks 0.545 vs 0.603.",
+        example="import lecore; m=lecore.UnifiedMind(dim=256,seed=0); "
+        "m.swarm_step('resolve families','catalog_families',{'decide':False},done_when='500 resolve',"
+        "evidence={'resolved':501},worker='w1',verify={'verb':'catalog_families','args':{}}); "
+        "print(m.verify_precheck('resolve families',['skill_lint','catalog_families'])['order'])",
+        aliases=("which tool will pass verification", "order candidate actions by past verify results",
+                 "pre-check before running a verify", "learn from failed verifications",
+                 "skip actions that usually fail", "predict whether a swarm step will pass"),
+        module="holographic_protostore", method="verify_precheck", native=True,
+    )
+
 
 _PART = "holographic_catalog_p08"
 

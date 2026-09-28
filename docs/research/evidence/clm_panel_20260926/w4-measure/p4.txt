@@ -1,0 +1,4 @@
+P0.97 unweighted val        thr 0.777 -> test cov 40.4% realised precision 0.967 oos served 2.2%
+P0.97 prior-reweighted val  thr 0.797 -> test cov 37.7% realised precision 0.970 oos served 2.1%
+P0.95 unweighted val        thr 0.624 -> test cov 60.9% realised precision 0.941 oos served 5.6%
+P0.95 prior-reweighted val  thr 0.656 -> test cov 56.9% realised precision 0.948 oos served 4.4%

@@ -1,0 +1,378 @@
+{
+ "config": {
+  "agents": 4,
+  "requests_per_agent": 40,
+  "pool": 60,
+  "own_words": 4,
+  "k_tools": 6,
+  "zipf_s": 1.1,
+  "p_alt_wording": 0.25,
+  "seeds": 3
+ },
+ "results": {
+  "no_learning": [
+   {
+    "requests": 160,
+    "judge_calls": 154,
+    "solved": 152,
+    "answer": 108,
+    "menu": 44,
+    "refuse": 8,
+    "from_experience": 0,
+    "experience_wrong": 0,
+    "seconds": 1.2,
+    "by_kind": {
+     "new": {
+      "n": 81,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 65,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "paraphrase": {
+      "n": 14,
+      "exp": 0,
+      "exp_wrong": 0
+     }
+    }
+   },
+   {
+    "requests": 160,
+    "judge_calls": 162,
+    "solved": 160,
+    "answer": 136,
+    "menu": 24,
+    "refuse": 0,
+    "from_experience": 0,
+    "experience_wrong": 0,
+    "seconds": 0.7,
+    "by_kind": {
+     "new": {
+      "n": 70,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 71,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "paraphrase": {
+      "n": 19,
+      "exp": 0,
+      "exp_wrong": 0
+     }
+    }
+   },
+   {
+    "requests": 160,
+    "judge_calls": 210,
+    "solved": 139,
+    "answer": 130,
+    "menu": 26,
+    "refuse": 4,
+    "from_experience": 0,
+    "experience_wrong": 0,
+    "seconds": 0.7,
+    "by_kind": {
+     "new": {
+      "n": 79,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 67,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "paraphrase": {
+      "n": 14,
+      "exp": 0,
+      "exp_wrong": 0
+     }
+    }
+   }
+  ],
+  "isolated_judged": [
+   {
+    "requests": 160,
+    "judge_calls": 157,
+    "solved": 155,
+    "answer": 141,
+    "menu": 14,
+    "refuse": 5,
+    "from_experience": 79,
+    "experience_wrong": 0,
+    "seconds": 3.0,
+    "by_kind": {
+     "new": {
+      "n": 81,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 65,
+      "exp": 65,
+      "exp_wrong": 0
+     },
+     "paraphrase": {
+      "n": 14,
+      "exp": 14,
+      "exp_wrong": 0
+     }
+    }
+   },
+   {
+    "requests": 160,
+    "judge_calls": 161,
+    "solved": 160,
+    "answer": 147,
+    "menu": 13,
+    "refuse": 0,
+    "from_experience": 88,
+    "experience_wrong": 0,
+    "seconds": 2.5,
+    "by_kind": {
+     "new": {
+      "n": 70,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 71,
+      "exp": 71,
+      "exp_wrong": 0
+     },
+     "paraphrase": {
+      "n": 19,
+      "exp": 17,
+      "exp_wrong": 0
+     }
+    }
+   },
+   {
+    "requests": 160,
+    "judge_calls": 210,
+    "solved": 139,
+    "answer": 144,
+    "menu": 12,
+    "refuse": 4,
+    "from_experience": 74,
+    "experience_wrong": 0,
+    "seconds": 2.5,
+    "by_kind": {
+     "new": {
+      "n": 79,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 67,
+      "exp": 63,
+      "exp_wrong": 0
+     },
+     "paraphrase": {
+      "n": 14,
+      "exp": 11,
+      "exp_wrong": 0
+     }
+    }
+   }
+  ],
+  "shared_judged": [
+   {
+    "requests": 160,
+    "judge_calls": 157,
+    "solved": 156,
+    "answer": 149,
+    "menu": 7,
+    "refuse": 4,
+    "from_experience": 116,
+    "experience_wrong": 0,
+    "seconds": 1.9,
+    "by_kind": {
+     "new": {
+      "n": 42,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 104,
+      "exp": 104,
+      "exp_wrong": 0
+     },
+     "paraphrase": {
+      "n": 14,
+      "exp": 12,
+      "exp_wrong": 0
+     }
+    }
+   },
+   {
+    "requests": 160,
+    "judge_calls": 161,
+    "solved": 160,
+    "answer": 152,
+    "menu": 8,
+    "refuse": 0,
+    "from_experience": 119,
+    "experience_wrong": 0,
+    "seconds": 2.0,
+    "by_kind": {
+     "new": {
+      "n": 37,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 107,
+      "exp": 107,
+      "exp_wrong": 0
+     },
+     "paraphrase": {
+      "n": 16,
+      "exp": 12,
+      "exp_wrong": 0
+     }
+    }
+   },
+   {
+    "requests": 160,
+    "judge_calls": 209,
+    "solved": 139,
+    "answer": 146,
+    "menu": 10,
+    "refuse": 4,
+    "from_experience": 102,
+    "experience_wrong": 0,
+    "seconds": 1.9,
+    "by_kind": {
+     "new": {
+      "n": 43,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 104,
+      "exp": 92,
+      "exp_wrong": 0
+     },
+     "paraphrase": {
+      "n": 13,
+      "exp": 10,
+      "exp_wrong": 0
+     }
+    }
+   }
+  ],
+  "shared_selfreport": [
+   {
+    "requests": 160,
+    "judge_calls": 0,
+    "solved": 154,
+    "answer": 149,
+    "menu": 7,
+    "refuse": 4,
+    "from_experience": 116,
+    "experience_wrong": 1,
+    "seconds": 1.8,
+    "by_kind": {
+     "new": {
+      "n": 42,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 104,
+      "exp": 104,
+      "exp_wrong": 1
+     },
+     "paraphrase": {
+      "n": 14,
+      "exp": 12,
+      "exp_wrong": 0
+     }
+    }
+   },
+   {
+    "requests": 160,
+    "judge_calls": 0,
+    "solved": 158,
+    "answer": 152,
+    "menu": 8,
+    "refuse": 0,
+    "from_experience": 119,
+    "experience_wrong": 1,
+    "seconds": 1.9,
+    "by_kind": {
+     "new": {
+      "n": 37,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 107,
+      "exp": 107,
+      "exp_wrong": 1
+     },
+     "paraphrase": {
+      "n": 16,
+      "exp": 12,
+      "exp_wrong": 0
+     }
+    }
+   },
+   {
+    "requests": 160,
+    "judge_calls": 0,
+    "solved": 137,
+    "answer": 150,
+    "menu": 6,
+    "refuse": 4,
+    "from_experience": 115,
+    "experience_wrong": 14,
+    "seconds": 2.0,
+    "by_kind": {
+     "new": {
+      "n": 43,
+      "exp": 0,
+      "exp_wrong": 0
+     },
+     "repeat": {
+      "n": 104,
+      "exp": 103,
+      "exp_wrong": 12
+     },
+     "paraphrase": {
+      "n": 13,
+      "exp": 12,
+      "exp_wrong": 2
+     }
+    }
+   }
+  ],
+  "restart": [
+   {
+    "asked": 120,
+    "from_experience": 73,
+    "right": 73,
+    "wrong": 0
+   },
+   {
+    "asked": 120,
+    "from_experience": 71,
+    "right": 71,
+    "wrong": 0
+   },
+   {
+    "asked": 120,
+    "from_experience": 70,
+    "right": 70,
+    "wrong": 0
+   }
+  ]
+ }
+}

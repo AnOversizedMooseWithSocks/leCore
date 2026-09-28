@@ -1,0 +1,64 @@
+{
+ "encode_s": 18.6,
+ "K_per_intent": 20,
+ "dim": 2048,
+ "anisotropy_mean_cos_between_different_intents": {
+  "raw": 0.0457,
+  "centered": -0.0012
+ },
+ "arms": [
+  {
+   "arm": "raw",
+   "test_top1": 0.7264,
+   "auroc_inscope_vs_oos_topscore": 0.8523,
+   "auroc_correct_vs_wrong_topscore": 0.7814,
+   "null_abstains_inscope": 0.0,
+   "null_abstains_oos": 0.0,
+   "at_val_oos2pct_threshold": {
+    "test_inscope_served_correct": 0.3893,
+    "test_inscope_served_wrong": 0.0416,
+    "test_oos_served": 0.026
+   }
+  },
+  {
+   "arm": "centered",
+   "test_top1": 0.7287,
+   "auroc_inscope_vs_oos_topscore": 0.8704,
+   "auroc_correct_vs_wrong_topscore": 0.7965,
+   "null_abstains_inscope": 0.0,
+   "null_abstains_oos": 0.0,
+   "at_val_oos2pct_threshold": {
+    "test_inscope_served_correct": 0.4322,
+    "test_inscope_served_wrong": 0.0471,
+    "test_oos_served": 0.025
+   }
+  },
+  {
+   "arm": "raw+NULL",
+   "test_top1": 0.7264,
+   "auroc_inscope_vs_oos_topscore": 0.8523,
+   "auroc_correct_vs_wrong_topscore": 0.7814,
+   "null_abstains_inscope": 0.0151,
+   "null_abstains_oos": 0.17,
+   "at_val_oos2pct_threshold": {
+    "test_inscope_served_correct": 0.3971,
+    "test_inscope_served_wrong": 0.0429,
+    "test_oos_served": 0.027
+   }
+  },
+  {
+   "arm": "centered+NULL",
+   "test_top1": 0.7287,
+   "auroc_inscope_vs_oos_topscore": 0.8704,
+   "auroc_correct_vs_wrong_topscore": 0.7965,
+   "null_abstains_inscope": 0.0051,
+   "null_abstains_oos": 0.07,
+   "at_val_oos2pct_threshold": {
+    "test_inscope_served_correct": 0.4322,
+    "test_inscope_served_wrong": 0.0471,
+    "test_oos_served": 0.025
+   }
+  }
+ ],
+ "cpu_s": 25.4
+}

@@ -238,3 +238,37 @@ def test_preset_kind_is_json_and_readable_by_the_other_app(mind, root):
     p = L.Workspace(root, app="lestudio", create=False).sections("lecore.preset")[0]
     assert p["meta"]["target"] == "polystudio.render" and p["meta"]["params"]["exposure"] == 1.2 and p["meta"]["tags"] == ["lighting"]
     json.dumps(p["meta"])
+
+
+def test_rev_reads_the_manifest_only_never_the_section_arrays(root, monkeypatch):
+    """Regression (leStudio painting session): Workspace.rev() -- called on EVERY mutating request through
+    bump() -- used to load_container() the whole file, decoding every layer's pixels to read one integer
+    (1.7 s per paint stroke, and transient arrays that OOM-killed the studio). rev() must now answer from
+    manifest.json alone, with the same value as before."""
+    ws = L.Workspace(root, app="lestudio")
+    big = np.zeros((256, 256, 4), np.float32); big[..., 3] = 1
+    for k in range(3):
+        s = image_section(big, name="layer%d" % k); s["id"] = "L%d" % k
+        ws.put(s)
+    ws.bump("agent-1")                                   # a journal-only note advances rev past the file meta
+    expected = max(load_container(open(os.path.join(root, L.Workspace.FILE), "rb").read())["meta"]["rev"],
+                   ws._journal_rev())
+
+    def boom(*a, **k):
+        raise AssertionError("rev() decoded the whole container")
+    monkeypatch.setattr(L, "load_container", boom)
+    assert ws.rev() == expected == 4
+    assert ws.bump("agent-1") == 5                       # the hot path works without ever calling load_container
+
+
+def test_rev_meta_cache_sees_every_container_rewrite(root):
+    """The rev() meta cache is keyed on the file's stat: a put() by ANOTHER Workspace object (another app) must
+    still be seen immediately -- a stale cache here would make two apps disagree about the revision."""
+    a = L.Workspace(root, app="lestudio"); b = L.Workspace(root, app="polystudio")
+    img = np.zeros((8, 8, 4), np.float32); img[..., 3] = 1
+    s = image_section(img, name="t"); s["id"] = "tex"
+    assert a.put(s) == 1 and b.rev() == 1 and a.rev() == 1          # both cached at rev 1
+    s2 = image_section(img, name="t2"); s2["id"] = "tex2"
+    assert b.put(s2) == 2
+    assert a.rev() == 2                                                # a's cache was invalidated by b's rewrite
+    assert a.bump("x") == 3 and b.rev() == 3                           # journal-only notes still count

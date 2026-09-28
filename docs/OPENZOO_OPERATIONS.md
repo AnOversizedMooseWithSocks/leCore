@@ -10,8 +10,10 @@ generator broke, and `tools/regen_docs.py --check` fails CI.*
     python3 holographic_mcp.py           # MCP server; tool pin = 26
 
 - **`LECORE_PARTITION`** — your operator memory (a directory holding
-  `learning/state.lecore`). Absent → the shipped `release_bundle/` loads (62 generic
-  entries, leakage-audited 0/4).
+  `learning/state.lecore`). Absent → the shipped `release_bundle/` loads (125 generic
+  entries since 2026-09-27, distilled by `tools/distill_release.py`, which also writes
+  `release_bundle/distill_report.json`: every shipped question and every exclusion by reason;
+  `python tools/distill_release.py --check release_bundle` audits a bundle against the rule).
 - **`LECORE_MODEL`** — optional model directory for `autoboot(llm="auto")` /
   `attach_runtime`; attribution is automatic, **`LECORE_NO_ATTRIBUTION=1`** disables.
 - **`LECORE_MEMORIES`** — root for named memory portfolios (`memory_list`).

@@ -1,0 +1,193 @@
+{
+ "dataset": "clinc",
+ "K_wordings_per_intent": 10,
+ "rank_seconds": 3.6,
+ "runs": [
+  {
+   "eps": 0.0,
+   "n_cal": 1600,
+   "ceiling": 0.9875,
+   "reask_agree": 1.0,
+   "eps_hat_selfconsistency": 0.0,
+   "m_bar": 6.9,
+   "disagreements": 576,
+   "disagree_rank_hist_genuine": [
+    245,
+    0,
+    172,
+    69,
+    47,
+    16,
+    14,
+    8,
+    5
+   ],
+   "disagree_rank_hist_noise": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "quarantine_rank>=3": {
+    "planted_recall": 0.0,
+    "genuine_quarantined": 0.276,
+    "n_noise_disagree": 0,
+    "n_genuine_disagree": 576
+   },
+   "gate_abs_0.95": {
+    "in_correct": 0.2013,
+    "in_WRONG": 0.0047,
+    "oos_served": 0.0067
+   },
+   "gate_ceiling_floor0.90(bar 0.938)": {
+    "in_correct": 0.2847,
+    "in_WRONG": 0.0147,
+    "oos_served": 0.0133
+   },
+   "gate_ceiling_floor0.75(bar 0.938)": {
+    "in_correct": 0.2847,
+    "in_WRONG": 0.0147,
+    "oos_served": 0.0133
+   },
+   "gate_noisecorrected_eps_hat": {
+    "in_correct": 0.2013,
+    "in_WRONG": 0.0047,
+    "oos_served": 0.0067
+   },
+   "gate_noisecorrected_eps_true": {
+    "in_correct": 0.2013,
+    "in_WRONG": 0.0047,
+    "oos_served": 0.0067
+   }
+  },
+  {
+   "eps": 0.1,
+   "n_cal": 1600,
+   "ceiling": 0.8906,
+   "reask_agree": 0.84,
+   "eps_hat_selfconsistency": 0.084,
+   "m_bar": 6.9,
+   "disagreements": 672,
+   "disagree_rank_hist_genuine": [
+    218,
+    0,
+    151,
+    62,
+    44,
+    12,
+    14,
+    7,
+    5
+   ],
+   "disagree_rank_hist_noise": [
+    2,
+    0,
+    29,
+    18,
+    23,
+    16,
+    20,
+    29,
+    22
+   ],
+   "quarantine_rank>=3": {
+    "planted_recall": 0.805,
+    "genuine_quarantined": 0.281,
+    "n_noise_disagree": 159,
+    "n_genuine_disagree": 513
+   },
+   "gate_abs_0.95": {
+    "in_correct": 0.0033,
+    "in_WRONG": 0.0,
+    "oos_served": 0.0
+   },
+   "gate_ceiling_floor0.90(bar 0.900)": {
+    "in_correct": 0.0487,
+    "in_WRONG": 0.0007,
+    "oos_served": 0.0
+   },
+   "gate_ceiling_floor0.75(bar 0.846)": {
+    "in_correct": 0.2013,
+    "in_WRONG": 0.0047,
+    "oos_served": 0.0067
+   },
+   "gate_noisecorrected_eps_hat": {
+    "in_correct": 0.2007,
+    "in_WRONG": 0.0047,
+    "oos_served": 0.0067
+   },
+   "gate_noisecorrected_eps_true": {
+    "in_correct": 0.2007,
+    "in_WRONG": 0.0047,
+    "oos_served": 0.0067
+   }
+  },
+  {
+   "eps": 0.2,
+   "n_cal": 1600,
+   "ceiling": 0.7969,
+   "reask_agree": 0.63,
+   "eps_hat_selfconsistency": 0.2103,
+   "m_bar": 6.9,
+   "disagreements": 755,
+   "disagree_rank_hist_genuine": [
+    184,
+    0,
+    125,
+    50,
+    39,
+    14,
+    12,
+    5,
+    4
+   ],
+   "disagree_rank_hist_noise": [
+    2,
+    0,
+    40,
+    45,
+    40,
+    52,
+    42,
+    52,
+    49
+   ],
+   "quarantine_rank>=3": {
+    "planted_recall": 0.87,
+    "genuine_quarantined": 0.286,
+    "n_noise_disagree": 322,
+    "n_genuine_disagree": 433
+   },
+   "gate_abs_0.95": {
+    "in_correct": 0.0,
+    "in_WRONG": 0.0,
+    "oos_served": 0.0
+   },
+   "gate_ceiling_floor0.90(bar 0.900)": {
+    "in_correct": 0.0,
+    "in_WRONG": 0.0,
+    "oos_served": 0.0
+   },
+   "gate_ceiling_floor0.75(bar 0.757)": {
+    "in_correct": 0.2527,
+    "in_WRONG": 0.0093,
+    "oos_served": 0.01
+   },
+   "gate_noisecorrected_eps_hat": {
+    "in_correct": 0.2527,
+    "in_WRONG": 0.0093,
+    "oos_served": 0.01
+   },
+   "gate_noisecorrected_eps_true": {
+    "in_correct": 0.2527,
+    "in_WRONG": 0.0093,
+    "oos_served": 0.01
+   }
+  }
+ ]
+}

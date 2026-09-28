@@ -45,6 +45,7 @@ under two names:
 | `wgsl` | `run_wgsl_kernel` | wgpu | `pip install leos-core[wgsl]` |
 | `gpu` | `unicron_device` | cupy | `pip install cupy-cuda12x` (match your CUDA) |
 | `lean4` | `lean_export`, `lean_verify`, `lean_status`, `lean_fuzz` | a `lean` binary (optional) | `python3 tools/install_lean.py` |
+| `clm` | `clm_status`, `clm_systemone`, `clm_rank`, `clm_escalator`, `clm_embedder` | nothing for the http backend; torch, transformers, contrastive-lm for the local one | `pip install contrastive-lm transformers torch` (local only) |
 
 ## Where plugins come from
 
@@ -178,6 +179,119 @@ One rule the loader enforces here: **the file (or entry point) is named after th
 `PLUGIN["name"]` must equal the filename stem, because `plugins=(...)` selects and `plugin_config`
 keys by that name before the module can be imported. A mismatch is refused with a sentence.
 
+## The `clm` plugin: a CLM model end, on CPU or GPU
+
+`holographic/plugins/clm.py` adds [Contrastive-LM's CLM-8B](https://github.com/Contrastive-LM/CLM) as one more
+tier of the reflex arc (backlog items E6.2 and E6.3). CLM is a two-tower "System One" scorer. It has a state tower
+and a candidate tower, trained with InfoNCE. It answers the same three typed questions leCore does (Choice, Noul,
+Score) and ranks free-form candidates. It does not generate text.
+
+**What CLM actually is, as read from its source.**
+
+- The encoder is Qwen3-8B, served separately as an OpenAI-compatible `/v1/embeddings` endpoint. The reference
+  setup is vLLM with `--runner pooling` on port 8090. Vectors are 4096-d, last-token pooled and L2-normalised.
+- The heads are a 75 MB checkpoint loaded by the `contrastive-lm` package (`import clm`). They project 4096-d to
+  512-d, one head per tower.
+- `clm-serve` (port 8700) wraps both. It serves `POST /v1/systemone`, `POST /v1/rank`, `GET /v1/models` and
+  `GET /health`. It is not OpenAI-compatible, and it exposes no state vectors.
+
+**The contract is partly ASSUMED.** The request and response shapes were read through a fetch-and-summarise tool,
+not a clone. Where a detail was not visible, the plugin's docstring lists what it assumes. The stub server in
+`tests/test_clm_plugin.py` speaks exactly that dialect. If a live server disagrees, strict validation refuses its
+replies with the reason. The fix goes in the mapping, never in the validation.
+
+### Two backends, one interface
+
+| backend | how | needs | device |
+|---|---|---|---|
+| `http` | talks to a running `clm-serve` with stdlib `urllib` | nothing (`LECORE_CLM_URL` or `url=`) | wherever the server runs; a CPU-only client is fine |
+| `local` | runs `clm.Engine` in this process | `pip install contrastive-lm transformers torch` | `device="auto"` picks CUDA when torch sees it, else CPU |
+| `auto` (default) | `http` when a URL is configured, else `local` | | |
+
+```python
+import lecore
+m = lecore.UnifiedMind(plugin_config={"clm": {"url": "http://gpu-host:8700", "timeout": 5}})
+m.clm_status()           # {backend, device, reachable, why, local_missing, ...} -- never raises
+```
+
+`plugin_list()` reports `available=False` when the **local** backend's packages are missing. The http backend
+still works then, because it needs nothing. `clm_status()` is the real answer to "can I use CLM here".
+
+**CPU is supported, and it is slow.** These are ESTIMATES, not measurements. The box this was written on has no
+torch and no GPU, so no live number is claimed anywhere.
+
+- **The local backend with an embeddings server** (`emb_url=`). Only the 75 MB heads run in-process, so CPU is
+  fine. The encoder's cost is the server's.
+- **The local backend with no embeddings server.** Qwen3-8B loads in-process with transformers: float32 on CPU,
+  bfloat16 on CUDA, or whatever `dtype=` says.
+  - Qwen3-8B has about 8.2B parameters, so float32 weights need about 33 GB of RAM (bfloat16 about 16 GB).
+  - A 30-token state costs about 4e11 FLOPs. That is roughly 2 to 4 s per new state on a 16-core server running at
+    an effective 100 to 200 GFLOP/s.
+  - On a CUDA GPU in bfloat16 the forward pass is memory-bound, about 10 ms on an A100-class card.
+  - The plugin warns loudly when it loads the encoder on CPU.
+  - Candidate embeddings are cached by text, so a revisited candidate set only pays for the new state.
+- **Timeouts.** A local call cannot be interrupted, so `timeout` applies to the http backend only. The default is
+  10 s; CLM's own client uses 300 s, which is too long for a reflex arc.
+
+Configuration keys, all optional: `backend`, `url`, `emb_url`, `emb_model`, `model` (default `clm-latest`),
+`timeout`, `device`, `dtype`, `encoder` (default `Qwen/Qwen3-8B`), `checkpoint`, `temperature`, `max_tokens`,
+`cache`, and `api_key`. The environment equivalents are `LECORE_CLM_URL`, `LECORE_CLM_BACKEND`,
+`LECORE_CLM_EMB_URL`, `LECORE_CLM_TIMEOUT` and `LECORE_CLM_API_KEY`. CLM's own `CLM_EMB_URL`, `CLM_DEVICE`,
+`CLM_CKPT` and `CLM_API_KEY` are read too. The key only goes into the `Authorization` header. It never appears in
+status, evidence or errors.
+
+### The reply is one more typed verdict
+
+`clm_systemone(state, questions)` takes leCore's own question schema and validates it strictly before anything is
+sent. It returns one record per question, in the same shape every door returns: `value`, `ranked`, `margin`,
+`p_correct`, `p_null`, `set`, `via`, `id` and `evidence`.
+
+- **`p_correct` is never CLM's probability.** It stays `None` until leCore's own per-door calibrator
+  (`m.door_calibrator("clm:<question>")`) has seen enough reported outcomes. CLM's numbers travel as
+  `evidence.model_confidence`.
+- **Every record is in the decision ledger** (`via="model_end"`, filed under `clm:<question>`). So
+  `m.decision_outcome(id, truth)` calibrates the CLM door. It also runs `reflex_learn`: one confirmed CLM answer
+  teaches the reflex to answer the next similar state without CLM.
+- **Strict validation refuses, it never repairs.** An answer outside the options is refused. So are probabilities
+  over the wrong keys or not summing to 1, a choice that is not the argmax of its own probabilities, and an
+  out-of-range number. So is a missing answer, a non-JSON body, or a rank list that drops, duplicates or invents a
+  candidate. Each comes back as `via="refused"` with a `why`. None of them raise.
+
+**As the escalation tier of `typed`:**
+
+```python
+ex = {"billing": ["charged twice on my card"], "shipping": ["courier lost my parcel"]}
+fn = m.clm_escalator(examples=ex)        # pass the SAME examples: the escalation payload carries none
+a = m.typed("the courier lost my parcel", ["billing", "shipping"], examples=ex, escalate=fn)
+m.decision_outcome(a["id"], truth)       # trains SystemOne + the reflex
+m.decision_outcome(fn.last["id"], truth) # calibrates the CLM tier
+```
+
+When the substrate abstains, CLM answers under the schema. A CLM that is down or answers off-schema becomes an
+honest `via="refused"` answer, not an exception out of `typed`.
+
+The contract tests found two things this way:
+
+- **Without `examples=`, CLM scores the bare option names.** `decide_or_escalate` strips examples from the
+  payload.
+- **The CLM record and the escalated typed record first hashed to the same ledger id.** They share state,
+  question, options, answer and via. The typed record's hook then replaced CLM's calibration hook. Filing CLM
+  records under `clm:<question>` fixed that. One id carrying both hooks would need `Ledger.add` to compose hooks.
+
+### CLM's encoder behind `set_embedder` (E6.3)
+
+`clm_embedder(space="raw")` returns a text-to-vector callable that uses the encoder: 4096-d, over http or
+in-process. `space="state"` also applies CLM's state head (512-d). That needs torch and contrastive-lm locally,
+because `clm-serve` exposes no vectors. Pass the callable to `m.set_embedder(fn)`; the seam's own verify gate
+decides.
+
+The honest outcome, pinned by the tests: **the gate refuses CLM for the shipped routing index.** That index lives
+in nomic's 128-d space. CLM's 4096-d or 512-d vectors are refused at the dimension check. A 128-d deterministic
+hash projection gets past the dimension check and then fails the space probe at chance: about 5/509 self-recall,
+against a 0.30 bar. A stub serving the index's own rows passes the gate through the same plugin, so the plugin's
+transport is not what fails. CLM's encoder becomes useful to `set_embedder` only with an index built in CLM's
+space, which is separate work.
+
 ## Building ON the holographic framework
 
 The template shows the contract. `holographic/plugins/_example_tags.py` shows the point: a
@@ -280,6 +394,7 @@ accelerators are present: core, because it reports *on* plugins.
 | discovery: bundled folder, `LECORE_PLUGIN_PATH`, entry points | `holographic/plugins/__init__.py` |
 | the mind's door: `plugins=`, `plugin_list`, `plugin_manifest`, `_plugin_load`, `_plugin_unload` | `holographic/unified/holographic_unified_p26_plugins.py` |
 | the template | `holographic/plugins/_template.py` |
-| the six bundled plugins | `holographic/plugins/{jit,symbolic,zig,wgsl,gpu,lean4}.py` |
+| the bundled plugins | `holographic/plugins/{jit,symbolic,zig,wgsl,gpu,lean4,clm}.py` |
+| the clm plugin's contract tests (stub server) | `tests/test_clm_plugin.py` |
 | the migration tool that moved them | `tools/migrate_to_plugins.py` |
 | tests | `tests/test_plugin.py` |

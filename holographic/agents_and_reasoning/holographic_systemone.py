@@ -276,6 +276,27 @@ def schema_lint(questions, states=None, scorer=None):
             "recommended_scorer": rec, "k_min": k_min, "budgets": budgets}
 
 
+def _noul_want(truth):
+    """The yes/no label a NOUL truth names. THE BUG THIS FIXES (backlog E0.5): the old rule was
+    `"yes" if truth else "no"`, so the STRING "no" -- which is exactly what decision_outcome(id, "no") reports for a
+    yes/no decision, the record's own answer vocabulary -- is truthy and was learned as YES. Bools map as before;
+    the strings yes/no/true/false (any case) map to their meaning; any other value is not a yes/no truth and is
+    returned unchanged, so the caller's `want not in labels` check refuses it with a SchemaError instead of
+    silently learning the opposite."""
+    if isinstance(truth, (bool, np.bool_)):
+        return "yes" if truth else "no"
+    if isinstance(truth, str):
+        t = truth.strip().lower()
+        if t in ("yes", "true"):
+            return "yes"
+        if t in ("no", "false"):
+            return "no"
+        return truth
+    if isinstance(truth, (int, np.integer)) and int(truth) in (0, 1):
+        return "yes" if int(truth) else "no"
+    return truth
+
+
 class SystemOne:
     """Fit once, decide many: the typed-decision contract over any text encoder.
 
@@ -285,8 +306,15 @@ class SystemOne:
     question -- the whole multi-question answer is a single parallel pass, which is the property
     Jev advertises and a vector substrate gets for free."""
 
+    # The contrastive scorer's calibration FEATURE: p_top = the softmax weight of the top option at this sharper
+    # temperature (holographic_protostore.ProtoStore.p_top). MEASURED (tools/bench_contrastive.py, E0.4 gate,
+    # 3 seeds): p_top at tau 0.02 ranked correctness better than the raw margin gap (AUROC, both datasets), and
+    # CLM's "top - mean of the others" adds nothing once an isotonic map sits on top (it is monotone in p_top).
+    CONTRASTIVE_CAL_TAU = 0.02
+
     def __init__(self, encode, margin=0.1, score_floor=0.15, score_tau=0.05, score_top_k=5,
-                 min_support=None, scorer="prototype", nb_bigrams=False, nb_transform=True):
+                 min_support=None, scorer="prototype", nb_bigrams=False, nb_transform=True,
+                 contrastive_tau=0.05, contrastive_lr=0.3):
         self.encode = encode
         # scorer (sweep 174): "prototype" = the sweep-171 cosine-to-mean-bundle path, unchanged.
         # "nb" = multinomial naive Bayes over word counts of the SAME examples -- a count table,
@@ -298,9 +326,26 @@ class SystemOne:
         # d=2048 (worse than the plain centroid) and 0.742 at d=8192 -- JL cross-term noise over a
         # vocabulary far larger than the dimension swamps per-token log-odds. Kept negative.
         # Default stays "prototype": additive, off, and every existing decision is untouched.
-        if scorer not in ("prototype", "nb"):
-            raise SchemaError("scorer must be 'prototype' or 'nb', got %r" % (scorer,))
+        #
+        # "contrastive" (CLM backlog E1.1, first consumer of the shared rule): the SAME prototypes as "prototype"
+        # (fit = the unit mean of each option's example encodings, bit for bit), but every labelled observation
+        # moves them by the InfoNCE rule of holographic_protostore.ProtoStore -- p = softmax(cos / tau) over the
+        # options, A_k += lr * (onehot(truth) - p)_k * state, touched rows renormalised -- instead of the miss-only
+        # AdaptHD pull/push. As tau -> 0 it IS AdaptHD; at tau 0.05 it also learns from narrow wins and pushes every
+        # close rival. MEASURED (Banking77, 77 intents, K = 5 examples per intent then a 3,000-verdict one-pass
+        # stream, hashed char n-grams d = 2048; tools/bench_contrastive.py systemone, through THIS class's fit /
+        # observe / decide): top-1 0.8263 / 0.8218 (seeds 0 / 1) against this class's own scorer="prototype" with
+        # observe(lr=0.3) -- miss-only AdaptHD -- 0.7253 / 0.7377, both reproducing the panel's probe to the digit.
+        # Its calibrator is fed p_top (tau 0.02) instead of the margin gap (CONTRASTIVE_CAL_TAU): the feature's
+        # AUROC for correctness on the test set is 0.873 / 0.882 (p_top) vs 0.839 / 0.822 (the prototype scorer's
+        # margin gap). Cost: the whole run (3,000 observes + 3,080 decides, 77 options) took 8.1 s vs 2.0 s -- about
+        # 2 ms more per observe, the price of moving every close rival instead of two rows on a miss.
+        if scorer not in ("prototype", "nb", "contrastive"):
+            raise SchemaError("scorer must be 'prototype', 'nb' or 'contrastive', got %r" % (scorer,))
         self.scorer = scorer
+        self.contrastive_tau = float(contrastive_tau)   # the rule's temperature (= score_tau 0.05, measured)
+        self.contrastive_lr = float(contrastive_lr)     # the rule's step at observe(lr=1) (0.3, measured)
+        self._store = {}      # qname -> ProtoStore (contrastive scorer only); its A / P ARE _acc / _mat
         self.nb_bigrams = bool(nb_bigrams)
         # nb_transform (sweep 175): Rennie et al. 2003 -- log(1+tf), times IDF (from the examples),
         # length-normalised -- still closed-form counts. MEASURED best on all three real tasks at
@@ -353,6 +398,36 @@ class SystemOne:
         post = np.exp(logs)
         return post / post.sum()
 
+    def _new_store(self, name, labels, meta=None):
+        """The contrastive scorer's ProtoStore for one question, laid OVER this SystemOne's own tables: its
+        accumulators A ARE self._acc[name] and its unit rows P ARE self._mat[name] (the same arrays, not copies --
+        ProtoStore.update writes both in place), so decide / state / load_state keep working on _mat / _acc exactly
+        as they do for the prototype scorer, and the init is the prototype scorer's init bit for bit (P = the
+        build_prototypes matrix, A = the unit-mean accumulator). meta: ProtoStore.state()'s meta, on reload (the
+        verdict counts and the confusion miner; the arrays come from _acc / _mat, never twice).
+        Imported lazily: holographic_protostore imports IsotonicCalibrator from this module."""
+        from holographic.agents_and_reasoning.holographic_protostore import ProtoStore
+        st = ProtoStore(self._acc[name].shape[1], tau=self.contrastive_tau, lr=self.contrastive_lr,
+                        name="systemone:" + str(name))
+        st.labels = list(labels)
+        st._ix = {l: i for i, l in enumerate(st.labels)}
+        st.A = self._acc[name]
+        st.P = self._mat[name]
+        st.count = [0] * len(st.labels)
+        if meta:
+            st.count = list(meta.get("count", st.count))
+            st.confusion = {k: dict(v) for k, v in (meta.get("confusion") or {}).items()}
+            st.n_updates = int(meta.get("n_updates", 0))
+            st.n_negatives = int(meta.get("n_negatives", 0))
+        return st
+
+    def _cal_feature(self, ans):
+        """The score this SystemOne's isotonic calibrator maps to P(correct): the margin gap for the prototype and
+        nb scorers (unchanged), p_top at CONTRASTIVE_CAL_TAU for the contrastive scorer (see the class constant)."""
+        if self.scorer == "contrastive" and "p_top" in ans:
+            return ans["p_top"]
+        return ans["margin_gap"]
+
     def fit(self, questions):
         """Validate the schema and precompute prototype/anchor matrices. Options WITH examples get
         a real prototype (build_prototypes: mean bundle); options WITHOUT examples fall back to
@@ -398,6 +473,8 @@ class SystemOne:
                 basis = ("examples" if len(with_ex) == len(labels)
                          else "labels-only" if not with_ex else "mixed")
                 self._meta[name] = {"labels": labels, "basis": basis}
+                if self.scorer == "contrastive":
+                    self._store[name] = self._new_store(name, labels)
                 if self.scorer == "nb":
                     # One pass over the same examples: per-option token counts. An option with no
                     # examples is counted from its label text, matching the prototype fallback.
@@ -456,11 +533,17 @@ class SystemOne:
                 # decision; a falling support quantile flags covariate shift before labels arrive.
                 self._support.setdefault(name, []).append(float(ranked[0][1]))
                 cal = self._calib.get(name)
-                p = cal.predict(gap) if cal is not None else None
                 ans = {"type": spec["type"], "confident": bool(confident),
                        "abstained": not confident, "ranked": ranked, "margin_gap": float(gap),
-                       "p": p, "calibrated": cal is not None,
+                       "p": None, "calibrated": cal is not None,        # p filled below (key order kept)
                        "basis": self._meta[name]["basis"]}
+                if self.scorer == "contrastive":
+                    # the calibration FEATURE (never served as a probability on its own: candidate-relative
+                    # softmax abstains worse, AURC 0.094 vs 0.078 -- the isotonic map below is what p is)
+                    z = (np.asarray(sims, np.float64) - float(np.max(sims))) / self.CONTRASTIVE_CAL_TAU
+                    ez = np.exp(z)
+                    ans["p_top"] = float(ez.max() / ez.sum())
+                ans["p"] = cal.predict(self._cal_feature(ans)) if cal is not None else None
                 if spec["type"] == "noul":
                     # value is a typed bool; p (when calibrated) is P(this yes/no call is correct).
                     ans["value"] = (winner == "yes") if confident else None
@@ -539,7 +622,9 @@ class SystemOne:
         so the probability tracks the CURRENT prototypes, not the ones you fitted last month --
         the thing a frozen hosted decision model cannot do. Returns {q: {was_correct, updated}}.
         Truths for score questions are ignored here (their update story is anchor management,
-        recorded as future work, not silently faked)."""
+        recorded as future work, not silently faked).
+        scorer="contrastive": the InfoNCE update of holographic_protostore.ProtoStore on EVERY observation
+        (not only a miss), and the outcome stream records p_top (tau 0.02) instead of the margin gap."""
         q = self._unit(state)
         ans = self._decide_encoded(q, state=state)
         out = {}
@@ -547,16 +632,28 @@ class SystemOne:
             spec = self.questions.get(name)
             if spec is None or spec["type"] == "score":
                 continue
-            want = ("yes" if truth else "no") if spec["type"] == "noul" else truth
+            want = _noul_want(truth) if spec["type"] == "noul" else truth
             labels = self._meta[name]["labels"]
             if want not in labels:
                 raise SchemaError("%s: observed truth %r is not an option" % (name, truth))
             pred = ans[name]["ranked"][0][0]
             correct = pred == want
             self._outcomes.setdefault(name, []).append(
-                (ans[name]["margin_gap"], 1.0 if correct else 0.0))
+                (self._cal_feature(ans[name]), 1.0 if correct else 0.0))
             updated = False
-            if lr > 0 and self.scorer == "nb" and name in self._nb:
+            if lr > 0 and self.scorer == "contrastive" and name in self._store:
+                # THE SHARED RULE on EVERY labelled observation (a narrow win is still evidence, a close rival is
+                # still pushed): ProtoStore.update moves _acc / _mat in place (they are its A / P). lr scales the
+                # measured step, so observe(lr=1) -- the default every caller uses -- is contrastive_lr (0.3), and
+                # lr=0 records the outcome without learning (the frozen baseline), as for the other scorers.
+                st = self._store[name]
+                st.lr = self.contrastive_lr * float(lr)
+                try:
+                    r = st.update(q, want)
+                finally:
+                    st.lr = self.contrastive_lr
+                updated = r["touched"] > 0
+            elif lr > 0 and self.scorer == "nb" and name in self._nb:
                 # NB learns by COUNTING, on EVERY labeled observation -- a correct decision is
                 # still evidence (the ladder measured every added example helping: AG News 0.697
                 # -> 0.821 from k=32 to 300). AdaptHD below moves only on a miss because pulling a
@@ -721,8 +818,8 @@ class SystemOne:
                 if spec is None or spec["type"] == "score":
                     continue
                 a = ans[name]
-                want = ("yes" if truth else "no") if spec["type"] == "noul" else truth
-                feats.setdefault(name, []).append(a["margin_gap"])
+                want = _noul_want(truth) if spec["type"] == "noul" else truth
+                feats.setdefault(name, []).append(self._cal_feature(a))
                 hits.setdefault(name, []).append(1.0 if a["ranked"][0][0] == want else 0.0)
         report = {}
         for name, xs in feats.items():
@@ -753,9 +850,10 @@ class SystemOne:
                 if not a or a.get("type") not in ("choice", "noul") or not a.get("ranked"):
                     continue
                 sc = dict(a["ranked"])
-                if truth not in sc:
+                want = _noul_want(truth) if a.get("type") == "noul" else truth   # a noul truth names yes/no
+                if want not in sc:
                     continue
-                gaps.setdefault(name, []).append(float(a["ranked"][0][1]) - float(sc[truth]))
+                gaps.setdefault(name, []).append(float(a["ranked"][0][1]) - float(sc[want]))
         self._conformal = {}
         for name, g in gaps.items():
             cp = ConformalPredictor(alpha=alpha)
@@ -919,7 +1017,7 @@ class SystemOne:
                 if spec is None or spec["type"] == "score" or name not in self._calib:
                     continue
                 a = ans[name]
-                want = ("yes" if truth else "no") if spec["type"] == "noul" else truth
+                want = _noul_want(truth) if spec["type"] == "noul" else truth
                 per_q.setdefault(name, []).append(
                     (a["p"], 1.0 if a["ranked"][0][0] == want else 0.0))
         for name, pairs in per_q.items():
@@ -936,9 +1034,201 @@ class SystemOne:
                          "brier": float(np.mean((p - y) ** 2)), "ece": float(ece)}
         return rep
 
+    # ---------------- persistence (backlog E0.5) ----------------
+    # WHY: the mind keeps one fitted SystemOne per schema (_systemone_cache) and every outcome reported by id trains
+    # it (observe: NB counts on every label, AdaptHD pulls on a miss, a rolling isotonic calibrator). None of that
+    # survived learning_save / learning_load -- a restart re-fit the schema from its examples and every lesson was
+    # gone. state() is the LEARNED part only, as JSON meta + float64 arrays (bit-exact: a decision after a reload
+    # equals the one before, pinned in tests/test_arc_substrate.py). The fitted part (schema, examples) is NOT the
+    # durable record here: the mind re-fits from the cache key and then lays these tables over the fresh fit.
+    SUPPORT_KEEP = 1024     # the label-free drift channel keeps its newest 1024 winning scores across a save
+    OUTCOMES_KEEP = 4096    # the (margin, correct) outcome stream: observe() refits on the last 256; 4096 keeps history
+
+    def state(self):
+        """-> (meta, arrays): everything observe() / calibrate() / calibrate_conformal() learned, plus the fitted
+        tables they act on. meta is JSON-able; arrays are float64 per question (index-named: question names are
+        free text and array names become file paths inside the container)."""
+        if self.questions is None:
+            raise RuntimeError("state() of an unfitted SystemOne")
+        qnames = list(self.questions)
+        meta = {"version": 1, "scorer": self.scorer, "nb_bigrams": self.nb_bigrams, "nb_transform": self.nb_transform,
+                "margin": self.margin, "min_support": self.min_support, "schema_sha256": self.schema_sha256,
+                "questions": qnames, "q": {}}
+        if self.scorer == "contrastive":
+            # the rule's settings travel so a reload keeps learning at the same tau / lr (absent = the defaults)
+            meta["contrastive"] = {"tau": self.contrastive_tau, "lr": self.contrastive_lr}
+        arrays = {}
+        for i, name in enumerate(qnames):
+            qm = {}
+            if name in self._mat:
+                arrays["mat_%d" % i] = np.asarray(self._mat[name], np.float64)
+            if name in self._acc:
+                arrays["acc_%d" % i] = np.asarray(self._acc[name], np.float64)
+            m = self._meta.get(name) or {}
+            if "labels" in m:
+                qm["labels"], qm["basis"] = list(m["labels"]), m.get("basis")
+            if "values" in m:
+                arrays["values_%d" % i] = np.asarray(m["values"], np.float64)
+            if name in self._nb:
+                tab = self._nb[name]
+                qm["nb"] = {"counts": {o: dict(sorted(c.items())) for o, c in tab["counts"].items()},
+                            "tot": dict(tab["tot"]), "vocab": sorted(tab["vocab"]),
+                            "idf": (dict(sorted(tab["idf"].items())) if tab.get("idf") is not None else None),
+                            "n_docs": tab.get("n_docs")}
+            cal = self._calib.get(name)
+            if cal is not None:
+                # the FITTED map, stored exactly (predict() is np.interp over xs/ys): a calibrator fitted by
+                # calibrate(labeled) keeps no raw pairs, so the fit itself is the only exact record of it
+                arrays["calx_%d" % i] = np.asarray(cal.xs, np.float64)
+                arrays["caly_%d" % i] = np.asarray(cal.ys, np.float64)
+            if name in self._conformal:
+                qm["conformal"] = dict(self._conformal[name])
+            if name in self._store:
+                # the contrastive store's bookkeeping (verdict counts, the confusion miner); its arrays ARE
+                # mat_i / acc_i above, so nothing is stored twice
+                smeta, _ = self._store[name].state()
+                qm["store"] = {k: smeta[k] for k in ("count", "confusion", "n_updates", "n_negatives")}
+            if name in self._support:
+                arrays["support_%d" % i] = np.asarray(self._support[name][-self.SUPPORT_KEEP:], np.float64)
+            if name in self._outcomes:
+                oc = self._outcomes[name][-self.OUTCOMES_KEEP:]
+                arrays["outcomes_%d" % i] = np.asarray(oc, np.float64).reshape(-1, 2)
+            meta["q"][str(i)] = qm
+        return meta, arrays
+
+    def load_state(self, meta, arrays):
+        """Lay state() output over THIS fitted SystemOne (same schema: checked by schema_sha256 and the question
+        list -- a mismatch refuses with ValueError rather than mixing two schemas' tables). Returns the number of
+        questions restored."""
+        if self.questions is None:
+            raise RuntimeError("fit() before load_state()")
+        if meta.get("schema_sha256") != self.schema_sha256 or list(meta.get("questions") or []) != list(self.questions):
+            raise ValueError("SystemOne.load_state: the saved tables belong to a different schema")
+        if meta.get("contrastive"):
+            self.contrastive_tau = float(meta["contrastive"].get("tau", self.contrastive_tau))
+            self.contrastive_lr = float(meta["contrastive"].get("lr", self.contrastive_lr))
+        n = 0
+        for i, name in enumerate(meta["questions"]):
+            qm = (meta.get("q") or {}).get(str(i)) or {}
+            A = arrays or {}
+            if "mat_%d" % i in A:
+                if name in self._mat and np.shape(A["mat_%d" % i]) != np.shape(self._mat[name]):
+                    raise ValueError("SystemOne.load_state: %r tables were saved under a different encoder "
+                                     "dimension" % name)
+                self._mat[name] = np.array(A["mat_%d" % i], np.float64)
+            if "acc_%d" % i in A:
+                self._acc[name] = np.array(A["acc_%d" % i], np.float64)
+            if "labels" in qm:
+                self._meta[name] = {"labels": list(qm["labels"]), "basis": qm.get("basis")}
+            if "values_%d" % i in A:
+                self._meta[name] = {"values": np.array(A["values_%d" % i], np.float64)}
+            if qm.get("nb") is not None:
+                nb = qm["nb"]
+                self._nb[name] = {"counts": {o: {t: float(c) for t, c in cc.items()} for o, cc in nb["counts"].items()},
+                                  "tot": {o: float(v) for o, v in nb["tot"].items()}, "vocab": set(nb["vocab"]),
+                                  "idf": ({t: float(v) for t, v in nb["idf"].items()} if nb.get("idf") is not None
+                                          else None), "n_docs": nb.get("n_docs")}
+            if "calx_%d" % i in A:
+                cal = IsotonicCalibrator.__new__(IsotonicCalibrator)
+                cal.xs = np.array(A["calx_%d" % i], np.float64)
+                cal.ys = np.array(A["caly_%d" % i], np.float64)
+                cal.n = int(len(cal.xs))
+                self._calib[name] = cal
+            if qm.get("conformal") is not None:
+                self._conformal[name] = dict(qm["conformal"])
+            if "support_%d" % i in A:
+                self._support[name] = [float(x) for x in np.asarray(A["support_%d" % i]).reshape(-1)]
+            if "outcomes_%d" % i in A:
+                self._outcomes[name] = [(float(g), float(c)) for g, c in np.asarray(A["outcomes_%d" % i]).reshape(-1, 2)]
+            if self.scorer == "contrastive" and name in self._acc and "labels" in (self._meta.get(name) or {}):
+                # re-lay the store over the RESTORED arrays (load replaced _mat / _acc with new objects; the store
+                # must write into the ones decide() reads, or the next verdict would train a detached copy)
+                self._store[name] = self._new_store(name, self._meta[name]["labels"], qm.get("store"))
+            n += 1
+        return n
+
+    @classmethod
+    def from_state(cls, encode, questions, meta, arrays):
+        """A SystemOne rebuilt from its schema + state(): fit(questions) with the saved scorer settings, then
+        load_state. `encode` must be the same text encoder the saved one used (the mind passes its own)."""
+        ct = meta.get("contrastive") or {}
+        so = cls(encode, margin=meta.get("margin", 0.1), min_support=meta.get("min_support"),
+                 scorer=meta.get("scorer", "prototype"), nb_bigrams=meta.get("nb_bigrams", False),
+                 nb_transform=meta.get("nb_transform", True), contrastive_tau=ct.get("tau", 0.05),
+                 contrastive_lr=ct.get("lr", 0.3))
+        so.fit(questions)
+        so.load_state(meta, arrays)
+        return so
+
 
 # ---------------------------------------------------------------------------
-def hashed_ngram_encode(dim=2048, lo=3, hi=5):
+# ---- the n-gram ATOM cache: one per process and dimension, BOUNDED (backlog G2) -------------------------------------
+#
+# WHY: every hashed_ngram_encode() used to own a private dict that kept one float64 atom (dim x 8 bytes: 16 KB at 2048)
+# per distinct n-gram FOREVER. MEASURED on a CLINC-sized input (all 23,700 CLINC150 texts, dim 2048, one process,
+# tools-free probe ngram_mem.py): 2.77 M lookups, 92,849 distinct n-grams, peak RSS 1,513 MB -- the 2-core box's memory
+# cgroup kills near 2 GB, and CI runs several pytest workers at once. Several encoders in one process (SystemOne doors,
+# the catalog's family decider, the decision tree, rolecall, the rank door's private copy) each held their OWN copy
+# of the same atoms.
+# NOW: one cache per dimension for the whole process, shared by every encoder, holding at most NGRAM_CACHE_MB of atoms
+# (least recently used evicted first). An atom is a PURE function of its n-gram -- the sha256-seeded gaussian below --
+# so an evicted atom is regenerated bit for bit on its next use: the encodings are IDENTICAL whatever the cache holds
+# (same atoms, same summation order; the CLINC probe's sha256 over all 23,700 encodings is the same unbounded and at
+# every cap). What a cap costs is TIME, one regeneration (~41 us quiet) per miss. MEASURED miss counts on that input
+# (LRU / FIFO): 4,096 atoms 559k / 631k, 8,192 420k / 488k, 16,384 284k / 345k, 32,768 170k / 218k; unbounded 92,849.
+# LRU is kept (-18% misses vs FIFO at 16,384). THE PRICE, KEPT LOUD -- the whole-corpus probe, paired on the 2-core box
+# at load ~2.5 (unbounded first, same machine minutes):
+#     unbounded   11.4 s   1,513 MB peak      (93k regenerations)
+#     512 MB      16.3 s     562 MB peak      (170k)
+#     256 MB      21.5 s     301 MB peak      (284k)   <-- the default: ~1.9x slower on a FULL-CORPUS stream, 5x less RAM
+# The default favours the box that OOM-kills near 2 GB (and CI's several workers per runner); service-sized use (short
+# questions, a few hundred n-grams) never evicts, and a benchmark that streams a whole corpus should raise it:
+# LECORE_NGRAM_CACHE_MB=... in the environment, or holographic_systemone.NGRAM_CACHE_MB = ... before encoding.
+# Thread-safe by construction: every step is a single dict operation (atomic under the GIL); two threads missing the same
+# n-gram both generate it and store the same bits. Atoms are handed out READ-ONLY, so no caller can corrupt a shared one.
+def _env_cache_mb():
+    import os
+    try:
+        return float(os.environ.get("LECORE_NGRAM_CACHE_MB", "") or 256.0)
+    except ValueError:
+        return 256.0
+
+
+NGRAM_CACHE_MB = _env_cache_mb()
+_NGRAM_ATOMS = {}                    # dim -> {n-gram: read-only float64 atom}; dict order = LRU order (oldest first)
+NGRAM_CACHE_STATS = {"misses": 0, "evictions": 0}
+
+
+def ngram_cache_cap(dim):
+    """How many atoms of this dimension the shared cache keeps: NGRAM_CACHE_MB / (8 * dim), at least 64."""
+    return max(64, int(float(NGRAM_CACHE_MB) * (1 << 20) // (8 * int(dim))))
+
+
+def ngram_atom(g, dim):
+    """THE atom of an n-gram: a standard gaussian vector seeded by the first 8 bytes of sha256(g) mod 2**32 (hashlib,
+    never hash()). Served from the shared bounded cache; a miss regenerates it -- the same bits every time."""
+    cache = _NGRAM_ATOMS.get(dim)
+    if cache is None:
+        cache = _NGRAM_ATOMS.setdefault(dim, {})
+    a = cache.pop(g, None)                         # a hit is moved to the young end below (LRU)
+    if a is None:
+        seed = int.from_bytes(hashlib.sha256(g.encode()).digest()[:8], "big") % (2 ** 32)
+        a = np.random.default_rng(seed).standard_normal(dim)
+        a.flags.writeable = False
+        NGRAM_CACHE_STATS["misses"] += 1
+        cap = ngram_cache_cap(dim)
+        while len(cache) >= cap:
+            try:
+                cache.pop(next(iter(cache)), None)     # the least recently used
+                NGRAM_CACHE_STATS["evictions"] += 1
+            except (RuntimeError, StopIteration):      # another thread resized the dict mid-step: try again
+                if not cache:
+                    break
+    cache[g] = a
+    return a
+
+
+def hashed_ngram_encode(dim=2048, lo=3, hi=5, cap=None):
     """Character 3..5-gram hashed BUNDLE encoder: each n-gram is a hashlib-seeded random
     hypervector, a text is their superposition. Substrate-native (bundle of atoms), deterministic
     (hashlib, never hash()), stdlib+numpy only, and MEASURED (sweep 171, 200-row evals, 3 seeds,
@@ -952,23 +1242,51 @@ def hashed_ngram_encode(dim=2048, lo=3, hi=5):
     encoder. Every n-gram here weighs the same (" th" as much as a distinctive word); IDF
     weighting measured +0.02 to +0.03 (char_idf centroid 0.748 vs 0.723 on AG News k=300) --
     small, real, not yet applied here. Cosine gaps in this space are small -- pair with margin
-    ~0.02 (systemone's encoder='ngram' path sets that default for you)."""
-    import hashlib as _hl
-    cache = {}
+    ~0.02 (systemone's encoder='ngram' path sets that default for you).
+    ATOMS (backlog G2): served from ONE bounded, process-wide cache per dimension (ngram_atom; see the section comment
+    above -- 1,513 MB -> a bounded 301 MB peak on all of CLINC150, the same encodings bit for bit). The returned
+    enc carries enc.cache (the shared dict for its dimension), enc.stats ({"misses": this encoder's regenerations})
+    and enc.cap (the cache's current atom cap for its dimension).
+    cap=N instead gives this encoder a PRIVATE least-recently-used cache of N atoms (the rank door's
+    holographic_unified_p29_contrastive._bounded_ngram semantics, for a caller that wants its memory isolated or a
+    test that wants constant eviction); the vectors are the same either way."""
+    dim, lo, hi = int(dim), int(lo), int(hi)
+    stats = {"misses": 0}
+    if cap is None:
+        cache, cap_now = _NGRAM_ATOMS.setdefault(dim, {}), ngram_cache_cap(dim)
 
-    def _vec(g):
-        if g not in cache:
-            seed = int.from_bytes(_hl.sha256(g.encode()).digest()[:8], "big") % (2 ** 32)
-            cache[g] = np.random.default_rng(seed).standard_normal(dim)
-        return cache[g]
+        def atom(g):
+            # the hit path inlined (ngram_atom's first two steps on this dimension's dict); a miss goes through
+            # ngram_atom itself, so there is ONE definition of an atom and of the eviction
+            a = cache.pop(g, None)
+            if a is None:
+                return ngram_atom(g, dim)
+            cache[g] = a
+            return a
+    else:
+        cache, cap_now = {}, int(cap)             # a private LRU: dict order = recency (a hit is re-inserted last)
+
+        def atom(g):
+            a = cache.pop(g, None)
+            if a is None:
+                seed = int.from_bytes(hashlib.sha256(g.encode()).digest()[:8], "big") % (2 ** 32)
+                a = np.random.default_rng(seed).standard_normal(dim)
+                NGRAM_CACHE_STATS["misses"] += 1
+                if len(cache) >= cap_now:
+                    cache.pop(next(iter(cache)))
+            cache[g] = a
+            return a
 
     def enc(text):
-        t = " " + text.lower() + " "
+        t = " " + str(text).lower() + " "            # str(): the rank door's copy took any object (a str is unchanged)
         v = np.zeros(dim)
+        before = NGRAM_CACHE_STATS["misses"]
         for n in range(lo, hi + 1):
             for i in range(len(t) - n + 1):
-                v += _vec(t[i:i + n])
+                v += atom(t[i:i + n])
+        stats["misses"] += NGRAM_CACHE_STATS["misses"] - before
         return v
+    enc.cache, enc.stats, enc.cap = cache, stats, cap_now
     return enc
 
 
@@ -1208,7 +1526,28 @@ def _selftest():
     shy.fit({"cat": {"type": "choice", "options": ["billing", "shipping"], "examples": {"billing": ["card"], "shipping": ["parcel"]}}})
     shy.decide_or_escalate("zzz qqq", escalate=lambda pl: (seen.setdefault("prompt", pl.get("prompt")), "billing")[1])
     assert seen.get("prompt") and "RETURN FORMAT" in seen["prompt"], seen
-    return {"ok": True, "pinned": 17}
+    # 18. (E0.5) the noul fix: the STRING "no" is a no (it used to be truthy -> learned as YES); a non-yes/no string
+    #     is refused, not learned as its truthiness
+    nq = SystemOne(enc, scorer="nb", margin=0.0)
+    nq.fit({"ok": {"type": "noul", "examples": {"yes": ["approve ship now"], "no": ["reject deny request"]}}})
+    before = dict(nq._nb["ok"]["tot"])
+    nq.observe("deny it", {"ok": "no"})
+    assert nq._nb["ok"]["tot"]["no"] > before["no"] and nq._nb["ok"]["tot"]["yes"] == before["yes"]
+    try:
+        nq.observe("deny it", {"ok": "wrong"}); raise AssertionError("a non-yes/no noul truth was learned")
+    except SchemaError:
+        pass
+    # 19. (E0.5) state() / from_state(): every learned table survives, and the decision after equals the one before
+    for _ in range(3):
+        small.observe("courier delivery was late again", {"cat": "shipping"})
+        small.observe("they charged my card twice", {"cat": "billing"})
+    meta, arrays = small.state()
+    meta = json.loads(json.dumps(meta))                        # it must survive JSON (the container's meta)
+    q_small = small.questions
+    back = SystemOne.from_state(enc, q_small, meta, arrays)
+    for st in ("courier delivery was late", "charged twice on my card", "zzz"):
+        assert back.decide(st)["cat"]["ranked"] == small.decide(st)["cat"]["ranked"], st
+    return {"ok": True, "pinned": 19}
 
 
 if __name__ == "__main__":

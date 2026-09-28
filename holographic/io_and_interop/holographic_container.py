@@ -212,6 +212,25 @@ def load_container(data):
     return {"meta": manifest.get("meta", {}), "sections": sections}
 
 
+def load_container_meta(source):
+    """Only the file-level `meta` of a container (bytes or a path) -- reads manifest.json and NOTHING else.
+
+    WHY: a live workspace asks "what is the current rev?" on every mutating request, and the rev lives in this
+    meta. Answering it with load_container() decompressed and parsed EVERY section's arrays (a painting's layer
+    pixels included) just to read one integer: measured 1.7 s per paint stroke on a 1024x1280 leStudio document,
+    and enough transient arrays per request to push the studio into an OOM kill. The ZIP's central directory lets
+    us pull the manifest alone."""
+    try:
+        src = io.BytesIO(source) if isinstance(source, (bytes, bytearray)) else source
+        with zipfile.ZipFile(src) as z:
+            manifest = json.loads(z.read("manifest.json"))
+    except (zipfile.BadZipFile, KeyError, ValueError) as e:
+        raise ValueError("not a lecore container (bad or missing manifest.json): %s" % (e,))
+    if manifest.get("format") != FORMAT:
+        raise ValueError("unrecognised container format %r (expected %r)" % (manifest.get("format"), FORMAT))
+    return manifest.get("meta", {}) or {}
+
+
 def _sections_equal(a, b):
     """True iff two section lists carry the same kinds/ids/meta and bit-identical arrays -- the round-trip contract."""
     if len(a) != len(b):

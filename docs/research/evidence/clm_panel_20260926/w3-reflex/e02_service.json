@@ -1,0 +1,48 @@
+{
+ "queries": [
+  "1d curve from medial voxels",
+  "audio drives parameters",
+  "cache invalidation",
+  "combine shader variants",
+  "decode a png",
+  "draw the mandelbrot set",
+  "faraday rotation",
+  "generate many surrogates cheaply",
+  "identify a generator",
+  "kernel",
+  "mandelbrot field",
+  "my glb bake is hollow",
+  "pcg hash",
+  "put the sphere on top of the box",
+  "render points to an image",
+  "scattering off a well",
+  "silhouette iou sweep",
+  "store a frame stack",
+  "too many factors",
+  "wave state encoder carrier and envelope"
+ ],
+ "noop reflex_stats": {
+  "mean": 0.9227029499868422,
+  "p50": 0.5183524999665678,
+  "p95": 2.548266800010882,
+  "max": 6.975947000000815,
+  "first": 6.975947000000815
+ },
+ "find_capability": {
+  "mean": 3.2522412499929487,
+  "p50": 2.3324130000332843,
+  "p95": 6.1820726500343435,
+  "max": 6.9548339999983,
+  "first": 6.9548339999983
+ },
+ "serve": {
+  "mean": 6.0779138000100374,
+  "p50": 3.6479305000511886,
+  "p95": 15.187252500078332,
+  "max": 17.614474000083646,
+  "first": 11.868236000054821,
+  "via": {
+   "escalate": 20
+  }
+ }
+}

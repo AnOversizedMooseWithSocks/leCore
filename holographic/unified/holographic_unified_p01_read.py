@@ -785,19 +785,50 @@ class _UnifiedPart01:
             # a similar request later is answered from it -- tier 'answer', via 'reflex' -- when its gates pass.
             rf = self.reflex_decide(problem)
             if rf.get("value") is not None:
-                return {"tier": "answer", "answer": rf["value"], "via": "reflex", "z": None, "score": None, "ties": 1,
-                        "families": [], "options": [{"name": rf["value"], "score": None, "family": None}],
-                        "p": (None if rf.get("error_prob") is None else 1.0 - rf["error_prob"]),
-                        "confidence": rf["confidence"], "id": rf["id"], "question": None,
-                        "reason": "answered from experience (reflex confidence %.2f)" % rf["confidence"]}
+                # E0.6: the reflex path's p was 1 - error (HIGH = confident) while the catalog path's p below is a
+                # null p-value (LOW = confident) -- same key, opposite meanings. Now: p_correct from the bridge's
+                # calibrator here, p_null (none: no null on this path); the bare p keeps its old value, deprecated.
+                from holographic.agents_and_reasoning.holographic_decisionrecord import door_record
+                return door_record({"tier": "answer", "answer": rf["value"], "via": "reflex", "z": None, "score": None,
+                        "ties": 1, "families": [], "options": [{"name": rf["value"], "score": None, "family": None}],
+                        "p": rf.get("p_correct"), "confidence": rf["confidence"], "id": rf["id"], "question": None,
+                        "reason": "answered from experience (reflex confidence %.2f)" % rf["confidence"]},
+                        "route", p_correct=rf.get("p_correct"), p_null=None)
+        # E4.1: with the router mode on, the LEARNED router reranks the lexical top-K and a gate re-derived by the E0.4
+        # protocol decides the answer tier (holographic_routerlearn's ROUTER_GATE_*; tools/bench_router.py). Mode off
+        # (a fresh mind) -> learned=None -> the catalog's lexical path, byte for byte.
+        from holographic.agents_and_reasoning import holographic_routerlearn as _RL
+        _lrn = self._router() if self.router_mode() else None
         r = self._capability_catalog().route_tiered(problem, k=k, z_answer=z_answer, z_refuse=z_refuse,
-                                                    n_null=n_null, seed=seed, clarify=clarify)
+                                                    n_null=n_null, seed=seed, clarify=clarify, learned=_lrn,
+                                                    gate_answer=_RL.ROUTER_GATE_ANSWER, gate_signal=_RL.ROUTER_GATE_SIGNAL)
+        if _lrn is None:
+            # the LEXICAL gate signal (serve's bar reads `gate`): z + (top score - runner-up), the best lexical signal by
+            # val AURC in tools/bench_router.py (0.535 vs z alone 0.559). The tiers above are untouched by it.
+            _sc = [o["score"] for o in r["options"]]
+            r["gate"] = (float(r["z"]) + ((_sc[0] - _sc[1]) if len(_sc) > 1 else (_sc[0] if _sc else 0.0))
+                         if r.get("z") is not None else None)
+            r["learned"] = None
         # G1 (sweep 176): the route is a DecisionRecord too; its ledger id replaces the catalog's local id so
         # one id space covers every door, and decision_outcome(id, chosen_capability) records what was used.
-        from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord
-        rec = DecisionRecord(problem, "route", [o["name"] for o in r["options"]], r["answer"], "route",
-                             margin=r.get("z"), p=r.get("p"), meta={"tier": r["tier"]})
-        self.decision_ledger().add(rec)
+        from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord, door_record, legacy_p
+        # E0.6: the catalog's p is a NULL p-value (in-vocabulary word salad; low = significant) -> p_null. p_correct is
+        # the ROUTE door's own calibrator over z, fed by decision_outcome on route records (P(the top option is the
+        # capability you used | z)); None until that door has labelled outcomes of both kinds. The record's margin
+        # stays z in BOTH modes: one door, one score scale (D2 -- a calibrator fed two scales was a measured defect).
+        p_null = r.get("p_null", legacy_p(r))
+        p_correct = self._door_p("route", r.get("z"))
+        opts = [o["name"] for o in r["options"]]
+        rec = DecisionRecord(problem, "route", opts, r["answer"], "route",
+                             margin=r.get("z"), p=legacy_p(r), p_correct=p_correct, p_null=p_null, meta={"tier": r["tier"]})
+        # E4.1: a reported outcome on this route is one more labelled pair for the router's ProtoStore (the route door's
+        # calibrator and the reflex bridge learn from the same report, as before). The live closure is keyed "router",
+        # which the mind's ledger ALSO persists as the spec {"kind": "router"} in rec.meta (learning-loop audit): an
+        # outcome reported after a restart is rebuilt by _decision_hook from the record -- before, it trained nothing.
+        self.decision_ledger().add(rec, hook=lambda outcome, _p=problem, _o=tuple(opts): self._router_outcome(_p, _o, outcome),
+                                   hook_key="router")
+        r = door_record(r, "route", p_correct=p_correct, p_null=p_null)
+        r["p_correct"] = p_correct                      # the catalog cannot know it; the mind does
         r["id"] = rec.id
         if verify and r.get("answer"):
             # VERIFY (sweep 176): is this answer a valid response to this input, against experience -- forward and

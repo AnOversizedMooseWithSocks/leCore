@@ -236,7 +236,8 @@ class _UnifiedPart08:
         (prototype 34% at 0.966). CAVEAT, measured: nb posteriors are sharp, so calibrate with >=150
         labeled outcomes or p is overstated (SST-2 ECE 0.147 at 16 rows, 0.047 at 150); the
         rolling recalibration in observe() accumulates exactly those. min_support is a cosine
-        floor and does not apply to nb. See holographic_systemone.SystemOne."""
+        floor and does not apply to nb. scorer='contrastive' (CLM E1.1): the prototypes learn by the shared InfoNCE
+        rule on every outcome -- Banking77 one pass 0.826 / 0.822 vs AdaptHD 0.725 / 0.738. See holographic_systemone.SystemOne."""
         from holographic.agents_and_reasoning.holographic_systemone import (SystemOne,
                                                                             hashed_ngram_encode)
         if callable(encoder):
@@ -274,21 +275,28 @@ class _UnifiedPart08:
                 if conformal_alpha is not None:
                     # H1 (sweep 176): the same labeled rows also calibrate the conformal answer SET.
                     so.calibrate_conformal(labeled, alpha=conformal_alpha)
+            so._cache_key = key                         # E0.5: a record names its SystemOne by this key
             cache[key] = so
         return so
 
-    def _systemone_record(self, so, state, questions, out):
+    def _systemone_record(self, so, state, questions, out, escalated=False):
         """G1 (sweep 176): every question's answer becomes a DecisionRecord whose outcome, reported by id,
         forwards to THIS fitted SystemOne's observe() -- the loop closes without a teach() call."""
-        from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord
+        from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord, door_record
         L = self.decision_ledger()
-        for q, a in out.items():
+        for q, a in list(out.items()):
             if not isinstance(a, dict) or a.get("type") not in ("choice", "noul", "score"):
                 continue
             opts = [n for n, _ in a.get("ranked", [])] if a.get("ranked") else list(questions[q].get("options", []))
-            rec = DecisionRecord(state, q, opts, a.get("value"), "typed",
-                                 margin=a.get("margin_gap"), p=a.get("p"), meta={"basis": a.get("basis")})
-            L.add(rec, hook=(lambda outcome, _so=so, _s=state, _q=q: _so.observe(_s, {_q: outcome}).get(_q)))
+            # E0.6: SystemOne's p IS isotonic P(correct) -> p_correct; no null here. E0.5: the hook is NAMED in meta
+            # (cache key + question) and re-derived at report time -- a live closure died with the process
+            meta = {"basis": a.get("basis"), "hook": {"kind": "systemone", "key": getattr(so, "_cache_key", None), "q": q}}
+            if escalated:                               # decide_or_escalate: a model-end answer is its own via
+                meta["escalated"] = a.get("via") == "escalated"
+            rec = DecisionRecord(state, q, opts, a.get("value"), "model_end" if a.get("via") == "escalated" else "typed",
+                                 margin=a.get("margin_gap"), p=a.get("p"), p_correct=a.get("p"), meta=meta)
+            L.add(rec)
+            out[q] = a = door_record(a, "typed", p_correct=a.get("p"), p_null=None)
             a["id"] = rec.id
         return out
 
@@ -308,9 +316,13 @@ class _UnifiedPart08:
             if rf.get("value") is not None:
                 q = next(iter(questions))
                 if rf["value"] in (questions[q].get("options") or []):
-                    return {q: {"type": questions[q]["type"], "value": rf["value"], "via": "reflex",
-                                "confident": True, "abstained": False, "p": rf.get("error_prob") is not None and (1.0 - rf["error_prob"]) or None,
-                                "confidence": rf["confidence"], "ranked": [(rf["value"], rf["confidence"])], "id": rf["id"]}}
+                    # E0.6: p_correct is the bridge's calibrated P(correct). The old `err is not None and (1 - err)
+                    # or None` turned a calibrated p of 0.0 into None (and/or on a falsy value) -- fixed by reading it.
+                    from holographic.agents_and_reasoning.holographic_decisionrecord import door_record
+                    return {q: door_record({"type": questions[q]["type"], "value": rf["value"], "via": "reflex",
+                                "confident": True, "abstained": False, "p": rf.get("p_correct"),
+                                "confidence": rf["confidence"], "ranked": [(rf["value"], rf["confidence"])], "id": rf["id"]},
+                                "typed-reflex", p_correct=rf.get("p_correct"), p_null=None)}
         so = self._systemone_cached(questions, labeled, margin, encoder, min_support, scorer, nb_bigrams,
                                     conformal_alpha=conformal_alpha)
         if escalate is not None:
@@ -319,16 +331,7 @@ class _UnifiedPart08:
             # DecisionRecord via 'model_end' -- report its outcome by id and the reflex learns the task, so the
             # next similar request never reaches the model. The escalation carries the generated four-part prompt.
             r = so.decide_or_escalate(state, escalate=escalate, p_floor=p_floor)
-            out = r["answers"]
-            from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord
-            L = self.decision_ledger()
-            for q, a in out.items():
-                via = "model_end" if a.get("via") == "escalated" else "typed"
-                opts = [n for n, _ in a.get("ranked", [])] if a.get("ranked") else list(questions[q].get("options", []))
-                rec = DecisionRecord(state, q, opts, a.get("value"), via, margin=a.get("margin_gap"), p=a.get("p"),
-                                     meta={"basis": a.get("basis"), "escalated": a.get("via") == "escalated"})
-                L.add(rec, hook=(lambda outcome, _so=so, _s=state, _q=q: _so.observe(_s, {_q: outcome}).get(_q)))
-                a["id"] = rec.id
+            out = self._systemone_record(so, state, questions, r["answers"], escalated=True)
             out["_summary"] = r["summary"]
             return out
         out = self._systemone_record(so, state, questions, so.decide(state))
@@ -763,19 +766,22 @@ class _UnifiedPart08:
         def skill(name):
             c = cat.get(name) if hasattr(cat, "get") else None
             return {"name": name, "does": (c.does if c else ""), "call": (c.example if c else "")}
-        base = {"tier": r["tier"], "z": r.get("z"), "id": r.get("id"), "via": r.get("via", "catalog"), "p": r.get("p")}
+        from holographic.agents_and_reasoning.holographic_decisionrecord import door_record, legacy_p
+        _dd = (lambda b, **kw: door_record(dict(b, **kw), "route-node"))   # the bare p is deprecated here too
+        base = {"tier": r["tier"], "z": r.get("z"), "id": r.get("id"), "via": r.get("via", "catalog"), "p": legacy_p(r),
+                "p_correct": r.get("p_correct"), "p_null": r.get("p_null")}      # E0.6: the two named p's
         if r["tier"] == "answer":
             conf = r.get("confidence") if r.get("via") == "reflex" else (1.0 / (1.0 + 2.718281828 ** (-(r.get("z") or 0.0))))
-            return dict(base, decision="act", confidence=round(float(conf), 3), skill=skill(r["answer"]))
+            return _dd(base, decision="act", confidence=round(float(conf), 3), skill=skill(r["answer"]))
         if r["tier"] == "refuse":
-            return dict(base, decision="abstain", confidence=0.0, why=r.get("reason"),
+            return _dd(base, decision="abstain", confidence=0.0, why=r.get("reason"),
                         prompt="No capability matched %r (%s). Try different words, or mind.suggest()." % (task, r.get("reason")))
         names = [o["name"] for o in r["options"]]
         prompt = ("GOAL: choose the capability that does %r.\n" % task +
                   "RETURN FORMAT: exactly one of %s as a JSON string, or null if none fits.\n" % names +
                   "CONSTRAINTS: choose only from the options; do not invent one; null is a correct answer when nothing fits.\n" +
                   "VERIFICATION: the reply is validated against the options; report the outcome with mind.decision_outcome(%r, <choice>)." % r.get("id"))
-        return dict(base, decision="choose", confidence=round(float(1.0 / (1.0 + 2.718281828 ** (-(r.get("z") or 0.0)))), 3),
+        return _dd(base, decision="choose", confidence=round(float(1.0 / (1.0 + 2.718281828 ** (-(r.get("z") or 0.0)))), 3),
                     prompt=prompt, options=[skill(n) for n in names])
 
 

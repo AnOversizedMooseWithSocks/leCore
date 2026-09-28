@@ -72,13 +72,21 @@ from holographic.unified.holographic_unified_p24_wired import _UnifiedPart24
 from holographic.unified.holographic_unified_p25_swarm_roles import _UnifiedPart25
 from holographic.unified.holographic_unified_p26_plugins import _UnifiedPart26
 from holographic.unified.holographic_unified_p27_decisions import _UnifiedPart27
+# sweep 181: find by meaning, the typed model end, learning how an answer was found
+from holographic.unified.holographic_unified_p28_meaning import _UnifiedPart28
+# the CLM backlog (2026-09-26): one contrastive rule under every door; holographic candidates
+from holographic.unified.holographic_unified_p29_contrastive import _UnifiedPart29
+from holographic.unified.holographic_unified_p30_compose import _UnifiedPart30
+from holographic.unified.holographic_unified_p31_encoders import _UnifiedPart31
+from holographic.unified.holographic_unified_p32_teacher import _UnifiedPart32
+from holographic.unified.holographic_unified_p33_router import _UnifiedPart33
 # MERGE 2026-08: upstream shipped its OWN _UnifiedPart19 (p19_verify -- answer
 # verification faculties). Both live here: upstream's rides as _UnifiedPart19V, ours
 # keeps the alias; MRO puts our arc first (p20 > p19_lever7 > p19_verify > base parts).
 from holographic.unified.holographic_unified_p19_verify import _UnifiedPart19 as _UnifiedPart19V
 
 
-class UnifiedMind(_UnifiedPart21, _UnifiedPart22, _UnifiedPart23, _UnifiedPart20, _UnifiedPart20B, _UnifiedPart19, _UnifiedPart19V, _UnifiedPart01, _UnifiedPart02, _UnifiedPart03, _UnifiedPart03B, _UnifiedPart04, _UnifiedPart05, _UnifiedPart06, _UnifiedPart07, _UnifiedPart08, _UnifiedPart09, _UnifiedPart09B, _UnifiedPart10, _UnifiedPart11, _UnifiedPart12, _UnifiedPart13, _UnifiedPart14, _UnifiedPart15, _UnifiedPart16, _UnifiedPart17, _UnifiedPart18, _UnifiedPart24, _UnifiedPart25, _UnifiedPart26, _UnifiedPart27):
+class UnifiedMind(_UnifiedPart21, _UnifiedPart22, _UnifiedPart23, _UnifiedPart20, _UnifiedPart20B, _UnifiedPart19, _UnifiedPart19V, _UnifiedPart01, _UnifiedPart02, _UnifiedPart03, _UnifiedPart03B, _UnifiedPart04, _UnifiedPart05, _UnifiedPart06, _UnifiedPart07, _UnifiedPart08, _UnifiedPart09, _UnifiedPart09B, _UnifiedPart10, _UnifiedPart11, _UnifiedPart12, _UnifiedPart13, _UnifiedPart14, _UnifiedPart15, _UnifiedPart16, _UnifiedPart17, _UnifiedPart18, _UnifiedPart24, _UnifiedPart25, _UnifiedPart26, _UnifiedPart27, _UnifiedPart28, _UnifiedPart29, _UnifiedPart30, _UnifiedPart31, _UnifiedPart32, _UnifiedPart33):
     """Perceive once, into one space; remember, organize, recall, and decide over it.
 
     THE THREE MINDS -- one division of labour, so this never gets confusing again:

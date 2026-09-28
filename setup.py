@@ -69,6 +69,13 @@ setup(
             # because MANIFEST.in-driven inclusion is the rule that silently
             # dropped pipelinemap for seven releases.
             "capabilities.json",
+            # THE CORE MEMORY (2026-09-27, owner-approved): the distilled bundle tools/distill_release.py writes, so a
+            # pip install boots with the shipped engine knowledge, learned wordings, methods and API recipes instead
+            # of an empty memory. autoboot COPIES it into the user's own partition on first boot -- the package
+            # directory is never mounted for writing. Audited in CI: distill_release.py --check.
+            "release_bundle/*.json",
+            "release_bundle/*.lecore",
+            "release_bundle/learning/*.lecore",
         ],
     },
     python_requires=">=3.9",

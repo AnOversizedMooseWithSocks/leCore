@@ -345,3 +345,27 @@ live-generated examples is `docs/TYPED_DECISIONS.md`. What they measured on exac
   T0; `decision_outcome(id, truth)` is the structured path the table, the reflex and the calibration learn
   from. Both.
 
+## 15. One learning loop under every door (sweep 182, 2026-09-26)
+
+What the CLM backlog pass changed for a sim session (the full list, with every command run: lecore-boot
+Step 7c; the numbers: `docs/research/BENCHMARK_sweep182_contrastive.md`):
+
+- **Read `p_correct` / `p_null`, not `p`.** `p_correct` is P(this pick is right), HIGH = confident, `None` until
+  that door has calibrated on reported outcomes; `p_null` is a significance p-value, LOW = significant. The bare
+  `p` is deprecated (it meant opposite things at different doors) and warns when read in process.
+- **Outcomes by id survive a restart.** Decisions are saved in the partition (`lecore.learning.decisions`) and
+  come back with `boot` — a solver picked yesterday and judged today can still be reported. Until `boot` runs, an
+  old id raises `KeyError`. A correction now also UNLEARNS the wrong answer in the reflex trace (same key 1.000
+  after one correction, 0.453 before).
+- **A failed verify is now a lesson.** `swarm_step` learns every verified step as a SUCCESS or FAILURE example
+  per tool, and `verify_precheck(state, [solver, ...])` orders the next candidates by it — only on strong
+  evidence (|score| ≥ 0.5), otherwise your order stands, and the verify command still runs on every step.
+  Measured on recorded swarm runs: judge calls 1,755 vs 2,691 without a reflex; KEPT NEGATIVE: on a NOVEL task
+  it is no better than chance (0.545 vs 0.603), so it helps on repeated sim chores, not on a first-of-its-kind
+  experiment.
+- **`serve` asks the router after a memory miss.** Near-exact capability wording can come back "use capability
+  X" with the card and an id ("render a cloud" → "Cloud stack (closed-form shadow rays)", measured); a looser
+  one escalates WITH the route's tier and options (`route.tier` / `route.options`: "cloth simulation" came back
+  a menu, "soft body physics" an answer tier under the serve bar, "simulate a falling cloth" a refusal) — report
+  the capability you used by `route.id` with the card's NAME.
+

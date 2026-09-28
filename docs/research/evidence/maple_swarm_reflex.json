@@ -1,0 +1,123 @@
+{
+ "run": "maple field-journal swarm, 2026-09-27 (leStudio + one leCore service, 5 workers in two phases)",
+ "reflex_log": {
+  "coordinator": {
+   "same": 45,
+   "ask_T0": 3,
+   "teach": 5,
+   "new": 11,
+   "unclear": 5
+  },
+  "sketch": {
+   "ask_miss": 20,
+   "new": 11,
+   "same": 1,
+   "teach": 11,
+   "ask_T0": 2
+  },
+  "paint": {
+   "ask_T0": 6,
+   "ask_miss": 18,
+   "new": 11,
+   "teach": 8,
+   "same": 2
+  }
+ },
+ "serve_ms": {
+  "median": 10.2,
+  "p90": 23.8,
+  "max": 34.7,
+  "n": 49
+ },
+ "studio_calls": {
+  "/api/composite.png": {
+   "n": 23,
+   "median_ms": 1735.2,
+   "max_ms": 7583.3
+  },
+  "/api/hatchfill": {
+   "n": 90,
+   "median_ms": 376.9,
+   "max_ms": 4094.3
+  },
+  "/api/layer": {
+   "n": 27,
+   "median_ms": 75.6,
+   "max_ms": 15081.8
+  },
+  "/api/layer/<id>.png": {
+   "n": 15,
+   "median_ms": 119.7,
+   "max_ms": 642.6
+  },
+  "/api/paint_batch": {
+   "n": 46,
+   "median_ms": 1279.4,
+   "max_ms": 79359.1
+  },
+  "/api/scribble": {
+   "n": 43,
+   "median_ms": 89.2,
+   "max_ms": 2004.3
+  },
+  "/api/state": {
+   "n": 14,
+   "median_ms": 34.4,
+   "max_ms": 1579.0
+  },
+  "/api/text": {
+   "n": 14,
+   "median_ms": 144.8,
+   "max_ms": 551.8
+  }
+ },
+ "audits": {
+  "fresh_audit_after_swarm": {
+   "fresh_T0": 1,
+   "fresh_n": 16,
+   "fresh_wrong": 0,
+   "must_not_served": []
+  },
+  "fresh_audit_after_fixes": {
+   "fresh_T0": 2,
+   "fresh_n": 16,
+   "fresh_wrong": 0,
+   "must_not_served": []
+  },
+  "fresh_audit_round3": {
+   "fresh_T0": 2,
+   "fresh_n": 16,
+   "fresh_wrong": 0,
+   "must_not_served": [
+    "how do I add a new document in lestudio",
+    "BTC"
+   ],
+   "note": "the two must-not probes served in round 3 were ANSWERED in round 2 by the coordinator: 'BTC' -> the clarifying question (bare-ticker rule), 'add a new document' -> POST /api/new; both are correct serves"
+  }
+ },
+ "rss_mb": {
+  "idle, 9 restored documents": 2353,
+  "full sketch, own LESTUDIO_WS": 784,
+  "after paint phase": 2610,
+  "OOM kill": 5595
+ },
+ "gate_counterfactual": {
+  "fresh_rewordings": 32,
+  "served_race_labels_removed": 11,
+  "served_with_race_labels": 0,
+  "p_at_g_1.2_with_races": 0.708,
+  "p_at_g_1.2_after": 0.994
+ },
+ "noisy_teacher_ab": {
+  "both": {
+   "detached_in_scope": "1989 (44.2%) / 71 (1.6%)",
+   "oos_wrong": "24 (2.4%)"
+  },
+  "no_exact_wording": "identical",
+  "no_shown_list_labels": "identical",
+  "recorded_2026_09_26": {
+   "detached_in_scope": "1245 (27.7%) / 23 (0.5%)",
+   "oos_wrong": "5 (0.5%)"
+  }
+ }
+}

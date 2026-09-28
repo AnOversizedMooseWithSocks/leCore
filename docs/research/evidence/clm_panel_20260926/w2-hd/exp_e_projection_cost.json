@@ -1,0 +1,23 @@
+{
+ "features": 12330,
+ "K": 20,
+ "sparse_exact_top1": 0.7313,
+ "hv": [
+  {
+   "D": 1024,
+   "top1": 0.72,
+   "agree_with_sparse": 0.9304
+  },
+  {
+   "D": 2048,
+   "top1": 0.7224,
+   "agree_with_sparse": 0.9473
+  },
+  {
+   "D": 8192,
+   "top1": 0.7256,
+   "agree_with_sparse": 0.9709
+  }
+ ],
+ "cpu_s": 5.1
+}

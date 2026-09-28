@@ -148,11 +148,157 @@ class AnswerLadder:
             else key_atom("q:", 2048)
         return v / (np.linalg.norm(v) + 1e-12)
 
+    def _meaning_index(self):
+        """The mind's MeaningIndex (sweep 181), or None for a bare ladder without a mind that has one."""
+        m = getattr(self, "mind", None)
+        if m is None or not hasattr(type(m), "meaning"):
+            return None
+        try:
+            return m.meaning
+        except Exception:
+            return None
+
+    # ---- PAYLOAD KEYS FOLLOW THE TRACE'S LAYOUT (learning-loop audit, 2026-09-26) ---------------------------------
+    # A payload is keyed "<tile>:<atom index>" -- where the gated read lands. The experience trace RE-LAYS itself: a
+    # tile SPLIT (every ~61 accepted writes per tile at the measured advisory load 0.03) replays the tile into two new
+    # ones, so atom indices shift and half the questions move to a new tile index; reflex_retile rebuilds the whole
+    # trace; consolidate merges atoms. Nothing told the ladder, so its keys went STALE. MEASURED (tools/
+    # audit_learning_loop.py, 90 taught rows, one live split): 60 of 90 keys no longer located their own question;
+    # the fuzzy T0 arm lost those rows (the meaning rung happened to cover them); and a CORRECTION went to the wrong
+    # place -- answer_feedback(q, ok=False) on 3 questions marked the payload keys the CURRENT layout gave, whose stale
+    # entries named OTHER questions, so after a restart 2 innocent questions were no longer served. The fix: a cheap
+    # layout check at every read / write / feedback / save (tile and atom-list IDENTITY -- a split replaces the tile
+    # object, a retile the trace, a consolidate the atom list; appends change nothing) and, on a change, a remap of
+    # just the keys in the changed tiles, by the atom VECTOR itself (a split / retile replays the exact float64 audit
+    # values, so every atom reappears bit-identical in exactly one new slot), falling back to re-locating the key's
+    # question for an atom that did not reappear, and dropping a key that locates nothing (never a stale pointer).
+    def _layout_now(self):
+        tr = self.mind.experience
+        return {"trace": tr, "tiles": list(tr.tiles), "atom_lists": [t._atoms for t in tr.tiles]}
+
+    def _payload_sync(self):
+        """Remap every payload key whose tile changed layout since the last call. -> keys remapped (0 = none)."""
+        try:
+            now = self._layout_now()
+        except Exception:
+            return 0                                     # a bare ladder without a trace: nothing to keep in step
+        snap = getattr(self, "_payload_layout", None)
+        self._payload_layout = now
+        if snap is None:
+            return 0                                     # first use: every key was located under this layout
+        same_trace = snap["trace"] is now["trace"]
+
+        def same(i, j):
+            return same_trace and i == j and i < len(snap["tiles"]) and j < len(now["tiles"]) and \
+                snap["tiles"][i] is now["tiles"][j] and snap["atom_lists"][i] is now["atom_lists"][j]
+        changed_old = {i for i in range(len(snap["tiles"])) if not same(i, i)}
+        if not changed_old:
+            return 0
+        return self._payload_remap(snap, now, changed_old)
+
+    def _payload_remap(self, snap, now, changed_old):
+        import hashlib
+        changed_new = [j for j in range(len(now["tiles"])) if not (
+            snap["trace"] is now["trace"] and j < len(snap["tiles"]) and snap["tiles"][j] is now["tiles"][j]
+            and snap["atom_lists"][j] is now["atom_lists"][j])]
+
+        def h(a):
+            return hashlib.sha256(np.ascontiguousarray(np.asarray(a, np.float64)).tobytes()).digest()
+        loc = {}
+        for j in changed_new:
+            for k, a in enumerate(now["atom_lists"][j]):
+                loc.setdefault(h(a), "%d:%d" % (j, k))
+        qs_, pay_ = getattr(self, "_payload_qs", {}), getattr(self, "_payloads", {})
+
+        def new_key(pk):
+            try:
+                t, k = (int(x) for x in str(pk).split(":"))
+            except ValueError:
+                return pk                                # a legacy int key (v1 tolerance): not positional here
+            if t not in changed_old:
+                return pk
+            atoms = snap["atom_lists"][t] if t < len(snap["atom_lists"]) else []
+            nk = loc.get(h(atoms[k])) if k < len(atoms) else None
+            if nk is None and qs_.get(pk):
+                nk = self._payload_locate(qs_[pk])      # the atom did not reappear: find the question itself
+            return nk
+        mapping = {pk: new_key(pk) for pk in list(pay_) + [k for k in qs_ if k not in pay_]}   # insertion order
+        moved = sum(1 for a, b in mapping.items() if a != b)
+        if not moved:
+            return 0
+        # rebuild each keyed map in insertion order (a later entry wins a collision, as a later teach would)
+        self._payloads = {mapping[k]: v for k, v in pay_.items() if mapping.get(k) is not None}
+        self._payload_qs = {mapping[k]: v for k, v in qs_.items() if mapping.get(k) is not None}
+        if hasattr(self, "_payload_bad"):
+            self._payload_bad = {mapping.get(k, k) for k in self._payload_bad if mapping.get(k, k) is not None}
+        if hasattr(self, "_payload_ok"):
+            ok_ = {}
+            for k, v in self._payload_ok.items():
+                nk = mapping.get(k, k)
+                if nk is not None:
+                    ok_[nk] = ok_.get(nk, 0) + v
+            self._payload_ok = ok_
+        for e in getattr(self, "_exact", {}).values():
+            if e.get("pid") is not None and e["pid"] in mapping:
+                e["pid"] = mapping[e["pid"]]
+        self._payload_remaps = getattr(self, "_payload_remaps", 0) + moved
+        return moved
+
+    def _payload_locate(self, question_text):
+        """The CURRENT key of a question's payload atom (content-derived: key_atom('ans#' + question[:64])), or None
+        when its routed tile does not hold that atom (cosine < 0.99 -- never guess a neighbour's slot)."""
+        tr = self.mind.experience
+        qk = self._qkey(question_text)
+        t = tr._route(qk)
+        A = np.asarray(tr.tiles[t]._atoms, float)
+        if not len(A):
+            return None
+        pa = key_atom("ans#" + str(question_text)[:64], 2048)
+        cs = A @ pa / (np.linalg.norm(A, axis=1) * np.linalg.norm(pa) + 1e-12)
+        idx = int(np.argmax(cs))
+        return "%d:%d" % (t, idx) if float(cs[idx]) >= 0.99 else None
+
+    def _feedback_target(self, queries, hit, tile):
+        """The payload key a CORRECTION of these query forms (the raw question and its session-salted form) must mark:
+        the one answer() would SERVE for it -- its exact entry's payload when that entry is this question's, else the
+        gated read's payload when the question recorded with it passes answer()'s own verify-on-hit (same session
+        token, content-word Jaccard >= 0.75, the same numbers). None = the payload near this query belongs to ANOTHER
+        question: marking it would veto that question instead (learning-loop audit, 2026-09-26: a key-space neighbour
+        read fired an innocent question's atom, and after a restart that question was no longer served)."""
+        import re as _re
+        qs_ = getattr(self, "_payload_qs", {})
+        forms = [" ".join(str(q).lower().split()) for q in queries]
+        for nq in forms:
+            ex = getattr(self, "_exact", {}).get(nq)
+            pid = (ex or {}).get("pid")
+            if pid is not None and " ".join(str(qs_.get(pid, "")).lower().split()) == nq:
+                return pid
+        if not (hit or {}).get("fired"):
+            return None
+        cand = "%d:%d" % (int(tile), int(hit.get("atom", -1)))
+        stored = qs_.get(cand)
+        if stored is None:
+            return cand                                  # a payload recorded without its question: the old rule
+
+        def tok(t):
+            t = str(t)
+            return t.split("]", 1)[0] + "]" if t.startswith("[s:") else ""
+        for q in queries:
+            if tok(q) != tok(stored):
+                continue
+            a_ = set(str(q).lower().split()) - self._STOP
+            b_ = set(str(stored).lower().split()) - self._STOP
+            if len(a_ & b_) / max(len(a_ | b_), 1) >= 0.75 and \
+                    sorted(_re.findall(r"\d+(?:\.\d+)?", str(q))) == sorted(_re.findall(r"\d+(?:\.\d+)?", str(stored))):
+                return cand
+        return None
+
     def answer(self, query, kb_search=None, dispatchers=None, intern=None, main=None,
-               est_llm_tokens=600):
+               est_llm_tokens=600, resolver=None):
         if not hasattr(self, "query_log"):
             self.query_log = []
         self.query_log.append(str(query))
+        self._payload_sync()                             # the audit's fix: keys follow the trace's layout
         qk = self._qkey(query)
         # T0a -- EXACT-REPEAT SIDECAR (cp38, the harsh battery's lesson): 200 questions
         # sharing a frame are quasi-parallel keys; superposition cleanup at D=2048
@@ -166,7 +312,14 @@ class AnswerLadder:
         ex_ = getattr(self, "_exact", {})
         if nq_ in ex_:
             pe_ = ex_[nq_]
-            if (pe_.get("pid") not in getattr(self, "_payload_bad", set())
+            # THE PAYLOAD VETO, LIVE (backlog E2.1). This compared pe_["pid"] with _payload_bad, but _remember wrote
+            # pid None, so it never fired: a payload marked BAD by answer_feedback on a fuzzy hit was still served here
+            # for its own taught question. _remember now records the located payload id; it must still belong to THIS
+            # question (a slot index freed by a tile split may name another question's payload since).
+            _pid_ = pe_.get("pid")
+            _bad_ = (_pid_ is not None and _pid_ in getattr(self, "_payload_bad", set())
+                     and " ".join(str(getattr(self, "_payload_qs", {}).get(_pid_, "")).lower().split()) == nq_)
+            if (not _bad_
                     and str(pe_.get("answer", "")).strip()):     # a cached blank is not a hit
                 out0 = {"tier": "T0", "via": "reflex-exact", "answer": pe_["answer"],
                         "provenance": pe_.get("provenance", "model-cached"),
@@ -273,6 +426,28 @@ class AnswerLadder:
                         "confidence": float(hit["confidence"]),
                         "served_count": self._payload_ok[pid_key],
                         "why": "gated trace hit"}
+        # T0m -- MEANING (sweep 181). The reflex above serves near-exact repeats only (by design); this rung
+        # finds a taught row by what the question MEANS -- any confirmed wording of it, learned associations,
+        # calibrated confidence -- and serves it, runs its METHOD, or asks the person to clarify. An unsure
+        # decision is kept for the model end below, which gets the nearest rows as typed evidence.
+        _mdec = None
+        _mind = getattr(self, "mind", None)
+        if _mind is not None and hasattr(_mind, "_meaning_rung"):
+            try:
+                served_, _mdec = _mind._meaning_rung(str(query))
+            except Exception:
+                served_, _mdec = None, None
+            if served_ is not None:
+                # SPOT-CHECK (sweep 181): with a model attached, a sample of confident meaning serves is shown to
+                # the model anyway -- every one until the gate is calibrated, then a deterministic few percent.
+                # Escalations only label the UNSURE region; without this the calibrator never sees its own
+                # confident mistakes. A disagreement corrects the answer on the spot and teaches the wording.
+                if resolver is not None and served_.get("via") == "meaning" and \
+                        _mind._meaning_should_verify(str(query)):
+                    served_ = _mind._meaning_verify(str(query), served_, _mdec, resolver) or served_
+                self.ledger.record(served_["tier"] if served_["tier"] in ("T0", "T2", "T4") else "T0",
+                                   est_llm_tokens)
+                return served_
         # T1 -- substrate + freshness
         if kb_search is not None:
             row = kb_search(query)
@@ -306,6 +481,16 @@ class AnswerLadder:
                     self.ledger.record("T3", est_llm_tokens)
                     return {"tier": "T3", "via": "intern", "answer": text,
                             "confidence": float(conf), "why": "utility task, intern confident"}
+        # T4m -- THE TYPED MODEL END (sweep 181): when a model is attached as a raw prompt->text resolver, it is
+        # asked a TYPED question -- same as one of these rows / new (with how it was found) / unclear -- and the
+        # verdict is learned on the spot: a new wording links to its row, a new answer becomes a row with its
+        # method, an unclear wording teaches the clarifying question. A reply that ignores the contract is used
+        # as a plain answer (the legacy T4 below), so a model that cannot do JSON still answers.
+        if resolver is not None and _mind is not None and hasattr(_mind, "_meaning_escalate"):
+            got_ = _mind._meaning_escalate(str(query), _mdec, resolver)
+            if got_ is not None:
+                self.ledger.record("T4", est_llm_tokens)
+                return got_
         # T4 -- the exception
         if main is not None:
             text = main(query, None)
@@ -334,6 +519,26 @@ class AnswerLadder:
         def _has_ctl(txt_):
             return any(re_.fullmatch(r"__\w+__", tk_) for tk_ in str(txt_).split())
         if _has_ctl(a_) or _has_ctl(q_):
+            return None
+        # THE LEARNING GUARD (sweep 179). Every remember path passes here -- explicit teach, T1 rows, cached
+        # T3/T4 model answers, load-time replay -- so a secret or a live reading is refused ONCE, for all of
+        # them (cp23's lesson: guard the door, not one caller). Measured before: an API key, a seed phrase and
+        # a password were served at T0 after a reload; so were a taught price and a resolve()d weather report.
+        # The refusal is kept on _last_refusal so teach() can say WHY without echoing the secret.
+        from holographic.agents_and_reasoning.holographic_learnguard import learning_verdict as _guard_check
+        _vok = " ".join(q_.lower().split()) in getattr(self, "_volatile_ok", set())
+        # sweep 180: the mind's SEMANTIC guard rides along -- the filter asks what the question MEANS, not only
+        # what it looks like (and learns from every pattern refusal)
+        # ...except during load-time REPLAY (_replaying): a stored row is judged by the pattern layer only, so a
+        # semantic GUESS never deletes a fact the user already has (found by test: the replay pre-check was
+        # pattern-only but this call still applied the semantic layer underneath it)
+        _sg = None if getattr(self, "_replaying", False) else \
+            getattr(getattr(self, "mind", None), "semantic_guard", None)
+        _verdict = _guard_check(q_, a_, allow_volatile=_vok, guard=_sg)
+        if not _verdict["ok"]:
+            self._last_refusal = _verdict
+            self._guard_refusals = getattr(self, "_guard_refusals", {"sensitive": 0, "volatile": 0})
+            self._guard_refusals[_verdict["kind"]] += 1
             return None
         if a_.startswith("__") and a_.endswith("__"):
             return None                                   # cp23: CONTROL TOKENS are not
@@ -370,6 +575,17 @@ class AnswerLadder:
                  # policy, or a benchmark can treat model-cached answers as provisional.
                  "provenance": provenance or getattr(self, "_provenance_hint", "model-cached")}
             self._exact = ex_
+            # sweep 181: every remembered question is a ROW of the meaning index, reachable by wordings other
+            # than this one. Idempotent (replay re-adds nothing). Route rows ("toolreflex: ", "decision: ") are
+            # the engine's own bookkeeping, not questions a person asks -- they stay out.
+            _mi = self._meaning_index()
+            if _mi is not None and not str(question_text).startswith(("toolreflex: ", "decision: ")):
+                try:
+                    import hashlib as _hl
+                    _mi.add_row(str(question_text), kind="answer", provenance=str(provenance or "model-cached"),
+                                akey="a:" + _hl.sha256(" ".join(_at.lower().split()).encode()).hexdigest()[:12])
+                except Exception:
+                    pass                                  # meaning is an index, never a reason to lose a teach
         if not hasattr(self, "_payload_qs"):
             self._payload_qs = {}
         if not hasattr(self, "taught_log"):
@@ -380,7 +596,9 @@ class AnswerLadder:
         # mark has no payload. Atom identity must be CONTENT-DERIVED: same question, same
         # atom, in any process, forever.
         pid_atom = key_atom("ans#" + str(question_text or answer_text)[:64], 2048)
+        self._payload_sync()                              # keys located under the layout BEFORE this write...
         self.mind.experience.write(qkey, pid_atom)
+        self._payload_sync()                              # ...follow it if this write split a tile (the audit's fix)
         # KEPT NEGATIVES (cp21, a matched set from the v2 cold cross-check):
         # (1) payloads indexed by within-tile slot ALONE collide across tiles -- the index
         #     must be TILE-QUALIFIED (a restored partition served 0/8 through that hole);
@@ -402,6 +620,9 @@ class AnswerLadder:
                                                           # a fresh answer clears the veto
         if question_text is not None:
             self._payload_qs[pid_key] = str(question_text)
+            _ex_e = getattr(self, "_exact", {}).get(" ".join(str(question_text).lower().split()))
+            if _ex_e is not None:
+                _ex_e["pid"] = pid_key                    # E2.1: the exact entry knows its payload (the veto check)
             # cp54: the log records PROVENANCE, because replay has to know it. Without
             # this, every restart relabelled deliberate teaches as model-cached (the
             # record was [q, a] and replay could only guess). Rows are [q, a] historic,
@@ -409,6 +630,26 @@ class AnswerLadder:
             self._log_taught([str(question_text), str(answer_text), "shared",
                               provenance or getattr(self, "_provenance_hint",
                                                     "model-cached")])
+
+    def _forget_served(self, question_text, answer_text=None):
+        """Stop serving `question_text` (sweep 179): drop its exact-match entry and every payload slot whose
+        recorded question is it (and, when given, whose answer is `answer_text`). Used when the learning guard
+        refuses a row that a RESTORED floor already serves -- replay alone never reaches those. Returns the
+        number of served entries removed."""
+        n = 0
+        qn = " ".join(str(question_text).lower().split())
+        ex_ = getattr(self, "_exact", {})
+        if qn in ex_ and (answer_text is None or ex_[qn].get("answer") == str(answer_text)):
+            del ex_[qn]
+            n += 1
+        qs_ = getattr(self, "_payload_qs", {})
+        pay_ = getattr(self, "_payloads", {})
+        for pk in [k for k, q in qs_.items() if q == str(question_text)]:
+            if answer_text is None or pay_.get(pk) == str(answer_text):
+                pay_.pop(pk, None)
+                qs_.pop(pk, None)
+                n += 1
+        return n
 
     def _log_taught(self, row):
         """Append a [q, a, session, provenance] row to the durable teaching record -- UNLESS an

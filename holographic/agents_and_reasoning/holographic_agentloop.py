@@ -59,7 +59,11 @@ def _finite(value):
 def arg_fingerprint(args):
     """A stable digest plus a short repr for one call's arguments -- what a transcript records INSTEAD of the
     arguments themselves. Deterministic across processes (blake2b, never hash())."""
-    text = json.dumps(args, sort_keys=True, default=repr)
+    # REDACTED FIRST (sweep 179): measured, a call carrying {"api_key": ...} put the key in plain text in this
+    # repr, and so in every DecisionRecord, bus message and transcript. The digest is taken over the SAME
+    # redacted text -- a short digest of a secret is still an offline guessing target.
+    from holographic.agents_and_reasoning.holographic_learnguard import redact_args
+    text = json.dumps(redact_args(args), sort_keys=True, default=repr)
     return {"digest": hashlib.blake2b(text.encode("utf-8"), digest_size=8).hexdigest(),
             "repr": text[:120]}
 
@@ -91,15 +95,25 @@ class AgentLoop:
     """Runs a task by letting `llm` (any callable text->text) pick tools, with a null-referenced gate in
     front of every action and `invoke` as the only dispatch path."""
 
-    def __init__(self, mind, llm, max_steps=6, z_min=0.1, k_tools=6, seed=0):
+    def __init__(self, mind, llm, max_steps=6, z_min=0.1, k_tools=6, seed=0, verify=None, reflex=False):
+        """`verify` (sweep 178) is the JUDGE for tool calls: callable(task, tool, args, result) -> bool, run
+        after every successful invoke. Only a step it passes TEACHES (decision_outcome -> reflex_learn); with
+        verify=None every step is still RECORDED in the decision ledger, but nothing is learned -- "the tool
+        did not raise" is the tool's own report, and self-reported outcomes are what the reflex must not
+        learn from (sweep 177: self-report served 261 wrong answers on 319 repeats). `reflex=True` lets the
+        gate answer a repeat from that judged experience (route_tiered(reflex=True))."""
         if not callable(llm):
             raise TypeError("agent_loop needs a callable text->text, got %r" % type(llm))
+        if verify is not None and not callable(verify):
+            raise TypeError("verify must be callable(task, tool, args, result) -> bool, got %r" % type(verify))
         self.mind = mind
         self.llm = llm
         self.max_steps = int(max_steps)
         self.z_min = float(z_min)
         self.k_tools = int(k_tools)
         self.seed = int(seed)
+        self.verify = verify
+        self.reflex = bool(reflex)
 
     def manifest(self, task):
         """The RELEVANT slice of the tool manifest, not all of it. ~1,500 faculties will not fit a prompt,
@@ -115,8 +129,47 @@ class AgentLoop:
                 call = desc.get("call") or method
             except Exception:
                 call = method
-            rows.append({"tool": method, "call": call, "does": (getattr(cap, "does", "") or "")[:160]})
+            # "card" (sweep 178): the catalog NAME behind the method. The router's decisions are labelled by
+            # card, the model invokes by method -- outcomes are reported by card so one label space feeds
+            # one learner (a method name reported against a route record would mint a second vocabulary).
+            rows.append({"tool": method, "call": call, "does": (getattr(cap, "does", "") or "")[:160],
+                         "card": getattr(cap, "name", method)})
         return rows
+
+    def _record_step(self, task, k, prev_card, tools, name, args, why, result, gate_id):
+        """RECORD ONE TOOL CALL, AND TEACH ONLY IF IT WAS JUDGED (sweep 178). Returns the step's learning
+        fields {id, card, verified, taught}.
+
+        The decision a step represents: "for THIS context, which tool?" -- the task itself for the first
+        step (whose record is the route decision the gate already made, `gate_id`), and the task PLUS what
+        just happened for later steps (decision_tree's measured edge: request + outcome kept 4/5 children on
+        topic). Every step lands in the ledger; only a step whose verify passed is reported as an outcome.
+        Deliberately NOT done: an exception or a failed verify never marks the reflex failure field -- it is
+        region-wide, so one bad tool would silence every later good one on the same task (sweep 177)."""
+        from holographic.agents_and_reasoning.holographic_decisionrecord import DecisionRecord
+        card = next((row.get("card", row["tool"]) for row in tools if row["tool"] == name), name)
+        verified = None
+        if why == "invoked" and self.verify is not None:
+            try:
+                verified = bool(self.verify(task, name, args, result))
+            except Exception:                 # a judge that crashes has not passed anything
+                verified = False
+        state = task if k == 0 else "%s | after %s" % (task, prev_card)
+        led = self.mind.decision_ledger()
+        # EVERY call gets its own audit record (tool, args digest, what happened, the verdict) ...
+        rec = DecisionRecord(state, "agent-step", [row.get("card", row["tool"]) for row in tools], card, "route",
+                             meta={"tool": name, "args": arg_fingerprint(args), "why": why, "verified": verified,
+                                   "step": int(k)})
+        led.add(rec)
+        # ... but the FIRST call teaches through the route decision the gate already made (same task text, same
+        # fingerprint key), so route_tiered(reflex=True) is what answers the repeat. Later calls teach their own
+        # context record. One report per call, never two: two would put the same key in the seen gate twice.
+        teach_id = gate_id if (k == 0 and gate_id and led.get(gate_id) is not None) else rec.id
+        taught = None
+        if verified:
+            taught = self.mind.decision_outcome(teach_id, card).get("reflex")
+        return {"id": rec.id, "taught_on": teach_id if verified else None, "card": card, "verified": verified,
+                "taught": bool(taught and taught.get("learned"))}
 
     def _prompt(self, task, tools, history):
         lines = ["TASK: %s" % task, "", "TOOLS:"]
@@ -149,7 +202,7 @@ class AgentLoop:
         # 0.5 keeps the old gate exactly (tiered=False), so no existing decision flips unless asked.
         if hasattr(self.mind, "route_tiered") and self.z_min <= 0.5:
             tr = self.mind.route_tiered(task, k=max(3, self.k_tools), seed=self.seed,
-                                        z_answer=self.z_min, z_refuse=min(-0.5, self.z_min))
+                                        z_answer=self.z_min, z_refuse=min(-0.5, self.z_min), reflex=self.reflex)
             gate = {"abstain": tr["tier"] == "refuse", "z": tr.get("z"), "tier": tr["tier"], "id": tr.get("id"),
                     "reason": tr.get("reason"), "hits": [(o["name"], o["score"]) for o in tr["options"]]}
         else:
@@ -173,6 +226,7 @@ class AgentLoop:
                     "why": "the task cleared the null floor but no CALLABLE capability matched it"}
 
         steps, history = [], []
+        n_calls, prev_card = 0, None          # tool calls actually dispatched, and the last one's card
         for _ in range(self.max_steps):
             try:
                 reply = self.llm(self._prompt(task, tools, history))
@@ -204,6 +258,15 @@ class AgentLoop:
             except Exception as exc:
                 result, why = None, "invoke raised: %s" % exc
             record = {"tool": name, "args": arg_fingerprint(args), "result": result, "why": why}
+            # THE OUTCOME EDGE (sweep 178): before this the loop had the route id, the tool, and whether it
+            # raised -- and dropped all three. Now the call is recorded and, when judged, taught.
+            try:
+                record.update(self._record_step(task, n_calls, prev_card, tools, name, args, why, result,
+                                                gate.get("id")))
+                prev_card = record["card"]
+            except Exception as exc:           # learning must never break the loop it observes
+                record["learn_error"] = str(exc)[:120]
+            n_calls += 1
             steps.append(record)
             history.append({"tool": name, "result": result})
 

@@ -382,8 +382,9 @@ example; the loop:
   (question, answer, by="human")` closes what the swarm could not; then
   **`learning_save(root, path=<root>/learning/state-<UTC stamp>Z.lecore)`** — `learning_save(root)`
   alone writes the legacy `state.lecore`, which the rollover ranks *oldest* (lab: ten taught
-  rows vanished that way once). Boot next session with `boot(partition, doctrine=True)`; it
-  rolls the generation. MCP: `zoo_ask`, `zoo_teach`, `zoo_feedback`, `memory_write(text, tags)`,
+  rows vanished that way once). Boot next session with `boot(partition, doctrine=True)`, then
+  `learning_rollover(root)` — `boot` does NOT roll the generation (measured 2026-09-26: after `boot` the
+  legacy and the dated file were both still on disk until `learning_rollover` merged them into one). MCP: `zoo_ask`, `zoo_teach`, `zoo_feedback`, `memory_write(text, tags)`,
   `memory_search`. Lab: 476 → 488 rows, re-ask returned T0 with the numbers after a reload.
   Recall quality is measured for sensor questions (2.2× runner-up margin) — **not for render
   recipes; that benchmark does not exist yet.**
@@ -487,4 +488,15 @@ what the chain cannot, at 1×, with the engine's upscale last.
   repeat brief is answered from experience; `route(task)` is tiered (act / choose / abstain) and learns the
   same way; `plan_change("render X with Y")` answers reuse / extend / build with the catalog tier and the
   source as evidence before you write a renderer that already exists.
+
+- **One learning loop under every door (sweep 182, 2026-09-26; details in lecore-boot Step 7c).** Read
+  `p_correct` (high = confident; `None` until the door has calibrated on reported outcomes) and `p_null` (low =
+  significant) on every decision; the bare `p` is deprecated and warns. Decision ids now survive a restart once
+  the partition is booted, so a render judged the next session can still be reported with
+  `decision_outcome(id, what was used)`. `serve("<render question>")` may now answer "use capability X"
+  (`via: "route"`) instead of escalating, and its escalation carries a capability menu (`route.options`) — pick
+  from it and report the pick by `route.id` with the card's name. `rank(state, candidates)` ranks options you
+  already hold, but give each candidate a few example phrasings: a bare name matches only when the description
+  says it ("a shiny copper kettle" → copper 0.48; "flat wooden panel" → wood_oak 0.148, refused under the 0.15 floor). Teaching a render recipe with its numbers is still accepted by the
+  learning guard (a recipe with "4.9 s at 44.9 dB" was taught, measured); a bare "sol?" or a live price is not.
 

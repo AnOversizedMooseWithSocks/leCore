@@ -1,0 +1,244 @@
+{
+ "applied": {
+  "method_rows": 0,
+  "wordings_linked": 2
+ },
+ "artifacts": {
+  "api_cards": {
+   "carried": 0,
+   "excluded": {},
+   "items": []
+  },
+  "apis": {
+   "carried": 0,
+   "excluded": {},
+   "items": []
+  },
+  "direction": {
+   "carried": 0,
+   "excluded": {},
+   "items": []
+  },
+  "methods": {
+   "carried": 0,
+   "excluded": {
+    "provisional-provenance": 5
+   },
+   "items": []
+  },
+  "negatives": {
+   "carried": 0,
+   "excluded": {
+    "row not carried": 15
+   },
+   "items": []
+  },
+  "protostores": {
+   "carried": 0,
+   "excluded": {},
+   "items": []
+  },
+  "reflexes": {
+   "carried": 0,
+   "excluded": {},
+   "items": []
+  },
+  "sops": {
+   "carried": 0,
+   "excluded": {
+    "the seedpack installs it": 1
+   },
+   "items": []
+  },
+  "wordings": {
+   "carried": 2,
+   "excluded": {},
+   "items": [
+    [
+     "How should the reflex experience trace store a correction when the served answer was wrong, positive and negative evidence",
+     "how should the reflex arc store negative evidence from a wrong answer"
+    ],
+    [
+     "how should a swarm of agents share one lecore memory",
+     "how should a swarm share memory"
+    ]
+   ]
+  },
+  "workflows": {
+   "carried": 1,
+   "excluded": {},
+   "items": [
+    "what workflow solved simulate the ci inside lecore, find the failures, and fix them"
+   ]
+  }
+ },
+ "bundle": "release_bundle/learning/state.lecore",
+ "env": [],
+ "excluded": {
+  "build-history": 11,
+  "deployment-specific": 32,
+  "doctrine (the seedpack ships it)": 1,
+  "history": 27,
+  "length": 1,
+  "no-engine-anchor": 25,
+  "no-engine-content": 66,
+  "open-item": 4,
+  "probe": 11,
+  "provisional-provenance": 86,
+  "session-specific": 19,
+  "task-artifact": 26,
+  "third-party-product": 7,
+  "vetoed": 45,
+  "work-scope": 177,
+  "workflow-episode": 5
+ },
+ "not_distilled": {
+  "SystemOne tables + decision ledger": "one user's decisions about their own states",
+  "door calibration streams": "thresholds re-derive per population (doctrine: re-derive when the population moves)",
+  "learning guard's learned examples": "users' refused questions (redacted); the shipped examples live in holographic_learnguard_examples",
+  "open escalations": "one deployment's open questions",
+  "query ledger, tool cache, goals": "session bookkeeping",
+  "reflex bridge experience": "question vectors without their text: nothing to audit for secrets or session facts (the tool door's store travels because its eligibility was tracked at learn time)",
+  "semantic context vectors": "one-shot noise tokens (the balloon lesson); rebuilt from shipped text",
+  "teacher-noise estimate": "a property of one deployment's model end"
+ },
+ "promoted": [],
+ "questions": [
+  "systemone benchmark results and negatives",
+  "what margin should systemone use",
+  "does online learning beat frozen prototypes in systemone",
+  "can leCore detect decision drift before labels arrive",
+  "what is the risk coverage curve for systemone",
+  "how does leCore surpass a hosted typed decision api",
+  "what does min_support do in systemone",
+  "what makes a good contextual alias",
+  "which systemone scorer is strongest on real text",
+  "what is the best systemone scorer for few-shot intent routing",
+  "how well does leCore route support tickets without a model",
+  "does semi-supervised EM help systemone",
+  "should systemone fuse the prototype and nb scorers or auto-select between them",
+  "does routing to a family first help find the right capability",
+  "where are the research documents on typed decisions routing and the roadmap",
+  "how do I route a request without a bare rejection",
+  "how do I check a typed decision schema before asking it",
+  "how do I report the outcome of a decision so the system learns",
+  "does routing to a family first improve capability matching",
+  "can systemone return a set of options with a coverage guarantee",
+  "how do I control false discoveries over a batch of typed decisions",
+  "should the router ask which family the user meant",
+  "how do I learn from unlabeled traffic in a typed decision safely",
+  "what is the swarm step contract",
+  "what NOOA properties do the typed decision doors honour",
+  "does the reflex arc learn from use now",
+  "do decision trees learn from the picks users make",
+  "the reflex stopped firing after boot, what do I do",
+  "why does the reflex only answer things it has seen before",
+  "how do I verify a result is a valid response to its input",
+  "how do I run the benchmarks for the scorer ladder and the gate table",
+  "how do I run SWE-bench file localization with leCore",
+  "which NOOA benchmarks can leCore run in the sandbox",
+  "where is the syntax reference for typed decisions and the swarm contract",
+  "how should an LLM write code through leCore",
+  "what is the easiest way to make a typed decision",
+  "what can the leCore MCP do now and how do I gate it",
+  "does the reflex arc survive a save and reload into another mind",
+  "do verified swarm steps teach the reflex arc",
+  "does leCore have a swarm versus isolated agents or best-of-N benchmark",
+  "do tool calls teach the decision trees and typed decisions in leCore",
+  "does leCore learn api keys passwords or seed phrases",
+  "how accurate is the leCore learning guard",
+  "what does the leCore learning guard miss",
+  "how does the leCore learning guard understand meaning",
+  "how well does the semantic learning guard work",
+  "does the leCore semantic guard delete stored memories",
+  "how do I check leCore memory for leaked secrets",
+  "what does the leCore semantic guard still miss",
+  "how does leCore find a taught answer when the question is reworded",
+  "how does leCore learn new phrasings from an attached model",
+  "how does leCore remember how an answer was found",
+  "what does mind.prf_rank do and what is its identity contract",
+  "how does the boot memory rollover work",
+  "how does lecore compare to vsa hdc state of the art",
+  "what should lecore adopt from the sota literature",
+  "what improves the hrr cleanup capacity",
+  "what benchmarks should lecore publish against",
+  "how do we simulate ci inside lecore",
+  "what is the measured resonator capacity",
+  "what does the void between resonator and deltanet license",
+  "how do charts work in lecore",
+  "Can the leCore ResonatorNetwork factor a method call encoded as one bound product verb x from-slot x to-slot, and does it keep direction",
+  "Should a method call candidate be encoded as a role-filler sum or as one bound product, and do I need the resonator to decode it",
+  "Does a role-filler encoding FROM(x) + TO(y) separate the direction of a currency conversion, and how big is the gap over noise",
+  "Can a holographic learner pick up which currency is the FROM slot from the words around it",
+  "Does centering the hypervector space or a NULL none-of-these prototype help abstention on out-of-scope questions",
+  "how accurate is find_capability at routing catalog aliases it has never seen",
+  "how accurate is route_tiered answer tier on held-out catalog aliases at full catalog size",
+  "where does route_tiered spend its time",
+  "are family siblings the right hard negatives for capability routing",
+  "how long does a serve call take on the leCore service",
+  "how many capabilities are in the leCore catalog",
+  "can I report a decision outcome by id after the leCore service restarts",
+  "does the p field mean the same thing in route_tiered and typed decisions",
+  "do the reflex doors share one calibration",
+  "How should the reflex experience trace store a correction when the served answer was wrong, positive and negative evidence",
+  "What does it cost in accuracy to put question text into hypervector space instead of the sparse meaning index vectors",
+  "What is the proposed hypervector encoding spec for states, candidates, method calls, typed options and trajectories in leCore contrastive scoring",
+  "is the CLM confidence top probability minus mean of the others better than the margin gap for calibration",
+  "Does InfoNCE softmax-weighted prototype learning beat the centroid plus best-wording blend in the leCore meaning index on CLINC150?",
+  "Does subtracting a mean or background vector from the similarity (contrastive readout, centering, backlog E1.4) help the leCore meaning index?",
+  "Is coverage at exactly 97 percent precision a reliable statistic for comparing abstention or confidence signals in the leCore meaning index?",
+  "Can the E1.3 NULL none-of-these hypervector be trained from new verdicts in the leCore meaning index?",
+  "What does the unknown-word mass in the meaning index query norm contribute to abstention?",
+  "should leCore train a none of these NULL option for abstention",
+  "should all leCore doors share one contrastive prototype store",
+  "is a candidate-relative softmax a good confidence for abstention in leCore",
+  "how do I tell which currency is FROM and which is TO in an exchange rate question",
+  "does the resonator network factor a noisy composite that is not an exact product",
+  "how do I decode a method call from a hypervector without building a chimera",
+  "Do superposed text encoders (character n-grams plus word hashing plus WordNet synonyms bound under role keys) beat character n-grams alone for intent classification?",
+  "Which frozen text channel should a leCore intent door use: character n-grams, word hashing, or WordNet synonyms?",
+  "Why can two decision records share one id in the leCore decision ledger, and what breaks?",
+  "How should I measure a confidence gate or serve threshold in leCore so the number is honest?",
+  "Can a negative-quality score detect a teacher's wrong 'not A' verdict before it trains a prototype?",
+  "Does ProtoStore's confusion miner predict which intents get confused better than centroid cosine?",
+  "Does a curriculum (curriculum_k0=3, warm temperature for young rows) help ProtoStore learn?",
+  "How many labelled verdicts per row does a leCore door need, and does a bigger hypervector dimension help?",
+  "does leCore keep its decision records and typed-decision learning after a restart",
+  "what is the difference between p_correct and p_null on a leCore decision",
+  "how does the leCore reflex trace unlearn a wrong answer after a correction",
+  "how well does the typed learning guard catch credential requests and live readings",
+  "why does the learning guard use a frozen snapshot of catalog aliases instead of the live catalog",
+  "how do I tell the learning guard a question is ordinary after a false positive",
+  "how fast is route_tiered after the families cache",
+  "does the capability router learn from aliases and how much does it help",
+  "does serve ask the capability router",
+  "which learner picks the tool in serve",
+  "how do I rank a list of free-form candidate texts against a question in leCore and know how sure it is",
+  "what happens when two doors file the same decision id in the leCore decision ledger",
+  "can past verification results tell a swarm agent which tool to try first before running the verify",
+  "How well does SystemOne scorer contrastive do on Banking77 compared with AdaptHD?",
+  "does boot roll the learning generation in lecore",
+  "does leCore keep learning from outcomes reported after a restart",
+  "can the learning guard leak a secret into the saved memory partition",
+  "can answer_feedback veto the wrong question after the experience trace splits a tile",
+  "what does drift_vs_previous_save in learning_save measure",
+  "do open escalations survive a leCore restart",
+  "does reflex_retile keep the reflex trace's reported failures",
+  "which ways of pasting a password does the leCore learning guard catch",
+  "is reflex_decide's min_confidence floor of 0.1 needed with the seen gate",
+  "why is the first teach in a new leCore process slow (the typed learning guard build)",
+  "how do I restrict a ProtoStore update to a candidate set or add many options at once",
+  "how do I know the capability router's serve bar is still right after the catalog changes",
+  "does meaning_resolve clear the escalation it answers"
+ ],
+ "refused_by_guard_on_teach": 0,
+ "rule": {
+  "allow_private_hosts": false,
+  "anchor": true,
+  "carry_calibration": false,
+  "rows_only": false
+ },
+ "shipped": 126,
+ "source_rows": 670,
+ "topics": 0
+}

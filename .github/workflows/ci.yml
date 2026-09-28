@@ -278,6 +278,15 @@ jobs:
       - name: Gate -- SERVICE.md documents every endpoint and flag
         run: python servicedoc.py
 
+      # CORE MEMORY GATE (2026-09-27). The shipped core memory (release_bundle/, mirrored into the wheel as
+      # lecore_data/release_bundle) must be a DISTILLATE: every row, wording, method and API recipe passes the
+      # distiller's rules and the secret scan. It once drifted into a copy of session memory (497 rows, 75 passing)
+      # and nothing noticed. Fix: re-run `python tools/distill_release.py --partition <memory> --out release_bundle`.
+      - name: Gate -- the shipped core memory passes its distillation audit
+        run: |
+          python tools/distill_release.py --check release_bundle
+          python tools/distill_release.py --check lecore_data/release_bundle
+
   # ---------------------------------------------------------------------------------------------------------
   # The TRUE full suite: every test, slow ones included, budget kept: unmarked tests 15 s, slow-marked the long budget (--run-slow). One job's 20-minute
   # budget can't hold it -- timeout-minutes is PER JOB, so a matrix of 4 shard jobs runs 1/4 of the suite each,

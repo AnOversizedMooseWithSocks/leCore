@@ -200,11 +200,27 @@ class _UnifiedPart20:
                                                           # 400-char clipping was a
                                                           # JSON-era defense; the
                                                           # container compresses
+            # THE LEARNING GUARD ON STEP RESULTS (sweep 179). The tool cache is PERSISTED (learning_save), and a
+            # stateless step matches out of order -- so a step like "check the SOL price" would return the same
+            # number on every later goal, and a step that fetched a credential would store it. The step's name
+            # plus the goal is the question; the output is the answer.
+            _cacheable = ok
+            if ok and not cache_hit:
+                from holographic.agents_and_reasoning.holographic_learnguard import learning_verdict as _guard_check
+                _v = _guard_check("%s -- %s" % (st["name"], g.get("text", "")), str(out),
+                                  guard=self.semantic_guard)
+                if not _v["ok"]:
+                    _cacheable = False
+                    g.setdefault("guard_refused", []).append({"step": st["name"], "kind": _v["kind"]})
+                    if _v["kind"] == "sensitive":
+                        from holographic.agents_and_reasoning.holographic_learnguard import redact as _redact
+                        st["deliverable"] = _redact(st["deliverable"])   # the goal record is persisted too
             if ok:
-                if st["name"] in (stateless or ()):
-                    tc["stateless"][st["name"]] = out
-                else:
-                    tc["prefix"]["|".join(traj + (st["name"],))] = out
+                if _cacheable:
+                    if st["name"] in (stateless or ()):
+                        tc["stateless"][st["name"]] = out
+                    else:
+                        tc["prefix"]["|".join(traj + (st["name"],))] = out
                 traj = traj + (st["name"],)
             scopes.pop(salvage=True)
             did.append(st["name"])
@@ -1104,13 +1120,16 @@ class _UnifiedPart20:
             self._api_toolbox = ApiToolbox(mind=self)
         return self._api_toolbox
 
-    def api_learn(self, spec, name=None, base_url=None):
+    def api_learn(self, spec, name=None, base_url=None, auth=None):
         """Learn an external API from its OpenAPI spec (dict, JSON text, or URL) with
         no LLM in the parse -- endpoints register as callable tools and each one
         teaches a DISCOVERABILITY CARD into memory, so 'how do i ...' finds the tool
         like any other knowledge (with provenance, veto, session isolation for
-        free). Returns {service, base, endpoints}. Extracted from leOS API_LEARN."""
-        return self.api_toolbox().learn(spec, name=name, base_url=base_url)
+        free). Returns {service, base, endpoints, env}. Extracted from leOS API_LEARN.
+        CREDENTIALS ARE LEARNED AS ${ENV} PLACEHOLDERS (2026-09-27): the spec's securitySchemes and an optional
+        auth={"headers": {...}, "query": {...}} become a template like {"X-Api-Key": "${WEATHER_API_KEY}"} --
+        a raw key given here is replaced before anything is stored; `env` lists the variables api_use will read."""
+        return self.api_toolbox().learn(spec, name=name, base_url=base_url, auth=auth)
 
     def api_use(self, service, endpoint, params=None, headers=None):
         """Call a LEARNED api endpoint by service.endpoint: the URL is built from the
@@ -1118,7 +1137,9 @@ class _UnifiedPart20:
         goes through stdlib urllib, and the reply is an honest {ok, status,
         data | error} -- never a dressed-up failure. Successful calls note themselves
         into the drift sentinel, so tool usage becomes experience. Extracted from
-        leOS API_CALL."""
+        leOS API_CALL. Learned ${VAR} credential placeholders are read from os.environ at call time; an unset one
+        returns ok=False with missing_env naming it and makes NO request. A key passed by hand in headers/params
+        is used for this call and, on success, learned as a placeholder (learned_auth / env) -- never stored."""
         return self.api_toolbox().call(service, endpoint, params=params,
                                        headers=headers)
 

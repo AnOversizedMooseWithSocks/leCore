@@ -86509,3 +86509,394 @@ FOUND, NOT FIXED
 - ITEM R's other six above/below cards: untouched, because the agent that owned them
   never reported and guessing signatures for someone else's stack is how a sweep
   breaks someone else's work.
+
+## SWEEP 177: the reflex arc was connected to neither the judge nor the disk
+
+Prompted by SwarmWorld (Pal, Wang, Buehler, arXiv 2608.26081): LLM agents propose, a
+deterministic simulator judges, results persist in a shared world other agents reuse, and
+the society is compared against a best-of-N isolated baseline. Moose: "we already do what
+they do, just not benchmarked the same way." The audit said: partly.
+
+WHAT WAS BROKEN (both measured before the fix)
+- PERSISTENCE. experience_save / learning_save carried the trace but not the two things
+  reflex_decide checks BEFORE it reads the trace: the label book (_reflex_labels -- empty
+  book = "no experience yet") and the seen gate (_reflex_seen). Probe: mind A answered a
+  reported repeat via='reflex'; B loaded A's 91,561-byte save and answered "no experience
+  yet". Every restart and every second agent started blind.
+- THE JUDGE NEVER TAUGHT. swarm_step ran its verify verb and wrote the step to the ledger
+  and the bus, and never called reflex_learn. The reflex learned only from
+  decision_outcome, i.e. from whatever string a caller reported.
+
+FIX
+- reflex_bridge_state / reflex_bridge_restore(merge=) (p27). Labels travel as NAMES (the
+  atom is derived from the name); seen keys as float32. experience_save/_from_state carry a
+  "reflex" key; learning_save writes a lecore.learning.reflexbridge section in BOTH normal
+  and audit-regen modes (decision outcomes are not taught rows, so regen cannot rebuild
+  them); learning_load restores it after the trace. Older files load exactly as before.
+- swarm_step: a step whose verification RAN AND PASSED goes through decision_outcome ->
+  reflex_learn. Unverified steps do not teach. A refused step does NOT mark the failure
+  field (region-wide: one refused tool would silence every later correct tool on the task).
+- tests/test_reflex_bridge_persist.py: 8 tests; 6 FAIL on the pre-fix code, 2 are controls
+  that pass both ways (an unrelated query stays refused; a refused step teaches nothing).
+
+BENCHMARK (tools/bench_swarm_reflex.py; 4 agents x 40 tasks, pool 60, Zipf 1.1, 3 seeds,
+bit-identical under PYTHONHASHSEED 0 and 123). A task = hidden target card + vague
+description (2 own words + 2 distractors); solve = submit find_capability's top 16 to a
+deterministic judge until one passes; cost = judge calls. Calibrated: top-1 right 21%,
+solvable 86%, ~4.5 calls per solve.
+                      judge calls     accuracy     reflex served  reflex wrong
+    isolated_judged   610.3 +- 85.6   0.885        65.3           0
+    shared_judged     488.7 +- 99.6   0.885        95.3           0
+    shared_selfreport   0             0.194        106.3          87.0
+  Paired per seed, shared saves 20.0 / 14.4 / 27.4% of judge calls. On SOLVABLE tasks only:
+  319->207, 283->178, 349->201 (35-42%).
+  Restart (learning_save -> fresh mind -> learning_load): 139/139 solved wordings fire after
+  reboot, 139 right, 0 wrong; the other 221 wordings stay refused. Pre-fix: 0 fires.
+
+KEPT NEGATIVES
+- PARAPHRASES NEVER FIRE: 0/45 (isolated) and 0/44 (shared). The swarm key is 'ngram'
+  with a 0.8 seen gate, so reuse is exact-wording reuse. Sharing buys repeats, not
+  generalisation. 'fingerprint' keys (the router's) are the obvious next probe.
+- FAILURE IS NOT REMEMBERED: unsolvable tasks cost 240 / 448 / 192 judge calls in BOTH
+  conditions -- every agent re-searches all 16 candidates. That is 49-72% of the shared
+  swarm's budget. A per-wording "searched K, none passed" record (not the region-wide
+  failure field) is the next lever and the biggest one on the table.
+- ACCURACY IS IDENTICAL (0.885 both): the agents are homogeneous and deterministic, so
+  sharing changes COST, never WHAT is found. SwarmWorld's breadth gain came from diverse
+  explorers; this bench has none, so it cannot show one. Say so before anyone quotes it.
+- SELF-REPORT POISONS: with nobody judging, the reflex served 261 wrong answers out of 319
+  repeats (seeds summed). This is the case for fix 2 in one number.
+- Wall seconds (3.2 vs 1.4) include building 4 minds vs 1; judge calls are the cost metric.
+
+## SWEEP 178: tool calls never reached the decision learners
+
+Moose: "the decision trees and typed (Jev-like) prompts are supposed to help the system
+learn about tool calling in addition to just text responses." They were built for it --
+route_tiered, decision_tree, typed and plan_change all mint DecisionRecords and say "report
+the outcome with decision_outcome(id, ...)" -- but NOTHING THAT CALLS A TOOL EVER REPORTED:
+- AgentLoop had the route id, the tool and whether it raised, and dropped all three.
+- mind.invoke / service /invoke / MCP lecore_invoke record nothing.
+- serve()'s tool reflex noted successes in a side trace (tool_usage), failures as `+0`
+  (indistinguishable from never tried), minted no record, and the trace was never saved.
+- The only outcome sources were MCP lecore_outcome (by hand) and, since 177, swarm_step.
+
+FIX (the 177 rule carried over: ONLY A JUDGED CALL TEACHES)
+1. AgentLoop(verify=callable(task, tool, args, result) -> bool, reflex=False); mind.tool_loop
+   passes both. Every dispatched call gets its own DecisionRecord (tool, args digest, why,
+   verdict, step). A call the judge passes is reported -- step 0 against the gate's route id
+   (so route_tiered(reflex=True) answers the repeat), later steps against a context record
+   "task | after <previous card>" (decision_tree's measured edge). Reported by CARD name, not
+   method name: the router labels by card; a method name would mint a second vocabulary.
+   No verify -> recorded, nothing taught. Raised or rejected -> recorded, never the failure
+   field (region-wide: it would silence the right tool judged later -- pinned by a test).
+2. serve(query, verify=None): every tool-reflex call, success OR failure, is a DecisionRecord
+   (new via 'tool', ngram key) whose id is returned; a verified call is reported; judged
+   experience picks the tool BEFORE word overlap (picked_by='experience'); failures tallied.
+   The pre-existing tool_note on ok is kept (backward compatible) -- it is not a judge.
+3. UsageTrace.to_state/from_state + a real `failures` tally; learning_save writes a
+   lecore.learning.toolusage section, learning_load restores it.
+FOUND ON THE WAY (cProfile): holographic_skills._catalog() rebuilt the whole catalog on
+EVERY call; AgentLoop.manifest calls describe_skill per offered tool, so one acting step
+spent 0.519 s rebuilding catalogs (95% of the bench's wall time). Cached once per process
+(all callers read-only): 0.519 s -> 0.002 s per manifest. Bench conditions 32-70 s -> 3-5 s.
+
+TESTS: tests/test_tool_call_learning.py, 11 tests, all 11 FAIL on the post-177 code. 864
+passed across the 20 suites touching the changed code; 703 across the 11 skills suites.
+
+BENCH (tools/bench_tool_learning.py; through AgentLoop, 4 agents x 40 requests, pool 60
+callable targets, request = 4 of the target's own words, Zipf 1.1, 3 seeds, bit-identical
+under PYTHONHASHSEED 0 and 77). Judge = pass iff the tool is the target's method; tools stubbed.
+                      judge calls    solved   acted (answer)  menus  from experience  wrong
+    no_learning       175.3          0.940     43.0          113.0     0              0
+    isolated_judged   176.0          0.946    102.0           55.0    80.3            0
+    shared_judged     175.7          0.948    124.7           32.7   112.3            0
+    shared_selfreport   0            0.935    124.7           32.7   112.7            1.3
+  Per seed, requests the loop could ACT on without asking: 52->125, 21->131, 56->118 of 160.
+  Reworded requests reused experience: 42/47 (isolated), 34/43 (shared) -- the fingerprint key
+  DOES carry across rewording when the request is clear (sweep 177's vague tasks: 0/44).
+  Restart: 214 of 360 wordings answered from experience after reboot, 214 right, 0 wrong.
+  bench_swarm_reflex.py (sweep 177) re-run: bit-identical, unchanged by this sweep.
+
+KEPT NEGATIVES
+- JUDGE CALLS DO NOT FALL (175 vs 176): on clear requests the first tool tried is almost
+  always right, so learning saves no verification. What it saves is ASKING: menus that need
+  a model or a person fell from 113 to 33 per 160 requests. An experience answer is still
+  verified (1 call); skipping that check would save calls and was deliberately not done.
+- SELF-REPORT IS NEARLY HARMLESS ON EASY TASKS (0.935 vs 0.948, 4 wrong serves summed) and
+  CATASTROPHIC ON HARD ONES (sweep 177: 0.194, 261 wrong). The judge earns its keep where
+  the first guess is usually wrong. Quote the two benches together or not at all.
+- THE GATE REFUSES VAGUE REQUESTS: 2 own + 2 distractor words -> 85% refused, so a tool loop
+  cannot learn from them at all. Clear requests only; that is the gate working, not a bug.
+- ONE METHOD, TWO CARDS: the manifest can list a method twice (mesh_smooth); the loop reports
+  the FIRST card offering it. Deterministic, but the second card never learns from that tool.
+- Arguments are still not learned: the tool reflex fills declared numbers from the text.
+
+## SWEEP 179: the engine learned secrets and froze live readings into facts
+
+Moose: "We don't want to learn things like api keys, wallet seed phrases, or passwords [...] I am also
+concerned that we might learn static results from dynamic data -- the price of solana [...] the weather."
+
+MEASURED BEFORE (fake values, scratch partition): teach() accepted an API key, a 12-word seed phrase and a
+password; after learning_save -> a FRESH mind -> learning_load, all three were served at T0. A taught
+"$142.10" for "the current price of solana" and a resolve()d "72F and sunny" for "the weather right now"
+came back at T0 as facts. Sweep 178's own tool-call records carried an api_key in plain text in the
+argument preview (arg_fingerprint.repr). The only existing guards were manual (reflex_mark_volatile,
+zoo_freshness_policy) or export-only (commons SECRET regex).
+
+FIX -- holographic_learnguard: one deterministic verdict, learning_verdict(question, answer), run at every
+door that learns, and redact()/redact_args() for text that must travel but not carry a secret.
+- SENSITIVE (never learned, no override): provider key prefixes, PEM private-key blocks, JWTs, 64-byte
+  keypair arrays, a run of 12+ BIP-39 words (8+ distinct; vendored MIT wordlist, sha256 in the manifest),
+  `password: <value>` assignments; weak shapes (64 hex, 80+ base58, long mixed tokens) only next to a
+  credential word, because sha256 digests, tx signatures and addresses share those shapes and are public;
+  a question naming a credential answered by a bare value. Bare "token" is not a credential word here.
+- VOLATILE (not learned as a fact): the question names a moving quantity (price, weather, balance, TVL,
+  APY, gas, odds...) or a live word (now, today, current, latest) AND the answer is a short measured
+  READING (<=24 / <=12 words). Exempt: explicit time anchors (a dated snapshot IS a fact), mechanism
+  questions ("how is the price computed"), route/record rows (toolreflex:, decision:). teach(...,
+  allow_volatile=True) is the deliberate override and is persisted (volatile_ok_questions).
+- DOORS: ladder._remember (teach, T1 rows, cached T3/T4 model answers, replay) refuses and says why;
+  teach()/resolve() report the reason, never the value; learning_load drops pre-guard rows INCLUDING ones a
+  restored floor served without _remember (_forget_served) and reports guard_dropped; learning_save never
+  writes a sensitive row or payload and redacts query_log/feedback_log; reflex_learn refuses a secret label
+  and a FREE-FORM reading label (a declared option is a choice -- "call the v2 price feed" is still learned);
+  goal_work never caches a secret or a reading (the cache is persisted and stateless steps match out of
+  order); arg_fingerprint, DecisionRecord.to_dict, semantic_ingest, study and MCP corpus_bind redact.
+- mind.learn_guard(question, answer) is the faculty; catalog card with plain-English aliases (4/4 probes
+  found it first; before the card, only a query using its own name did).
+
+MEASURED AFTER
+- Leak probe: every case refused; the fresh mind knows none of them; the preview reads "[redacted]".
+- tools/bench_learnguard.py: 0 misclassified -- secrets 170/170, public look-alikes 90/90, readings 100/100,
+  static facts 100/100, the real partition 469/469, the whole catalog 9,287/9,287. The real partition at
+  load: guard_dropped {sensitive: 0, volatile: 0}.
+- tests/test_learnguard.py: 15 tests, 10 FAIL with the wiring reverted (the 3 that pass are the module's own
+  selftest/bench and the declared-choice control; 2 document tests added after). 1,374 passed / 0 failed
+  across the 61 test files touching the changed code; all seven lint gates green.
+
+CALIBRATION FALSE POSITIVES, FOUND AND FIXED (kept on record)
+- Real partition, first rules: 22/469 flagged, 22 wrong. 19 dev-log questions ("what is the pipeline NOW")
+  with 33-141 word explanations -> a reading must be SHORT. 3 "PASS: ..." test logs -> bare "pass" is not a
+  credential name.
+- "how is the pool price computed" (24-word explanation) -> mechanism questions are not readings.
+- tests/test_mcp_server release audit: "secret 0 of session 1" -> "payload-1-0" refused -> the pair rule
+  takes only specific credential nouns, not the loose word "secret".
+- Probed miss: an all-lowercase passphrase ("correcthorsebatterystaple") passed -> a question asking for a
+  PASSWORD refuses any bare 6+ char value (a password manager / policy / reset question is exempt).
+- Name collision: the verdict was first called `check` (taken by mathcheck, proglib) -> learning_verdict.
+
+BENCHMARKS WERE NOT REPRODUCIBLE ACROSS CATALOG CHANGES (found here, fixed here)
+Adding ONE catalog card changed every number in bench_swarm_reflex and bench_tool_learning, with the code
+under test bit-identical (proved: guard in, card out -> identical). Their tasks were drawn from the live
+catalog. Workloads are now frozen fixtures (docs/research/evidence/bench_*_workload_seedN.json, drawn from
+the pre-card catalog; they reproduce the recorded 177/178 results exactly); --fresh redraws, --freeze
+rewrites. With the fixture, the tool bench is identical with the new card; the swarm bench moves +1..+6
+judge calls per seed (the new card is a real wrong candidate in its live search) -- genuine, recorded.
+
+KEPT NEGATIVES
+- Readings with NO cue word are not caught: "sol?" -> "$142", "what is btc at" -> "64k".
+- Only the formats it has patterns for; only English BIP-39; a secret split across messages; an encoded
+  (base64) key with no credential word nearby.
+- The labelled sets were written alongside the rules: their 0 is partly self-graded. The independent
+  evidence is the 9,756 real rows.
+- FOUND, NOT FIXED: tests/test_catalog_exam's agent_boot() defaults to the repo's lecore_memory and SAVES
+  into it -- a test run wrote a duplicate legacy state.lecore and touched toolmemo/store.lecore in the real
+  partition. Removed/restored by hand this sweep; the test needs a temp partition.
+
+## SWEEP 180: the guard filters by MEANING, and an audit reads every store
+
+Moose: "In order for something to be learned the system needs to understand something semantically. The same
+goes for being able to filter something." Sweep 179's guard was patterns only, while memory recalls by meaning:
+"sol?" -> "$142" and "what's the pw for the router" -> "Xk29!mQpa" passed the filter and would be recalled later.
+
+THE SEMANTIC LAYER (holographic_learnguard.SemanticGuard, mind.semantic_guard)
+- intent(question) = cos(nearest CLASS example) - cos(nearest NORMAL example) in character 3..5-gram space
+  (hashed_ngram_encode: deterministic, untrained, sub-word -- "pw" near "password"). Classes: credential,
+  reading. NORMAL = every other catalog alias (sorted) + NORMAL_EXAMPLES (static facts with short numbers).
+- Refuse only when intent > INTENT_MARGIN (0.01) AND the answer has the shape of the thing (a bare token /
+  a short measured reading with no time anchor, not a mechanism question). Intent alone refuses nothing.
+- IT LEARNS: every pattern refusal with a question-side cue becomes an example of its class (bounded, 500 per
+  class); learn_guard_example(q, kind) adds by hand -- kind='normal' is the correction. Persisted
+  (lecore.learning.guard), restored before replay.
+- WHERE IT RUNS: the doors where a refusal is VISIBLE (teach, resolve, cached model answers, free-form reflex
+  labels, goal step cache). NOT at load-time replay (either replay path) -- see below.
+
+ENCODER CHOICE, MEASURED (held-out, threshold picked on a validation split of real rows, 0 FP there):
+question-only intent at a strict 0-FP point was weak for every encoder (lexical _qkey 4/20 cred, 8/25 read;
+char n-gram 5/20, 7/25; corpus semantic_key 3/20, 12/25). Paired with the ANSWER shape, char n-gram reached
+19/20 and 24/25 -- the answer gate is what makes a loose intent threshold safe.
+
+SHIPPED NUMBERS (tools/bench_learnguard.py --semantic; B written with the examples, C after the design froze;
+neither is ever used as an example)
+                              pattern only    + semantic
+    credential requests         9/35            30/35
+    live-reading requests      15/40            34/40
+    false positives, real      0/474            0/474  (the partition)
+    false positives, held-out  0/4041           0/4041 (catalog questions the guard never saw)
+The pattern-layer numbers of sweep 179 (0 misclassified of 10,216) are unchanged.
+
+LEAK AUDIT (mind.leak_audit(root=None)): taught rows, served payloads, exact answers, semantic vocabulary,
+goal step cache, goal records, the RAW decision ledger, the message bus, and every .lecore under root.
+FLAGGED = pattern layer, SUSPECTED = semantic layer. Reports store / index / rule, never a value; deletes
+nothing. Planted fakes found in all 4 planted stores. The shipped partition: flagged 0, suspected 1 -- a
+superseded historical row ("what is lever 7", its old 6-word answer) that the file keeps as history.
+
+KEPT NEGATIVES, LOUD
+- A GUESS MUST NOT DELETE. First wiring ran the semantic layer at load-time replay: it DROPPED a real row of the
+  shipped partition ("what is lever 7", intent +0.008). Then a second leak: the replay pre-check was pattern-only
+  but _remember underneath still applied the semantic layer; and _replay_taught_rows (the rollover path) had the
+  same hole. Fixed with a ladder._replaying flag (try/finally) on both paths. The same bug exposed a latent crash
+  (a refused FIRST row left no taught_log) -- fixed.
+- INTENT_MARGIN 0.01 was chosen AFTER two real false positives just over 0 ("what is lever 7" +0.008, "spec 9 of
+  the flux rotor" +0.005, from tests/test_mcp_server's regen audit). No held-out positive lies in (0, 0.01], so
+  it costs nothing measured; 0.02 would cost 4.
+- With catalog questions as the ONLY normal examples the reading side flagged 42/441 real rows (static facts,
+  "tensile strength of martian regolith"). NORMAL_EXAMPLES were written after seeing three of them: the real-row
+  0 is partly fitted. Counting the mind's own taught questions as normal cost 1-2 held-out catches and fixed
+  nothing, so it is not on by default (learn_guard_example(q, 'normal') is the targeted version).
+- A ticker slang table (sol -> "solana price") was written after seeing held-out set B: not shipped. Generic
+  slang only; on the fresh set C it moved one case.
+- STILL MISSED: very short questions ("sol?", "ray?") have too few n-grams to place; "orca pool depth";
+  "my trezor recovery"; anything whose answer does not have the shape (a secret inside a long sentence with no
+  pattern shape and no credential cue).
+- FOUND AGAIN, NOT FIXED: tests/test_catalog_exam's agent_boot() writes into the repo's lecore_memory during a
+  test run (a duplicate legacy state.lecore and toolmemo/store.lecore). Cleaned by hand again.
+
+## SWEEP 181 -- finding by meaning, the typed model end, learning HOW an answer was found
+
+Owner direction (Moose, 2026-09-24): an LLM on the back side should resolve new wordings, and memory should learn
+on the go -- "the meaning behind not just the question and the answer, but also how we find the answer."
+
+What the measurement said first: the reflex's near-exact gate (Jaccard >= 0.75) is right -- a looser one served
+one-word-different questions each other's answers -- but nothing ABOVE it searched the taught rows, so a person
+who reworded a question got a refusal: 0.1% of CLINC150's held-out wordings served, 0.0% of Banking77's. The
+paraphrase sacrifice was "delegated to T1/synthesis", and T1 never looked at taught rows.
+
+What was built (holographic_meaning.MeaningIndex + UnifiedMind part 28): a row per answer, reachable by every
+wording confirmed to mean it; stems + bigrams + char 4-grams with IDF over ROWS; best wording blended with the row
+centroid; learned word associations from every confirmed link; a calibrated serve gate whose labels are the model's
+own verdicts; a typed model end (same / new + method / unclear, JSON contract, one retry); methods that bind slots
+(question words -> tool values) and run fresh; a bare value clarifies; a question that says more than the learned
+call uses escalates so the method can grow.
+
+Kept negatives, each measured (docs/research/BENCHMARK_sweep181_meaning.md):
+- ONE wording per intent is a lexical dead end: top-1 0.44 on CLINC val; the only honest cold-start gate is
+  near-exact (0.80 / 0.15 serves 1.4% at 0.977). The learning is the lever, not the matcher.
+- Naive Bayes over the same features: +2-3 points top-1, but its posterior serves 24-76% of OUT-OF-SCOPE questions
+  at any threshold -- no abstention signal. Not adopted; the cosine scale is what refuses the unrelated.
+- A teacher-relative serve bar cannot tell a noisy teacher from confusable rows: on Banking77 with a PERFECT
+  teacher it served 6.8-8.6% wrong. Off by default; the price is that a 10%-noisy teacher barely opens the gate.
+- Word associations add +1.2 points top-1 (0.820 -> 0.832) on the learned CLINC index -- real, small.
+- Direction between same-kind slots (from/to currency) is positional, not parsed: the one wrong exchange call.
+  CORRECTED 2026-09-26: the bench's own exchange truth is positional too (wrong on 29/74 directional train items),
+  so the exchange row never measured direction at all -- only currencies and amount.
+Bugs found by the work, fixed: negation was a stopword; numbers made "20 dollars" and "50 dollars" different
+questions; a credential typed IN A SENTENCE ("my password is ...") passed the learning guard; the workspace rev()
+decoded the whole .lews per leStudio request (3.2 s -> 0.012 s a stroke).
+Sweep 181 correction to sweep 180's SHIPPED NUMBERS (kept loud). The semantic guard chose its "normal" examples
+as aliases[0::2] by sorted index, so one new catalog card reshuffled half of them (credential 30 -> 29/35 with no
+guard change) -- and, re-sampled, its 0.01 margin turned out to sit inside the sampling noise: "what is 7 times 8"
+-> "56" and "spec 12 of the flux rotor" were refused as live readings (two guide examples and a sweep-96 test
+caught it). Now: normals chosen by a hash of the alias (insertion-stable); aliases that read like a class example
+dropped (NORMAL_CLASH 0.4, chosen with sets B/C in view -- no longer strictly held out); INTENT_MARGIN 0.05.
+Re-measured: credential 24/35 (was 30), live-reading 32/40 (was 34), no static fact the tests or guides teach is
+refused, 0/3954 held-out catalog false positives, 2/516 real (one superseded "what is lever 7" row, twice). A
+guess must not block a fact. Added to the PATTERN layer: a credential disclosed in a sentence ("my password is
+...", "my pin is 4821") and "where is X at/trading" readings ("what is btc at"). An email address is no longer
+credential-shaped (the semantic layer refused "my email" -> an address). "what's the unlock code" is still refused,
+but as a READING, not a credential. The real fix is the typed guard on realistic data the owner asked for.
+
+## SWEEP 182 -- the CLM backlog: one learning loop under every door
+
+Moose (2026-09-26): gather the expert panel, spin up a swarm on the shared memory, have JEV, NOOA and CLM all help
+improve the reflex arc and the substrate -- "adapt, don't copy; holographic where it makes sense". His answers to
+the backlog's questions: build BOTH trace-correction designs and let measurement choose; the CLM plugin may use a
+GPU host but MUST run on CPU; learned prototypes MAY travel through the commons, behind the guard. A 10-seat panel
+(4 workers) measured before it argued; two waves of workers then implemented it. The whole pass, item by item with
+baselines, bars and reproduce commands: docs/research/BENCHMARK_sweep182_contrastive.md; the syntax:
+docs/TYPED_DECISIONS.md 8d-8e; the agent workflow: skills/lecore-boot Step 7c.
+
+THE LOOP. DECIDE (JEV): every door returns one typed record -- value, ranked, margin, p_correct, p_null, id.
+VERIFY (NOOA): only a verified or reported truth is a label. OUTCOME: decision_outcome(id, truth), the only path,
+and it survives a restart. LEARN (CLM, holographically): ONE rule, holographic_protostore.ProtoStore -- InfoNCE on
+per-option prototypes, A_k += lr (t_k - p_k) q; as tau -> 0 it IS the old miss-only AdaptHD -- one instance per
+door, with one DoorCalibrator per door.
+
+SUBSTRATE FIRST (the panel found it broken in four places). The ledger forgot every decision at a restart (now
+lecore.learning.decisions, with SystemOne's learned tables; KeyError -> lands after boot). "p" meant opposite things
+at different doors (a null p-value at the catalog, 1 - error at the reflex): now p_correct (HIGH = confident, None
+until calibrated) and p_null (LOW = significant), the bare p deprecated for one release. Two doors fed one calibration
+curve (now ladder and bridge are separate instances; the ladder veto is wired on load). A correction could not unlearn
+(write() corrects along the truth atom and clamps s >= 0): codebook LMS + affine projection along k-perp reads the
+truth 1.000 after one correction (0.453 before) and a neighbour at cosine 0.8 keeps its answer 1.000 (0.900); the
+provenance design fails the neighbour bar at 0.780 -- measurement chose lms_apa.
+
+WHAT WON, with baselines. SystemOne(scorer="contrastive") 0.8263 / 0.8218 vs AdaptHD 0.7253 / 0.7377 on Banking77
+(opt-in). The router learns from the catalog's own aliases: held-out top-1 0.412 vs 0.397 (+1.52, CI [+0.45, +2.5]),
+OFF by default (45-71 s pretrain, partition 5.6 -> 20.8 MB). serve asks the router after a memory miss: 0/20 -> 19/20
+alias probes served, 0 wrong. The families memo: route_tiered p50 32.7 -> 1.43 ms, bit-identical. Verifier prototypes
+(a failed verify is now a lesson): AUROC 0.951 vs the reflex's 0.924, judge calls 1,755 vs 2,691 without a reflex.
+Direction is read from the question's context words: 49/51 held out vs positional 35/51; end to end 27 right / 2
+wrong vs 18 / 11. A composed call nobody handed us: 96/102 never seen whole, ECE 0.026, 0 chimeras served. The
+resonator's tolerant exit: 5/20 -> 20/20 at 5% flips; the phasor resonator 0/20 -> 20/20. The teacher's own noise,
+from 3% re-asks with a lower bound: 27.7 / 45.7 / 43.6% served correct at <= 1.5% wrong vs 18.0 / 8.1 / 10.5%.
+mind.rank learns from outcomes: 0.892 vs 0.690 static on the last third. Negatives worth trusting are picked by the
+TEACHER MARGIN (AUROC 0.936 at 0.41% false flags).
+
+KEPT NEGATIVES, LOUD
+- The draft negative-quality score flagged teacher errors at AUROC 0.33 -- worse than chance: hardness REWARDS the
+  teacher's mistakes (a wrong "not A" lands on a question A owns).
+- Static rank only TIES TF-IDF (0.697 vs 0.696); rolecall's option_encode costs 6.7 points for ranking; and the
+  backlog's "absolute top score is the confidence" rule LOST to the margin on this door at every set size.
+- The verifier is no better than chance on NOVEL tasks (0.545 vs 0.603); reordering by its raw score cost +7.8%.
+- serve's router consult answers near-exact wording only (0/20 with the aliases held out) and slowed serve on a miss
+  (p95 340 ms vs 15.2 ms) -- G2's to fix.
+- The meaning rows' learned prototypes: +2.6 to +3.7 points top-1 and lower AURC, but out-of-scope served past the
+  bar on every seed (the operating point moves; at matched coverage they serve LESS out-of-scope). OFF.
+- The merge rule cut Banking77 from 37.2% to 25.5% served correct. OFF.
+- E2.3 misses its bar on seed 0 (27.7% < 30%); the point estimate of eps passed 1 of 3 seeds.
+- The typed guard misses every recall bar (credential 28/35, live 28/40, held-out 78% / 81%) -- shipped anyway
+  because it refuses 3/705 ordinary questions where the old one refused 47/705; hand-written live questions
+  generalise poorly (26/66): it learns intents, not "liveness".
+- Superposed n-gram / word / synonym encoders tie or lose to n-grams alone.
+- CLM's staged curriculum did not reproduce on clean data (+0.05 / -0.29 points); under 10% noise it helps (+1.48).
+- The contrastive rule needs ~10 verdicts per row before it beats the positive-only rule (0.623 vs 0.663 at 5).
+- The tool door's acceptance bench was NOT re-run; 16 tests pin it.
+- After a restart, route / compose outcomes reach their calibrators or nothing, not their learners (live closures
+  died) -- G1's to fix.
+
+Found on the way: "20,000" was read as two numbers and froze a learned method's amount; a yes/no decision learned
+the STRING "no" as yes; a hook that raised aborted the whole outcome report; the ladder veto stayed off for 8 reports
+after every restart; two doors filing one id replaced each other's hook; the docs' "menu tier" example had drifted
+into the refuse band; lecore-render's skill said boot rolls the generation (it does not: learning_rollover does).
+
+### Sweep 182 addendum (2026-09-27) -- what was distilled into the published memory, and what the bundle had become
+
+Owner question: "the current memory from our sessions doesn't get published, but the core memory does -- do we have
+anything we should distill to our core seed memory?" Two published memories exist, and they are different things:
+the seedpack DOCTRINE (holographic_seedpack.py, ships in the wheel; boot teaches it) holds operating lessons in their
+timeless form, and release_bundle/ (the repo's shipped partition; autoboot falls back to it on a fresh clone) holds
+measured engine Q&A distilled by tools/distill_release.py. Session memory (lecore_memory/) is neither.
+
+DOCTRINE: 28 -> 42 rows. The pack stopped at sweep 76; the decision loop of sweeps 171-182 had no timeless form in it.
+Added 14: decide with a typed question, report every outcome by id, read p_correct/p_null, share the algorithm never
+the state, write corrections as subtract-and-project, measure a noisy teacher against itself, choose thresholds by
+the E0.4 protocol, calibrate the door's own score (softmax is a feature), test learning across a restart door by door,
+re-derive thresholds when the population moves, never learn secrets or live values (and redact what you refused),
+rewordings belong to the meaning rung, a hard negative is the candidate that beat the truth, one service per
+partition for a swarm. register_doctrine now teaches only the rows a store is missing: a grown pack used to re-teach
+every row into a partition seeded earlier (measured: the live partition took exactly the 14 new rows).
+
+KEPT LOUD -- THE BUNDLE HAD STOPPED BEING A DISTILLATE. release_bundle/ held the 62 distilled rows at 5ae7460
+(2026-08-23) and 497 at 4589f22 (2026-08-26): session-salted probes ("[s:full-stack] what is the calibration constant
+of sensor array 7 in bay 0"), build history, deployment notes (Qwen install runbooks, Galvatron bundle
+reviews). A fresh clone served 360 answers from it at T0. By the distiller's own rules 75 of the 497 qualified.
+The distiller itself had four defects: duplicate questions kept the OLDEST answer (replay is last-wins, so a
+corrected answer shipped stale); vetoed answers shipped; `cp\d{2}` missed cp104..cp116 and "user's box" missed "the
+user's qwen"; doctrine rows were copied into the bundle, where an old text would shadow the new one. Fixed, plus an
+engine-anchor rule (domain knowledge taught for one picture is that collaboration's, not the engine's), a history rule
+("what did X find" is the build's story; its lesson belongs in doctrine), the learning guard as the leak scan, and
+arguments instead of one machine's hard-coded paths. Rebuilt: 125 rows from 646 (every exclusion counted by reason
+in release_bundle/distill_report.json); `--check` audits a bundle against the rule and tests/test_distill_release.py
+pins that the shipped bundle passes it. Cold boot from the new bundle: the new doctrine and generic questions answer
+at T0, the session probes do not.

@@ -1,0 +1,1075 @@
+{
+"seed": 2,
+"tasks": [
+{
+"truth": "Run an allowlisted external command",
+"wordings": [
+"measured command holographic joint",
+"budget breaks security private"
+]
+},
+{
+"truth": "Orientation-field preservation check (Extended Gaussian Image)",
+"wordings": [
+"recall extended tracr guard",
+"sign read guard rows"
+]
+},
+{
+"truth": "Closed-form operator iteration (iterate)",
+"wordings": [
+"gaussian instead evaluation quantum",
+"fourier created anything instead"
+]
+},
+{
+"truth": "Grid-free PDE solve on an SDF (Walk on Stars)",
+"wordings": [
+"there first each faster",
+"flight neumann solve this"
+]
+},
+{
+"truth": "Index (search)",
+"wordings": [
+"large nearest ladybird centred",
+"neighbour negative moldability index"
+]
+},
+{
+"truth": "Compare rendered images (files)",
+"wordings": [
+"many lighting images mesh",
+"given mean change analogue"
+]
+},
+{
+"truth": "Texture sampler + ramps (textures as numbers, numbers as textures)",
+"wordings": [
+"drive numbers region select",
+"material centres roundtrip holographic"
+]
+},
+{
+"truth": "One-call textured preview of an asset file",
+"wordings": [
+"pipeline imports null normalises",
+"material loadedmesh smooth pixels"
+]
+},
+{
+"truth": "soft_selection_weights",
+"wordings": [
+"linear artist into moves",
+"only falling field texttiling"
+]
+},
+{
+"truth": "diagnose_scaling",
+"wordings": [
+"which tool returns live",
+"wall scalinglaw origin roles"
+]
+},
+{
+"truth": "Split a loaded mesh into per-material submeshes",
+"wordings": [
+"render data first turning",
+"material lists split constraint"
+]
+},
+{
+"truth": "Stock a part library (why your creature parts do not render)",
+"wordings": [
+"builds size injects outside",
+"fraction gets measure library"
+]
+},
+{
+"truth": "Ids and presets shared across apps (lews_mint, lecore.preset)",
+"wordings": [
+"recovers deep applies lews",
+"list lestudio deterministic weights"
+]
+},
+{
+"truth": "Celled memory (domain repetition over the capacity law -- unbounded pairs, bounded cells)",
+"wordings": [
+"negative exact exactly directory",
+"that size interference iterate"
+]
+},
+{
+"truth": "Query time-travel & audit",
+"wordings": [
+"merkle animates mind changed",
+"root what layer from"
+]
+},
+{
+"truth": "Conformal UV unwrap (LSCM) + the metric that sees folds",
+"wordings": [
+"method every mind over",
+"conformal writes untouched kept"
+]
+},
+{
+"truth": "File map ingest (folder / zip -> queryable)",
+"wordings": [
+"kind changed pipeline which",
+"larger physically broad files"
+]
+},
+{
+"truth": "four_surface_demo",
+"wordings": [
+"kernel base defaults text",
+"with text identical engine"
+]
+},
+{
+"truth": "workflow_neighbors",
+"wordings": [
+"stay stated hdri pixels",
+"which sims steps neighbors"
+]
+},
+{
+"truth": "comparability_cost",
+"wordings": [
+"builds boring number section",
+"matching impose measure similarity"
+]
+},
+{
+"truth": "orbit_trap_render",
+"wordings": [
+"each abstains mind approach",
+"cosine enclosed look magnetic"
+]
+},
+{
+"truth": "Pose a rigged asset at a time (animation + skin -> moving geometry)",
+"wordings": [
+"mesh inputs blend renderer",
+"negative prescription scale moves"
+]
+},
+{
+"truth": "Enriched capability search (dictionary-augmented routing) + recipe replay",
+"wordings": [
+"provenance recipe never from",
+"which join world ledgers"
+]
+},
+{
+"truth": "Pulsar panel (Hellings-Downs pattern test with a sky-scramble null)",
+"wordings": [
+"reports permuted typed exist",
+"never ground control certified"
+]
+},
+{
+"truth": "Symbolic reasoning",
+"wordings": [
+"does share bound vectors",
+"laws checks taxonomy unicron"
+]
+},
+{
+"truth": "edit_verified",
+"wordings": [
+"asked range that never",
+"scene conflict asked file"
+]
+},
+{
+"truth": "Memory curation, decay and reflection (what to keep hot, what to archive, never delete)",
+"wordings": [
+"door exactly fact path",
+"middle token turn taught"
+]
+},
+{
+"truth": "Look-ahead linter (prove the signal only used the past)",
+"wordings": [
+"name leakage belongs methods",
+"honestly full belongs critic"
+]
+},
+{
+"truth": "decompose_piecewise",
+"wordings": [
+"signal segment rides every",
+"measured segment mind shifts"
+]
+},
+{
+"truth": "Dialect emitters (WGSL / C / JS / Zig from the Python kernel)",
+"wordings": [
+"python global indirect wgsl",
+"make skydata with kernel"
+]
+},
+{
+"truth": "Walsh-Hadamard transform (exact, matrix-free)",
+"wordings": [
+"this only sunset microarchitecture",
+"exact integer field butterfly"
+]
+},
+{
+"truth": "Atmosphere (fog & light shafts)",
+"wordings": [
+"holographic though ring colour",
+"tables time passes outward"
+]
+},
+{
+"truth": "creature",
+"wordings": [
+"menu answers generic creature",
+"spine shortest option constraints"
+]
+},
+{
+"truth": "Will compression pay? (area law vs volume law)",
+"wordings": [
+"test mind quartz could",
+"encloses interpolation measured mean"
+]
+},
+{
+"truth": "Crystal imperfections (cloudiness, inclusions, phantoms, fractures, chips)",
+"wordings": [
+"because phantoms tested makes",
+"subtract refuse null chips"
+]
+},
+{
+"truth": "add_caustics",
+"wordings": [
+"adapter pass mind light",
+"plane rendered particle error"
+]
+},
+{
+"truth": "Face as a landmark graph + parts (procedural, no scans, non-human friendly)",
+"wordings": [
+"photo transform backends landmarks",
+"smallest flame edit delta"
+]
+},
+{
+"truth": "Studio lighting rig (three-point as an environment, for the path tracer)",
+"wordings": [
+"converges parse example sampler",
+"exact replay weak trace"
+]
+},
+{
+"truth": "Turnaround + silhouette-IoU critic",
+"wordings": [
+"into with mesh slurped",
+"measured scope naive over"
+]
+},
+{
+"truth": "Return the tie, then verify which candidate works",
+"wordings": [
+"tool bequeath doors answer",
+"clear until regime guide"
+]
+},
+{
+"truth": "Precomputed radiance transfer (PRT): shading as a dot product",
+"wordings": [
+"material each codebook what",
+"framing solved peer readout"
+]
+},
+{
+"truth": "Reproject a uv map onto changed topology (seam-aware)",
+"wordings": [
+"face texture returns number",
+"cliff atlas there trace"
+]
+},
+{
+"truth": "Lossless set-packing for image families",
+"wordings": [
+"serves handler whole reference",
+"content mind returns file"
+]
+},
+{
+"truth": "decision_outcome",
+"wordings": [
+"decide grid intensity records",
+"costs records cosine function"
+]
+},
+{
+"truth": "Stripe patterns (field-following even stripes on a surface)",
+"wordings": [
+"measured places states stripe",
+"runs measured eigenvector exactly"
+]
+},
+{
+"truth": "from_components",
+"wordings": [
+"reads vector test winding",
+"minimizing reads polarized rotation"
+]
+},
+{
+"truth": "Tiered memory (adaptive short-term / long-term with promotion & demotion)",
+"wordings": [
+"exact host recency ties",
+"spill kept shortest slime"
+]
+},
+{
+"truth": "bios_boot",
+"wordings": [
+"prompt substrate these call",
+"prompt step doctrine reaction"
+]
+},
+{
+"truth": "Fit a base mesh to a target",
+"wordings": [
+"mesh keep pays base",
+"topology move void base"
+]
+},
+{
+"truth": "Deterministic top-k (the tie-safe shortlist rule, stated once)",
+"wordings": [
+"extended ties mind filter",
+"nearest echo indices import"
+]
+},
+{
+"truth": "Job lifecycle control (start / pause / resume / cancel)",
+"wordings": [
+"sweep like coordinator saves",
+"iteration renders only pool"
+]
+},
+{
+"truth": "Cloud stack (closed-form shadow rays)",
+"wordings": [
+"takes mind implies does",
+"deterministic renderer cloud table"
+]
+},
+{
+"truth": "Code health: complexity x exposure x exercise (risk, not size)",
+"wordings": [
+"other they texture undo",
+"radon construction mind catalog"
+]
+},
+{
+"truth": "Scan-to-asset pipeline (repair, retopo, LOD, fresh UVs, rebake)",
+"wordings": [
+"retopo beta wiki order",
+"panel correct polys void"
+]
+},
+{
+"truth": "detect_regimes",
+"wordings": [
+"homogeneous temporal image margin",
+"stream segment point cast"
+]
+},
+{
+"truth": "spectral_caustics",
+"wordings": [
+"returns seed observer anchors",
+"hero speckle route family"
+]
+},
+{
+"truth": "UV shell (texture-carrying envelope)",
+"wordings": [
+"geometry compression recovers phasemorph",
+"name both optional pushes"
+]
+},
+{
+"truth": "Creature gait (make it walk, any body plan)",
+"wordings": [
+"find classic count state",
+"residuals series diagrams their"
+]
+},
+{
+"truth": "NURBS",
+"wordings": [
+"pipeline exactly over aside",
+"holographic delegates what different"
+]
+},
+{
+"truth": "Store a multi-way array (tensor-train file)",
+"wordings": [
+"tangency brdf clean real",
+"decision missed where float"
+]
+}
+],
+"streams": [
+[
+[
+25,
+0
+],
+[
+40,
+0
+],
+[
+4,
+0
+],
+[
+18,
+0
+],
+[
+0,
+0
+],
+[
+1,
+1
+],
+[
+7,
+1
+],
+[
+10,
+0
+],
+[
+6,
+0
+],
+[
+0,
+0
+],
+[
+40,
+0
+],
+[
+0,
+0
+],
+[
+10,
+0
+],
+[
+26,
+0
+],
+[
+0,
+0
+],
+[
+3,
+1
+],
+[
+7,
+0
+],
+[
+56,
+0
+],
+[
+11,
+1
+],
+[
+2,
+1
+],
+[
+10,
+0
+],
+[
+4,
+0
+],
+[
+0,
+0
+],
+[
+0,
+1
+],
+[
+7,
+0
+],
+[
+9,
+0
+],
+[
+2,
+0
+],
+[
+1,
+1
+],
+[
+0,
+0
+],
+[
+14,
+0
+],
+[
+0,
+0
+],
+[
+12,
+0
+],
+[
+42,
+0
+],
+[
+21,
+0
+],
+[
+6,
+1
+],
+[
+0,
+0
+],
+[
+11,
+0
+],
+[
+53,
+1
+],
+[
+1,
+1
+],
+[
+23,
+0
+]
+],
+[
+[
+32,
+0
+],
+[
+1,
+0
+],
+[
+6,
+1
+],
+[
+52,
+0
+],
+[
+23,
+0
+],
+[
+0,
+0
+],
+[
+9,
+0
+],
+[
+0,
+0
+],
+[
+46,
+0
+],
+[
+12,
+0
+],
+[
+34,
+0
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+14,
+1
+],
+[
+29,
+0
+],
+[
+3,
+0
+],
+[
+23,
+0
+],
+[
+0,
+0
+],
+[
+2,
+0
+],
+[
+2,
+0
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+8,
+0
+],
+[
+3,
+0
+],
+[
+58,
+0
+],
+[
+8,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+10,
+0
+],
+[
+21,
+0
+],
+[
+0,
+0
+],
+[
+4,
+1
+],
+[
+46,
+1
+],
+[
+34,
+0
+],
+[
+0,
+0
+],
+[
+3,
+0
+]
+],
+[
+[
+11,
+1
+],
+[
+10,
+0
+],
+[
+29,
+1
+],
+[
+39,
+0
+],
+[
+1,
+1
+],
+[
+23,
+0
+],
+[
+48,
+1
+],
+[
+0,
+1
+],
+[
+2,
+0
+],
+[
+4,
+0
+],
+[
+5,
+0
+],
+[
+27,
+1
+],
+[
+0,
+1
+],
+[
+0,
+1
+],
+[
+17,
+0
+],
+[
+1,
+0
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+47,
+1
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+34,
+1
+],
+[
+6,
+0
+],
+[
+1,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+27,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+5,
+0
+],
+[
+0,
+0
+],
+[
+12,
+0
+],
+[
+8,
+0
+],
+[
+8,
+1
+],
+[
+1,
+0
+],
+[
+1,
+0
+],
+[
+16,
+0
+],
+[
+53,
+0
+],
+[
+6,
+1
+],
+[
+36,
+0
+]
+],
+[
+[
+0,
+1
+],
+[
+14,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+0,
+0
+],
+[
+20,
+1
+],
+[
+0,
+0
+],
+[
+1,
+1
+],
+[
+5,
+0
+],
+[
+4,
+1
+],
+[
+10,
+0
+],
+[
+4,
+0
+],
+[
+0,
+0
+],
+[
+0,
+1
+],
+[
+16,
+0
+],
+[
+1,
+1
+],
+[
+0,
+1
+],
+[
+1,
+0
+],
+[
+0,
+0
+],
+[
+15,
+0
+],
+[
+0,
+0
+],
+[
+6,
+0
+],
+[
+2,
+0
+],
+[
+5,
+0
+],
+[
+39,
+1
+],
+[
+3,
+0
+],
+[
+0,
+0
+],
+[
+10,
+0
+],
+[
+1,
+0
+],
+[
+1,
+0
+],
+[
+21,
+0
+],
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+2,
+0
+],
+[
+16,
+1
+],
+[
+16,
+0
+],
+[
+2,
+1
+],
+[
+0,
+1
+],
+[
+0,
+0
+]
+]
+]
+}
