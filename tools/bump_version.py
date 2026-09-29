@@ -28,8 +28,18 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VERSION_FILE = os.path.join(ROOT, "VERSION")
 
 
+def _version_file():
+    """The file to read and bump: the repo's VERSION, unless LECORE_VERSION_FILE names another one.
+    The override exists for tests/test_bump_version.py (2026-09-28): its tests used to rewrite the repo's real VERSION,
+    and under `pytest -n auto` two workers raced on that one file (CI read 0.5.9 where 0.5.7 had just been written,
+    and a malformed '1.2' test saw another test's '1.4.101'). Each test now bumps its own temp file. CI's release
+    job never sets the variable."""
+    return os.environ.get("LECORE_VERSION_FILE") or VERSION_FILE
+
+
 def read_current():
     """Return (major, minor, patch) ints, or raise ValueError if VERSION is missing/malformed."""
+    VERSION_FILE = _version_file()
     if not os.path.exists(VERSION_FILE):
         raise ValueError("VERSION file not found at %s" % VERSION_FILE)
     raw = open(VERSION_FILE, encoding="utf-8").read().strip()
@@ -67,7 +77,7 @@ def main(argv):
             print(nxt)                                  # dry run: don't touch the file
             return 0
         # write the bumped version back, keeping a single trailing newline (POSIX text file)
-        with open(VERSION_FILE, "w", encoding="utf-8", newline="\n") as fh:
+        with open(_version_file(), "w", encoding="utf-8", newline="\n") as fh:
             fh.write(nxt + "\n")
         print(nxt)
         return 0

@@ -14,29 +14,26 @@ import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUMP = os.path.join(ROOT, "tools", "bump_version.py")
-VERSION_FILE = os.path.join(ROOT, "VERSION")
 
-# Running from a DELIVERY ARCHIVE is a supported state in which VERSION is
-# deliberately absent (PACKAGING.md / DELIVERY_NOTES: the file must never
-# travel -- it once shipped holding 0.9.0 against a 0.2.10 release). The bump
-# tool is a clone-side concern, so these tests SKIP there rather than error:
-# nine FileNotFound errors were masquerading as suite breakage (sweep 63).
-pytestmark = pytest.mark.skipif(
-    not os.path.exists(VERSION_FILE),
-    reason="VERSION deliberately excluded from delivery archives (PACKAGING.md)")
+# Each test bumps its OWN temporary VERSION file (the tool reads LECORE_VERSION_FILE). CI (2026-09-28): the tests used
+# to rewrite the repo's real VERSION, and under `pytest -n auto` workers raced on it -- '--print' of 0.5.7 answered
+# 0.5.9, and a malformed '1.2' test read another test's '1.4.101' and exited 0. A private file per test cannot race,
+# and the tests no longer need the real VERSION at all (so they also run from a delivery archive, which omits it).
+VERSION_FILE = None                                   # set per test by the fixture below
 
 
 def _run(*args):
-    return subprocess.run([sys.executable, BUMP, *args], capture_output=True, text=True)
+    env = dict(os.environ, LECORE_VERSION_FILE=VERSION_FILE)
+    return subprocess.run([sys.executable, BUMP, *args], capture_output=True, text=True, env=env)
 
 
-@pytest.fixture
-def restore_version():
-    """Snapshot VERSION and put it back after each test -- these tests write to it."""
-    original = open(VERSION_FILE, encoding="utf-8").read()
+@pytest.fixture(autouse=True)
+def restore_version(tmp_path):
+    """A private VERSION file for this test (the name is kept from when this fixture restored the real one)."""
+    global VERSION_FILE
+    VERSION_FILE = str(tmp_path / "VERSION")
     yield
-    with open(VERSION_FILE, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(original)
+    VERSION_FILE = None
 
 
 def _write(v):
