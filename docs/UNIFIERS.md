@@ -172,13 +172,13 @@
 |---|---|
 | `holographic_fieldhome` | ✅ wired |
 
-## `cachehome.MarginCache (fat margin for a drifting query)`  — 0/1 wired
+## `cachehome.MarginCache (fat margin for a drifting query)`  — 1/1 wired
 
 *a drifting query (a camera, a cursor, a recall neighbourhood) should be served from an ENLARGED baked region, not re-keyed exactly. MEASURED on a unit-step 2-D walk of 400 queries: exact-key caching rebuilds 400/400; margin 6.0 rebuilds 20 at 95% hits. Wired into RenderSession.preview(reuse_margin=), where the drifting query is the CAMERA POSE: 20 drifting frames at margin 0.12 give 19 hits, 1 rebuild. THE GATE a caller must pass is NOT a hit-rate target: a hit serves a STALE value, and on a rendered frame the max error saturates at the FIRST reuse (0.5864, a silhouette edge) while the mean creeps 0.0001 -> 0.0051. `suggest_margin_for_error(..., max_abs_error=)` sizes it against the error you cannot tolerate. Measured: on a value that jumps 0->1, a mean-only budget passes margin 0.1929 and serves a completely wrong answer (max error 1.00); the max-error bound stops at 0.094558, and 0.095158 is already catastrophic. The admissible margin is a CLIFF, not a slope.*
 
 | client | status |
 |---|---|
-| `holographic_session` | ❌ not wired |
+| `holographic_session` | ✅ wired |
 
 ## `denoise.soft_relaxation (stiffness in physical units)`  — 2/2 wired
 
